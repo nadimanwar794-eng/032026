@@ -59,7 +59,7 @@ import { saveRecentHomework, getRecentHomeworks, removeRecentHomework, getRecent
 import { SubscriptionEngine } from "../utils/engines/subscriptionEngine";
 import { recalculateSubscriptionStatus } from "../utils/subscriptionUtils";
 import { RewardEngine } from "../utils/engines/rewardEngine";
-import { Button } from "./ui/Button"; // Design System
+import { Button } from "./ui/button"; // Design System
 import { getActiveChallenges } from "../services/questionBank";
 import { generateDailyChallengeQuestions } from "../utils/challengeGenerator";
 import { searchNotesByWords, searchNotesByTitle, type NoteSearchResult } from "../utils/noteSearcher";
