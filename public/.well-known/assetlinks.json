@@ -1,0 +1,26 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.vercel.app_26may_plum.twa",
+      "sha256_cert_fingerprints": [
+        "36:0D:FE:D5:FF:03:C6:5B:6B:89:06:6A:51:6D:C2:66:45:A1:B4:CB:EF:7E:06:2E:80:6C:D2:9F:A0:3D:7A:99"
+      ]
+    }
+  },
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.vercel.thensta.twa",
+      "sha256_cert_fingerprints": [
+        "72:89:44:18:79:ED:8C:0F:26:31:D0:FC:51:C0:49:05:E7:A7:31:EF:34:BB:60:CE:71:B2:CE:06:5B:3B:22:A1"
+      ]
+    }
+  }
+]
