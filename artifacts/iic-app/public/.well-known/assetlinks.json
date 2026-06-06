@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.vercel.thensta.twa",
+      "sha256_cert_fingerprints": [
+        "D7:49:2F:EC:21:D5:AD:F6:4B:DD:C6:7D:C5:27:60:FF:3D:4A:B0:D8:A4:2C:6C:66:1B:C4:23:26:90:2E:31:0D"
+      ]
+    }
+  }
+]

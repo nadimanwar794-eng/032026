@@ -1,23 +1,16 @@
 {
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "build", "dist", "**/*.test.ts"],
-  "compilerOptions": {
-    "target": "ES2020",
-    "useDefineForClassFields": true,
-    "module": "ESNext",
-    "skipLibCheck": true,
-    "incremental": true,
-    "tsBuildInfoFile": ".tsbuildinfo",
-    "noEmit": true,
-    "jsx": "react-jsx",
-    "lib": ["esnext", "dom", "dom.iterable"],
-    "resolveJsonModule": true,
-    "allowImportingTsExtensions": true,
-    "moduleResolution": "bundler",
-    "strict": false,
-    "types": ["node", "vite/client"],
-    "paths": {
-      "@/*": ["./src/*"]
+  "extends": "./tsconfig.base.json",
+  "compileOnSave": false,
+  "files": [],
+  "references": [
+    {
+      "path": "./lib/db"
+    },
+    {
+      "path": "./lib/api-client-react"
+    },
+    {
+      "path": "./lib/api-zod"
     }
-  }
+  ]
 }
