@@ -448,33 +448,6 @@ export const EventManager: React.FC<Props> = ({ settings, onUpdate, onSave, isSa
       ),
     },
     {
-      key: 'themeStudio',
-      title: 'Theme Studio Event',
-      icon: <Palette size={18} style={{ color: '#8b5cf6' }} />,
-      accentColor: '#8b5cf6',
-      description: 'Sabhi themes temporarily free access ke saath unlock honge',
-      enabled: (settings as any).themeStudioEvent?.enabled ?? false,
-      eventName: (settings as any).themeStudioEvent?.eventName,
-      startsAt: (settings as any).themeStudioEvent?.startsAt,
-      endsAt: (settings as any).themeStudioEvent?.endsAt,
-      onToggle: (v: boolean) => upd({ themeStudioEvent: { ...((settings as any).themeStudioEvent || { eventName: 'Theme Studio Free', days: 3 }), enabled: v } } as any),
-      onNameChange: (n: string) => upd({ themeStudioEvent: { ...((settings as any).themeStudioEvent || { enabled: false }), eventName: n } } as any),
-      onStartChange: (s: string) => upd({ themeStudioEvent: { ...((settings as any).themeStudioEvent || { enabled: false, eventName: '' }), startsAt: s || undefined } } as any),
-      onEndChange: (e: string) => upd({ themeStudioEvent: { ...((settings as any).themeStudioEvent || { enabled: false, eventName: '' }), endsAt: e || undefined } } as any),
-      extraSettings: (
-        <div>
-          <label className="text-[10px] font-black text-slate-500 uppercase mb-1 block">User ko kitne din access milega?</label>
-          <div className="flex items-center gap-2">
-            <input type="number" min={1} max={7}
-              value={(settings as any).themeStudioEvent?.days ?? 3}
-              onChange={e => upd({ themeStudioEvent: { ...((settings as any).themeStudioEvent || { enabled: false, eventName: '' }), days: Number(e.target.value) } } as any)}
-              className="w-20 p-2 border border-slate-200 rounded-xl text-sm font-bold" />
-            <span className="text-[10px] text-slate-500">din free theme access (event ke baad)</span>
-          </div>
-        </div>
-      ),
-    },
-    {
       key: 'creditBonus',
       title: 'Credit Bonus Event',
       icon: <Gift size={18} style={{ color: '#22c55e' }} />,

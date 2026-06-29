@@ -167,7 +167,7 @@ export const FullBookCompare: React.FC<Props> = ({ settings, user, isLimited = f
   }, []);
   const handleRotateFbc = async () => {
     const result = await rotateScreen();
-    if (result === null) alert('Is device mein screen auto-rotate support nahi hai. Phone ko manually ghuma sakte hain.');
+    if (result === null) alert('Screen auto-rotate is not supported on this device. You can rotate your phone manually.');
   };
 
   // ── Compre notes (Firestore) — loaded at mount for search ──
@@ -499,8 +499,8 @@ export const FullBookCompare: React.FC<Props> = ({ settings, user, isLimited = f
               {topicResult
                 ? `"${topicResult.topicName}" · ${topicResult.common.length} common · ${topicResult.extra.reduce((a, e) => a + e.points.length, 0)} extra`
                 : compreLoading
-                  ? 'Notes load ho rahi hain…'
-                  : `${bookContents.length} books ready — word search karein`}
+                  ? 'Loading notes…'
+                  : `${bookContents.length} books ready — search a word`}
             </p>
           </div>
           <button onClick={onClose} className="p-2 rounded-full hover:bg-white/20 transition-colors shrink-0">
@@ -518,7 +518,7 @@ export const FullBookCompare: React.FC<Props> = ({ settings, user, isLimited = f
               className="flex items-center gap-1.5 text-[11px] font-black px-3 py-1.5 rounded-full active:scale-95 transition-all border"
               style={{ color: subColor, background: subColorLight, borderColor: subColorBorder }}
             >
-              <ChevronLeft size={13} /> Wapas
+              <ChevronLeft size={13} /> Back
             </button>
             <span className="text-[12px] font-black text-slate-700 truncate">🔍 "{topicResult.topicName}"</span>
           </div>
@@ -558,7 +558,7 @@ export const FullBookCompare: React.FC<Props> = ({ settings, user, isLimited = f
             {compreLoading && (
               <div className="flex items-center gap-2 px-2 text-[11px] font-semibold" style={{ color: subColor }}>
                 <Loader2 size={13} className="animate-spin" />
-                Compre Notes load ho rahi hain…
+                Loading Compre Notes…
               </div>
             )}
 
@@ -571,7 +571,7 @@ export const FullBookCompare: React.FC<Props> = ({ settings, user, isLimited = f
                       <p className="text-[11px] font-black uppercase tracking-wider" style={{ color: subColor }}>
                         📚 Saved Topics ({allCompreTopics.length})
                       </p>
-                      <p className="text-[10px] text-slate-400">Click karein → Compare dekhein</p>
+                      <p className="text-[10px] text-slate-400">Click → Compare</p>
                     </div>
                     <div className="space-y-2">
                       {allCompreTopics.map(topic => {
@@ -609,7 +609,7 @@ export const FullBookCompare: React.FC<Props> = ({ settings, user, isLimited = f
                       })}
                     </div>
                     <div className="pt-2 border-t border-slate-100">
-                      <p className="text-[10px] text-slate-400 text-center">Ya upar search karein koi bhi word likhke</p>
+                      <p className="text-[10px] text-slate-400 text-center">Or search any word in the bar above</p>
                     </div>
                   </>
                 ) : (
@@ -617,8 +617,8 @@ export const FullBookCompare: React.FC<Props> = ({ settings, user, isLimited = f
                     <Search size={48} className="mx-auto mb-4 opacity-20" />
                     <p className="font-black text-slate-500 text-base">Word Search</p>
                     <p className="text-xs mt-2 leading-relaxed text-slate-400">
-                      Upar koi bhi word likhein.<br />
-                      Jitne books mein wo word hoga — sab ke sab notes aur points dikh jaayenge.
+                      Type any word above.<br />
+                      All notes and points containing that word across all books will appear.
                     </p>
                     <div className="mt-6 flex flex-wrap justify-center gap-2">
                       {['Mughal', 'Congress', 'Photosynthesis', 'DNA', 'संविधान', 'Newton'].map(ex => (
@@ -639,15 +639,15 @@ export const FullBookCompare: React.FC<Props> = ({ settings, user, isLimited = f
 
             {/* Search too short */}
             {searchWord && searchWord.trim().length < 2 && (
-              <p className="text-center text-xs text-slate-400 py-4">Kam se kam 2 characters likhein…</p>
+              <p className="text-center text-xs text-slate-400 py-4">Type at least 2 characters…</p>
             )}
 
             {/* No results */}
             {searchWord.trim().length >= 2 && wordSearchResults.length === 0 && !compreLoading && (
               <div className="text-center py-14 text-slate-400">
                 <Search size={40} className="mx-auto mb-3 opacity-20" />
-                <p className="font-black text-slate-500">"{searchWord}" nahi mila</p>
-                <p className="text-xs mt-2">Is word ke notes kisi bhi book mein nahi hain. Dusra word try karein.</p>
+                <p className="font-black text-slate-500">"{searchWord}" not found</p>
+                <p className="text-xs mt-2">No notes for this word found in any book. Try a different word.</p>
               </div>
             )}
 
@@ -657,7 +657,7 @@ export const FullBookCompare: React.FC<Props> = ({ settings, user, isLimited = f
                 {/* Summary bar */}
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <p className="text-[11px] font-black uppercase tracking-wider" style={{ color: subColor }}>
-                    {wordSearchResults.reduce((a, r) => a + r.points.length, 0)} points — {wordSearchResults.length} book{wordSearchResults.length !== 1 ? 's' : ''} mein mila
+                    {wordSearchResults.reduce((a, r) => a + r.points.length, 0)} points — found in {wordSearchResults.length} book{wordSearchResults.length !== 1 ? 's' : ''}
                   </p>
                   {wordSearchResults.length >= 2 && (
                     <button
@@ -721,7 +721,7 @@ export const FullBookCompare: React.FC<Props> = ({ settings, user, isLimited = f
               if (!activeBookNote) return (
                 <div className="text-center py-14 text-slate-400">
                   <Layers size={44} className="mx-auto mb-3 opacity-20" />
-                  <p className="font-black text-slate-500">Koi book select karein upar se</p>
+                  <p className="font-black text-slate-500">Select a book above</p>
                 </div>
               );
               const hasHtml = !!activeBookNote.htmlNotes?.trim();
@@ -759,8 +759,8 @@ export const FullBookCompare: React.FC<Props> = ({ settings, user, isLimited = f
                   ) : (
                     <div className="text-center py-12 text-slate-400">
                       <Layers size={36} className="mx-auto mb-3 opacity-20" />
-                      <p className="font-black text-slate-500 text-sm">Notes nahi hain</p>
-                      <p className="text-xs mt-2">Is book ke is topic ke liye notes add nahi kiye gaye hain.</p>
+                      <p className="font-black text-slate-500 text-sm">No notes available</p>
+                      <p className="text-xs mt-2">Notes have not been added for this topic in this book.</p>
                     </div>
                   )}
                 </>

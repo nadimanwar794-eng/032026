@@ -50,8 +50,8 @@ export const CreditConfirmationModal: React.FC<Props> = ({ title, cost, userCred
                                 <Zap size={16} fill={autoEnabled ? "currentColor" : "none"} />
                             </div>
                             <div>
-                                <p className="text-xs font-bold text-slate-700">Aaj ke liye Skip Karo</p>
-                                <p className="text-[9px] text-slate-500">Kal phir yeh popup dikhega</p>
+                                <p className="text-xs font-bold text-slate-700">Skip for Today</p>
+                                <p className="text-[9px] text-slate-500">This popup will appear again tomorrow</p>
                             </div>
                         </div>
                         <label className="relative inline-flex items-center cursor-pointer">

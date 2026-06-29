@@ -237,7 +237,7 @@ export const LevelLeaderboard: React.FC<Props> = ({ user, settings, onBack }) =>
         ) : sortedUsers.length === 0 ? (
           <div className="text-center py-16 text-slate-600">
             <Trophy size={40} className="mx-auto mb-3 opacity-30" />
-            <p className="text-sm font-bold">Koi students nahi mile</p>
+            <p className="text-sm font-bold">No students found</p>
           </div>
         ) : (
           <div className="space-y-2">
@@ -398,7 +398,7 @@ export const LevelLeaderboard: React.FC<Props> = ({ user, settings, onBack }) =>
                 )}
 
                 {isMe && (
-                  <p className="text-center text-[10px] text-slate-600 pb-2">👆 Yeh aapka profile hai</p>
+                  <p className="text-center text-[10px] text-slate-600 pb-2">👆 This is your profile</p>
                 )}
               </div>
             </div>

@@ -77,6 +77,11 @@ const getSubjectStats = (
       if (hw.videoUrl) video++;
       if (hw.pdfUrl) pdf++;
     });
+    // Also count lucent-style lessons added for this book (e.g. Speedy Science, Sar Sangrah)
+    const bookLucentCount = lucentNotes.filter(
+      (n: any) => (n.bookName?.trim() || 'Lucent') === subject.name.trim()
+    ).length;
+    notes += bookLucentCount;
     return { notes, pdf, video, audio, mcq, lucentNotes: 0 };
   }
 
@@ -135,10 +140,10 @@ export const SubjectSelection: React.FC<Props> = ({
           </button>
           <div>
             <h2 className="text-2xl font-bold" style={{ color: tierHeaderColor }}>
-              {isCompetition ? 'Competition Books' : stream ? `${stream} Subjects` : `Class ${classLevel} Subjects`}
+              {isCompetition ? 'Competition Books' : `Class ${classLevel} Subjects`}
             </h2>
             <p className="text-sm mt-0.5" style={{ color: `${tierHeaderColor}99` }}>
-              {isCompetition ? 'Select a book to start reading' : 'Select a subject to view chapters'}
+              {isCompetition ? 'Ek book chunein padhne ke liye' : `Class ${classLevel} ka subject chunein`}
             </p>
           </div>
         </div>
@@ -186,15 +191,43 @@ export const SubjectSelection: React.FC<Props> = ({
               <div className="flex-1 min-w-0">
                 <h3 className="nst-card-title font-black text-base truncate">{subject.name}</h3>
                 {totalContent > 0 ? (
-                  <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                  <div className="flex items-center gap-1 flex-wrap mt-1">
                     {statBadges.map(b => (
-                      <span key={b.emoji} className="nst-card-meta text-[10px] font-bold">
-                        {b.emoji} {b.count} {b.label}
+                      <span
+                        key={b.emoji}
+                        className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[9px] font-black border"
+                        style={{
+                          background: b.label === 'Notes'  ? '#dcfce7' :
+                                      b.label === 'PDF'    ? '#dbeafe' :
+                                      b.label === 'MCQ'    ? '#fef9c3' :
+                                      b.label === 'Video'  ? '#fee2e2' :
+                                      b.label === 'Audio'  ? '#f3e8ff' :
+                                      b.label === 'Lessons'? '#dcfce7' :
+                                      b.label === 'Pages'  ? '#dbeafe' : '#f1f5f9',
+                          color:      b.label === 'Notes'  ? '#16a34a' :
+                                      b.label === 'PDF'    ? '#1d4ed8' :
+                                      b.label === 'MCQ'    ? '#b45309' :
+                                      b.label === 'Video'  ? '#dc2626' :
+                                      b.label === 'Audio'  ? '#7c3aed' :
+                                      b.label === 'Lessons'? '#16a34a' :
+                                      b.label === 'Pages'  ? '#1d4ed8' : '#475569',
+                          borderColor:b.label === 'Notes'  ? '#86efac' :
+                                      b.label === 'PDF'    ? '#93c5fd' :
+                                      b.label === 'MCQ'    ? '#fde047' :
+                                      b.label === 'Video'  ? '#fca5a5' :
+                                      b.label === 'Audio'  ? '#d8b4fe' :
+                                      b.label === 'Lessons'? '#86efac' :
+                                      b.label === 'Pages'  ? '#93c5fd' : '#e2e8f0',
+                        }}
+                      >
+                        {b.emoji} {b.count}
                       </span>
                     ))}
                   </div>
+                ) : settings != null ? (
+                  <p className="nst-card-meta text-[11px] font-medium mt-0.5 opacity-40">No content yet</p>
                 ) : (
-                  <p className="nst-card-meta text-[11px] font-medium mt-0.5">No content yet</p>
+                  <p className="nst-card-meta text-[11px] font-medium mt-0.5 opacity-60">Loading…</p>
                 )}
               </div>
               <ChevronRight size={18} className="nst-card-arrow opacity-70 shrink-0" />

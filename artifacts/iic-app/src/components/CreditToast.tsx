@@ -47,7 +47,7 @@ export const CreditToast: React.FC = () => {
               <p className="text-xs font-black leading-tight">
                 -{payload.amount} Credits Kate
                 {payload.remaining !== undefined && (
-                  <span className="font-normal opacity-80"> · Baaki: {payload.remaining} CR</span>
+                  <span className="font-normal opacity-80"> · Balance: {payload.remaining} CR</span>
                 )}
               </p>
             </div>

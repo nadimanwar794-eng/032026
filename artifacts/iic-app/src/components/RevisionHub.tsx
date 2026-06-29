@@ -59,7 +59,7 @@ const RevisionHubComponent: React.FC<Props> = ({ user, onTabChange, settings, on
         return 'FREE';
     });
 
-    const [activeFilter, setActiveFilter] = useState<'TODAY' | 'WEAK' | 'AVERAGE' | 'STRONG' | 'EXCELLENT' | 'MISTAKES' | 'MCQ' | 'WEAK_NOTES'>('TODAY');
+    const [activeFilter, setActiveFilter] = useState<'TODAY' | 'ALL' | 'WEAK' | 'AVERAGE' | 'STRONG' | 'EXCELLENT' | 'MISTAKES' | 'MCQ' | 'WEAK_NOTES'>('TODAY');
     const [scoreViewMode, setScoreViewMode] = useState<'LATEST' | 'ALL_TIME'>('LATEST'); // NEW: Score View Mode
     const [ttsRate, setTtsRate] = useState(1.0); // TTS Speed Control
 
@@ -956,9 +956,9 @@ const RevisionHubComponent: React.FC<Props> = ({ user, onTabChange, settings, on
                         <Layout size={18} /> Self Study
                     </button>
                     <button
-                        onClick={() => setActiveFilter('WEAK')} // Default entry for strength view
+                        onClick={() => setActiveFilter('ALL')}
                         className={`flex-1 min-w-[150px] py-3 px-4 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${
-                            ['WEAK', 'AVERAGE', 'STRONG', 'EXCELLENT'].includes(activeFilter) ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-600'
+                            ['ALL', 'WEAK', 'AVERAGE', 'STRONG', 'EXCELLENT'].includes(activeFilter) ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-600'
                         }`}
                     >
                         <TrendingUp size={18} /> Topic Strength
@@ -969,11 +969,11 @@ const RevisionHubComponent: React.FC<Props> = ({ user, onTabChange, settings, on
             {/* SUB-TABS FOR TOPIC STRENGTH - Hidden as per user request to use the Chart exclusively */}
 
             {/* --- STATS OVERVIEW CHART (Only when looking at Topic Strength) --- */}
-            {['WEAK', 'AVERAGE', 'STRONG', 'EXCELLENT'].includes(activeFilter) && (
-                <RevisionDonutChart activeFilter={activeFilter}
+            {['ALL', 'WEAK', 'AVERAGE', 'STRONG', 'EXCELLENT'].includes(activeFilter) && (
+                <RevisionDonutChart activeFilter={activeFilter === 'ALL' ? null : activeFilter as any}
                     data={donutChartData}
                     onSegmentClick={(filterId) => {
-                        setActiveFilter(filterId);
+                        setActiveFilter(prev => prev === filterId ? 'ALL' : filterId);
                     }}
                 />
             )}
@@ -1391,10 +1391,25 @@ const RevisionHubComponent: React.FC<Props> = ({ user, onTabChange, settings, on
             {/* 2. FILTERED VIEWS (WEEKLY BREAKDOWN) */}
             {activeFilter !== 'TODAY' && activeFilter !== 'MCQ' && activeFilter !== 'MISTAKES' && (
                 <div className="space-y-6 relative z-10">
-                     <TopicChart topics={topics.filter(t => t.status === activeFilter)} type={activeFilter as any} />
+
+                    {/* Active filter banner */}
+                    {activeFilter !== 'ALL' && (
+                        <div className="flex items-center px-4 py-2.5 rounded-2xl"
+                            style={{
+                                background: activeFilter === 'WEAK' ? '#fef2f2' : activeFilter === 'AVERAGE' ? '#fff7ed' : activeFilter === 'STRONG' ? '#f0fdf4' : '#eff6ff',
+                                border: `2px solid ${activeFilter === 'WEAK' ? '#fca5a5' : activeFilter === 'AVERAGE' ? '#fdba74' : activeFilter === 'STRONG' ? '#86efac' : '#93c5fd'}`,
+                            }}
+                        >
+                            <span className="font-black text-sm" style={{ color: activeFilter === 'WEAK' ? '#dc2626' : activeFilter === 'AVERAGE' ? '#ea580c' : activeFilter === 'STRONG' ? '#16a34a' : '#2563eb' }}>
+                                {activeFilter === 'WEAK' ? '🔴 Weak Topics' : activeFilter === 'AVERAGE' ? '🟠 Average Topics' : activeFilter === 'STRONG' ? '🟢 Strong Topics' : '🔵 Mastery Topics'} — {topics.filter(t => t.status === activeFilter).length} topics
+                            </span>
+                        </div>
+                    )}
 
                      {(() => {
-                        const relevantTopics = topics.filter(t => t.status === activeFilter);
+                        const relevantTopics = activeFilter === 'ALL'
+                            ? topics
+                            : topics.filter(t => t.status === activeFilter);
                         const weeklyData = getWeeklyBreakdown(relevantTopics);
                         const weekKeys = Object.keys(weeklyData);
 

@@ -4,14 +4,15 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import { LessonContent, Subject, ClassLevel, Chapter, MCQItem, ContentType, User, SystemSettings } from '../types';
-import { ArrowLeft, Clock, AlertTriangle, ExternalLink, CheckCircle, XCircle, Trophy, BookOpen, Play, Lock, ChevronRight, ChevronLeft, Save, X, Maximize, Volume2, Square, Zap, StopCircle, Globe, Lightbulb, FileText, BrainCircuit, Grip, CheckSquare, List, Download, BarChart3, RotateCcw, Monitor, CloudOff } from 'lucide-react';
+import { ArrowLeft, Clock, AlertTriangle, ExternalLink, CheckCircle, XCircle, Trophy, BookOpen, Play, Lock, ChevronRight, ChevronLeft, Save, X, Maximize, Volume2, Square, Zap, StopCircle, Globe, Lightbulb, FileText, BrainCircuit, Grip, CheckSquare, List, Download, BarChart3, RotateCcw, Monitor, CloudOff, MoreVertical, EyeOff, Eye, LayoutGrid, Pencil, Send } from 'lucide-react';
 import { CustomConfirm, CustomAlert } from './CustomDialogs';
 import { CustomPlayer } from './CustomPlayer';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { decodeHtml } from '../utils/htmlDecoder';
 import { storage } from '../utils/storage';
-import { getChapterData, saveUserHistory, saveTestResult, saveUserToLive } from '../firebase';
+import { getChapterData, saveUserHistory, saveTestResult, saveUserToLive, saveAdminMark2Topics, subscribeAdminMark2Topics, saveSuggestion } from '../firebase';
+import { WriteModeCorrection } from "./WriteModeCorrection";
 import { SpeakButton } from './SpeakButton';
 import { McqSpeakButtons } from './McqSpeakButtons';
 import { ChunkedNotesReader } from './ChunkedNotesReader';
@@ -27,6 +28,8 @@ import { rotateScreen, isDesktopModeOn, setDesktopMode } from '../utils/displayP
 import { applyDeduction, getTotalCredits } from '../utils/creditSystem';
 import { getLevelFromScore } from '../utils/levelSystem';
 import { getActiveBoost } from '../utils/scoreSystem';
+import { ReadingScoreSession, ReadingScoreState } from '../utils/readingScoreEngine';
+import { ReadingScoreHUD } from './ReadingScoreHUD';
 import { PdfViewer } from './PdfViewer';
 
 
@@ -47,6 +50,16 @@ interface Props {
   instantExplanation?: boolean; // NEW: Instant Feedback Mode
   onShowMarksheet?: (result?: any) => void; // NEW: Marksheet Trigger
   onImmersiveChange?: (isImmersive: boolean) => void;
+  onNext?: () => void;
+  nextTitle?: string;
+  schoolMode?: boolean;
+  schoolControlsRef?: React.MutableRefObject<(() => void) | null>;
+  onSchoolModeSwitch?: () => void;
+  schoolModeSwitchDots?: boolean;
+  schoolSaveOffline?: () => void;
+  onAdminBoard?: () => void;
+  /** Called when admin/subadmin taps the Edit button — opens content editor for this chapter. */
+  onAdminEdit?: () => void;
 }
 
 export const LessonView: React.FC<Props> = ({ 
@@ -65,7 +78,16 @@ export const LessonView: React.FC<Props> = ({
   onToggleAutoTts,
   instantExplanation = false, // Default to standard mode
   onShowMarksheet,
-  onImmersiveChange
+  onImmersiveChange,
+  onNext,
+  nextTitle,
+  schoolMode = false,
+  schoolControlsRef,
+  onSchoolModeSwitch,
+  schoolModeSwitchDots = false,
+  schoolSaveOffline,
+  onAdminBoard,
+  onAdminEdit,
 }) => {
   const [mcqState, setMcqState] = useState<Record<number, number | null>>({});
   const [revealedAnswers, setRevealedAnswers] = useState<Set<number>>(new Set());
@@ -95,6 +117,7 @@ export const LessonView: React.FC<Props> = ({
   const [isDesktopMode, setIsDesktopMode] = useState<boolean>(isDesktopModeOn);
   const [rotateToast, setRotateToast] = useState<string | null>(null);
   const [isImmersive, setIsImmersive] = useState(false);
+  const [showBlankScreen, setShowBlankScreen] = useState(false);
   useEffect(() => {
     if (onImmersiveChange) onImmersiveChange(isImmersive);
   }, [isImmersive]);
@@ -125,6 +148,59 @@ export const LessonView: React.FC<Props> = ({
     onScoreEarned: handleReadingScoreEarned,
   } : undefined;
 
+  // ── Media (Video / Audio) time-based score session ───────────────────────
+  const mediaScoreSessionRef = useRef<ReadingScoreSession | null>(null);
+  const [mediaScoreState, setMediaScoreState] = useState<ReadingScoreState | null>(null);
+
+  useEffect(() => {
+    // Detect if current content is video or audio
+    const isVideoContent = content?.type === 'VIDEO_LECTURE' || (
+      contentValue && (contentValue.startsWith('http://') || contentValue.startsWith('https://')) &&
+      !['PDF_FREE','PDF_PREMIUM','PDF_ULTRA','PDF_VIEWER'].includes(content?.type || '') &&
+      !content?.type?.includes('AUDIO') &&
+      (contentValue.includes('youtube') || contentValue.includes('youtu.be') ||
+       contentValue.includes('drive.google.com') || contentValue.includes('notebooklm.google.com'))
+    );
+    const isAudioContent = content?.type?.includes('AUDIO') || (
+      contentValue &&
+      (contentValue.includes('drive.google.com') || contentValue.includes('notebooklm.google.com')) &&
+      (content?.title?.toLowerCase().includes('audio') || content?.title?.toLowerCase().includes('podcast'))
+    );
+    const isMediaContent = isVideoContent || isAudioContent;
+
+    if (!isMediaContent || !user?.id) {
+      // Stop any running session
+      if (mediaScoreSessionRef.current) {
+        mediaScoreSessionRef.current.stop();
+        mediaScoreSessionRef.current = null;
+        setMediaScoreState(null);
+      }
+      return;
+    }
+
+    // Start a new session
+    const session = new ReadingScoreSession(
+      {
+        userId: user.id,
+        userLevel: getLevelFromScore(user.totalScore || 0),
+        subscriptionLevel: user.subscriptionTier || 'FREE',
+        isPremium: !!(user.isPremium || (user.subscriptionTier && user.subscriptionTier !== 'FREE')),
+        boostPercent: getActiveBoost(user as any),
+        mode: isAudioContent ? 'audio' : 'video',
+        onScoreEarned: handleReadingScoreEarned,
+      },
+      (state) => setMediaScoreState(state),
+    );
+    mediaScoreSessionRef.current = session;
+    session.start();
+
+    return () => {
+      session.stop();
+      mediaScoreSessionRef.current = null;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [content?.id, content?.type, user?.id]);
+
   // On mount: always re-apply stored desktop mode preference to the viewport
   useEffect(() => {
     const current = isDesktopModeOn();
@@ -154,7 +230,7 @@ export const LessonView: React.FC<Props> = ({
     const desktopWasOn = isDesktopModeOn();
     const result = await rotateScreen();
     if (!result) {
-      setRotateToast('Is device mein screen rotation supported nahi hai');
+      setRotateToast('Screen rotation is not supported on this device');
       setTimeout(() => setRotateToast(null), 2500);
     } else {
       // Re-apply desktop mode after rotation settles (rotation can reset viewport)
@@ -202,7 +278,33 @@ export const LessonView: React.FC<Props> = ({
       try { localStorage.setItem('nst_starred_notes_v1', JSON.stringify(updated)); } catch {}
       return updated;
     });
+    // Admin star in Class 6-12 → also save to Firebase Mark 2 so ALL users
+    // see the orange highlight in their own reader instantly.
+    if (isAdmin) {
+      const existsInMark2 = mark2Topics.includes(text);
+      const updatedMark2 = existsInMark2
+        ? mark2Topics.filter(t => t !== text)
+        : [...mark2Topics, text];
+      setMark2Topics(updatedMark2);
+      saveAdminMark2Topics(noteKey, updatedMark2);
+    }
   };
+
+  // Admin highlight system — admin stars a topic → RTDB → all users see orange highlight
+  const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUB_ADMIN';
+
+  const [mark2Topics, setMark2Topics] = useState<string[]>([]);
+
+  // Real-time RTDB subscription — all users get live highlight updates
+  useEffect(() => {
+    if (!noteKey) return;
+    const unsub = subscribeAdminMark2Topics(noteKey, (topics) => {
+      setMark2Topics(topics);
+    });
+    return unsub;
+  }, [noteKey]);
+
+  const isTopicMark2 = (text: string) => mark2Topics.includes(text);
 
   const submitRef = useRef<() => void>();
 
@@ -226,9 +328,9 @@ export const LessonView: React.FC<Props> = ({
 
   // LANGUAGE AUTO-SELECT
   useEffect(() => {
-    if (user?.board === 'BSEB') {
+    if (user?.board === 'BSEB' || user?.board === 'NCERT_HI') {
         setLanguage('Hindi');
-    } else if (user?.board === 'CBSE') {
+    } else if (user?.board === 'NCERT_EN') {
         setLanguage('English');
     }
   }, [user?.board]);
@@ -249,6 +351,11 @@ export const LessonView: React.FC<Props> = ({
   // Full Screen Ref
   const containerRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showSuggestionPanel, setShowSuggestionPanel] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [mcqSuggestionOpen, setMcqSuggestionOpen] = useState<Record<number, boolean>>({});
+  const [mcqSuggestionText, setMcqSuggestionText] = useState<Record<number, string>>({});
+  const [mcqSuggestionSent, setMcqSuggestionSent] = useState<Set<number>>(new Set());
 
   const toggleFullScreen = () => {
       if (!document.fullscreenElement) {
@@ -347,6 +454,7 @@ export const LessonView: React.FC<Props> = ({
   const isFree = content.type === 'PDF_FREE' || content.type === 'NOTES_HTML_FREE' || (content.type === 'VIDEO_LECTURE' && content.videoPlaylist?.some(v => v.access === 'FREE'));
   
   const [fabOpen, setFabOpen] = useState(false);
+  const [savedOffline, setSavedOffline] = useState(false);
 
   const handleSaveNotesOffline = () => {
     if (!user) return;
@@ -363,7 +471,8 @@ export const LessonView: React.FC<Props> = ({
         questions: localMcqData,
       }
     });
-    setAlertConfig({ isOpen: true, message: '✅ Notes offline save ho gaye! Offline tab mein dekho.', type: 'SUCCESS' });
+    setSavedOffline(true);
+    setAlertConfig({ isOpen: true, message: '✅ Notes saved offline! Check the Offline tab.', type: 'SUCCESS' });
   };
 
   // FLOATING IMMERSIVE BUTTON — always rendered via portal into document.body
@@ -371,23 +480,17 @@ export const LessonView: React.FC<Props> = ({
   const fabBottom = isImmersive ? 16 : 80;
   const floatingBtn = createPortal(
     <>
-      {/* Backdrop — close menu on outside tap */}
-      {fabOpen && (
+      {/* Backdrop — close menu on outside tap (not in schoolMode) */}
+      {fabOpen && !schoolMode && (
         <div
           style={{ position: 'fixed', inset: 0, zIndex: 9190 }}
           onClick={() => setFabOpen(false)}
         />
       )}
 
-      {/* Sub-action buttons above FAB */}
-      {fabOpen && (
+      {/* Sub-action buttons above FAB (not in schoolMode — direct focus toggle instead) */}
+      {fabOpen && !schoolMode && (
         <div style={{ position: 'fixed', bottom: fabBottom + 68, right: '16px', zIndex: 9200, display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-end' }}>
-          <button
-            onClick={() => { handleSaveNotesOffline(); setFabOpen(false); }}
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#059669', color: '#fff', border: 'none', borderRadius: '24px', padding: '8px 14px', fontSize: '12px', fontWeight: 900, boxShadow: '0 4px 16px rgba(5,150,105,0.35)', cursor: 'pointer', whiteSpace: 'nowrap' }}
-          >
-            <CloudOff size={14} /> Save Offline
-          </button>
           <button
             onClick={() => { setIsImmersive(v => !v); setFabOpen(false); }}
             style={{ display: 'flex', alignItems: 'center', gap: '6px', background: isImmersive ? '#4f46e5' : '#1e293b', color: '#fff', border: 'none', borderRadius: '24px', padding: '8px 14px', fontSize: '12px', fontWeight: 900, boxShadow: '0 4px 16px rgba(0,0,0,0.25)', cursor: 'pointer', whiteSpace: 'nowrap' }}
@@ -405,9 +508,9 @@ export const LessonView: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Main FAB button */}
+      {/* Main FAB button — in schoolMode: direct focus toggle; otherwise open menu */}
       <button
-        onClick={() => setFabOpen(v => !v)}
+        onClick={() => schoolMode ? setIsImmersive(v => !v) : setFabOpen(v => !v)}
         className="shadow-2xl flex items-center justify-center"
         style={{
           position: 'fixed',
@@ -422,9 +525,15 @@ export const LessonView: React.FC<Props> = ({
           zIndex: 9200,
           transition: 'background 0.2s',
         }}
-        title={fabOpen ? 'Close menu' : 'Options'}
+        title={schoolMode ? (isImmersive ? 'Exit Focus Mode' : 'Focus Mode') : (fabOpen ? 'Close menu' : 'Options')}
       >
-        {fabOpen ? (
+        {schoolMode ? (
+          isImmersive
+            ? <X size={22} style={{ color: '#fff', pointerEvents: 'none' }} />
+            : settings?.appLogo
+              ? <img src={settings.appLogo} alt="App" style={{ width: '38px', height: '38px', objectFit: 'contain', borderRadius: '50%', pointerEvents: 'none' }} />
+              : <span style={{ fontSize: '18px', fontWeight: 900, color: '#fff', pointerEvents: 'none' }}>{(settings?.appShortName || settings?.appName || 'A').charAt(0)}</span>
+        ) : fabOpen ? (
           <X size={22} style={{ color: '#fff', pointerEvents: 'none' }} />
         ) : settings?.appLogo ? (
           <img src={settings.appLogo} alt="App" style={{ width: '38px', height: '38px', objectFit: 'contain', borderRadius: '50%', pointerEvents: 'none' }} />
@@ -433,7 +542,8 @@ export const LessonView: React.FC<Props> = ({
             {(settings?.appShortName || settings?.appName || 'A').charAt(0)}
           </span>
         )}
-        {!fabOpen && <span style={{ position: 'absolute', top: '3px', right: '3px', width: '10px', height: '10px', borderRadius: '50%', background: isImmersive ? '#6366f1' : '#22c55e', border: '2px solid #fff', pointerEvents: 'none' }} />}
+        {!fabOpen && !schoolMode && <span style={{ position: 'absolute', top: '3px', right: '3px', width: '10px', height: '10px', borderRadius: '50%', background: isImmersive ? '#6366f1' : '#22c55e', border: '2px solid #fff', pointerEvents: 'none' }} />}
+        {schoolMode && !isImmersive && <span style={{ position: 'absolute', top: '3px', right: '3px', width: '10px', height: '10px', borderRadius: '50%', background: '#22c55e', border: '2px solid #fff', pointerEvents: 'none' }} />}
       </button>
     </>,
     document.body
@@ -442,7 +552,7 @@ export const LessonView: React.FC<Props> = ({
   // FREE HTML NOTE MODAL
   if (viewingNote) {
       return (
-          <div className="fixed inset-0 z-[200] bg-white flex flex-col animate-in fade-in">
+          <div className="fixed inset-0 z-[200] bg-white flex flex-col">
               {/* Header */}
               <header className="bg-white border-b border-slate-200 p-4 flex items-center justify-between shadow-sm sticky top-0 z-10">
                   <div className="flex items-center gap-3"><button onClick={toggleFullScreen} className="p-2 bg-slate-100 rounded-full text-slate-600 hover:bg-slate-200" title="Toggle Fullscreen"><Maximize size={20} /></button>
@@ -484,7 +594,7 @@ export const LessonView: React.FC<Props> = ({
                       ) : (
                           <div
                               className="notes-html-content"
-                              dangerouslySetInnerHTML={{ __html: decodeHtml(viewingNote.content) }}
+                              dangerouslySetInnerHTML={{ __html: renderMathInHtml(decodeHtml(viewingNote.content)) }}
                           />
                       )}
                   </div>
@@ -536,11 +646,11 @@ export const LessonView: React.FC<Props> = ({
                       setNotesViewMode('styled');
                   } else {
                       if (!user || !onUpdateUser) {
-                          setAlertConfig({ isOpen: true, message: `HTML Notes unlock karne ke liye ${HTML_UNLOCK_COST} coins chahiye.` });
+                          setAlertConfig({ isOpen: true, message: `You need ${HTML_UNLOCK_COST} coins to unlock HTML Notes.` });
                           return;
                       }
                       if (getTotalCredits(user) < HTML_UNLOCK_COST) {
-                          setAlertConfig({ isOpen: true, message: `HTML Notes unlock karne ke liye ${HTML_UNLOCK_COST} coins chahiye. Aapke paas sirf ${getTotalCredits(user)} coins hain.` });
+                          setAlertConfig({ isOpen: true, message: `You need ${HTML_UNLOCK_COST} coins to unlock HTML Notes. You only have ${getTotalCredits(user)} coins.` });
                           return;
                       }
                       const updatedUser = applyDeduction(user, HTML_UNLOCK_COST)!;
@@ -621,11 +731,23 @@ export const LessonView: React.FC<Props> = ({
                           className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-100 mt-2"
                           noteKey={noteKey}
                           isStarred={isTopicStarred}
-                          onStarToggle={toggleTopicStar}
+                          onStarToggle={isAdmin ? toggleTopicStar : undefined}
                           preferChunkMode
                           hideTopBar={isImmersive}
+                          hideFix={schoolMode}
+                          hideDesktopToggle={schoolMode}
+                          suppressStickyControls={schoolMode}
+                          triggerControlsRef={schoolControlsRef}
+                          onMoreOptions={schoolMode && onSchoolModeSwitch ? onSchoolModeSwitch : undefined}
                           onDesktopModeChange={setIsDesktopMode}
                           readingScoreConfig={readingScoreConfig}
+                          isAdmin={isAdmin}
+                          useImportantMark2={false}
+                          isMarked2={isTopicMark2}
+                          onMark2Toggle={undefined}
+                          onSaveOffline={schoolSaveOffline ?? (user ? handleSaveNotesOffline : undefined)}
+                          isSavedOffline={savedOffline}
+                          onAdminEdit={isAdmin ? onAdminEdit : undefined}
                       />
                   ) : (
                       <>
@@ -654,7 +776,7 @@ export const LessonView: React.FC<Props> = ({
                       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden mt-2">
                           <div
                               className="notes-html-content p-4 sm:p-6"
-                              dangerouslySetInnerHTML={{ __html: deduplicatedHtml }}
+                              dangerouslySetInnerHTML={{ __html: renderMathInHtml(deduplicatedHtml) }}
                               style={{ fontSize: '15px', lineHeight: '1.8' }}
                           />
                       </div>
@@ -686,7 +808,7 @@ export const LessonView: React.FC<Props> = ({
                                       {hasHtml && (
                                           <div
                                               className="notes-html-content p-4 sm:p-6"
-                                              dangerouslySetInnerHTML={{ __html: sec.html || '' }}
+                                              dangerouslySetInnerHTML={{ __html: renderMathInHtml(sec.html || '') }}
                                               style={{ fontSize: '15px', lineHeight: '1.8' }}
                                           />
                                       )}
@@ -707,44 +829,98 @@ export const LessonView: React.FC<Props> = ({
           );
 
           return (
-              <div className="fixed inset-0 z-50 bg-white flex flex-col animate-in fade-in">
+              <div className="fixed inset-0 z-50 bg-white flex flex-col">
                   {/* Rotate toast */}
                   {rotateToast && (
                       <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[9999] bg-slate-800 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-lg animate-in fade-in">
                           {rotateToast}
                       </div>
                   )}
-                  {/* Header */}
-                  <header className={`bg-white/95 backdrop-blur-md text-slate-800 px-4 py-3 flex-shrink-0 z-10 flex items-center justify-between border-b border-slate-100 shadow-sm${isImmersive ? ' hidden' : ''}`}>
-                      <div className="flex items-center gap-3">
-                          <button onClick={toggleFullScreen} className="p-2 bg-slate-100 rounded-full text-slate-600 hover:bg-slate-200" title="Toggle Fullscreen"><Maximize size={20} /></button>
-                          <button onClick={onBack} className="p-2 bg-slate-100 rounded-full"><ArrowLeft size={20} /></button>
-                          <h2 className="text-sm font-bold truncate max-w-[120px]">{content.title}</h2>
-                      </div>
+                  {/* Header — 2-row write mode bar */}
+                  <header className={`bg-white border-b border-slate-100 px-3 pt-2 pb-2 flex-shrink-0 z-10 shadow-sm${isImmersive ? ' hidden' : ''}`}>
+                      {/* Row 1: Back + Title + WRITE badge + Close */}
                       <div className="flex items-center gap-2">
-                          <button
-                              onClick={handleRotate}
-                              className="p-2 bg-slate-100 rounded-full text-slate-600 hover:bg-slate-200 transition-colors"
-                              title="Screen Rotate"
-                          >
-                              <RotateCcw size={18} />
-                          </button>
-                          <button
-                              onClick={toggleDesktopMode}
-                              className={`p-2 rounded-full transition-colors ${isDesktopMode ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                              title={isDesktopMode ? 'Desktop Mode ON' : 'Desktop Mode OFF'}
-                          >
-                              <Monitor size={18} />
-                          </button>
-                          <button
-                              onClick={() => setLanguage(l => l === 'English' ? 'Hindi' : 'English')}
-                              className="px-3 py-1.5 bg-slate-100 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-200 border border-slate-200 flex items-center gap-1 transition-all"
-                          >
-                              <Globe size={14} /> {language === 'English' ? 'हिंदी' : 'Eng'}
-                          </button>
-                          <button onClick={onBack} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"><X size={20} /></button>
+                          <button onClick={onBack} className="shrink-0 p-2 bg-slate-50 hover:bg-slate-100 rounded-xl text-slate-500 transition-colors"><ArrowLeft size={18} /></button>
+                          <div className="min-w-0 flex-1">
+                              <h2 className="text-[13px] font-black text-slate-800 truncate leading-tight">{content.title}</h2>
+                          </div>
+                          <span className="shrink-0 text-[8px] font-black uppercase tracking-[0.18em] text-indigo-400/70 select-none whitespace-nowrap">✏️ WRITE</span>
+                          <button onClick={onBack} className="shrink-0 p-2 bg-slate-50 hover:bg-red-50 hover:text-red-500 text-slate-400 rounded-xl transition-colors"><X size={17} /></button>
+                      </div>
+                      {/* Row 2: Controls */}
+                      <div className="flex items-center gap-2 mt-1.5">
+                          {/* Language pill */}
+                          {!schoolMode && (
+                              <button onClick={() => setLanguage(l => l === 'English' ? 'Hindi' : 'English')}
+                                  className="shrink-0 px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-[11px] font-black text-slate-600 hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-600 flex items-center gap-1 transition-all">
+                                  <Globe size={11} /> {language === 'English' ? 'हि' : 'EN'}
+                              </button>
+                          )}
+                          {/* Admin Edit button */}
+                          {isAdmin && onAdminEdit && (
+                              <button onClick={onAdminEdit} className="shrink-0 p-2 bg-orange-50 hover:bg-orange-100 rounded-xl text-orange-600 border border-orange-200 transition-colors" title="Edit / Delete Notes (Admin)">
+                                  <Pencil size={17} />
+                              </button>
+                          )}
+                          {/* ⋮ More menu — pushed to the right */}
+                          {!schoolMode && (
+                              <div className="relative shrink-0 ml-auto">
+                                  {showMoreMenu && <div className="fixed inset-0 z-40" onClick={() => setShowMoreMenu(false)} />}
+                                  <button onClick={() => setShowMoreMenu(s => !s)}
+                                      className={`p-2 rounded-xl transition-colors ${showMoreMenu ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}>
+                                      <MoreVertical size={17} />
+                                  </button>
+                                  {showMoreMenu && (
+                                      <div className="absolute right-0 top-11 z-50 bg-white border border-slate-100 rounded-2xl shadow-2xl w-56 py-2 overflow-hidden">
+                                          <button onClick={() => { handleRotate(); setShowMoreMenu(false); }}
+                                              className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 font-semibold transition-colors">
+                                              <RotateCcw size={15} className="text-slate-400 shrink-0" /> Screen Rotate
+                                          </button>
+                                          <button onClick={() => { toggleDesktopMode(); setShowMoreMenu(false); }}
+                                              className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold transition-colors hover:bg-slate-50 ${isDesktopMode ? 'text-indigo-600' : 'text-slate-700'}`}>
+                                              <Monitor size={15} className={`shrink-0 ${isDesktopMode ? 'text-indigo-500' : 'text-slate-400'}`} />
+                                              Desktop Mode{isDesktopMode ? ' (ON)' : ''}
+                                          </button>
+                                          <button onClick={() => { toggleFullScreen(); setShowMoreMenu(false); }}
+                                              className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 font-semibold transition-colors">
+                                              <Maximize size={15} className="text-slate-400 shrink-0" /> Fullscreen
+                                          </button>
+                                          <div className="my-1.5 border-t border-slate-100" />
+                                          <button onClick={() => { setShowSuggestionPanel(s => !s); setShowMoreMenu(false); }}
+                                              className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold transition-colors ${showSuggestionPanel ? 'bg-amber-50 text-amber-700' : 'text-slate-700 hover:bg-slate-50'}`}>
+                                              <Lightbulb size={15} className={`shrink-0 ${showSuggestionPanel ? 'text-amber-500' : 'text-slate-400'}`} />
+                                              💡 Suggestions & Corrections
+                                          </button>
+                                      </div>
+                                  )}
+                              </div>
+                          )}
                       </div>
                   </header>
+
+                  {/* 💡 Suggestions & Corrections panel — write mode */}
+                  {showSuggestionPanel && !schoolMode && (
+                      <div className="flex-shrink-0 border-b border-amber-200 bg-amber-50">
+                          <WriteModeCorrection user={user} lessonTitle={chapter.title} subject={subject.name} classLevel={classLevel} />
+                      </div>
+                  )}
+
+                  {/* ── Blank Screen overlay — covers content, header stays visible ── */}
+                  {showBlankScreen && (
+                      <div
+                          className="absolute inset-0 z-30 flex flex-col items-center justify-center select-none"
+                          style={{ background: '#0f172a', top: 0 }}
+                          onClick={() => setShowBlankScreen(false)}
+                      >
+                          <div className="flex flex-col items-center gap-4 pointer-events-none">
+                              <div className="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center">
+                                  <EyeOff size={32} className="text-white/40" />
+                              </div>
+                              <p className="text-white/30 text-sm font-bold tracking-widest uppercase">Screen Hidden</p>
+                              <p className="text-white/20 text-xs">Tap anywhere to show</p>
+                          </div>
+                      </div>
+                  )}
 
                   {isLandscape ? (
                       /* ── LANDSCAPE: Split screen — controls left, notes right ── */
@@ -752,7 +928,7 @@ export const LessonView: React.FC<Props> = ({
                           {/* Left panel: mode switcher controls */}
                           <div className={`w-[220px] flex-shrink-0 bg-white border-r border-slate-100 flex flex-col p-4 gap-3 overflow-y-auto${isImmersive ? ' hidden' : ''}`}>
                               {/* Language toggle */}
-                              <div className="mt-2">
+                              {!schoolMode && <div className="mt-2">
                                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Language</p>
                                   <button
                                       onClick={() => setLanguage(l => l === 'English' ? 'Hindi' : 'English')}
@@ -760,18 +936,10 @@ export const LessonView: React.FC<Props> = ({
                                   >
                                       <Globe size={14} /> {language === 'English' ? 'हिंदी में बदलें' : 'Switch to English'}
                                   </button>
-                              </div>
-                              {/* Rotate & Desktop Mode */}
-                              <div className="mt-1">
-                                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Screen</p>
+                              </div>}
+                              {/* Desktop Mode */}
+                              {!schoolMode && <div className="mt-1">
                                   <div className="flex gap-2">
-                                      <button
-                                          onClick={handleRotate}
-                                          className="flex-1 flex items-center justify-center gap-1 py-2 bg-slate-100 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-200 border border-slate-200 transition-all"
-                                          title="Screen Rotate"
-                                      >
-                                          <RotateCcw size={14} /> Rotate
-                                      </button>
                                       <button
                                           onClick={toggleDesktopMode}
                                           className={`flex-1 flex items-center justify-center gap-1 py-2 rounded-xl text-xs font-bold border transition-all ${isDesktopMode ? 'bg-indigo-100 text-indigo-600 border-indigo-200' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}
@@ -780,7 +948,7 @@ export const LessonView: React.FC<Props> = ({
                                           <Monitor size={14} /> {isDesktopMode ? 'Desktop' : 'Desktop'}
                                       </button>
                                   </div>
-                              </div>
+                              </div>}
                           </div>
                           {/* Right panel: notes content */}
                           <div className="flex-1 overflow-y-auto px-4 py-3 min-w-0">
@@ -802,8 +970,8 @@ export const LessonView: React.FC<Props> = ({
       
       if (isImage) {
           return (
-              <div className="fixed inset-0 z-50 bg-[#111] flex flex-col animate-in fade-in">
-                  <header className={`bg-black/90 backdrop-blur-md text-white p-4 absolute top-0 left-0 right-0 z-10 flex items-center justify-between border-b border-white/10${isImmersive ? ' hidden' : ''}`}>
+              <div className="fixed inset-0 z-50 bg-[#111] flex flex-col" style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)', paddingLeft: 'env(safe-area-inset-left)', paddingRight: 'env(safe-area-inset-right)' }}>
+                  <header className={`bg-black/90 backdrop-blur-md text-white p-4 absolute top-0 left-0 right-0 z-10 flex items-center justify-between border-b border-white/10${isImmersive ? ' hidden' : ''}`} style={{ top: 'env(safe-area-inset-top)' }}>
                       <div className="flex items-center gap-3"><button onClick={toggleFullScreen} className="p-2 bg-slate-100 rounded-full text-slate-600 hover:bg-slate-200" title="Toggle Fullscreen"><Maximize size={20} /></button>
                           <button onClick={onBack} className="p-2 bg-white/10 rounded-full"><ArrowLeft size={20} /></button>
                           <div>
@@ -813,8 +981,14 @@ export const LessonView: React.FC<Props> = ({
                       </div>
                       <button onClick={onBack} className="p-2 bg-white/10 rounded-full hover:bg-white/20 transition-colors backdrop-blur-md"><X size={20} /></button>
                   </header>
-                  <div className="flex-1 overflow-y-auto pt-16 flex items-start justify-center" onContextMenu={preventMenu}>
-                      <img src={content.content} alt="Notes" className="w-full h-auto object-contain" draggable={false} />
+                  <div className="flex-1 min-h-0 overflow-auto pt-16 flex items-center justify-center" onContextMenu={preventMenu}>
+                      <img
+                          src={content.content}
+                          alt="Notes"
+                          className="max-w-full max-h-full object-contain"
+                          style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                          draggable={false}
+                      />
                   </div>
               {floatingBtn}
               </div>
@@ -829,27 +1003,57 @@ export const LessonView: React.FC<Props> = ({
 
       if (isGoogleDriveAudio) {
           return (
-              <div className="fixed inset-0 z-50 bg-slate-900 flex flex-col animate-in fade-in">
-                  <header className={`bg-slate-900/90 backdrop-blur-md text-white p-4 flex items-center justify-between border-b border-white/10 z-20${isImmersive ? ' hidden' : ''}`}>
-                      <div className="flex items-center gap-3"><button onClick={toggleFullScreen} className="p-2 bg-slate-100 rounded-full text-slate-600 hover:bg-slate-200" title="Toggle Fullscreen"><Maximize size={20} /></button>
-                          <button onClick={onBack} className="p-2 bg-white/10 rounded-full hover:bg-white/20 transition-colors"><ArrowLeft size={20} /></button>
-                          <div>
-                            <h2 className="font-bold text-white leading-tight">{content.title}</h2>
-                            <p className="text-[10px] text-blue-400 font-black uppercase tracking-widest">Premium Audio Experience</p>
-                          </div>
+              <div
+                className="fixed inset-0 z-50 bg-black flex flex-col"
+                onClick={() => setIsImmersive(v => !v)}
+              >
+                  {/* ── Floating gradient header (overlays video, no layout impact) ── */}
+                  <header
+                    className="absolute top-0 left-0 right-0 z-30 transition-all duration-300"
+                    style={{
+                      background: 'linear-gradient(to bottom, rgba(0,0,0,0.90) 0%, rgba(0,0,0,0.45) 65%, transparent 100%)',
+                      opacity: isImmersive ? 0 : 1,
+                      pointerEvents: isImmersive ? 'none' : 'auto',
+                      paddingBottom: 32,
+                    }}
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <div className="flex items-center gap-2 px-3 pt-3 pb-1">
+                      <button
+                        onClick={onBack}
+                        className="p-2 rounded-full active:scale-90 transition-transform"
+                        style={{ background: 'rgba(255,255,255,0.12)' }}
+                      >
+                        <ArrowLeft size={18} color="#fff" />
+                      </button>
+                      <div className="flex-1 min-w-0 mx-1">
+                        <h2 className="font-bold text-white text-[13px] leading-snug truncate">{content.title}</h2>
+                        <p className="text-[9px] font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.38)' }}>Tap screen to hide controls</p>
                       </div>
-                      <button onClick={onBack} className="p-2 bg-white/10 rounded-full hover:bg-white/20 transition-colors"><X size={20} /></button>
+                      <button
+                        onClick={onBack}
+                        className="p-2 rounded-full active:scale-90 transition-transform"
+                        style={{ background: 'rgba(255,255,255,0.12)' }}
+                      >
+                        <X size={18} color="#fff" />
+                      </button>
+                    </div>
                   </header>
-                  <div className="flex-1 flex items-center justify-center p-4 bg-slate-950 relative overflow-hidden">
-                      {/* Animated Background Gradients */}
-                      <div className="absolute top-1/4 left-1/4 w-64 h-64 bg-blue-600/10 rounded-full blur-[100px] animate-pulse"></div>
-                      <div className="absolute bottom-1/4 right-1/4 w-64 h-64 bg-purple-600/10 rounded-full blur-[100px] animate-pulse" style={{ animationDelay: '1s' }}></div>
-                      
-                      <div className="w-full aspect-video relative z-10 rounded-2xl overflow-hidden shadow-2xl border border-white/5">
-                          <CustomPlayer videoUrl={contentValue} />
-                      </div>
+
+                  {/* ── Video fills FULL screen (no aspect-ratio, no padding) ── */}
+                  <div className="flex-1 relative" onClick={e => e.stopPropagation()}>
+                    <CustomPlayer videoUrl={contentValue} onNext={onNext} nextTitle={nextTitle} badgePos={settings?.iicNstaBadgePos} badgeLabel={settings?.playerBadgeLabel} fsButtonLabel={settings?.playerFsButtonLabel} isAdmin={isAdmin} hideYtLogoBlocker={settings?.hideYtLogoBlocker} />
                   </div>
-              {floatingBtn}
+
+                  {/* ── Media score HUD ── */}
+                  {mediaScoreState && (
+                      <ReadingScoreHUD
+                          state={mediaScoreState}
+                          visible={true}
+                          levelColor="#818cf8"
+                      />
+                  )}
+                  {floatingBtn}
               </div>
           );
       }
@@ -861,10 +1065,16 @@ export const LessonView: React.FC<Props> = ({
               onBack={onBack}
               sessionKey={chapter?.id ? `chapter_${chapter.id}` : undefined}
               userId={user?.id}
+              userLevel={getLevelFromScore(user?.totalScore || 0)}
               subscriptionLevel={user?.subscriptionTier || 'FREE'}
               isPremium={!!(user?.isPremium || (user?.subscriptionTier && user.subscriptionTier !== 'FREE'))}
               boostPercent={getActiveBoost(user as any)}
               onScoreEarned={handleReadingScoreEarned}
+              onNext={onNext}
+              nextTitle={nextTitle}
+              onSchoolModeSwitch={schoolMode && onSchoolModeSwitch ? onSchoolModeSwitch : undefined}
+              isAdmin={user?.role === 'ADMIN' || user?.role === 'SUB_ADMIN'}
+              onAdminBoard={onAdminBoard}
           />
       );
   }
@@ -872,39 +1082,78 @@ export const LessonView: React.FC<Props> = ({
   // 3. MANUAL TEXT / MARKDOWN NOTES (Fallback)
   if (content.content || isStreaming) {
       return (
-          <div className="flex flex-col h-full bg-white animate-in fade-in">
+          <div className="flex flex-col h-full bg-white">
               {rotateToast && (
                   <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[9999] bg-slate-800 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-lg animate-in fade-in">
                       {rotateToast}
                   </div>
               )}
-              <header className={`bg-white border-b p-4 flex items-center justify-between sticky top-0 z-10${isImmersive ? ' hidden' : ''}`}>
-                  <div className="flex items-center gap-3"><button onClick={toggleFullScreen} className="p-2 bg-slate-100 rounded-full text-slate-600 hover:bg-slate-200" title="Toggle Fullscreen"><Maximize size={20} /></button>
-                      <button onClick={onBack} className="p-2 bg-slate-100 rounded-full"><ArrowLeft size={20} /></button>
-                      <h2 className="font-bold truncate max-w-[140px]">{content.title}</h2>
-                  </div>
+              {/* Header — 2-row write mode bar */}
+              <header className={`bg-white border-b border-slate-100 px-3 pt-2 pb-2 sticky top-0 z-10 shadow-sm${isImmersive ? ' hidden' : ''}`}>
+                  {/* Row 1: Back + Title + WRITE badge + Close */}
                   <div className="flex items-center gap-2">
-                      <button
-                          onClick={handleRotate}
-                          className="p-2 bg-slate-100 rounded-full text-slate-600 hover:bg-slate-200 transition-colors"
-                          title="Screen Rotate"
-                      >
-                          <RotateCcw size={18} />
-                      </button>
-                      <button
-                          onClick={toggleDesktopMode}
-                          className={`p-2 rounded-full transition-colors ${isDesktopMode ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                          title={isDesktopMode ? 'Desktop Mode ON' : 'Desktop Mode OFF'}
-                      >
-                          <Monitor size={18} />
-                      </button>
-                      <button 
-                          onClick={() => setLanguage(l => l === 'English' ? 'Hindi' : 'English')}
-                          className="px-3 py-1.5 bg-slate-100 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-200 border border-slate-200 mr-1 flex items-center gap-1 transition-all"
-                      >
-                          <Globe size={14} /> {language === 'English' ? 'Hindi (हिंदी)' : 'English'}
-                      </button>
-                      <button onClick={onBack} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors"><X size={20} /></button>
+                      <button onClick={onBack} className="shrink-0 p-2 bg-slate-50 hover:bg-slate-100 rounded-xl text-slate-500 transition-colors"><ArrowLeft size={18} /></button>
+                      <div className="min-w-0 flex-1">
+                          <h2 className="text-[13px] font-black text-slate-800 truncate leading-tight">{content.title}</h2>
+                      </div>
+                      <span className="shrink-0 text-[8px] font-black uppercase tracking-[0.18em] text-indigo-400/70 select-none whitespace-nowrap">✏️ WRITE</span>
+                      <button onClick={onBack} className="shrink-0 p-2 bg-slate-50 hover:bg-red-50 hover:text-red-500 text-slate-400 rounded-xl transition-colors"><X size={17} /></button>
+                  </div>
+                  {/* Row 2: Controls */}
+                  <div className="flex items-center gap-2 mt-1.5">
+                      {/* Language pill */}
+                      {!schoolMode && (
+                          <button onClick={() => setLanguage(l => l === 'English' ? 'Hindi' : 'English')}
+                              className="shrink-0 px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-[11px] font-black text-slate-600 hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-600 flex items-center gap-1 transition-all">
+                              <Globe size={11} /> {language === 'English' ? 'हि' : 'EN'}
+                          </button>
+                      )}
+                      {/* School mode controls */}
+                      {schoolMode && onSchoolModeSwitch && (
+                          <button onClick={onSchoolModeSwitch} className="shrink-0 p-2 bg-slate-50 hover:bg-slate-100 rounded-xl text-slate-500 transition-colors"><LayoutGrid size={17} /></button>
+                      )}
+                      {schoolMode && (
+                          <button onClick={() => schoolControlsRef?.current?.()} className="shrink-0 p-2 bg-slate-50 hover:bg-slate-100 rounded-xl text-slate-500 transition-colors"><MoreVertical size={17} /></button>
+                      )}
+                      {/* Admin Edit button */}
+                      {isAdmin && onAdminEdit && (
+                          <button onClick={onAdminEdit} className="shrink-0 p-2 bg-orange-50 hover:bg-orange-100 rounded-xl text-orange-600 border border-orange-200 transition-colors" title="Edit / Delete Notes (Admin)">
+                              <Pencil size={17} />
+                          </button>
+                      )}
+                      {/* ⋮ More menu — pushed to the right */}
+                      {!schoolMode && (
+                          <div className="relative shrink-0 ml-auto">
+                              {showMoreMenu && <div className="fixed inset-0 z-40" onClick={() => setShowMoreMenu(false)} />}
+                              <button onClick={() => setShowMoreMenu(s => !s)}
+                                  className={`p-2 rounded-xl transition-colors ${showMoreMenu ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}>
+                                  <MoreVertical size={17} />
+                              </button>
+                              {showMoreMenu && (
+                                  <div className="absolute right-0 top-11 z-50 bg-white border border-slate-100 rounded-2xl shadow-2xl w-56 py-2 overflow-hidden">
+                                      <button onClick={() => { handleRotate(); setShowMoreMenu(false); }}
+                                          className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 font-semibold transition-colors">
+                                          <RotateCcw size={15} className="text-slate-400 shrink-0" /> Screen Rotate
+                                      </button>
+                                      <button onClick={() => { toggleDesktopMode(); setShowMoreMenu(false); }}
+                                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold transition-colors hover:bg-slate-50 ${isDesktopMode ? 'text-indigo-600' : 'text-slate-700'}`}>
+                                          <Monitor size={15} className={`shrink-0 ${isDesktopMode ? 'text-indigo-500' : 'text-slate-400'}`} />
+                                          Desktop Mode{isDesktopMode ? ' (ON)' : ''}
+                                      </button>
+                                      <button onClick={() => { toggleFullScreen(); setShowMoreMenu(false); }}
+                                          className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 font-semibold transition-colors">
+                                          <Maximize size={15} className="text-slate-400 shrink-0" /> Fullscreen
+                                      </button>
+                                      <div className="my-1.5 border-t border-slate-100" />
+                                      <button onClick={() => { setShowSuggestionPanel(s => !s); setShowMoreMenu(false); }}
+                                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold transition-colors ${showSuggestionPanel ? 'bg-amber-50 text-amber-700' : 'text-slate-700 hover:bg-slate-50'}`}>
+                                          <Lightbulb size={15} className={`shrink-0 ${showSuggestionPanel ? 'text-amber-500' : 'text-slate-400'}`} />
+                                          💡 Suggestions & Corrections
+                                      </button>
+                                  </div>
+                              )}
+                          </div>
+                      )}
                   </div>
               </header>
               <div className="flex-1 overflow-y-auto p-4 md:p-6 bg-white">
@@ -915,11 +1164,23 @@ export const LessonView: React.FC<Props> = ({
                           topBarLabel={content.title}
                           noteKey={noteKey}
                           isStarred={isTopicStarred}
-                          onStarToggle={toggleTopicStar}
+                          onStarToggle={isAdmin ? toggleTopicStar : undefined}
                           preferChunkMode
                           hideTopBar={isImmersive}
+                          hideFix={schoolMode}
+                          hideDesktopToggle={schoolMode}
+                          suppressStickyControls={schoolMode}
+                          triggerControlsRef={schoolControlsRef}
+                          onMoreOptions={schoolMode && onSchoolModeSwitch ? onSchoolModeSwitch : undefined}
                           onDesktopModeChange={setIsDesktopMode}
                           readingScoreConfig={readingScoreConfig}
+                          isAdmin={isAdmin}
+                          useImportantMark2={false}
+                          isMarked2={isTopicMark2}
+                          onMark2Toggle={undefined}
+                          onSaveOffline={schoolSaveOffline ?? (user ? handleSaveNotesOffline : undefined)}
+                          isSavedOffline={savedOffline}
+                          onAdminEdit={isAdmin ? onAdminEdit : undefined}
                       />
                       {isStreaming && (
                         <div className="flex items-center gap-2 text-slate-600 mt-4 animate-pulse">
@@ -1367,8 +1628,8 @@ export const LessonView: React.FC<Props> = ({
                         </div>
                         <SpeakButton text={content.aiAnalysisText} className="p-2 bg-purple-50 text-purple-600 hover:bg-purple-100" />
                     </div>
-                    <div className="prose prose-sm prose-slate max-w-none w-full prose-p:text-slate-600 prose-headings:font-black prose-headings:text-slate-800 bg-slate-50 p-4 rounded-xl border border-slate-100">
-                        <ReactMarkdown>{content.aiAnalysisText}</ReactMarkdown>
+                    <div className="prose prose-sm prose-slate max-w-none w-full prose-p:text-slate-600 prose-headings:font-black prose-headings:text-slate-800 bg-slate-50 p-4 rounded-xl border border-slate-100 notes-html-content">
+                        <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{content.aiAnalysisText}</ReactMarkdown>
                     </div>
                 </div>
                 )}
@@ -1460,7 +1721,7 @@ export const LessonView: React.FC<Props> = ({
       };
 
       return (
-          <div className="flex flex-col h-full bg-slate-50 animate-in fade-in relative mcq-container overflow-y-auto">
+          <div className="flex flex-col h-full bg-slate-50 relative mcq-container overflow-y-auto">
                <CustomAlert 
                    isOpen={alertConfig.isOpen} 
                    message={alertConfig.message} 
@@ -1485,6 +1746,12 @@ export const LessonView: React.FC<Props> = ({
                                <button onClick={handleResume} className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-xl shadow-lg">Resume</button>
                            </div>
                        </div>
+                   </div>
+               )}
+
+               {showSuggestionPanel && (
+                   <div className="sticky top-0 z-20 border-b border-amber-200 bg-amber-50">
+                       <WriteModeCorrection user={user} lessonTitle={chapter.title} subject={subject.name} classLevel={classLevel} />
                    </div>
                )}
 
@@ -1605,81 +1872,102 @@ export const LessonView: React.FC<Props> = ({
                        {rotateToast}
                    </div>
                )}
-               <div className={`flex items-center justify-between p-4 bg-white border-b border-slate-200 sticky top-0 z-10 shadow-sm${isImmersive ? ' hidden' : ''}`}>
-                   <div className="flex gap-2">
-                       <button onClick={onBack} className="flex items-center gap-2 text-slate-600 font-bold text-sm bg-slate-100 px-3 py-2 rounded-lg hover:bg-slate-200 transition-colors">
-                           <ArrowLeft size={16} /> Exit
-                       </button>
-                       {(content.manualMcqData_HI && content.manualMcqData_HI.length > 0) && (
-                           <button 
-                               onClick={() => setLanguage(l => l === 'English' ? 'Hindi' : 'English')}
-                               className="flex items-center gap-2 text-slate-600 font-bold text-xs bg-slate-100 border border-slate-200 px-3 py-2 rounded-lg hover:bg-slate-200 transition-colors"
-                           >
-                               <Globe size={14} /> {language === 'English' ? 'English' : 'हिंदी'}
-                           </button>
-                       )}
-
+               {/* MCQ Top Bar — clean, professional */}
+               <div className={`bg-white border-b border-slate-100 px-3 py-2 flex items-center gap-2 sticky top-0 z-10 shadow-sm${isImmersive ? ' hidden' : ''}`}>
+                   {/* Back */}
+                   <button onClick={onBack} className="shrink-0 p-2 bg-slate-50 hover:bg-slate-100 rounded-xl text-slate-500 transition-colors">
+                       <ArrowLeft size={18} />
+                   </button>
+                   {/* Title block — flex-1, center */}
+                   <div className="min-w-0 flex-1">
+                       <h2 className="text-[13px] font-black text-slate-800 truncate leading-tight">{chapter.title}</h2>
+                       <p className="text-[10px] font-bold text-violet-500 truncate leading-tight uppercase tracking-wide">
+                           📝 MCQ {subject?.name ? `· ${subject.name}` : ''}
+                       </p>
                    </div>
-                   <div className="flex items-center gap-3">
-                       <button
-                           onClick={handleRotate}
-                           className="p-2 bg-slate-100 rounded-full text-slate-600 hover:bg-slate-200 transition-colors"
-                           title="Screen Rotate"
-                       >
-                           <RotateCcw size={18} />
-                       </button>
-                       <button
-                           onClick={toggleDesktopMode}
-                           className={`p-2 rounded-full transition-colors ${isDesktopMode ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                           title={isDesktopMode ? 'Desktop Mode ON' : 'Desktop Mode OFF'}
-                       >
-                           <Monitor size={18} />
-                       </button>
-                       <button onClick={toggleFullScreen} className="p-2 bg-slate-100 rounded-full text-slate-600 hover:bg-slate-200" title="Toggle Fullscreen"><Maximize size={20} /></button>
-                       <button onClick={() => setShowTopicSidebar(true)} className="p-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200" title="View Topic Progress">
-                           <List size={20} />
-                       </button>
-
-                       {/* Auto Read Toggle (Global) */}
-                       <button
-                           onClick={() => {
-                               const newState = !autoReadEnabled;
-                               setAutoReadEnabled(newState);
-                               if (onToggleAutoTts) onToggleAutoTts(newState);
-                               if (!newState) window.speechSynthesis.cancel();
-                           }}
-                           className={`p-2 rounded-lg transition-all ${autoReadEnabled ? 'bg-indigo-100 text-indigo-600 ring-2 ring-indigo-200' : 'bg-slate-100 text-slate-500'}`}
-                           title="Toggle Auto-Read"
-                       >
-                           {autoReadEnabled ? <Volume2 size={18} /> : <Volume2 size={18} className="opacity-50" />}
-                       </button>
-
-                       {/* Timer Display - Prominent */}
-                       <div className="flex items-center gap-3 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm">
-                           <div className="flex flex-col items-end">
-                               <span className="text-[9px] font-bold text-slate-500 uppercase leading-none">Total</span>
-                               <span className="text-xs font-mono font-bold text-slate-700 leading-none">
-                                   {Math.floor(sessionTime / 60)}:{String(sessionTime % 60).padStart(2, '0')}
-                               </span>
-                           </div>
-                           <div className="h-6 w-px bg-slate-200"></div>
-                           <div className="flex flex-col items-end">
-                               <span className="text-[9px] font-bold text-slate-500 uppercase leading-none">Q-Time</span>
-                               <span className={`text-xs font-mono font-bold leading-none ${(timeSpentPerQuestion[batchIndex] || 0) > 60 ? 'text-red-500' : 'text-slate-700'}`}>
-                                   {Math.floor((timeSpentPerQuestion[batchIndex] || 0) / 60)}:{String((timeSpentPerQuestion[batchIndex] || 0) % 60).padStart(2, '0')}
-                               </span>
-                           </div>
-                       </div>
-
-                       <button
-                           onClick={() => setShowQuestionDrawer(true)}
-                           className="flex items-center gap-2 text-slate-600 font-bold text-xs bg-slate-100 border border-slate-200 px-3 py-2 rounded-lg hover:bg-slate-200 transition-colors"
-                       >
-                           <Grip size={16} /> <span className="hidden sm:inline">All Questions</span>
-                           <span className="bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded text-[10px] ml-1">
-                               {attemptedCount}/{displayData.length}
+                   {/* Compact timer pill */}
+                   <div className="shrink-0 flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
+                       <div className="flex flex-col items-center">
+                           <span className="text-[8px] font-bold text-slate-400 uppercase leading-none">Total</span>
+                           <span className="text-[11px] font-mono font-black text-slate-700 leading-none">
+                               {Math.floor(sessionTime / 60)}:{String(sessionTime % 60).padStart(2, '0')}
                            </span>
+                       </div>
+                       <div className="w-px h-5 bg-slate-200" />
+                       <div className="flex flex-col items-center">
+                           <span className="text-[8px] font-bold text-slate-400 uppercase leading-none">Q</span>
+                           <span className={`text-[11px] font-mono font-black leading-none ${(timeSpentPerQuestion[batchIndex] || 0) > 60 ? 'text-red-500' : 'text-slate-700'}`}>
+                               {Math.floor((timeSpentPerQuestion[batchIndex] || 0) / 60)}:{String((timeSpentPerQuestion[batchIndex] || 0) % 60).padStart(2, '0')}
+                           </span>
+                       </div>
+                   </div>
+                   {/* All Questions button */}
+                   <button onClick={() => setShowQuestionDrawer(true)}
+                       className="shrink-0 flex items-center gap-1.5 bg-slate-50 border border-slate-200 hover:bg-slate-100 text-slate-600 font-black text-[11px] px-2.5 py-1.5 rounded-xl transition-colors">
+                       <Grip size={14} />
+                       <span className="text-[10px] font-black text-slate-500">{attemptedCount}/{displayData.length}</span>
+                   </button>
+                   {/* Admin Edit button — only for admin/subadmin */}
+                   {isAdmin && onAdminEdit && (
+                       <button onClick={onAdminEdit} className="shrink-0 p-2 bg-orange-50 hover:bg-orange-100 rounded-xl text-orange-600 border border-orange-200 transition-colors" title="Edit / Delete MCQ (Admin)">
+                           <Pencil size={17} />
                        </button>
+                   )}
+                   {/* ⋮ More menu */}
+                   <div className="relative shrink-0">
+                       {showMoreMenu && <div className="fixed inset-0 z-40" onClick={() => setShowMoreMenu(false)} />}
+                       <button onClick={() => setShowMoreMenu(s => !s)}
+                           className={`p-2 rounded-xl transition-colors ${showMoreMenu ? 'bg-violet-100 text-violet-600' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'}`}>
+                           <MoreVertical size={17} />
+                       </button>
+                       {showMoreMenu && (
+                           <div className="absolute right-0 top-11 z-50 bg-white border border-slate-100 rounded-2xl shadow-2xl w-60 py-2 overflow-hidden">
+                               {/* Language toggle */}
+                               {!schoolMode && (content.manualMcqData_HI && content.manualMcqData_HI.length > 0) && (
+                                   <button onClick={() => { setLanguage(l => l === 'English' ? 'Hindi' : 'English'); setShowMoreMenu(false); }}
+                                       className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 font-semibold transition-colors">
+                                       <Globe size={15} className="text-slate-400 shrink-0" />
+                                       {language === 'English' ? 'Hindi (हिंदी) में' : 'English में'} Switch
+                                   </button>
+                               )}
+                               <button onClick={() => { setShowTopicSidebar(true); setShowMoreMenu(false); }}
+                                   className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 font-semibold transition-colors">
+                                   <List size={15} className="text-slate-400 shrink-0" /> Topic Progress
+                               </button>
+                               <button onClick={() => { const newState = !autoReadEnabled; setAutoReadEnabled(newState); if (onToggleAutoTts) onToggleAutoTts(newState); if (!newState) window.speechSynthesis.cancel(); setShowMoreMenu(false); }}
+                                   className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold transition-colors hover:bg-slate-50 ${autoReadEnabled ? 'text-indigo-600' : 'text-slate-700'}`}>
+                                   <Volume2 size={15} className={`shrink-0 ${autoReadEnabled ? 'text-indigo-500' : 'text-slate-400'}`} />
+                                   Auto-Read {autoReadEnabled ? '(ON)' : ''}
+                               </button>
+                               <button onClick={() => { handleRotate(); setShowMoreMenu(false); }}
+                                   className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 font-semibold transition-colors">
+                                   <RotateCcw size={15} className="text-slate-400 shrink-0" /> Screen Rotate
+                               </button>
+                               {!schoolMode && (
+                                   <button onClick={() => { toggleDesktopMode(); setShowMoreMenu(false); }}
+                                       className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold transition-colors hover:bg-slate-50 ${isDesktopMode ? 'text-indigo-600' : 'text-slate-700'}`}>
+                                       <Monitor size={15} className={`shrink-0 ${isDesktopMode ? 'text-indigo-500' : 'text-slate-400'}`} />
+                                       Desktop Mode{isDesktopMode ? ' (ON)' : ''}
+                                   </button>
+                               )}
+                               <button onClick={() => { toggleFullScreen(); setShowMoreMenu(false); }}
+                                   className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 font-semibold transition-colors">
+                                   <Maximize size={15} className="text-slate-400 shrink-0" /> Fullscreen
+                               </button>
+                               {schoolMode && onSchoolModeSwitch && (
+                                   <button onClick={() => { onSchoolModeSwitch(); setShowMoreMenu(false); }}
+                                       className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-indigo-600 hover:bg-indigo-50 font-semibold transition-colors">
+                                       <LayoutGrid size={15} className="text-indigo-400 shrink-0" /> Switch Mode
+                                   </button>
+                               )}
+                               <div className="my-1.5 border-t border-slate-100" />
+                               <button onClick={() => { setShowSuggestionPanel(s => !s); setShowMoreMenu(false); }}
+                                   className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold transition-colors ${showSuggestionPanel ? 'bg-amber-50 text-amber-700' : 'text-slate-700 hover:bg-slate-50'}`}>
+                                   <Lightbulb size={15} className={`shrink-0 ${showSuggestionPanel ? 'text-amber-500' : 'text-slate-400'}`} />
+                                   💡 Suggestions & Corrections
+                               </button>
+                           </div>
+                       )}
                    </div>
                </div>
                
@@ -1742,13 +2030,13 @@ export const LessonView: React.FC<Props> = ({
                                        const currScore = percent;
                                        const diff = currScore - prevScore;
 
-                                       if (diff > 10) overallComparison = `### 🌟 Outstanding Progress!\nBohot badhiya improvement hai! Pichhli baar **${prevScore}%** tha, ish baar **${currScore}%** aaya hai.`;
-                                       else if (diff > 0) overallComparison = `### 👍 Good Improvement\nSahi ja rahe ho! Score ${prevScore}% se badh kar ${currScore}% ho gaya hai.`;
-                                       else if (diff < -10) overallComparison = `### 📉 Needs Attention\nBeta, score kaafi gir gaya (${prevScore}% -> ${currScore}%). Kya samajh nahi aaya?`;
-                                       else if (diff < 0) overallComparison = `### ⚠️ Slight Drop\nThoda dhyan do. Pichhli baar ${prevScore}% tha, ish baar ${currScore}% ho gaya. Consistency zaroori hai.`;
-                                       else overallComparison = `### ⚖️ Consistent Performance\nConsistency achhi hai (**${currScore}%**), par hume ab next level pe jana hai.`;
+                                       if (diff > 10) overallComparison = `### 🌟 Outstanding Progress!\nExcellent improvement! Last time **${prevScore}%**, this time **${currScore}%**.`;
+                                       else if (diff > 0) overallComparison = `### 👍 Good Improvement\nYou're on the right track! Score went from ${prevScore}% to ${currScore}%.`;
+                                       else if (diff < -10) overallComparison = `### 📉 Needs Attention\nScore dropped significantly (${prevScore}% -> ${currScore}%). What was difficult?`;
+                                       else if (diff < 0) overallComparison = `### ⚠️ Slight Drop\nPay a bit more attention. Last time ${prevScore}%, this time ${currScore}%. Consistency matters.`;
+                                       else overallComparison = `### ⚖️ Consistent Performance\nGreat consistency (**${currScore}%**), but let's aim even higher now.`;
                                    } else {
-                                       overallComparison = `### 👋 Welcome!\nFirst attempt hai! Chalo dekhte hain kahan improvement ki zarurat hai.`;
+                                       overallComparison = `### 👋 Welcome!\nThis is your first attempt! Let's see where there's room to improve.`;
                                    }
 
                                    msg += overallComparison + "\n\n";
@@ -1763,11 +2051,11 @@ export const LessonView: React.FC<Props> = ({
                                            const accuracy = (stats.correct / stats.total) * 100;
 
                                            if (accuracy >= 80) {
-                                               msg += `- ✅ **${topic}**: Shabash! Yahan pakad mazboot hai (${Math.round(accuracy)}%).\n`;
+                                               msg += `- ✅ **${topic}**: Well done! Strong grasp here (${Math.round(accuracy)}%).\n`;
                                            } else if (accuracy >= 50) {
-                                               msg += `- ⚖️ **${topic}**: Thik hai (${Math.round(accuracy)}%), par thoda aur revision chahiye.\n`;
+                                               msg += `- ⚖️ **${topic}**: Decent (${Math.round(accuracy)}%), but needs a bit more revision.\n`;
                                            } else {
-                                               msg += `- ❌ **${topic}**: Yahan dikkat hai (${Math.round(accuracy)}%). Is topic ko dubara padhna padega.\n`;
+                                               msg += `- ❌ **${topic}**: Needs work (${Math.round(accuracy)}%). Review this topic again.\n`;
                                            }
                                        });
                                    }
@@ -1792,8 +2080,8 @@ export const LessonView: React.FC<Props> = ({
                                                </div>
                                                <div className="z-10 flex-1">
                                                    <h4 className="font-black text-indigo-900 text-sm mb-1 uppercase tracking-wide">Teacher's Remarks</h4>
-                                                   <p className="text-indigo-800 text-sm font-medium leading-relaxed">
-                                                       <ReactMarkdown>{teacherMsg}</ReactMarkdown>
+                                                   <p className="text-indigo-800 text-sm font-medium leading-relaxed notes-html-content">
+                                                       <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{teacherMsg}</ReactMarkdown>
                                                    </p>
                                                </div>
                                            </div>
@@ -1872,8 +2160,8 @@ export const LessonView: React.FC<Props> = ({
                                                    <h3 className="font-black text-slate-800 text-lg flex items-center gap-2"><BrainCircuit size={18}/> AI Performance Report</h3>
                                                    <SpeakButton text={content.aiAnalysisText} className="p-2 bg-purple-50 text-purple-600 hover:bg-purple-100" />
                                                </div>
-                                               <div className="prose prose-sm prose-slate max-w-none w-full prose-p:text-slate-600 prose-headings:font-black prose-headings:text-slate-800 bg-slate-50 p-4 rounded-xl border border-slate-100">
-                                                   <ReactMarkdown>{content.aiAnalysisText}</ReactMarkdown>
+                                               <div className="prose prose-sm prose-slate max-w-none w-full prose-p:text-slate-600 prose-headings:font-black prose-headings:text-slate-800 bg-slate-50 p-4 rounded-xl border border-slate-100 notes-html-content">
+                                                   <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{content.aiAnalysisText}</ReactMarkdown>
                                                </div>
                                            </div>
                                        )}
@@ -1966,8 +2254,17 @@ export const LessonView: React.FC<Props> = ({
                            }
 
                            // 1. Group Data
+                           const lastAttemptedIdx = Object.keys(mcqState).length > 0
+                               ? Math.max(...Object.keys(mcqState).map(Number))
+                               : -1;
+
                            const grouped: Record<string, {questions: MCQItem[], indices: number[], correct: number}> = {};
                            displayData.forEach((q, idx) => {
+                               // For QUESTIONS tab: only show questions up to last attempted index
+                               if (activeAnalysisTab === 'QUESTIONS') {
+                                   if (idx > lastAttemptedIdx) return;
+                               }
+
                                // Filter for MISTAKES tab
                                if (activeAnalysisTab === 'MISTAKES') {
                                    if (mcqState[idx] === undefined || mcqState[idx] === q.correctAnswer) return;
@@ -2036,6 +2333,11 @@ export const LessonView: React.FC<Props> = ({
                                                                    {idx + 1}
                                                                </span>
                                                                <div className="w-full">
+                                                                   {!isAnswered && (
+                                                                       <span className="inline-block text-[10px] font-black text-orange-600 bg-orange-50 px-2 py-0.5 rounded-md border border-orange-200 uppercase tracking-wide mb-1">
+                                                                           Skip
+                                                                       </span>
+                                                                   )}
                                                                    <div dangerouslySetInnerHTML={{ __html: renderMathInHtml(q.question) }} className="prose prose-sm max-w-none" />
                                                                    {q.statements && q.statements.length > 0 && (
                                                                        <div className="mt-3 mb-2 flex flex-col space-y-2">
@@ -2055,6 +2357,12 @@ export const LessonView: React.FC<Props> = ({
                                                                index={localI}
                                                            />
                                                        </div>
+                                                       {!isAnswered ? (
+                                                           <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-center">
+                                                               <p className="text-orange-600 font-bold text-sm">Question Skip ki gayi</p>
+                                                               <p className="text-orange-500 text-xs mt-1">Sahi jawab: Option {String.fromCharCode(65 + q.correctAnswer)}) {q.options[q.correctAnswer]}</p>
+                                                           </div>
+                                                       ) : (
                                                        <div className="space-y-2">
                                                            {q.options.map((opt, oIdx) => {
                                                                let btnClass = "w-full text-left p-3 rounded-xl border transition-all text-sm font-medium relative overflow-hidden ";
@@ -2079,6 +2387,7 @@ export const LessonView: React.FC<Props> = ({
                                                                );
                                                            })}
                                                        </div>
+                                                       )}
                                                        {q.explanation && (
                                                            <div className="mt-4 p-4 bg-blue-50 border border-blue-100 rounded-xl">
                                                                <div className="flex items-center justify-between mb-1">
@@ -2117,7 +2426,7 @@ export const LessonView: React.FC<Props> = ({
                                const isWrong = isAnswered && !isCorrect;
                                
                                const isRevealed = revealedAnswers.has(idx);
-                               const showExplanation = (instantExplanation && isAnswered && isWrong) || isRevealed;
+                               const showExplanation = (showResults && isAnswered) || isRevealed;
                                const fullQuestionText = `${q.question}. Options are: ${q.options.map((opt, i) => `Option ${i+1}: ${opt}`).join('. ')}`;
 
                                return (
@@ -2159,7 +2468,7 @@ export const LessonView: React.FC<Props> = ({
                                            {q.options.map((opt, oIdx) => {
                                                let btnClass = "w-full text-left p-3 rounded-xl border transition-all text-sm font-medium relative overflow-hidden ";
 
-                                               const showColors = (instantExplanation && isAnswered) || isRevealed;
+                                               const showColors = showResults || isRevealed;
 
                                                if (showColors) {
                                                    if (oIdx === q.correctAnswer) {
@@ -2199,20 +2508,79 @@ export const LessonView: React.FC<Props> = ({
                                            })}
                                        </div>
 
-                                       {!showResults && !isRevealed && !(instantExplanation && isAnswered) && (
-                                           <div className="mt-3 flex justify-end">
-                                               <button
-                                                   type="button"
-                                                   onClick={() => setRevealedAnswers(prev => {
-                                                       const next = new Set(prev);
-                                                       next.add(idx);
-                                                       return next;
-                                                   })}
-                                                   className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-3 py-1.5 rounded-full transition-colors"
-                                               >
-                                                   <Lightbulb size={12} /> Show Answer
-                                               </button>
-                                           </div>
+                                       {/* ── MCQ Suggestion Button ── */}
+                                       <div className="mt-3 flex justify-end">
+                                         <button
+                                           onClick={() => setMcqSuggestionOpen(p => ({ ...p, [idx]: !p[idx] }))}
+                                           className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold border transition-colors ${
+                                             mcqSuggestionOpen[idx]
+                                               ? 'bg-amber-100 text-amber-700 border-amber-300'
+                                               : mcqSuggestionSent.has(idx)
+                                                 ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+                                                 : 'bg-white text-slate-500 border-slate-200 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-200'
+                                           }`}
+                                         >
+                                           <Lightbulb size={12} />
+                                           {mcqSuggestionSent.has(idx) ? '✓ Sent' : 'Question mein galti?'}
+                                         </button>
+                                       </div>
+
+                                       {mcqSuggestionOpen[idx] && (
+                                         <div className="mt-2 bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
+                                           {mcqSuggestionSent.has(idx) ? (
+                                             <p className="text-xs text-emerald-700 font-bold text-center py-1">
+                                               ✅ Suggestion bhej diya! Admin fix karega.
+                                             </p>
+                                           ) : (
+                                             <>
+                                               <p className="text-xs font-bold text-amber-800 flex items-center gap-1">
+                                                 <Lightbulb size={11} className="text-amber-600" />
+                                                 Is question mein kya galti hai? Batao:
+                                               </p>
+                                               <textarea
+                                                 value={mcqSuggestionText[idx] || ''}
+                                                 onChange={e => setMcqSuggestionText(p => ({ ...p, [idx]: e.target.value }))}
+                                                 placeholder="Question galat hai, option galat hai, answer galat hai..."
+                                                 className="w-full text-xs border border-amber-200 rounded-xl p-2.5 bg-white resize-none h-14 focus:outline-none focus:ring-2 focus:ring-amber-300"
+                                               />
+                                               <div className="flex gap-2">
+                                                 <button
+                                                   onClick={() => setMcqSuggestionOpen(p => ({ ...p, [idx]: false }))}
+                                                   className="flex-1 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-600"
+                                                 >
+                                                   Cancel
+                                                 </button>
+                                                 <button
+                                                   onClick={async () => {
+                                                     const text = (mcqSuggestionText[idx] || '').trim();
+                                                     if (!text) return;
+                                                     try {
+                                                       await saveSuggestion({
+                                                         id: `mcq_lv_${Date.now()}`,
+                                                         text: `MCQ: "${(q.question || '').substring(0, 100)}" | Sahi Jawab: ${q.options?.[q.correctAnswer] || '—'} | Correction: ${text}`,
+                                                         uid: user?.id || 'anonymous',
+                                                         userName: user?.name || user?.email?.split('@')[0] || 'Student',
+                                                         userBoard: (user as any)?.board || '',
+                                                         createdAt: new Date().toISOString(),
+                                                         mode: 'mcq',
+                                                         lessonTitle: chapter?.title,
+                                                         subject: subject?.name,
+                                                       });
+                                                       setMcqSuggestionSent(prev => new Set(prev).add(idx));
+                                                       setMcqSuggestionOpen(p => ({ ...p, [idx]: false }));
+                                                     } catch (err) {
+                                                       console.error('Suggestion save failed:', err);
+                                                     }
+                                                   }}
+                                                   disabled={!(mcqSuggestionText[idx] || '').trim()}
+                                                   className="flex-1 py-1.5 rounded-xl bg-amber-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-50"
+                                                 >
+                                                   <Send size={11} /> Admin ko Bhejo
+                                                 </button>
+                                               </div>
+                                             </>
+                                           )}
+                                         </div>
                                        )}
 
                                        {showExplanation && (

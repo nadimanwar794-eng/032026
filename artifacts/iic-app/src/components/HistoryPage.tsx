@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useDebounce } from '../utils/useDebounce';
 import { LessonContent, User, SystemSettings, UsageHistoryEntry } from '../types';
-import { BookOpen, Calendar, ChevronDown, ChevronUp, Trash2, Search, FileText, CheckCircle2, Lock, AlertCircle, Folder, Download, ChevronRight, Play, X as XIcon, Star, Volume2, Square, Target, Sparkles } from 'lucide-react';
+import { BookOpen, Calendar, ChevronDown, ChevronUp, Trash2, Search, FileText, CheckCircle2, Lock, AlertCircle, Folder, Download, ChevronRight, Play, X as XIcon, Star, Volume2, Square, Target, Sparkles, CreditCard, LogIn } from 'lucide-react';
 import { getMistakeBank, removeMistakes, clearMistakeBank, MistakeEntry } from '../utils/mistakeBank';
 import { getMistakeSessions, MistakeSession } from '../utils/mistakeAnalytics';
 import { MistakePracticeView } from './MistakePracticeView';
@@ -101,11 +101,42 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
   }, [activeTab, user.id]);
 
   const [creditHistory, setCreditHistory] = useState<CreditTxEntry[]>([]);
+  const [creditHistoryPage, setCreditHistoryPage] = useState(30);
   useEffect(() => {
     if (activeTab === 'CREDIT_HISTORY') {
       setCreditHistory(getCreditHistory(user.id));
+      setCreditHistoryPage(30);
     }
   }, [activeTab, user.id]);
+
+  // Pre-compute all display data once so every render doesn't re-parse/re-format
+  const creditHistoryDisplay = useMemo(() => {
+    const fmt = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    return creditHistory.map(tx => {
+      const isEarn = tx.amount > 0;
+      const txDate = new Date(tx.at);
+      const isValid = !isNaN(txDate.getTime());
+      const typeIcon =
+        tx.type.includes('SUBSCRIPTION') ? '👑' :
+        tx.type.includes('SPIN') ? '🎰' :
+        tx.type.includes('LOGIN') || tx.type.includes('BONUS') ? '🗓️' :
+        tx.type.includes('GIFT') || tx.type.includes('REDEEM') ? '🎁' :
+        tx.type.includes('NOTIF') || tx.type.includes('REWARD') ? '🏆' :
+        tx.type.includes('SPEND') || tx.type.includes('MCQ') || tx.type.includes('VIDEO') || tx.type.includes('PDF') ? '📖' :
+        isEarn ? '✅' : '💸';
+      const dateStr = isValid ? fmt.format(txDate) : '—';
+      return { ...tx, isEarn, typeIcon, dateStr };
+    });
+  }, [creditHistory]);
+
+  const [creditTotals] = [useMemo(() => {
+    let earned = 0, spent = 0;
+    for (const t of creditHistory) {
+      if (t.amount > 0) earned += t.amount;
+      else spent += Math.abs(t.amount);
+    }
+    return { earned, spent };
+  }, [creditHistory])];
   
   // SAVED NOTES STATE
   const [history, setHistory] = useState<LessonContent[]>([]);
@@ -439,19 +470,33 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
             onCancel={() => setConfirmConfig({...confirmConfig, isOpen: false})}
         />
         
-        <div className="flex items-center gap-3 mb-6">
-            {onBack && (
-                <button
-                    onClick={onBack}
-                    className="flex items-center justify-center w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 active:scale-95 transition-all shrink-0"
-                >
-                    <ChevronDown size={18} className="rotate-90" />
-                </button>
-            )}
-            <h3 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-                 <FileText className="text-blue-600" /> Downloads & History
-            </h3>
-        </div>
+        {(() => {
+            const tabMeta: Record<string, { label: string; icon: React.ReactNode }> = {
+                READING:       { label: 'Reading History',   icon: <BookOpen className="text-emerald-600" /> },
+                FLASHCARDS:    { label: 'Flashcard Activity', icon: <Layers className="text-violet-600" /> },
+                MISTAKE:       { label: 'My Mistakes',       icon: <Target className="text-rose-500" /> },
+                OFFLINE:       { label: 'Downloads',         icon: <Download className="text-blue-600" /> },
+                STARRED:       { label: 'Important Notes',   icon: <Star className="text-amber-500" fill="currentColor" /> },
+                LOGIN_HISTORY: { label: 'Login History',     icon: <LogIn className="text-indigo-500" /> },
+                CREDIT_HISTORY:{ label: 'Credit History',    icon: <CreditCard className="text-orange-500" /> },
+            };
+            const meta = tabMeta[activeTab] ?? { label: 'Downloads & History', icon: <FileText className="text-blue-600" /> };
+            return (
+                <div className="flex items-center gap-3 mb-6">
+                    {onBack && (
+                        <button
+                            onClick={onBack}
+                            className="flex items-center justify-center w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 active:scale-95 transition-all shrink-0"
+                        >
+                            <ChevronDown size={18} className="rotate-90" />
+                        </button>
+                    )}
+                    <h3 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+                        {meta.icon} {meta.label}
+                    </h3>
+                </div>
+            );
+        })()}
 
         {activeTab === 'READING' && (
             <ReadingProgressSection
@@ -553,7 +598,7 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
                             type="text"
                             value={starSearch}
                             onChange={e => { setStarSearch(e.target.value); stopStarRead(); }}
-                            placeholder="Notes mein search karo..."
+                            placeholder="Search notes..."
                             className="w-full pl-8 pr-8 py-2.5 text-xs font-semibold bg-amber-50 border border-amber-200 rounded-xl text-slate-700 placeholder-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-300 focus:border-amber-300 transition-all"
                         />
                         {starSearch && (
@@ -570,14 +615,14 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
                 {starredNotes.length === 0 ? (
                     <div className="text-center py-14 bg-amber-50 rounded-2xl border border-amber-100">
                         <Star size={40} className="text-amber-300 mx-auto mb-3" />
-                        <p className="font-bold text-slate-600 text-sm">Koi important note nahi mili.</p>
-                        <p className="text-xs text-slate-400 mt-1">Note padhte waqt ⭐ dabao — yahan dikhega.</p>
+                        <p className="font-bold text-slate-600 text-sm">No important notes saved yet.</p>
+                        <p className="text-xs text-slate-400 mt-1">Tap ⭐ while reading a note — it will appear here.</p>
                     </div>
                 ) : filtered.length === 0 ? (
                     <div className="text-center py-10 bg-amber-50 rounded-2xl border border-amber-100">
                         <Search size={32} className="text-amber-300 mx-auto mb-3" />
-                        <p className="font-bold text-slate-600 text-sm">Koi match nahi mila.</p>
-                        <p className="text-xs text-slate-400 mt-1">Doosra word try karo.</p>
+                        <p className="font-bold text-slate-600 text-sm">No match found.</p>
+                        <p className="text-xs text-slate-400 mt-1">Try a different word.</p>
                     </div>
                 ) : (
                     filtered.map((note, idx) => {
@@ -643,7 +688,7 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
                 {loginSessions.length === 0 ? (
                     <div className="text-center py-10 text-slate-400">
                         <p className="text-2xl mb-2">🕐</p>
-                        <p className="font-bold text-sm">Koi login history nahi mili</p>
+                        <p className="font-bold text-sm">No login history found</p>
                     </div>
                 ) : loginSessions.map((s, i) => {
                     const isCurrent = i === 0;
@@ -697,8 +742,8 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
             const levelColor = _lvl.color;
             const levelBg = levelColor + '15';
             const levelBorder = levelColor + '35';
-            const totalEarned = creditHistory.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
-            const totalSpent = Math.abs(creditHistory.filter(t => t.amount < 0).reduce((s, t) => s + t.amount, 0));
+            const visibleTx = creditHistoryDisplay.slice(0, creditHistoryPage);
+            const hasMore = creditHistoryDisplay.length > creditHistoryPage;
             return (
             <div className="space-y-3 animate-in fade-in duration-300">
                 <div className="rounded-2xl px-4 py-3 flex items-center gap-3" style={{ background: levelBg, border: `1px solid ${levelBorder}` }}>
@@ -725,11 +770,11 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
                     <div className="grid grid-cols-2 gap-2">
                         <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3 text-center">
                             <p className="text-[10px] font-black text-emerald-600 uppercase tracking-wider">Total Earned</p>
-                            <p className="text-xl font-black text-emerald-700 mt-0.5">+{totalEarned} CR</p>
+                            <p className="text-xl font-black text-emerald-700 mt-0.5">+{creditTotals.earned} CR</p>
                         </div>
                         <div className="bg-rose-50 border border-rose-200 rounded-2xl p-3 text-center">
                             <p className="text-[10px] font-black text-rose-600 uppercase tracking-wider">Total Spent</p>
-                            <p className="text-xl font-black text-rose-700 mt-0.5">-{totalSpent} CR</p>
+                            <p className="text-xl font-black text-rose-700 mt-0.5">-{creditTotals.spent} CR</p>
                         </div>
                     </div>
                 )}
@@ -737,47 +782,40 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
                 {creditHistory.length === 0 ? (
                     <div className="text-center py-12 bg-amber-50 rounded-2xl border border-amber-100">
                         <p className="text-3xl mb-2">💰</p>
-                        <p className="font-bold text-slate-600 text-sm">Koi credit transaction nahi mili</p>
-                        <p className="text-xs text-slate-400 mt-1">Spin karo, login bonus lo — yahan dikhega</p>
+                        <p className="font-bold text-slate-600 text-sm">No credit transactions yet</p>
+                        <p className="text-xs text-slate-400 mt-1">Spin, earn login bonuses — they'll appear here</p>
                     </div>
                 ) : (
                     <div className="space-y-2">
-                        {creditHistory.map((tx, i) => {
-                            const isEarn = tx.amount > 0;
-                            const txDate = new Date(tx.at);
-                            const isValid = !isNaN(txDate.getTime());
-                            const typeIcon = tx.type.includes('SUBSCRIPTION') ? '👑' :
-                                tx.type.includes('SPIN') ? '🎰' :
-                                tx.type.includes('LOGIN') || tx.type.includes('BONUS') ? '🗓️' :
-                                tx.type.includes('GIFT') || tx.type.includes('REDEEM') ? '🎁' :
-                                tx.type.includes('NOTIF') || tx.type.includes('REWARD') ? '🏆' :
-                                tx.type.includes('SPEND') || tx.type.includes('MCQ') || tx.type.includes('VIDEO') || tx.type.includes('PDF') ? '📖' :
-                                isEarn ? '✅' : '💸';
-                            return (
-                                <div key={tx.id || i} className={`rounded-2xl p-3.5 border flex items-center gap-3 transition-all ${
-                                    i % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'
-                                }`} style={{ borderColor: '#e2e8f0' }}>
-                                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-sm shrink-0 ${
-                                        isEarn ? 'bg-emerald-100' : 'bg-rose-100'
-                                    }`}>
-                                        {typeIcon}
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <p className="text-xs font-bold text-slate-800 truncate">{tx.description}</p>
-                                        <p className="text-[10px] text-slate-400 mt-0.5">
-                                            {isValid ? txDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
-                                            {isValid ? ` · ${txDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}` : ''}
-                                        </p>
-                                        {tx.balanceAfter !== undefined && (
-                                            <p className="text-[10px] text-slate-400">Balance: {tx.balanceAfter} CR</p>
-                                        )}
-                                    </div>
-                                    <div className={`text-sm font-black shrink-0 ${isEarn ? 'text-emerald-600' : 'text-rose-600'}`}>
-                                        {isEarn ? '+' : ''}{tx.amount} CR
-                                    </div>
+                        {visibleTx.map((tx, i) => (
+                            <div key={tx.id || i} className={`rounded-2xl p-3.5 border flex items-center gap-3 ${
+                                i % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'
+                            }`} style={{ borderColor: '#e2e8f0' }}>
+                                <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-sm shrink-0 ${
+                                    tx.isEarn ? 'bg-emerald-100' : 'bg-rose-100'
+                                }`}>
+                                    {tx.typeIcon}
                                 </div>
-                            );
-                        })}
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-bold text-slate-800 truncate">{tx.description}</p>
+                                    <p className="text-[10px] text-slate-400 mt-0.5">{tx.dateStr}</p>
+                                    {tx.balanceAfter !== undefined && (
+                                        <p className="text-[10px] text-slate-400">Balance: {tx.balanceAfter} CR</p>
+                                    )}
+                                </div>
+                                <div className={`text-sm font-black shrink-0 ${tx.isEarn ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                    {tx.isEarn ? '+' : ''}{tx.amount} CR
+                                </div>
+                            </div>
+                        ))}
+                        {hasMore && (
+                            <button
+                                onClick={() => setCreditHistoryPage(p => p + 30)}
+                                className="w-full py-2.5 rounded-2xl border border-slate-200 text-xs font-bold text-slate-500 hover:bg-slate-50 transition-colors"
+                            >
+                                Load more ({creditHistoryDisplay.length - creditHistoryPage} remaining)
+                            </button>
+                        )}
                         <p className="text-center text-[10px] text-slate-400 pt-1">Local device storage • Last {creditHistory.length} transactions</p>
                     </div>
                 )}
@@ -804,8 +842,8 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
                             <h4 className="text-lg font-black leading-tight">My Mistake</h4>
                             <p className="text-xs text-white/90 mt-0.5">
                                 {mistakes.length === 0
-                                    ? 'Abhi koi galti save nahin hui. MCQ test do — galat answers yahan automatically jud jayenge.'
-                                    : `${mistakes.length} galt question save hain. Practice karke clean karein!`}
+                                    ? 'No mistakes saved yet. Take an MCQ test — wrong answers will be added here automatically.'
+                                    : `${mistakes.length} incorrect questions saved. Practice to clear them!`}
                             </p>
                         </div>
                     </div>
@@ -1029,7 +1067,7 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
                       <div className="text-center py-12 text-slate-500 bg-slate-50 rounded-2xl border border-slate-200">
                           <Target size={42} className="mx-auto mb-3 opacity-30" />
                           <p className="text-sm font-bold text-slate-600">No mistakes yet — keep learning!</p>
-                          <p className="text-xs text-slate-400 mt-1">Galat MCQs apne aap yahan aa jayengi.</p>
+                          <p className="text-xs text-slate-400 mt-1">Wrong MCQs will appear here automatically.</p>
                       </div>
                     ) : (
                       <div className="text-center py-8 text-slate-500 text-sm">No mistakes match your search.</div>
@@ -1363,14 +1401,14 @@ const ReadingProgressSection: React.FC<ReadingSectionProps> = ({
             {totalCount === 0 && doneEntries.length === 0 ? (
                 <div className="text-center text-slate-500 py-12">
                     <BookOpen size={42} className="mx-auto mb-3 text-slate-300" />
-                    <p className="font-bold text-slate-700">Abhi tak kuch nahi padha.</p>
-                    <p className="text-xs mt-1">Koi note ya chapter padhna shuru karein — yahan progress save hogi.</p>
+                    <p className="font-bold text-slate-700">Nothing read yet.</p>
+                    <p className="text-xs mt-1">Start reading any note or chapter — your progress will be saved here.</p>
                 </div>
             ) : totalFiltered === 0 && searchText ? (
                 <div className="text-center py-10 bg-slate-50 rounded-2xl border border-slate-100">
                     <Search size={30} className="text-slate-300 mx-auto mb-3" />
-                    <p className="font-bold text-slate-600 text-sm">Koi match nahi mila.</p>
-                    <p className="text-xs text-slate-400 mt-1">Doosra word ya filter try karein.</p>
+                    <p className="font-bold text-slate-600 text-sm">No match found.</p>
+                    <p className="text-xs text-slate-400 mt-1">Try a different word or filter.</p>
                 </div>
             ) : (
                 <div className="space-y-5">
@@ -1588,8 +1626,8 @@ const FlashcardsActivitySection: React.FC<FlashcardsActivitySectionProps> = ({
             {isEmpty && (
                 <div className="text-center py-12 text-slate-500 bg-slate-50 rounded-xl border border-slate-200">
                     <Layers size={36} className="mx-auto text-slate-300 mb-2" />
-                    <p className="font-black text-slate-700">Abhi tak koi activity nahi</p>
-                    <p className="text-xs mt-1">Flashcards open karein ya koi note padhein — yahan record dikhega.</p>
+                    <p className="font-black text-slate-700">No activity yet</p>
+                    <p className="text-xs mt-1">Open flashcards or read a note — your record will appear here.</p>
                 </div>
             )}
 

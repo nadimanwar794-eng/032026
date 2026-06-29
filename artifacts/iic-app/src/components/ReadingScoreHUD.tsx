@@ -83,7 +83,12 @@ export const ReadingScoreHUD: React.FC<Props> = ({
   if (!visible || state.isWindowClosed) return null;
 
   const isReading  = state.mode === 'reading';
-  const modeIcon   = isReading ? '📖' : '✍️';
+  const isVideo    = state.mode === 'video';
+  const isAudio    = state.mode === 'audio';
+  const isPdf      = state.mode === 'pdf';
+  const modeIcon   = isVideo ? '🎬' : isAudio ? '🎧' : isPdf ? '📄' : isReading ? '📖' : '✍️';
+  const rewardBase = isVideo ? 8 : isAudio ? 6 : isPdf ? 5 : isReading ? 5 : 25;
+  const intervalLabel = isVideo || isAudio || isPdf ? '30s' : isReading ? '30s' : '5min';
   const remaining  = Math.max(0, state.maxWindowSec - state.sessionElapsedSec);
   const remMin     = Math.floor(remaining / 60);
   const remSec     = fmt2(remaining % 60);
@@ -167,7 +172,7 @@ export const ReadingScoreHUD: React.FC<Props> = ({
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, alignItems: 'center' }}>
               {!state.isPaused ? (
                 <span style={{ color: levelColor, fontWeight: 900 }}>
-                  +{isReading ? 5 : 25} in {state.nextRewardInSec}s
+                  +{rewardBase} in {state.nextRewardInSec}s
                 </span>
               ) : (
                 <span style={{ color: '#f87171', fontWeight: 700 }}>Score paused</span>
@@ -202,8 +207,8 @@ export const ReadingScoreHUD: React.FC<Props> = ({
               </span>
             </div>
             <div style={{ color: '#94a3b8', fontSize: 10, marginBottom: 8, lineHeight: 1.5 }}>
-              Topic par <span style={{ color: '#e2e8f0', fontWeight: 700 }}>10 sec</span> rukne ke baad<br />
-              <span style={{ color: '#86efac', fontWeight: 700 }}>+2 reward</span> milega
+              Ek topic par <span style={{ color: '#e2e8f0', fontWeight: 700 }}>10 sec</span> ruko<br />
+              aur <span style={{ color: '#86efac', fontWeight: 700 }}>+2 reward</span> pao
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <div
@@ -251,8 +256,8 @@ export const ReadingScoreHUD: React.FC<Props> = ({
                 </div>
                 <div style={{ color: '#cbd5e1', fontSize: 9, marginTop: 3 }}>
                   {state.isPaused
-                    ? 'Aage padhein to resume hoga'
-                    : '10% reading progress needed'}
+                    ? 'Padhna jaari rakho, resume ho jayega'
+                    : '10% reading progress chahiye'}
                 </div>
               </div>
             </div>

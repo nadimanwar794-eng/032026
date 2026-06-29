@@ -66,7 +66,7 @@ export const ChallengeCreator20: React.FC<Props> = ({ onBack, language }) => {
     try {
         // We use fetchLessonContent's MCQ mode
         const content = await fetchLessonContent(
-            'CBSE', // Default board for generic generation
+            'NCERT_EN', // Default board for generic generation
             classLevel,
             'Science', // Default stream
             subject,

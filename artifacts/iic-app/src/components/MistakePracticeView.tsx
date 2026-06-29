@@ -113,7 +113,7 @@ export const MistakePracticeView: React.FC<Props> = ({ mistakes, onClose, onComp
             <Trophy className="text-emerald-600" size={28} />
           </div>
           <h3 className="text-xl font-black text-slate-800 mb-2">No mistakes to practice!</h3>
-          <p className="text-sm text-slate-500 mb-6">Sab clean hai. Naye MCQ try karein.</p>
+          <p className="text-sm text-slate-500 mb-6">All clear. Try some new MCQs.</p>
           <button onClick={onClose} className="w-full py-3 rounded-2xl bg-slate-800 text-white font-black">Close</button>
         </div>
       </div>
@@ -291,7 +291,7 @@ export const MistakePracticeView: React.FC<Props> = ({ mistakes, onClose, onComp
                 )}
                 {!isCorrect && (
                   <div className="mt-2 pt-2 border-t border-amber-200 flex items-center gap-1.5">
-                    <span className="text-[10px] font-black text-amber-700">Sahi jawab:</span>
+                    <span className="text-[10px] font-black text-amber-700">Correct answer:</span>
                     <span className="text-[10px] font-bold text-slate-800 bg-white/70 rounded-lg px-2 py-0.5">{current.options[current.correctAnswer]}</span>
                   </div>
                 )}

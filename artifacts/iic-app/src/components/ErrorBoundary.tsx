@@ -89,7 +89,13 @@ export class ErrorBoundary extends Component<Props, State> {
   };
 
   private handleReset = () => {
-    localStorage.clear();
+    // Only clear content/cache keys — preserve user session and saved notes
+    // so the user doesn't get logged out and lose access to their data.
+    const KEEP_KEYS = ['nst_current_user', 'nst_users', 'nst_firebase_project_id', 'nst_user_history', 'nst_system_settings'];
+    Object.keys(localStorage).forEach(k => {
+      if (!KEEP_KEYS.includes(k)) localStorage.removeItem(k);
+    });
+    storage.clearContentCache().catch(() => {});
     window.location.reload();
   };
 
@@ -108,14 +114,14 @@ export class ErrorBoundary extends Component<Props, State> {
         >
           <div className="flex items-center gap-2 text-sm text-red-700 font-semibold">
             {isOffline
-              ? <><WifiOff size={16} className="shrink-0" /> Offline — {label} load nahi hua</>
-              : <><span aria-hidden>⚠️</span> {label} mein error aaya</>
+              ? <><WifiOff size={16} className="shrink-0" /> Offline — {label} failed to load</>
+              : <><span aria-hidden>⚠️</span> Error in {label}</>
             }
           </div>
           {this.state.retryCount < 2 && (
             <button
               onClick={this.handleRetry}
-              aria-label={`${label} dobara try karo`}
+              aria-label={`Retry ${label}`}
               className="shrink-0 flex items-center gap-1 text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-xl hover:bg-blue-100 transition-colors"
             >
               <RefreshCcw size={13} /> Retry
@@ -144,12 +150,12 @@ export class ErrorBoundary extends Component<Props, State> {
           )}
 
           <h1 className="text-lg font-black text-slate-800 mb-1">
-            {isOffline ? 'Internet nahi mila' : 'Kuch gadbad ho gayi'}
+            {isOffline ? 'No internet connection' : 'Something went wrong'}
           </h1>
           <p className="text-slate-500 text-xs mb-4">
             {isOffline
-              ? 'Network connection check karo aur wapas try karo.'
-              : `${label} mein ek error aaya. Admin ko notify kar diya gaya hai.`}
+              ? 'Check your network connection and try again.'
+              : `An error occurred in ${label}. The admin has been notified.`}
           </p>
 
           {this.state.error && !isOffline && (
@@ -166,20 +172,20 @@ export class ErrorBoundary extends Component<Props, State> {
           <div className="space-y-2.5">
             {this.state.retryCount < 2 && (
               <button onClick={this.handleRetry}
-                aria-label="Dobara try karo"
+                aria-label="Try again"
                 className="w-full bg-blue-600 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors shadow-md shadow-blue-100">
-                <RefreshCcw size={15} aria-hidden /> Dobara Try Karo
+                <RefreshCcw size={15} aria-hidden /> Try Again
               </button>
             )}
             <button onClick={this.handleGoHome}
-              aria-label="Home pe jao"
+              aria-label="Go to Home"
               className="w-full bg-slate-100 text-slate-700 font-bold py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-slate-200 transition-colors">
-              <Home size={15} aria-hidden /> Home Pe Jao
+              <Home size={15} aria-hidden /> Go to Home
             </button>
             <button onClick={this.handleReset}
-              aria-label="App reset karo"
+              aria-label="Reset app"
               className="w-full text-slate-400 text-[10px] py-1 hover:text-red-400 transition-colors">
-              App Reset Karo (last resort)
+              Reset App (last resort)
             </button>
           </div>
         </div>

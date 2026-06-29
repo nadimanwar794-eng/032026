@@ -7,6 +7,7 @@ import { storage } from '../utils/storage';
 import { DEFAULT_SUBJECTS } from '../constants';
 import { addMistakes, removeMistakeByQuestion } from '../utils/mistakeBank';
 import { ChunkedNotesReader } from './ChunkedNotesReader';
+import { renderMathInHtml } from '../utils/mathUtils';
 
 interface Props {
     user: User;
@@ -17,9 +18,10 @@ interface Props {
     subjectName?: string;
     onClose: () => void;
     onUpdateUser: (u: User) => void;
+    onSessionComplete?: (status: 'weak' | 'average' | 'strong', topicName: string) => void;
 }
 
-export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, subTopic, chapterTitle, subjectName, onClose, onUpdateUser }) => {
+export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, subTopic, chapterTitle, subjectName, onClose, onUpdateUser, onSessionComplete }) => {
     const [activeTab, setActiveTab] = useState<'NOTES' | 'MCQ'>('NOTES');
     const [notesViewMode, setNotesViewMode] = useState<'html' | 'chunk'>('html');
     const [loading, setLoading] = useState(true);
@@ -86,10 +88,12 @@ export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, su
     // MCQ State
     const [currentQIndex, setCurrentQIndex] = useState(0);
     const [selectedOption, setSelectedOption] = useState<number | null>(null);
-    const [showExplanation, setShowExplanation] = useState(false);
-    const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
-    const [score, setScore] = useState(0);
+    const [userAnswers, setUserAnswers] = useState<Record<number, number>>({}); // All selected answers
     const [notesRead, setNotesRead] = useState(false); // Track if user read notes
+
+    // Review screen state
+    const [showReview, setShowReview] = useState(false);
+    const [sessionResult, setSessionResult] = useState<any>(null);
 
     // Extract stable user properties
     const userBoard = user.board || 'CBSE';
@@ -214,93 +218,51 @@ export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, su
     const handleOptionSelect = (idx: number) => {
         if (selectedOption !== null) return; // Prevent change
         setSelectedOption(idx);
-
-        const q = mcqData[currentQIndex];
-        const correct = q.correctAnswer;
-        const isRight = idx === correct;
-        setIsCorrect(isRight);
-        setShowExplanation(true);
-
-        if (isRight) setScore(prev => prev + 1);
-
-        // ── MY MISTAKE BANK ──────────────────────────────────────────────
-        // Revision MCQ auto-grades on tap (no Submit button) — track wrong
-        // answers immediately so they land on the My Mistake page, and
-        // remove from the bank when the same question is answered correctly.
-        try {
-            if (isRight) {
-                removeMistakeByQuestion(q.question, q.correctAnswer);
-            } else {
-                addMistakes([{
-                    question: q.question,
-                    options: q.options || [],
-                    correctAnswer: q.correctAnswer,
-                    explanation: q.explanation,
-                    topic: q.topic || subTopic,
-                    chapterTitle: chapterTitle,
-                    subjectName: subjectName || 'Revision',
-                    classLevel: user.classLevel,
-                    board: user.board,
-                    source: 'REVISION',
-                }]);
-            }
-        } catch (err) { console.warn('mistakeBank update failed:', err); }
+        setUserAnswers(prev => ({ ...prev, [currentQIndex]: idx }));
     };
 
     const nextQuestion = () => {
         if (currentQIndex < mcqData.length - 1) {
             setCurrentQIndex(prev => prev + 1);
             setSelectedOption(null);
-            setShowExplanation(false);
-            setIsCorrect(null);
-        } else {
-            finishSession();
         }
     };
 
-    const finishSession = () => {
-        // Calculate Logic
-        const total = mcqData.length;
-        const finalScore = score; // Already updated
-        const percentage = total > 0 ? (finalScore / total) * 100 : 0;
+    // Phase 1 — compute score from answered Qs only, show review
+    const handleSubmit = () => {
+        const answeredKeys = Object.keys(userAnswers).map(Number);
+        const answeredCount = answeredKeys.length;
+        let correctCount = 0;
+        const items = answeredKeys.map(i => {
+            const q = mcqData[i];
+            const isCorrect = userAnswers[i] === q.correctAnswer;
+            if (isCorrect) correctCount++;
+            return { questionIdx: i, question: q.question, options: q.options || [], userAnswerIdx: userAnswers[i], correctAnswer: q.correctAnswer, explanation: q.explanation, isCorrect };
+        });
+        const percentage = answeredCount > 0 ? (correctCount / answeredCount) * 100 : 0;
+        const status: 'weak' | 'average' | 'strong' = percentage < 50 ? 'weak' : percentage >= 80 ? 'strong' : 'average';
+        const result = { score: correctCount, answeredCount, percentage, status, items };
+        setSessionResult(result);
+        setShowReview(true);
 
-        // Status Logic
-        let status = 'AVERAGE';
-        if (percentage < 50) status = 'WEAK';
-        else if (percentage >= 80) status = 'STRONG';
-
-        // Construct Report for Spaced Repetition Logic in RevisionHub
-        const ultraReport = {
-            topics: [
-                {
-                    name: subTopic,
-                    status: status
+        // Save automatically on submit — no button needed
+        try {
+            items.forEach((item: any) => {
+                const q = mcqData[item.questionIdx];
+                if (item.isCorrect) {
+                    removeMistakeByQuestion(q.question, q.correctAnswer);
+                } else {
+                    addMistakes([{ question: q.question, options: q.options || [], correctAnswer: q.correctAnswer, explanation: q.explanation, topic: q.topic || subTopic, chapterTitle, subjectName: subjectName || 'Revision', classLevel: user.classLevel, board: user.board, source: 'REVISION' }]);
                 }
-            ]
-        };
+            });
+        } catch (err) { console.warn('mistakeBank update failed:', err); }
 
-        // Create History Entry
-        const newEntry = {
-            testId: `rev-${Date.now()}`,
-            chapterId: chapterId,
-            chapterTitle: chapterTitle,
-            subjectName: subjectName || 'Revision',
-            score: finalScore,
-            totalQuestions: total,
-            date: new Date().toISOString(),
-            type: 'REVISION_MCQ',
-            ultraAnalysisReport: JSON.stringify(ultraReport)
-        };
-
-        // Update User
-        const updatedUser = {
-            ...user,
-            mcqHistory: [...(user.mcqHistory || []), newEntry]
-        };
-
+        const ultraReport = { topics: [{ name: subTopic, status: status.toUpperCase() }] };
+        const newEntry = { testId: `rev-${Date.now()}`, chapterId, chapterTitle, subjectName: subjectName || 'Revision', score: correctCount, totalQuestions: answeredCount, date: new Date().toISOString(), type: 'REVISION_MCQ', ultraAnalysisReport: JSON.stringify(ultraReport) };
+        const updatedUser = { ...user, mcqHistory: [...(user.mcqHistory || []), newEntry] };
         onUpdateUser(updatedUser);
         saveUserToLive(updatedUser);
-        onClose();
+        onSessionComplete?.(status, subTopic);
     };
 
     return (
@@ -361,7 +323,7 @@ export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, su
                                             <button
                                                 onClick={() => setNotesViewMode(m => m === 'html' ? 'chunk' : 'html')}
                                                 className={`flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-black transition-all border ${notesViewMode === 'chunk' ? 'bg-amber-500 text-white border-amber-500 shadow-sm' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}
-                                                title={notesViewMode === 'html' ? 'TTS Reader mein switch karo' : 'Styled Notes mein switch karo'}
+                                                title={notesViewMode === 'html' ? 'Switch to TTS Reader' : 'Switch to Styled Notes'}
                                             >
                                                 {notesViewMode === 'html' ? <Volume2 size={13} /> : <FileText size={13} />}
                                             </button>
@@ -381,7 +343,7 @@ export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, su
                                                 preferChunkMode
                                             />
                                         ) : (
-                                            <div dangerouslySetInnerHTML={{ __html: notesContent }} className="prose prose-sm prose-slate max-w-none" />
+                                            <div dangerouslySetInnerHTML={{ __html: renderMathInHtml(notesContent) }} className="prose prose-sm prose-slate max-w-none" />
                                         )}
                                         
                                         <div className="mt-8 pt-6 border-t border-slate-100 flex justify-center">
@@ -463,18 +425,12 @@ export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, su
 
                                             <div className="space-y-3 flex-1">
                                                 {mcqData[currentQIndex].options.map((opt, idx) => {
-                                                    let stateClass = "border-slate-200 hover:border-purple-300 hover:bg-purple-50 text-slate-600";
-                                                    if (selectedOption !== null) {
-                                                        if (idx === mcqData[currentQIndex].correctAnswer) {
-                                                            stateClass = "bg-green-100 border-green-500 text-green-800 font-bold ring-2 ring-green-200";
-                                                        } else if (idx === selectedOption) {
-                                                            stateClass = "bg-red-100 border-red-500 text-red-800 font-bold";
-                                                        } else {
-                                                            stateClass = "opacity-50 border-slate-100";
-                                                        }
-                                                    } else if (selectedOption === idx) {
-                                                         stateClass = "bg-purple-100 border-purple-500 text-purple-800 font-bold";
-                                                    }
+                                                    const isSelected = selectedOption === idx;
+                                                    const stateClass = isSelected
+                                                        ? "bg-purple-100 border-purple-500 text-purple-800 font-bold"
+                                                        : selectedOption !== null
+                                                            ? "opacity-50 border-slate-100 text-slate-500"
+                                                            : "border-slate-200 hover:border-purple-300 hover:bg-purple-50 text-slate-600";
 
                                                     return (
                                                         <button
@@ -484,40 +440,46 @@ export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, su
                                                             className={`w-full p-4 rounded-xl border-2 text-left transition-all flex items-center gap-3 ${stateClass}`}
                                                         >
                                                             <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold border ${
-                                                                selectedOption !== null && idx === mcqData[currentQIndex].correctAnswer ? 'bg-green-500 border-green-600 text-white' :
-                                                                selectedOption === idx ? 'bg-red-500 border-red-600 text-white' :
-                                                                'bg-white border-slate-300 text-slate-600'
+                                                                isSelected
+                                                                    ? 'bg-purple-500 border-purple-600 text-white'
+                                                                    : 'bg-white border-slate-300 text-slate-600'
                                                             }`}>
                                                                 {['A','B','C','D'][idx]}
                                                             </div>
                                                             <span className="flex-1 text-sm">{opt}</span>
-                                                            {selectedOption !== null && idx === mcqData[currentQIndex].correctAnswer && <CheckCircle size={20} className="text-green-600" />}
-                                                            {selectedOption === idx && idx !== mcqData[currentQIndex].correctAnswer && <AlertCircle size={20} className="text-red-600" />}
                                                         </button>
                                                     );
                                                 })}
                                             </div>
                                         </div>
 
-                                        {/* EXPLANATION & NEXT */}
-                                        {showExplanation && (
-                                            <div className="animate-in slide-in-from-bottom-4 space-y-4 pb-8">
-                                                <div className={`p-4 rounded-xl border-l-4 ${isCorrect ? 'bg-green-50 border-green-500' : 'bg-red-50 border-red-500'}`}>
-                                                    <h4 className={`font-bold text-sm mb-1 ${isCorrect ? 'text-green-800' : 'text-red-800'}`}>
-                                                        {isCorrect ? 'Correct Answer!' : 'Incorrect'}
-                                                    </h4>
-                                                    <p className="text-xs text-slate-600">
-                                                        {mcqData[currentQIndex].explanation || "No explanation provided."}
-                                                    </p>
-                                                </div>
+                                        {/* NEXT & SUBMIT BUTTONS */}
+                                        <div className="space-y-3 pb-8 animate-in slide-in-from-bottom-4">
+                                            {selectedOption !== null && currentQIndex < mcqData.length - 1 && (
                                                 <button
                                                     onClick={nextQuestion}
                                                     className="w-full py-4 bg-slate-900 text-white font-bold rounded-xl shadow-lg hover:bg-slate-800 active:scale-95 transition-all flex items-center justify-center gap-2"
                                                 >
-                                                    {currentQIndex < mcqData.length - 1 ? 'Next Question' : 'Finish Revision'} <ChevronRight size={18} />
+                                                    Next Question <ChevronRight size={18} />
                                                 </button>
-                                            </div>
-                                        )}
+                                            )}
+                                            {(() => {
+                                                const answered = Object.keys(userAnswers).length;
+                                                const minRequired = Math.min(30, mcqData.length);
+                                                const ready = answered >= minRequired;
+                                                return (
+                                                    <button
+                                                        onClick={handleSubmit}
+                                                        disabled={!ready}
+                                                        className={`w-full py-4 font-bold rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 ${ready ? 'bg-purple-600 text-white hover:bg-purple-700 active:scale-95' : 'bg-slate-300 text-slate-500 cursor-not-allowed'}`}
+                                                    >
+                                                        {ready
+                                                            ? `✓ Submit & Review (${answered} Answered)`
+                                                            : `${answered}/${minRequired} — ${minRequired - answered} aur chahiye`}
+                                                    </button>
+                                                );
+                                            })()}
+                                        </div>
                                     </div>
                                 ) : (
                                     <div className="flex flex-col items-center justify-center h-64 text-slate-500 text-center">
@@ -539,6 +501,97 @@ export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, su
                     </>
                 )}
             </div>
+
+            {/* ── REVIEW SCREEN ─────────────────────────────────────── */}
+            {showReview && sessionResult && (
+                <div className="fixed inset-0 z-[200] bg-white flex flex-col animate-in slide-in-from-bottom-6">
+                    {/* Review Header */}
+                    <div className="sticky top-0 bg-white border-b border-slate-100 p-4 flex items-center justify-between z-10">
+                        <div>
+                            <h2 className="text-lg font-black text-slate-800">Session Review</h2>
+                            <p className="text-xs text-slate-500 font-bold">{subTopic} · {chapterTitle}</p>
+                        </div>
+                    </div>
+
+                    {/* Score Summary */}
+                    <div className={`mx-4 mt-4 p-5 rounded-2xl flex items-center justify-between ${
+                        sessionResult.status === 'strong' ? 'bg-emerald-50 border border-emerald-200' :
+                        sessionResult.status === 'average' ? 'bg-amber-50 border border-amber-200' :
+                        'bg-rose-50 border border-rose-200'
+                    }`}>
+                        <div>
+                            <p className={`text-4xl font-black ${
+                                sessionResult.status === 'strong' ? 'text-emerald-600' :
+                                sessionResult.status === 'average' ? 'text-amber-600' : 'text-rose-600'
+                            }`}>{sessionResult.score}<span className="text-xl font-bold text-slate-400">/{sessionResult.answeredCount}</span></p>
+                            <p className="text-sm font-bold text-slate-600 mt-0.5">{Math.round(sessionResult.percentage)}% correct</p>
+                        </div>
+                        <div className="text-right">
+                            <span className={`text-base font-black px-4 py-2 rounded-xl block ${
+                                sessionResult.status === 'strong' ? 'bg-emerald-500 text-white' :
+                                sessionResult.status === 'average' ? 'bg-amber-500 text-white' :
+                                'bg-rose-500 text-white'
+                            }`}>
+                                {sessionResult.status === 'strong' ? '💪 Strong' : sessionResult.status === 'average' ? '🙂 Average' : '😕 Weak'}
+                            </span>
+                            <p className="text-[10px] text-slate-400 mt-1 font-bold">Schedule ho jayega</p>
+                        </div>
+                    </div>
+
+                    {/* Q&A Review list */}
+                    <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-28">
+                        {sessionResult.items.map((item: any, idx: number) => (
+                            <div key={idx} className={`bg-white rounded-2xl border shadow-sm overflow-hidden ${item.isCorrect ? 'border-emerald-200' : 'border-rose-200'}`}>
+                                <div className={`px-4 py-2 flex items-center gap-2 ${item.isCorrect ? 'bg-emerald-50' : 'bg-rose-50'}`}>
+                                    {item.isCorrect
+                                        ? <CheckCircle size={13} className="text-emerald-600" />
+                                        : <AlertCircle size={13} className="text-rose-600" />}
+                                    <span className={`text-xs font-black ${item.isCorrect ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                        Q{item.questionIdx + 1} · {item.isCorrect ? '✓ Sahi' : '✗ Galat'}
+                                    </span>
+                                </div>
+                                <div className="p-4">
+                                    <p className="text-sm font-bold text-slate-800 mb-3 leading-relaxed">{item.question}</p>
+                                    <div className="space-y-1.5">
+                                        {item.options.map((opt: string, oi: number) => {
+                                            const isUserAns = item.userAnswerIdx === oi;
+                                            const isCorrectAns = item.correctAnswer === oi;
+                                            return (
+                                                <div key={oi} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm ${
+                                                    isCorrectAns ? 'bg-emerald-100 text-emerald-800 font-bold' :
+                                                    isUserAns && !item.isCorrect ? 'bg-rose-100 text-rose-700 line-through' :
+                                                    'bg-slate-50 text-slate-500'
+                                                }`}>
+                                                    <span className="font-black text-[11px] shrink-0">{['A','B','C','D'][oi]}</span>
+                                                    <span className="flex-1">{opt}</span>
+                                                    {isCorrectAns && <Check size={13} className="text-emerald-600 shrink-0" />}
+                                                    {isUserAns && !item.isCorrect && <X size={13} className="text-rose-600 shrink-0" />}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    {item.explanation && (
+                                        <div className="mt-3 bg-indigo-50 border border-indigo-100 rounded-xl px-3 py-2.5">
+                                            <p className="text-[10px] font-black text-indigo-600 uppercase mb-1">💡 Explanation</p>
+                                            <p className="text-xs text-indigo-800 leading-relaxed">{item.explanation}</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Footer — Close */}
+                    <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-slate-200 z-10">
+                        <button
+                            onClick={onClose}
+                            className="w-full py-4 bg-slate-100 text-slate-700 font-black rounded-2xl active:scale-95 transition-all flex items-center justify-center gap-2"
+                        >
+                            ✅ Saved — Close
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

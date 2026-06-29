@@ -134,7 +134,7 @@ function countMatches(text: string, queryWords: string[]): { count: number; word
   const lower = text.toLowerCase();
   const matched: string[] = [];
   for (const w of queryWords) {
-    if (w.length >= 3 && lower.includes(w.toLowerCase())) {
+    if (w.length >= 2 && lower.includes(w.toLowerCase())) {
       matched.push(w);
     }
   }

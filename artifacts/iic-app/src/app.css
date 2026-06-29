@@ -180,6 +180,144 @@
 .nst-chapter-card.nst-chapter-locked  { border-left-color: #94a3b8; opacity: 0.75; }
 .nst-chapter-card.nst-chapter-current { border-left-color: var(--nst-color-brand); }
 
+/* ══════════════════════════════════════════════════════════════
+   GLOBAL 3D CARDS MODE — admin toggle se activate hota hai
+   Har page ka alag intensity level set hota hai (100/80/70/60%)
+   ══════════════════════════════════════════════════════════════ */
+
+/* Per-page intensity levels — CSS variables override per scope */
+.nst-3d-100 {
+  --nst-3d-lift:       -2px;
+  --nst-3d-hover-lift: -4px;
+  --nst-3d-depth:       4px;
+  --nst-3d-hover-depth: 5px;
+  --nst-3d-spread:      20px;
+  --nst-3d-hover-spread:28px;
+}
+.nst-3d-80 {
+  --nst-3d-lift:       -1.5px;
+  --nst-3d-hover-lift: -3px;
+  --nst-3d-depth:       3.2px;
+  --nst-3d-hover-depth: 4px;
+  --nst-3d-spread:      16px;
+  --nst-3d-hover-spread:22px;
+}
+.nst-3d-70 {
+  --nst-3d-lift:       -1.2px;
+  --nst-3d-hover-lift: -2.5px;
+  --nst-3d-depth:       2.5px;
+  --nst-3d-hover-depth: 3.5px;
+  --nst-3d-spread:      14px;
+  --nst-3d-hover-spread:18px;
+}
+.nst-3d-60 {
+  --nst-3d-lift:       -1px;
+  --nst-3d-hover-lift: -2px;
+  --nst-3d-depth:       2px;
+  --nst-3d-hover-depth: 3px;
+  --nst-3d-spread:      12px;
+  --nst-3d-hover-spread:16px;
+}
+
+/* nst-card */
+.global-cards-3d .nst-card {
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.90) inset,
+    0 var(--nst-3d-depth, 4px) 0 var(--nst-card-border, rgba(59,130,246,0.45)),
+    0 var(--nst-3d-spread, 20px) calc(var(--nst-3d-spread, 20px) * 1.4) rgba(0,0,0,0.13) !important;
+  transform: translateY(var(--nst-3d-lift, -2px));
+  border-width: 1.5px;
+  transition: box-shadow 0.18s ease, transform 0.18s ease;
+}
+.global-cards-3d .nst-card:hover {
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.90) inset,
+    0 var(--nst-3d-hover-depth, 5px) 0 var(--nst-card-border, rgba(59,130,246,0.55)),
+    0 var(--nst-3d-hover-spread, 28px) calc(var(--nst-3d-hover-spread, 28px) * 1.3) rgba(0,0,0,0.17) !important;
+  transform: translateY(var(--nst-3d-hover-lift, -4px));
+}
+
+/* nst-card-brand */
+.global-cards-3d .nst-card-brand {
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.90) inset,
+    0 var(--nst-3d-depth, 4px) 0 var(--nst-color-brand),
+    0 var(--nst-3d-spread, 20px) calc(var(--nst-3d-spread, 20px) * 1.4) rgba(0,0,0,0.13) !important;
+  transform: translateY(var(--nst-3d-lift, -2px));
+  transition: box-shadow 0.18s ease, transform 0.18s ease;
+}
+.global-cards-3d .nst-card-brand:hover {
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.90) inset,
+    0 var(--nst-3d-hover-depth, 5px) 0 var(--nst-color-brand),
+    0 var(--nst-3d-hover-spread, 28px) calc(var(--nst-3d-hover-spread, 28px) * 1.3) rgba(0,0,0,0.18) !important;
+  transform: translateY(var(--nst-3d-hover-lift, -4px));
+}
+
+/* nst-chapter-card */
+.global-cards-3d .nst-chapter-card {
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.90) inset,
+    0 var(--nst-3d-depth, 4px) 0 var(--nst-color-brand),
+    0 var(--nst-3d-spread, 20px) calc(var(--nst-3d-spread, 20px) * 1.4) rgba(0,0,0,0.12) !important;
+  transform: translateY(var(--nst-3d-lift, -2px));
+  transition: box-shadow 0.18s ease, transform 0.18s ease;
+}
+.global-cards-3d .nst-chapter-card:hover {
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.90) inset,
+    0 var(--nst-3d-hover-depth, 5px) 0 var(--nst-color-brand),
+    0 var(--nst-3d-hover-spread, 28px) calc(var(--nst-3d-hover-spread, 28px) * 1.3) rgba(0,0,0,0.16) !important;
+  transform: translateY(var(--nst-3d-hover-lift, -4px));
+}
+
+/* nst-lesson-card — inline-styled cards (Tailwind classes + inline borderColor/bg) */
+.global-cards-3d .nst-lesson-card {
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.90) inset,
+    0 var(--nst-3d-depth, 4px) 0 var(--nst-color-brand),
+    0 var(--nst-3d-spread, 20px) calc(var(--nst-3d-spread, 20px) * 1.4) rgba(0,0,0,0.12) !important;
+  transform: translateY(var(--nst-3d-lift, -2px)) !important;
+  transition: box-shadow 0.18s ease, transform 0.18s ease !important;
+}
+.global-cards-3d .nst-lesson-card:hover {
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.90) inset,
+    0 var(--nst-3d-hover-depth, 5px) 0 var(--nst-color-brand),
+    0 var(--nst-3d-hover-spread, 28px) calc(var(--nst-3d-hover-spread, 28px) * 1.3) rgba(0,0,0,0.16) !important;
+  transform: translateY(var(--nst-3d-hover-lift, -4px)) !important;
+}
+.global-cards-3d.dark-mode .nst-lesson-card {
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.07) inset,
+    0 var(--nst-3d-depth, 4px) 0 var(--nst-color-brand),
+    0 var(--nst-3d-spread, 20px) calc(var(--nst-3d-spread, 20px) * 2) rgba(0,0,0,0.55) !important;
+}
+
+/* nst-subject-card */
+.global-cards-3d .nst-subject-card {
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.90) inset,
+    0 var(--nst-3d-depth, 4px) 0 var(--nst-card-border, rgba(59,130,246,0.45)),
+    0 var(--nst-3d-spread, 20px) calc(var(--nst-3d-spread, 20px) * 1.4) rgba(0,0,0,0.12) !important;
+  transform: translateY(var(--nst-3d-lift, -2px)) !important;
+  transition: box-shadow 0.18s ease, transform 0.18s ease !important;
+}
+.global-cards-3d .nst-subject-card:hover {
+  transform: translateY(var(--nst-3d-hover-lift, -4px)) !important;
+}
+
+/* Dark mode: stronger bottom shadow */
+.global-cards-3d.dark-mode .nst-card,
+.global-cards-3d.dark-mode .nst-card-brand,
+.global-cards-3d.dark-mode .nst-chapter-card,
+.global-cards-3d.dark-mode .nst-subject-card {
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.07) inset,
+    0 var(--nst-3d-depth, 4px) 0 var(--nst-color-brand),
+    0 var(--nst-3d-spread, 20px) calc(var(--nst-3d-spread, 20px) * 2) rgba(0,0,0,0.50) !important;
+}
+
 /* ══════════════════════════════════════════════════
    NST BUTTON SYSTEM — unified across all components
    Usage: class="nst-btn nst-btn-primary"
@@ -627,6 +765,13 @@
 @keyframes sparkle-blink {
     0%, 100% { opacity: 0.1; transform: scale(0.8); }
     50%       { opacity: 0.7; transform: scale(1.2); }
+}
+/* System health dot: pop + glow when it first turns green */
+@keyframes dotPopIn {
+    0%   { transform: scale(0.4); opacity: 0.3; }
+    55%  { transform: scale(1.7); opacity: 1; }
+    75%  { transform: scale(0.9); }
+    100% { transform: scale(1); opacity: 1; }
 }
 @keyframes topbar-glow-pulse {
     0%, 100% { opacity: 0.4; }
@@ -2564,6 +2709,66 @@ model-viewer {
 .notes-html-content .container, .notes-html-content [class*="container"] { max-width: 100% !important; width: auto !important; box-sizing: border-box !important; margin-left: 0 !important; margin-right: 0 !important; }
 .notes-html-content body { max-width: 100% !important; }
 
+/* ── KaTeX formula rendering inside notes ──────────────────────────────────
+   Display-mode formulas (.katex-display) get a styled formula box.
+   Inline formulas (.katex) get subtle visual lift inline.
+   ── */
+:where(.notes-html-content) .katex-display {
+  background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%);
+  border: 1.5px solid #c4b5fd;
+  border-left: 4px solid #7c3aed;
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin: 10px 0;
+  overflow-x: auto;
+  box-shadow: 0 1px 4px rgba(124,58,237,0.08);
+  text-align: center;
+}
+:where(.notes-html-content) .katex {
+  font-size: 1.05em;
+  color: #3730a3;
+}
+:where(.notes-html-content) .katex-display .katex {
+  font-size: 1.15em;
+}
+/* sup / sub from plain-text math processing */
+:where(.notes-html-content) sup {
+  font-size: 0.72em;
+  vertical-align: super;
+  line-height: 0;
+  color: #6d28d9;
+  font-weight: 700;
+}
+:where(.notes-html-content) sub {
+  font-size: 0.72em;
+  vertical-align: sub;
+  line-height: 0;
+  color: #0369a1;
+  font-weight: 700;
+}
+/* Dark mode KaTeX */
+.dark-mode :where(.notes-html-content) .katex-display {
+  background: linear-gradient(135deg, #1e1245 0%, #150d33 100%) !important;
+  border-color: #4c1d95 !important;
+  border-left-color: #7c3aed !important;
+  box-shadow: 0 1px 6px rgba(0,0,0,0.4) !important;
+}
+.dark-mode :where(.notes-html-content) .katex {
+  color: #c4b5fd !important;
+}
+.dark-mode :where(.notes-html-content) sup { color: #a78bfa !important; }
+.dark-mode :where(.notes-html-content) sub { color: #7dd3fc !important; }
+.dark-mode-blue :where(.notes-html-content) .katex-display {
+  background: linear-gradient(135deg, #0f1e3d 0%, #0a1628 100%) !important;
+  border-color: #1e40af !important;
+  border-left-color: #3b82f6 !important;
+}
+.dark-mode-blue :where(.notes-html-content) .katex {
+  color: #93c5fd !important;
+}
+.dark-mode-blue :where(.notes-html-content) sup { color: #a5b4fc !important; }
+.dark-mode-blue :where(.notes-html-content) sub { color: #67e8f9 !important; }
+
 /* ═══════════════════════════════════════════════════════════════
    PROFESSIONAL DARK & BLUE MODE — STORE/PROFILE LEVEL POLISH
    Notes headings, top bar, cards, inputs, overall refinement.
@@ -2939,6 +3144,45 @@ model-viewer {
 /* Badges */
 .nst-badge-brand { background: var(--nst-color-brand-10) !important; color: var(--nst-color-brand) !important; }
 
+/* ── KaTeX in chunk-mode reader (topic bullets — no notes-html-content wrapper) ──
+   These rules ensure formulas look beautiful in the TTS/chunk reading view         */
+.katex-display {
+  background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%);
+  border: 1.5px solid #c4b5fd;
+  border-left: 4px solid #7c3aed;
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin: 8px 0;
+  overflow-x: auto;
+  box-shadow: 0 1px 4px rgba(124,58,237,0.08);
+  text-align: center;
+}
+/* Only color KaTeX outside of notes-html-content (inside notes-html-content already scoped above) */
+:not(.notes-html-content) .katex { color: #3730a3; }
+:not(.notes-html-content) .katex-display .katex { font-size: 1.15em; }
+
+/* Prose + KaTeX — prevent Tailwind prose from clobbering KaTeX font sizes */
+.prose .katex { font-size: 1em !important; }
+.prose .katex-display { font-size: 1.1em !important; }
+
+/* Fraction, integral, sigma — ensure they don't clip */
+.katex .vlist-t { overflow: visible; }
+.katex .base { overflow: visible; }
+
+/* Dark mode for chunk-mode KaTeX */
+.dark-mode .katex-display {
+  background: linear-gradient(135deg, #1e1245 0%, #150d33 100%) !important;
+  border-color: #4c1d95 !important;
+  border-left-color: #7c3aed !important;
+}
+.dark-mode :not(.notes-html-content) .katex { color: #c4b5fd !important; }
+.dark-mode-blue .katex-display {
+  background: linear-gradient(135deg, #0f1e3d 0%, #0a1628 100%) !important;
+  border-color: #1e40af !important;
+  border-left-color: #3b82f6 !important;
+}
+.dark-mode-blue :not(.notes-html-content) .katex { color: #93c5fd !important; }
+
 /* ── White Profile Mode ── */
 [data-pw="1"] .text-white { color: #1e293b !important; }
 [data-pw="1"] [class*="text-white/"] { color: #64748b !important; }
@@ -2952,3 +3196,7 @@ model-viewer {
 [data-pw="1"] .text-blue-400 { color: #2563eb !important; }
 [data-pw="1"] .text-violet-400 { color: #7c3aed !important; }
 [data-pw="1"] .text-amber-400 { color: #d97706 !important; }
+
+/* ── Notes Focus Mode — hides bottom nav and floating logo button ── */
+body[data-iic-notes-focus] [data-iic-bottom-nav] { display: none !important; }
+body[data-iic-notes-focus] [data-iic-float-logo] { display: none !important; }

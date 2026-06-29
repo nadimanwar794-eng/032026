@@ -4,7 +4,7 @@ import { X, CheckCircle, ArrowRight, Loader2, BrainCircuit, AlertCircle, List } 
 import { getChapterData, saveUserToLive, saveTestResult, saveDemand } from '../firebase';
 import { storage } from '../utils/storage';
 import { generateAnalysisJson } from '../utils/analysisUtils';
-import { recordAttempt as recordRevisionAttempt } from '../utils/revisionTrackerV2';
+import { recordAttempt as recordRevisionAttempt, applyInitialSchedule, bucketKey } from '../utils/revisionTrackerV2';
 import { addMistakes, removeMistakeByQuestion } from '../utils/mistakeBank';
 import { getEffectiveDailyLimit, getLevelInfo, UNLIMITED } from '../utils/levelSystem';
 import { SubscriptionEngine } from '../utils/engines/subscriptionEngine';
@@ -58,7 +58,10 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
     const loadTopicData = async (index: number) => {
         if (index >= topics.length) {
             if (sessionResults.length === 0) {
-                onComplete([]);
+                // All topics were skipped (no MCQs found for any) — don't silently
+                // navigate away. The caller will see loading=false + currentIndex>=topics.length
+                // and we show the "no MCQs" screen below. Just return here.
+                setLoading(false);
                 return;
             }
 
@@ -172,14 +175,17 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                 }
             }
 
-            // AUTO-SKIP EMPTY TOPICS & REPORT
-            if (mcqs.length === 0) {
-                console.log(`Skipping ${topic.name} - No MCQs found`);
-                // Report Missing Content to Admin
-                saveDemand(user.id, `Missing MCQs for Revision: ${topic.name} (${topic.chapterName})`);
+            // FALLBACK: if still no MCQs for specific topic, use ALL chapter MCQs
+            if (mcqs.length === 0 && data && data.manualMcqData && data.manualMcqData.length > 0) {
+                mcqs = data.manualMcqData;
+            }
 
-                setCurrentIndex(prev => prev + 1); // Automatically move to next
-                return; // Early exit, let effect re-trigger
+            // AUTO-SKIP EMPTY TOPICS & REPORT (only if truly nothing found)
+            if (mcqs.length === 0) {
+                console.log(`Skipping ${topic.name} - No MCQs found in chapter`);
+                saveDemand(user.id, `Missing MCQs for Revision: ${topic.name} (${topic.chapterName})`);
+                setCurrentIndex(prev => prev + 1);
+                return;
             }
 
             // FISHER-YATES SHUFFLE (Randomization)
@@ -372,6 +378,15 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                     questions: currentMcqData,
                     userAnswers: userAnswersArr,
                 });
+                // Apply interval-settings-based schedule based on accuracy
+                const accuracy = total > 0 ? score / total : 0;
+                const bk = bucketKey(
+                    topic.subjectId || 'REVISION',
+                    topic.chapterId,
+                    topic.chapterId,
+                    topic.name,
+                );
+                applyInitialSchedule(bk, accuracy, settings?.revisionConfig);
             } catch (_) { /* silent — tracking is non-critical */ }
         }
 
@@ -434,16 +449,6 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
         }, 800); // Reduced delay to 800ms for faster transition
     };
 
-    // MEGA ANALYSIS OVERLAY (Triggers when all topics are done but before passing to parent to allow review)
-    if (currentIndex >= topics.length) {
-        // We will call onComplete immediately, but since this component unmounts upon onComplete,
-        // we rely on the parent (RevisionHub) to display the Marksheet (Mega Analysis).
-        // Wait, the parent (RevisionHub) handles the "showCompletedMarksheets".
-        // But the user requested: "ek hi analisis me sare topic ķe question honge ek saath mega analysis aayega"
-        // This means we should COMBINE all session results into ONE Mega MCQResult before returning.
-        return null;
-    }
-
     if (loading) {
         return (
             <div className="fixed inset-0 z-[100] bg-white flex flex-col items-center justify-center">
@@ -453,9 +458,31 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
         );
     }
 
-    // Completion View
+    // All topics done but no session results — every topic was skipped (chapter has no MCQs)
+    if (currentIndex >= topics.length && sessionResults.length === 0) {
+        return (
+            <div className="fixed inset-0 z-[100] bg-white flex flex-col items-center justify-center p-8 text-center">
+                <AlertCircle size={52} className="text-amber-400 mb-4" />
+                <h2 className="text-xl font-black text-slate-800 mb-2">MCQ Nahi Mila</h2>
+                <p className="text-sm text-slate-500 mb-1">
+                    In {topics.length} topic{topics.length > 1 ? 's' : ''} ke liye abhi tak MCQ upload nahi hua hai.
+                </p>
+                <p className="text-xs text-slate-400 mb-8">
+                    Admin ko demand bhej diya gaya hai — jaldi MCQ aa jayega!
+                </p>
+                <button
+                    onClick={onClose}
+                    className="px-8 py-3 bg-indigo-600 text-white font-black rounded-2xl shadow-lg active:scale-95 transition-all"
+                >
+                    Wapas Jao
+                </button>
+            </div>
+        );
+    }
+
+    // All topics done with results — should have been handled in loadTopicData, safety net
     if (currentIndex >= topics.length) {
-        return null; // Handled by loadTopicData check, but for safety
+        return null;
     }
 
     const topic = topics[currentIndex];
@@ -570,12 +597,10 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                 <div className="space-y-3">
                     {question.options.map((opt, idx) => {
                         const isSelected = answers[qIndex] === idx;
-                        const isCorrect = idx === question.correctAnswer;
                         let btnClass = "border-slate-200 bg-white text-slate-600 hover:bg-slate-50";
 
                         if (answers[qIndex] !== undefined) {
-                            if (isCorrect) btnClass = "border-green-500 bg-green-50 text-green-700 ring-1 ring-green-500";
-                            else if (isSelected) btnClass = "border-red-500 bg-red-50 text-red-700";
+                            if (isSelected) btnClass = "border-blue-400 bg-blue-50 text-blue-700";
                             else btnClass = "border-slate-100 opacity-50 text-slate-800";
                         }
 
@@ -587,14 +612,12 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                                 className={`w-full p-4 rounded-xl border-2 text-left font-medium transition-all flex items-center gap-3 ${btnClass}`}
                             >
                                 <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold border ${
-                                    answers[qIndex] !== undefined && isCorrect ? 'bg-green-500 border-green-500 text-white' :
-                                    answers[qIndex] !== undefined && isSelected ? 'bg-red-500 border-red-500 text-white' :
+                                    answers[qIndex] !== undefined && isSelected ? 'bg-blue-500 border-blue-500 text-white' :
                                     'bg-slate-100 border-slate-300 text-slate-600'
                                 }`}>
                                     {['A','B','C','D'][idx]}
                                 </div>
                                 <span className="flex-1">{opt}</span>
-                                {answers[qIndex] !== undefined && isCorrect && <CheckCircle size={18} className="text-green-600" />}
                             </button>
                         );
                     })}

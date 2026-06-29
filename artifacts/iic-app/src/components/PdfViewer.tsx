@@ -13,9 +13,11 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   ArrowLeft, Maximize, Minimize, RotateCcw, Moon, Sun,
   ExternalLink, ChevronLeft, ChevronRight, Search, X, BookOpen, Check, MoreVertical,
-  ZoomIn, ZoomOut
+  ZoomIn, ZoomOut, LayoutGrid
 } from 'lucide-react';
 import { tryEarnScore } from '../utils/scoreSystem';
+import { ReadingScoreSession, ReadingScoreState } from '../utils/readingScoreEngine';
+import { ReadingScoreHUD } from './ReadingScoreHUD';
 
 interface Props {
   url: string;
@@ -25,10 +27,19 @@ interface Props {
   sessionKey?: string;
   /** User data for score milestones */
   userId?: string;
+  userLevel?: number;
   subscriptionLevel?: string;
   isPremium?: boolean;
   boostPercent?: number;
   onScoreEarned?: (pts: number) => void;
+  /** Next chapter navigation */
+  onNext?: () => void;
+  nextTitle?: string;
+  /** School mode: opens mode-switch sheet */
+  onSchoolModeSwitch?: () => void;
+  /** Admin board navigation */
+  isAdmin?: boolean;
+  onAdminBoard?: () => void;
 }
 
 type NightMode = 'normal' | 'night' | 'sepia';
@@ -60,7 +71,8 @@ const MILESTONE_SCORES = [
 
 export const PdfViewer: React.FC<Props> = ({
   url, title, onBack, sessionKey,
-  userId, subscriptionLevel, isPremium, boostPercent = 0, onScoreEarned,
+  userId, userLevel = 1, subscriptionLevel, isPremium, boostPercent = 0, onScoreEarned,
+  onNext, nextTitle, onSchoolModeSwitch, isAdmin, onAdminBoard,
 }) => {
   const key = sessionKey || btoa(url).replace(/[^a-z0-9]/gi, '').slice(0, 24);
 
@@ -71,7 +83,7 @@ export const PdfViewer: React.FC<Props> = ({
     try { return Math.max(0, parseInt(localStorage.getItem(TOTAL_KEY(key)) || '0', 10)); } catch { return 0; }
   });
   const [iframeSrc, setIframeSrc] = useState(() => buildSrc(url, currentPage));
-  const [rotated, setRotated] = useState(false);
+  const [rotated, setRotated] = useState(true);
   const [zoomLevel, setZoomLevel] = useState(1.0);
   const [nightMode, setNightMode] = useState<NightMode>('normal');
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -86,12 +98,38 @@ export const PdfViewer: React.FC<Props> = ({
     try { return new Set(JSON.parse(localStorage.getItem(`nst_pdf_ms_${key}`) || '[]')); } catch { return new Set(); }
   });
   const [showMoreMenu, setShowMoreMenu] = useState(false);
-  const moreMenuRef = useRef<HTMLDivElement>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const headerHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const jumpInputRef = useRef<HTMLInputElement>(null);
+
+  // ── PDF time-based score session (no scroll tracking possible in iframe) ──
+  const pdfScoreSessionRef = useRef<ReadingScoreSession | null>(null);
+  const [pdfScoreState, setPdfScoreState] = useState<ReadingScoreState | null>(null);
+
+  useEffect(() => {
+    if (!userId) return;
+    const session = new ReadingScoreSession(
+      {
+        userId,
+        userLevel,
+        subscriptionLevel,
+        isPremium,
+        boostPercent: boostPercent || 0,
+        mode: 'pdf',
+        onScoreEarned: (pts) => onScoreEarned?.(pts),
+      },
+      (state) => setPdfScoreState(state),
+    );
+    pdfScoreSessionRef.current = session;
+    session.start();
+    return () => {
+      session.stop();
+      pdfScoreSessionRef.current = null;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, url]);
 
   const showToast = useCallback((msg: string, ms = 2000) => {
     setToast(msg);
@@ -147,21 +185,6 @@ export const PdfViewer: React.FC<Props> = ({
     }
   }, [currentPage, totalPages, userId]);
 
-  // Close more menu on outside click
-  useEffect(() => {
-    if (!showMoreMenu) return;
-    const handler = (e: MouseEvent | TouchEvent) => {
-      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
-        setShowMoreMenu(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    document.addEventListener('touchstart', handler);
-    return () => {
-      document.removeEventListener('mousedown', handler);
-      document.removeEventListener('touchstart', handler);
-    };
-  }, [showMoreMenu]);
 
   // Fullscreen listener
   useEffect(() => {
@@ -174,9 +197,17 @@ export const PdfViewer: React.FC<Props> = ({
     return () => document.removeEventListener('fullscreenchange', h);
   }, []);
 
+  // Exit fullscreen when PDF viewer is closed/unmounted
+  useEffect(() => {
+    return () => {
+      try { if (document.fullscreenElement) document.exitFullscreen(); } catch (_) {}
+    };
+  }, []);
+
   const toggleFullscreen = () => {
+    setShowMoreMenu(false);
     if (!document.fullscreenElement) {
-      containerRef.current?.requestFullscreen().catch(() => showToast('Fullscreen supported nahi hai'));
+      containerRef.current?.requestFullscreen().catch(() => showToast('Fullscreen not supported'));
     } else {
       document.exitFullscreen();
     }
@@ -209,26 +240,37 @@ export const PdfViewer: React.FC<Props> = ({
   const zoomOut = () => setZoomLevel(z => Math.max(0.5, parseFloat((z - 0.25).toFixed(2))));
   const zoomReset = () => setZoomLevel(1.0);
 
-  // For non-rotated: use actual dimension changes so container can scroll when zoomed in.
-  // For rotated: combine rotate + scale transform (rotated content sits in a swap-dims absolute box).
-  const iframeWrapStyle: React.CSSProperties = rotated
+  // Toggle rotate: CSS-only rotation of the PDF iframe — never rotates the whole app
+  const toggleRotate = useCallback(() => {
+    const next = !rotated;
+    setRotated(next);
+    showToast(next ? 'Landscape mode' : 'Portrait mode');
+  }, [rotated, showToast]);
+
+  // When rotated: iframe wrapper is normal (no individual rotation needed)
+  const iframeWrapStyle: React.CSSProperties = {
+    position: 'relative',
+    width: `${zoomLevel * 100}%`,
+    minWidth: '100%',
+    height: `${zoomLevel * 100}%`,
+    minHeight: '100%',
+  };
+
+  // Rotate the entire viewer container like a video player going landscape.
+  // The container is fixed inset-0 so it covers full screen.
+  // When rotated: swap w/h and rotate 90deg so it fills the screen landscape.
+  const containerStyle: React.CSSProperties = rotated
     ? {
-        position: 'absolute',
+        position: 'fixed',
         top: '50%',
         left: '50%',
-        width: `calc(100vh * ${zoomLevel})`,
-        height: `calc(100vw * ${zoomLevel})`,
-        transform: `translate(-50%, -50%) rotate(90deg)`,
+        width: '100vh',
+        height: '100vw',
+        transform: 'translate(-50%, -50%) rotate(90deg)',
         transformOrigin: 'center center',
+        zIndex: 50,
       }
-    : {
-        // position relative so it expands the scroll area; min-* ensures it fills container at zoom=1
-        position: 'relative',
-        width: `${zoomLevel * 100}%`,
-        minWidth: '100%',
-        height: `${zoomLevel * 100}%`,
-        minHeight: '100%',
-      };
+    : {};
 
   const progressPct = totalPages > 0 ? Math.round((currentPage / totalPages) * 100) : 0;
 
@@ -236,6 +278,7 @@ export const PdfViewer: React.FC<Props> = ({
     <div
       ref={containerRef}
       className="fixed inset-0 z-50 bg-black flex flex-col"
+      style={containerStyle}
       onTouchStart={revealHeader}
       onMouseMove={revealHeader}
     >
@@ -264,7 +307,7 @@ export const PdfViewer: React.FC<Props> = ({
             className="bg-white rounded-2xl p-5 mx-4 w-full max-w-xs shadow-2xl"
             onClick={e => e.stopPropagation()}
           >
-            <p className="font-black text-slate-800 mb-3 text-center">📄 Kaunse page par jaana hai?</p>
+            <p className="font-black text-slate-800 mb-3 text-center">📄 Which page do you want to go to?</p>
             <input
               ref={jumpInputRef}
               type="number"
@@ -281,7 +324,7 @@ export const PdfViewer: React.FC<Props> = ({
               onClick={handleJump}
               className="w-full py-2 rounded-xl bg-indigo-600 text-white font-black active:scale-95 transition"
             >
-              Jao ▶
+              Go ▶
             </button>
           </div>
         </div>
@@ -298,8 +341,8 @@ export const PdfViewer: React.FC<Props> = ({
             className="bg-white rounded-2xl p-5 mx-4 w-full max-w-xs shadow-2xl"
             onClick={e => e.stopPropagation()}
           >
-            <p className="font-black text-slate-800 mb-1 text-center">📚 Total Pages Set Karein</p>
-            <p className="text-xs text-slate-500 text-center mb-3">PDF ke last page ka number enter karein</p>
+            <p className="font-black text-slate-800 mb-1 text-center">📚 Set Total Pages</p>
+            <p className="text-xs text-slate-500 text-center mb-3">Enter the last page number of the PDF</p>
             <input
               type="number"
               min={1}
@@ -331,6 +374,17 @@ export const PdfViewer: React.FC<Props> = ({
           <ArrowLeft size={18} />
         </button>
 
+        {/* School mode switch */}
+        {onSchoolModeSwitch && (
+          <button
+            onClick={onSchoolModeSwitch}
+            className="p-2 bg-indigo-500/30 rounded-xl active:bg-indigo-500/50 transition shrink-0"
+            title="Switch Mode"
+          >
+            <LayoutGrid size={16} className="text-indigo-200" />
+          </button>
+        )}
+
         {/* Title */}
         <h2 className="flex-1 font-bold text-sm truncate min-w-0">{title}</h2>
 
@@ -352,44 +406,6 @@ export const PdfViewer: React.FC<Props> = ({
           {nightLabel[nightMode]}
         </button>
 
-        {/* Zoom Out */}
-        <button
-          onClick={zoomOut}
-          disabled={zoomLevel <= 0.5}
-          className="p-2 bg-white/10 rounded-xl active:scale-90 transition shrink-0 disabled:opacity-30"
-          title="Zoom Out"
-        >
-          <ZoomOut size={16} />
-        </button>
-
-        {/* Zoom Level */}
-        <button
-          onClick={zoomReset}
-          className="px-2 py-1 bg-white/10 rounded-lg text-[10px] font-black shrink-0 active:scale-90 transition min-w-[38px] text-center"
-          title="Reset Zoom"
-        >
-          {Math.round(zoomLevel * 100)}%
-        </button>
-
-        {/* Zoom In */}
-        <button
-          onClick={zoomIn}
-          disabled={zoomLevel >= 3.0}
-          className="p-2 bg-white/10 rounded-xl active:scale-90 transition shrink-0 disabled:opacity-30"
-          title="Zoom In"
-        >
-          <ZoomIn size={16} />
-        </button>
-
-        {/* Rotate */}
-        <button
-          onClick={() => { setRotated(r => !r); showToast(rotated ? 'Portrait mode' : 'Landscape mode (90°)'); }}
-          className={`p-2 rounded-xl active:scale-90 transition shrink-0 ${rotated ? 'bg-indigo-500 text-white' : 'bg-white/10'}`}
-          title="Rotate PDF"
-        >
-          <RotateCcw size={16} />
-        </button>
-
         {/* Fullscreen */}
         <button
           onClick={toggleFullscreen}
@@ -399,31 +415,47 @@ export const PdfViewer: React.FC<Props> = ({
           {isFullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
         </button>
 
-        {/* More menu */}
-        <div ref={moreMenuRef} className="relative shrink-0">
-          <button
-            onClick={() => setShowMoreMenu(m => !m)}
-            className={`p-2 rounded-xl active:scale-90 transition ${showMoreMenu ? 'bg-indigo-500 text-white' : 'bg-white/10'}`}
-            title="More options"
-          >
-            <MoreVertical size={16} />
-          </button>
-          {showMoreMenu && (
-            <div className="absolute right-0 top-full mt-2 bg-slate-800 border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50 min-w-[160px] animate-in fade-in slide-in-from-top-2 duration-150">
-              <a
-                href={url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2.5 px-4 py-3 text-sm text-white font-semibold hover:bg-white/10 active:bg-white/20 transition"
-                onClick={() => setShowMoreMenu(false)}
-              >
-                <ExternalLink size={15} className="text-indigo-400" />
-                Browser mein kholein
-              </a>
-            </div>
-          )}
-        </div>
+        {/* More menu toggle */}
+        <button
+          onClick={() => setShowMoreMenu(m => !m)}
+          className={`p-2 rounded-xl active:scale-90 transition shrink-0 ${showMoreMenu ? 'bg-indigo-500 text-white' : 'bg-white/10'}`}
+          title="More options"
+        >
+          <MoreVertical size={16} />
+        </button>
       </header>
+
+      {/* Slim controls bar — visible when 3-dot is active, hides on fullscreen */}
+      {showMoreMenu && (
+        <div className="flex-shrink-0 bg-slate-800/98 border-t border-white/10 flex items-stretch z-10 animate-in slide-in-from-top-1 duration-150">
+          <button onClick={zoomOut} disabled={zoomLevel <= 0.5} className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 px-1 hover:bg-white/10 active:bg-white/20 transition disabled:opacity-30 border-r border-white/10">
+            <ZoomOut size={13} className="text-slate-300" />
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Out</span>
+          </button>
+          <button onClick={zoomReset} className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 px-1 hover:bg-white/10 active:bg-white/20 transition border-r border-white/10">
+            <span className="text-xs font-black text-white">{Math.round(zoomLevel * 100)}%</span>
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Zoom</span>
+          </button>
+          <button onClick={zoomIn} disabled={zoomLevel >= 3.0} className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 px-1 hover:bg-white/10 active:bg-white/20 transition disabled:opacity-30 border-r border-white/10">
+            <ZoomIn size={13} className="text-slate-300" />
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">In</span>
+          </button>
+          <button onClick={() => { toggleRotate(); setShowMoreMenu(false); }} className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 px-1 hover:bg-white/10 active:bg-white/20 transition border-r border-white/10 ${rotated ? 'text-indigo-300' : 'text-slate-300'}`}>
+            <RotateCcw size={13} />
+            <span className={`text-[9px] font-black uppercase tracking-wider ${rotated ? 'text-indigo-400' : 'text-slate-400'}`}>{rotated ? 'Portrait' : 'Rotate'}</span>
+          </button>
+          {isAdmin && onAdminBoard && (
+            <button onClick={() => { setShowMoreMenu(false); onAdminBoard(); }} className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 px-1 hover:bg-white/10 active:bg-white/20 transition border-r border-white/10 text-emerald-300">
+              <LayoutGrid size={13} />
+              <span className="text-[9px] font-black uppercase tracking-wider text-emerald-400">Admin</span>
+            </button>
+          )}
+          <a href={url} target="_blank" rel="noopener noreferrer" onClick={() => setShowMoreMenu(false)} className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 px-1 hover:bg-white/10 active:bg-white/20 transition text-indigo-300">
+            <ExternalLink size={13} />
+            <span className="text-[9px] font-black uppercase tracking-wider text-indigo-400">Open</span>
+          </a>
+        </div>
+      )}
 
       {/* Progress bar */}
       {totalPages > 0 && (
@@ -450,18 +482,18 @@ export const PdfViewer: React.FC<Props> = ({
       </div>
 
       {/* Bottom toolbar */}
-      <div className="flex-shrink-0 bg-slate-900/95 backdrop-blur text-white px-4 py-2 flex items-center justify-between z-20">
-        {/* Prev */}
+      <div className="flex-shrink-0 bg-slate-900/95 backdrop-blur text-white px-3 py-2 flex items-center gap-2 z-20">
+        {/* Prev page */}
         <button
           onClick={prevPage}
           disabled={currentPage <= 1}
-          className="p-2 bg-white/10 rounded-xl disabled:opacity-30 active:scale-90 transition"
+          className="p-2 bg-white/10 rounded-xl disabled:opacity-30 active:scale-90 transition shrink-0"
         >
-          <ChevronLeft size={20} />
+          <ChevronLeft size={18} />
         </button>
 
         {/* Center: page + set total */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 flex-1 justify-center">
           <button
             onClick={() => setShowJump(true)}
             className="flex items-center gap-1.5 bg-white/10 px-3 py-1.5 rounded-xl text-sm font-black active:bg-white/20 transition"
@@ -475,18 +507,31 @@ export const PdfViewer: React.FC<Props> = ({
             className="text-[10px] text-slate-400 font-bold bg-white/5 px-2 py-1 rounded-lg active:bg-white/10 transition"
             title="Set total pages"
           >
-            {totalPages > 0 ? `📚 ${progressPct}%` : '📚 Set pages'}
+            {totalPages > 0 ? `📚 ${progressPct}%` : '📚 Set'}
           </button>
         </div>
 
-        {/* Next */}
+        {/* Next page */}
         <button
           onClick={nextPage}
           disabled={totalPages > 0 && currentPage >= totalPages}
-          className="p-2 bg-white/10 rounded-xl disabled:opacity-30 active:scale-90 transition"
+          className="p-2 bg-white/10 rounded-xl disabled:opacity-30 active:scale-90 transition shrink-0"
         >
-          <ChevronRight size={20} />
+          <ChevronRight size={18} />
         </button>
+
+        {/* Next Chapter button — only when next exists */}
+        {onNext && (
+          <button
+            onClick={onNext}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-black active:scale-95 transition shrink-0"
+            style={{ background: 'rgba(59,130,246,0.30)', border: '1px solid rgba(59,130,246,0.45)', color: '#93c5fd' }}
+            title={nextTitle ? `Next: ${nextTitle}` : 'Next Chapter'}
+          >
+            <span className="max-w-[80px] truncate hidden xs:block">{nextTitle || 'Next'}</span>
+            <ChevronRight size={14} />
+          </button>
+        )}
       </div>
 
       {/* Fullscreen tap-to-show hint */}
@@ -494,6 +539,15 @@ export const PdfViewer: React.FC<Props> = ({
         <div
           className="absolute top-0 left-0 right-0 h-16 z-10 cursor-pointer"
           onClick={revealHeader}
+        />
+      )}
+
+      {/* ── PDF time-based score HUD ── */}
+      {pdfScoreState && (
+        <ReadingScoreHUD
+          state={pdfScoreState}
+          visible={true}
+          levelColor="#6366f1"
         />
       )}
     </div>

@@ -2,13 +2,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Board, ClassLevel, Stream, SystemSettings, RecoveryRequest } from '../types';
 import { ADMIN_EMAIL } from '../constants';
-import { saveUserToLive, auth, getUserByEmail, getUserByMobileOrId, rtdb, getUserData, updateUserUID, getUserByLinkedGoogleUid } from '../firebase';
+import { saveUserToLive, auth, getUserByEmail, getUserByMobileOrId, getUserByNameAndClass, rtdb, getUserData, updateUserUID, getUserByLinkedGoogleUid } from '../firebase';
 import { ref, set } from "firebase/database";
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, setPersistence, browserLocalPersistence, signInAnonymously, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
-import { UserPlus, LogIn, Lock, User as UserIcon, Phone, Mail, ShieldCheck, ArrowRight, School, GraduationCap, Layers, KeyRound, Copy, Check, AlertTriangle, XCircle, MessageCircle, Send, RefreshCcw, ShieldAlert, HelpCircle, Eye, EyeOff } from 'lucide-react';
+import { UserPlus, LogIn, Lock, User as UserIcon, Phone, Mail, ShieldCheck, ArrowRight, School, GraduationCap, Layers, KeyRound, Copy, Check, AlertTriangle, XCircle, MessageCircle, Send, RefreshCcw, ShieldAlert, HelpCircle, Eye, EyeOff, Search } from 'lucide-react';
 import { LoginGuide } from './LoginGuide';
 import { CustomAlert } from './CustomDialogs';
 import { SpeakButton } from './SpeakButton';
+import { getAllSchools, verifySchoolLockCode } from '../school-firebase';
+import type { School as SchoolType } from '../school-types';
 
 interface Props {
   onLogin: (user: User) => void;
@@ -16,7 +18,7 @@ interface Props {
   appSettings?: SystemSettings;
 }
 
-type AuthView = 'HOME' | 'LOGIN' | 'SIGNUP' | 'ADMIN' | 'RECOVERY' | 'SUCCESS_ID';
+type AuthView = 'HOME' | 'LOGIN' | 'SIGNUP' | 'ADMIN' | 'RECOVERY' | 'SUCCESS_ID' | 'SCHOOL_SELECT';
 
 const BLOCKED_DOMAINS = [
     'tempmail.com', 'throwawaymail.com', 'mailinator.com', 'yopmail.com', 
@@ -53,6 +55,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
   const [showGuide, setShowGuide] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{isOpen: boolean, message: string}>({isOpen: false, message: ''});
   const [pendingLoginUser, setPendingLoginUser] = useState<User | null>(null);
+  const [recoveryMode, setRecoveryMode] = useState<'id' | 'profile'>('id');
 
   // LOGIN REQUEST TIMER STATE
   const [requestTimestamp, setRequestTimestamp] = useState<number | null>(null);
@@ -60,6 +63,15 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
   const [showPassword, setShowPassword] = useState(false);
   const [welcomeUser, setWelcomeUser] = useState<any>(null);
   const [welcomeFading, setWelcomeFading] = useState(false);
+
+  // School selection state
+  const [schools, setSchools] = useState<SchoolType[]>([]);
+  const [loadingSchools, setLoadingSchools] = useState(false);
+  const [schoolSearch, setSchoolSearch] = useState('');
+  const [selectedSchoolForJoin, setSelectedSchoolForJoin] = useState<SchoolType | null>(null);
+  const [lockCodeInput, setLockCodeInput] = useState('');
+  const [lockCodeError, setLockCodeError] = useState('');
+  const [verifyingCode, setVerifyingCode] = useState(false);
 
   const welcomeTimer1Ref = useRef<ReturnType<typeof setTimeout> | null>(null);
   const welcomeTimer2Ref = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -83,6 +95,45 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
       const s = localStorage.getItem('nst_system_settings');
       if (s) { try { setSettings(JSON.parse(s)); } catch {} }
   }, []);
+
+  useEffect(() => {
+    if (view !== 'SCHOOL_SELECT') return;
+    setLoadingSchools(true);
+    getAllSchools().then(all => {
+      setSchools(all.filter(sc => sc.active && sc.subscription?.status === 'active'));
+      setLoadingSchools(false);
+    }).catch(() => setLoadingSchools(false));
+  }, [view]);
+
+  const handleSchoolSelect = async (school: SchoolType) => {
+    if (school.lockCodeActive && school.lockCode) {
+      setSelectedSchoolForJoin(school);
+      setLockCodeInput('');
+      setLockCodeError('');
+    } else {
+      await confirmSchoolJoin(school, null);
+    }
+  };
+
+  const confirmSchoolJoin = async (school: SchoolType, code: string | null) => {
+    if (school.lockCodeActive && school.lockCode) {
+      if (!code || code.trim() !== school.lockCode) {
+        setLockCodeError('Galat code hai. Dobara try karo.');
+        return;
+      }
+    }
+    if (pendingLoginUser) {
+      const updated = { ...pendingLoginUser, schoolId: school.id, schoolName: school.name };
+      await saveUserToLive(updated);
+      setPendingLoginUser(updated);
+    }
+    setSelectedSchoolForJoin(null);
+    setView('SUCCESS_ID');
+  };
+
+  const skipSchoolSelect = () => {
+    setView('SUCCESS_ID');
+  };
 
   // Timer Effect
   useEffect(() => {
@@ -257,7 +308,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
             logActivity("SIGNUP_EMAIL", "New Student Registered via Email", appUser);
             setGeneratedId(newId);
             setPendingLoginUser(appUser);
-            setView('SUCCESS_ID');
+            setView('SCHOOL_SELECT');
         } catch (err) {
             console.error("Signup Error:", err);
             if (err.code === 'auth/email-already-in-use') {
@@ -299,7 +350,9 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
 
         try {
             // STEP 1: QUERY FIRESTORE
-            let appUser: any = await getUserByMobileOrId(input);
+            let appUser: any = recoveryMode === 'profile'
+                ? await getUserByNameAndClass(formData.name.trim(), formData.classLevel.trim())
+                : await getUserByMobileOrId(input);
 
             // STEP 2: VERIFY CREDENTIALS LOCALLY IF USER EXISTS
             if (appUser) {
@@ -345,26 +398,38 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
                 const userCredential = await signInWithEmailAndPassword(auth, input, pass);
                 const firebaseUser = userCredential.user;
 
-                // Create profile since they don't exist in our DB
-                appUser = {
-                    id: firebaseUser.uid,
-                  displayId: generateUserId(),
-                    name: firebaseUser.displayName || 'Student',
-                    email: input,
-                    password: pass,
-                    mobile: '',
-                    role: 'STUDENT',
-                    createdAt: new Date().toISOString(),
-                    credits: 0,
-                    streak: 0,
-                    lastLoginDate: new Date().toISOString(),
-                    board: '',
-                    classLevel: '',
-                    provider: 'manual',
-                    profileCompleted: true,
-                    progress: {},
-                    redeemedCodes: []
-                } as User;
+                // Check if this user already exists in our DB (e.g. ADMIN whose
+                // Firestore document was temporarily unreachable). Never downgrade role.
+                let existingProfile: any = null;
+                try { existingProfile = await getUserData(firebaseUser.uid); } catch {}
+                if (!existingProfile && firebaseUser.email) {
+                    try { existingProfile = await getUserByEmail(firebaseUser.email); } catch {}
+                }
+                if (existingProfile) {
+                    // User exists — just update auth fields, preserve everything else
+                    appUser = { ...existingProfile, id: firebaseUser.uid, lastLoginDate: new Date().toISOString(), provider: 'email' };
+                } else {
+                    // Genuinely new user — create with default STUDENT role
+                    appUser = {
+                        id: firebaseUser.uid,
+                        displayId: generateUserId(),
+                        name: firebaseUser.displayName || 'Student',
+                        email: input,
+                        password: pass,
+                        mobile: '',
+                        role: 'STUDENT',
+                        createdAt: new Date().toISOString(),
+                        credits: 0,
+                        streak: 0,
+                        lastLoginDate: new Date().toISOString(),
+                        board: '',
+                        classLevel: '',
+                        provider: 'manual',
+                        profileCompleted: true,
+                        progress: {},
+                        redeemedCodes: []
+                    } as User;
+                }
                 await saveUserToLive(appUser);
                 logActivity("LOGIN", "Student Logged In (Firebase)", appUser);
                 triggerWelcome(appUser);
@@ -505,6 +570,106 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
             height: '100%', background: 'linear-gradient(90deg, #a78bfa, #fbbf24, #f472b6)',
             animation: 'welcome-progress 2.5s linear forwards'
           }} />
+        </div>
+      </div>
+    );
+  }
+
+  if (view === 'SCHOOL_SELECT') {
+    const filteredSchools = schools.filter(sc =>
+      sc.name.toLowerCase().includes(schoolSearch.toLowerCase()) ||
+      (sc.address || '').toLowerCase().includes(schoolSearch.toLowerCase())
+    );
+    return (
+      <div className="min-h-screen flex flex-col bg-slate-50 px-4 font-sans py-8">
+        <div className="w-full max-w-md mx-auto">
+          <div className="bg-white p-6 rounded-3xl shadow-xl border border-slate-200 animate-in zoom-in">
+            <div className="w-14 h-14 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-3">
+              <School size={28} />
+            </div>
+            <h2 className="text-xl font-black text-slate-800 mb-1 text-center">Apna School Select Karo</h2>
+            <p className="text-slate-500 text-sm mb-5 text-center">Apne school ka content dekho. Baad mein bhi change kar sakte ho.</p>
+
+            {/* Search */}
+            <div className="relative mb-4">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder="School dhundo..."
+                value={schoolSearch}
+                onChange={e => setSchoolSearch(e.target.value)}
+                className="w-full pl-9 pr-4 py-2.5 border border-slate-200 rounded-xl text-sm font-medium bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+              />
+            </div>
+
+            {/* Lock code modal */}
+            {selectedSchoolForJoin && (
+              <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-2xl">
+                <div className="flex items-center gap-2 mb-2">
+                  <Lock size={16} className="text-amber-600" />
+                  <p className="text-sm font-black text-amber-800">{selectedSchoolForJoin.name}</p>
+                </div>
+                <p className="text-xs text-amber-700 mb-3">Is school mein join karne ke liye school ka secret code enter karo.</p>
+                <input
+                  type="text"
+                  placeholder="School Lock Code"
+                  value={lockCodeInput}
+                  onChange={e => { setLockCodeInput(e.target.value); setLockCodeError(''); }}
+                  className="w-full px-3 py-2 border border-amber-300 rounded-xl text-sm font-bold mb-2 focus:ring-2 focus:ring-amber-400 outline-none"
+                />
+                {lockCodeError && <p className="text-xs text-red-600 font-bold mb-2">{lockCodeError}</p>}
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setSelectedSchoolForJoin(null)}
+                    className="flex-1 py-2 rounded-xl border border-slate-200 text-sm font-bold text-slate-600"
+                  >Cancel</button>
+                  <button
+                    onClick={() => confirmSchoolJoin(selectedSchoolForJoin, lockCodeInput)}
+                    disabled={verifyingCode}
+                    className="flex-1 py-2 rounded-xl bg-amber-500 text-white text-sm font-bold"
+                  >{verifyingCode ? 'Verifying...' : 'Join School'}</button>
+                </div>
+              </div>
+            )}
+
+            {/* School list */}
+            {loadingSchools ? (
+              <div className="text-center py-8 text-slate-400 text-sm">Loading schools...</div>
+            ) : filteredSchools.length === 0 ? (
+              <div className="text-center py-8 text-slate-400 text-sm">
+                {schoolSearch ? 'Koi school nahi mila.' : 'Abhi koi school available nahi hai.'}
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {filteredSchools.map(sc => (
+                  <button
+                    key={sc.id}
+                    onClick={() => handleSchoolSelect(sc)}
+                    className="w-full flex items-center gap-3 p-3 rounded-2xl border border-slate-200 hover:border-blue-300 hover:bg-blue-50 active:scale-95 transition-all text-left"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center shrink-0">
+                      {sc.logoUrl ? (
+                        <img src={sc.logoUrl} alt={sc.name} className="w-10 h-10 rounded-xl object-cover" />
+                      ) : (
+                        <School size={20} className="text-blue-600" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-slate-800 truncate">{sc.name}</p>
+                      {sc.address && <p className="text-xs text-slate-400 truncate">{sc.address}</p>}
+                    </div>
+                    {sc.lockCodeActive && <Lock size={14} className="text-amber-500 shrink-0" />}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="mt-5 pt-4 border-t border-slate-100">
+              <button onClick={skipSchoolSelect} className="w-full py-3 rounded-2xl border border-slate-200 text-sm font-bold text-slate-500 hover:text-slate-700 hover:border-slate-300 transition-all">
+                Baad Mein Select Karunga →
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -656,7 +821,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
         )}
 
         {view === 'HOME' && (
-            <div className="space-y-6 relative z-10 animate-in fade-in mt-10">
+            <div className="space-y-4 relative z-10 animate-in fade-in mt-10">
                  <button type="button" onClick={() => setView('SIGNUP')} className="w-full bg-[#111827] hover:bg-[#1f2937] text-white font-bold py-4 rounded-[2rem] flex items-center justify-center gap-3 transition-all shadow-lg active:scale-95">
                      Create Account
                  </button>
@@ -665,6 +830,27 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
                      Log in
                  </button>
 
+                 {/* Recovery text links — no button styling, plain text */}
+                 <div className="pt-2 flex flex-col items-center gap-2">
+                   <p className={`text-[11px] font-semibold uppercase tracking-wider ${isVideoMode ? 'text-slate-400' : 'text-slate-400'}`}>Account recover karo</p>
+                   <div className="flex items-center gap-4">
+                     <button
+                       type="button"
+                       onClick={() => { setFormData(f => ({ ...f, id: '', password: '' })); setView('RECOVERY'); }}
+                       className={`text-sm font-semibold underline underline-offset-2 transition-colors ${isVideoMode ? 'text-slate-300 hover:text-white' : 'text-slate-500 hover:text-slate-800'}`}
+                     >
+                       📱 Mobile number se
+                     </button>
+                     <span className={`text-xs ${isVideoMode ? 'text-slate-500' : 'text-slate-300'}`}>|</span>
+                     <button
+                       type="button"
+                       onClick={() => { setFormData(f => ({ ...f, id: '', password: '' })); setView('RECOVERY'); }}
+                       className={`text-sm font-semibold underline underline-offset-2 transition-colors ${isVideoMode ? 'text-slate-300 hover:text-white' : 'text-slate-500 hover:text-slate-800'}`}
+                     >
+                       📧 Email se
+                     </button>
+                   </div>
+                 </div>
             </div>
         )}
 
@@ -707,7 +893,43 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
 
               {view === 'RECOVERY' && (
                   <>
-                     <div className="space-y-1.5"><label className="text-xs font-bold text-slate-600 uppercase">Mobile Number / Email / UID</label><input name="id" type="text" placeholder="Enter Mobile Number" value={formData.id} onChange={handleChange} className="w-full px-4 py-3 border border-slate-200 rounded-xl font-bold" /></div>
+                     {/* ── Mode toggle ── */}
+                     <div className="flex rounded-xl overflow-hidden border border-slate-200 mb-4">
+                       <button type="button"
+                         onClick={() => setRecoveryMode('id')}
+                         className={`flex-1 py-2.5 text-xs font-black transition-colors ${recoveryMode === 'id' ? 'bg-blue-600 text-white' : 'bg-slate-50 text-slate-500'}`}
+                       >📱 Mobile / Email / UID</button>
+                       <button type="button"
+                         onClick={() => setRecoveryMode('profile')}
+                         className={`flex-1 py-2.5 text-xs font-black transition-colors ${recoveryMode === 'profile' ? 'bg-blue-600 text-white' : 'bg-slate-50 text-slate-500'}`}
+                       >👤 Name + Class</button>
+                     </div>
+
+                     {/* ── ID / Mobile / Email mode ── */}
+                     {recoveryMode === 'id' && (
+                       <div className="space-y-1.5">
+                         <label className="text-xs font-bold text-slate-600 uppercase">Mobile / Email / Account ID</label>
+                         <input name="id" type="text" placeholder="Mobile Number / Email / UID" value={formData.id} onChange={handleChange} className="w-full px-4 py-3 border border-slate-200 rounded-xl font-bold bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
+                       </div>
+                     )}
+
+                     {/* ── Name + Class mode ── */}
+                     {recoveryMode === 'profile' && (<>
+                       <div className="space-y-1.5">
+                         <label className="text-xs font-bold text-slate-600 uppercase">Apna Naam</label>
+                         <input name="name" type="text" placeholder="Poora naam likhो (e.g. Rahul Sharma)" value={formData.name} onChange={handleChange} className="w-full px-4 py-3 border border-slate-200 rounded-xl font-bold bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
+                       </div>
+                       <div className="space-y-1.5">
+                         <label className="text-xs font-bold text-slate-600 uppercase">Class / Level</label>
+                         <select name="classLevel" value={formData.classLevel} onChange={handleChange} className="w-full px-4 py-3 border border-slate-200 rounded-xl font-bold bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                           <option value="">-- Class select karo --</option>
+                           {['6','7','8','9','10','11','12','COMPETITION'].map(c => (
+                             <option key={c} value={c}>Class {c}</option>
+                           ))}
+                         </select>
+                       </div>
+                     </>)}
+
                      <div className="space-y-1.5">
                          <label className="text-xs font-bold text-slate-600 uppercase">Password</label>
                          <div className="relative">

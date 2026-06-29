@@ -204,7 +204,7 @@ export const getSubjectsList = (classLevel: string, stream: string | null, board
       if (pool[key]) selectedSubjects.push(pool[key]);
   });
 
-  if (board === 'BSEB') {
+  if (board === 'BSEB' || board === 'NCERT_HI') {
       const hindiMap: Record<string, string> = {
           'Physics': 'भौतिकी',
           'Chemistry': 'रसायन शास्त्र',

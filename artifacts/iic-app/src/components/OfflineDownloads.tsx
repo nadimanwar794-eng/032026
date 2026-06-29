@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Trash2, FileText, BarChart2, CheckCircle2, FileQuestion, Download, Volume2, Square } from 'lucide-react';
-import { getOfflineItems, removeOfflineItem, OfflineItem } from '../utils/offlineStorage';
+import { getOfflineItems, getOfflineItemData, removeOfflineItem, OfflineItem } from '../utils/offlineStorage';
 import { MarksheetCard } from './MarksheetCard';
 import { User, SystemSettings } from '../types';
 import { speakText, stopSpeech } from '../utils/textToSpeech';
@@ -16,6 +16,8 @@ export const OfflineDownloads: React.FC<Props> = ({ onBack, hideHeader = false, 
   const [items, setItems] = useState<OfflineItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedItem, setSelectedItem] = useState<OfflineItem | null>(null);
+  const [selectedItemData, setSelectedItemData] = useState<any>(null);
+  const [loadingItemData, setLoadingItemData] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
 
   const fetchItems = async () => {
@@ -34,70 +36,94 @@ export const OfflineDownloads: React.FC<Props> = ({ onBack, hideHeader = false, 
     };
   }, []);
 
+  const handleSelectItem = async (item: OfflineItem) => {
+    setSelectedItem(item);
+    setSelectedItemData(null);
+    setLoadingItemData(true);
+    try {
+      const data = await getOfflineItemData(item.id);
+      setSelectedItemData(data);
+    } catch {}
+    setLoadingItemData(false);
+  };
+
+  const handleCloseViewer = () => {
+    setSelectedItem(null);
+    setSelectedItemData(null);
+    setLoadingItemData(false);
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    setIsSpeaking(false);
+  };
+
   const handleDelete = async (id: string) => {
-    if (confirm("Are you sure you want to delete this downloaded item?")) {
+    if (confirm('Are you sure you want to delete this downloaded item?')) {
       await removeOfflineItem(id);
       fetchItems();
       if (selectedItem?.id === id) {
-        setSelectedItem(null);
+        handleCloseViewer();
       }
     }
   };
 
   const toggleSpeech = (htmlContent: string) => {
     if (!window.speechSynthesis) return;
-
     if (isSpeaking) {
       stopSpeech();
       setIsSpeaking(false);
       return;
     }
-
-    // Use our robust text-to-speech utility instead of raw utterance to handle HTML stripping
-    // and Android WebView quirks better.
     setIsSpeaking(true);
-    speakText(
-        htmlContent,
-        null,
-        1.0,
-        'en-IN',
-        undefined,
-        () => setIsSpeaking(false) // onEnd
-    ).then(utterance => {
-        if (!utterance) {
-            setIsSpeaking(false); // TTS failed or not supported
-        }
+    speakText(htmlContent, null, 1.0, 'en-IN', undefined, () => setIsSpeaking(false)).then(utterance => {
+      if (!utterance) setIsSpeaking(false);
     });
   };
 
-
-  // Group items by type
   const notes = items.filter(i => i.type === 'NOTE');
   const mcqs = items.filter(i => i.type === 'MCQ');
   const analysis = items.filter(i => i.type === 'ANALYSIS');
 
   const renderItemViewer = (item: OfflineItem) => {
-    if (item.type === 'ANALYSIS' && item.data?.result && user) {
-        return (
-            <MarksheetCard
-                result={item.data.result}
-                questions={item.data.questions}
-                user={user}
-                settings={settings}
-                onClose={() => setSelectedItem(null)}
-            />
-        );
+    if (loadingItemData) {
+      return (
+        <div className="fixed inset-0 z-[9999] bg-white flex flex-col h-screen w-screen overflow-hidden">
+          <div className="flex items-center gap-2 px-3 py-2 border-b bg-slate-50 sticky top-0 z-10">
+            <button onClick={handleCloseViewer} className="p-1.5 bg-slate-200 rounded-full text-slate-700 hover:bg-slate-300">
+              <ArrowLeft size={16} />
+            </button>
+            <div>
+              <h2 className="text-sm font-bold text-slate-800 line-clamp-1 leading-tight">{item.title}</h2>
+              <p className="text-[10px] text-slate-500 leading-tight">{item.subtitle}</p>
+            </div>
+          </div>
+          <div className="flex-1 flex items-center justify-center">
+            <div className="text-center">
+              <div className="text-3xl mb-3 animate-pulse">📖</div>
+              <p className="text-sm font-bold text-slate-500">Loading notes…</p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const data = selectedItemData;
+
+    if (item.type === 'ANALYSIS' && data?.result && user) {
+      return (
+        <MarksheetCard
+          result={data.result}
+          questions={data.questions}
+          user={user}
+          settings={settings}
+          onClose={handleCloseViewer}
+        />
+      );
     }
 
     return (
       <div className="fixed inset-0 z-[9999] bg-white flex flex-col h-screen w-screen overflow-hidden">
         <div className="flex items-center justify-between px-3 py-1.5 border-b bg-slate-50 sticky top-0 z-10">
           <div className="flex items-center gap-2">
-            <button onClick={() => {
-              setSelectedItem(null);
-              if (window.speechSynthesis) window.speechSynthesis.cancel();
-              setIsSpeaking(false);
-            }} className="p-1.5 bg-slate-200 rounded-full text-slate-700 hover:bg-slate-300">
+            <button onClick={handleCloseViewer} className="p-1.5 bg-slate-200 rounded-full text-slate-700 hover:bg-slate-300">
               <ArrowLeft size={16} />
             </button>
             <div>
@@ -106,14 +132,14 @@ export const OfflineDownloads: React.FC<Props> = ({ onBack, hideHeader = false, 
             </div>
           </div>
           <div className="flex items-center gap-1.5">
-            {item.type === 'NOTE' && item.data?.html && (
-               <button
-                  onClick={() => toggleSpeech(item.data.html)}
-                  className={`p-1.5 rounded-full ${isSpeaking ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                  title={isSpeaking ? "Stop Reading" : "Read Aloud"}
-               >
-                  {isSpeaking ? <Square size={16} /> : <Volume2 size={16} />}
-               </button>
+            {item.type === 'NOTE' && data?.html && (
+              <button
+                onClick={() => toggleSpeech(data.html)}
+                className={`p-1.5 rounded-full ${isSpeaking ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                title={isSpeaking ? 'Stop Reading' : 'Read Aloud'}
+              >
+                {isSpeaking ? <Square size={16} /> : <Volume2 size={16} />}
+              </button>
             )}
             <button onClick={() => handleDelete(item.id)} className="p-1.5 text-red-500 bg-red-50 rounded-full hover:bg-red-100">
               <Trash2 size={16} />
@@ -122,80 +148,81 @@ export const OfflineDownloads: React.FC<Props> = ({ onBack, hideHeader = false, 
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 bg-white">
-          {item.type === 'NOTE' && item.data?.html && (
-            <div className="prose prose-slate max-w-none" dangerouslySetInnerHTML={{ __html: item.data.html }} />
-          )}
-
-          {item.type === 'MCQ' && (
+          {!data ? (
+            <div className="text-center py-20 text-slate-400">
+              <p className="text-3xl mb-3">📭</p>
+              <p className="font-bold text-slate-600">Content not available</p>
+              <p className="text-xs mt-1">This saved item may be corrupted. Try saving it again.</p>
+            </div>
+          ) : item.type === 'NOTE' && (data.html || data.chunkNotes || data.content) ? (
+            data.html ? (
+              <div className="prose prose-slate max-w-none" dangerouslySetInnerHTML={{ __html: data.html }} />
+            ) : (
+              <div className="whitespace-pre-wrap text-sm text-slate-700 leading-relaxed font-medium">
+                {data.chunkNotes || data.content || ''}
+              </div>
+            )
+          ) : item.type === 'MCQ' ? (
             <div className="space-y-6">
-              {/* Legacy fallback for old array format or direct questions array */}
               {(() => {
-                  const questions = Array.isArray(item.data) ? item.data : (item.data.questions || []);
-                  const theory = item.data.theory;
-                  const topicNotes = item.data.topicNotes;
-
-                  return (
-                      <>
-                        {/* Display Theory/Notes if they exist */}
-                        {theory && (
-                            <div className="mb-8 p-6 bg-slate-50 rounded-2xl border border-slate-200">
-                                <h3 className="text-lg font-black text-slate-800 mb-4 border-b border-slate-200 pb-2">Chapter Theory</h3>
-                                <div className="prose prose-slate max-w-none text-sm" dangerouslySetInnerHTML={{ __html: theory.replace(/\n/g, '<br/>') }} />
-                            </div>
-                        )}
-                        {topicNotes && topicNotes.length > 0 && (
-                            <div className="mb-8 space-y-4">
-                                <h3 className="text-lg font-black text-slate-800 mb-4 border-b border-slate-200 pb-2">Topic Notes</h3>
-                                {topicNotes.map((note: any, idx: number) => (
-                                    <div key={idx} className="p-6 bg-slate-50 rounded-2xl border border-slate-200">
-                                        <h4 className="font-bold text-slate-700 mb-2">{note.title || note.topic}</h4>
-                                        <div className="prose prose-slate max-w-none text-sm" dangerouslySetInnerHTML={{ __html: note.content }} />
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-
-                        {/* Display Questions */}
-                        {questions.length > 0 && <h3 className="text-lg font-black text-slate-800 mb-4 border-b border-slate-200 pb-2 mt-8">Practice Questions</h3>}
-                        {questions.map((q: any, idx: number) => (
-                          <div key={idx} className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                            <p className="font-bold text-slate-800 mb-3">{idx + 1}. <span dangerouslySetInnerHTML={{ __html: q.question }} /></p>
-                            <div className="space-y-2">
-                              {q.options?.map((opt: string, oIdx: number) => (
-                                <div key={oIdx} className={`p-3 rounded-lg border flex items-center ${oIdx === q.correctAnswer ? 'bg-green-50 border-green-200 text-green-800 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
-                                  {oIdx === q.correctAnswer && <CheckCircle2 size={16} className="mr-2 text-green-600 flex-shrink-0" />}
-                                  <span dangerouslySetInnerHTML={{ __html: opt }} />
-                                </div>
-                              ))}
-                            </div>
-                            {q.explanation && (
-                              <div className="mt-4 p-3 bg-blue-50 text-blue-800 rounded-lg text-sm border border-blue-100">
-                                <strong>Explanation:</strong> <span dangerouslySetInnerHTML={{ __html: q.explanation }} />
-                              </div>
-                            )}
+                const questions = Array.isArray(data) ? data : (data.questions || []);
+                const theory = data.theory;
+                const topicNotes = data.topicNotes;
+                return (
+                  <>
+                    {theory && (
+                      <div className="mb-8 p-6 bg-slate-50 rounded-2xl border border-slate-200">
+                        <h3 className="text-lg font-black text-slate-800 mb-4 border-b border-slate-200 pb-2">Chapter Theory</h3>
+                        <div className="prose prose-slate max-w-none text-sm" dangerouslySetInnerHTML={{ __html: theory.replace(/\n/g, '<br/>') }} />
+                      </div>
+                    )}
+                    {topicNotes && topicNotes.length > 0 && (
+                      <div className="mb-8 space-y-4">
+                        <h3 className="text-lg font-black text-slate-800 mb-4 border-b border-slate-200 pb-2">Topic Notes</h3>
+                        {topicNotes.map((note: any, idx: number) => (
+                          <div key={idx} className="p-6 bg-slate-50 rounded-2xl border border-slate-200">
+                            <h4 className="font-bold text-slate-700 mb-2">{note.title || note.topic}</h4>
+                            <div className="prose prose-slate max-w-none text-sm" dangerouslySetInnerHTML={{ __html: note.content }} />
                           </div>
                         ))}
-                      </>
-                  );
+                      </div>
+                    )}
+                    {questions.length > 0 && <h3 className="text-lg font-black text-slate-800 mb-4 border-b border-slate-200 pb-2 mt-8">Practice Questions</h3>}
+                    {questions.map((q: any, idx: number) => (
+                      <div key={idx} className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                        <p className="font-bold text-slate-800 mb-3">{idx + 1}. <span dangerouslySetInnerHTML={{ __html: q.question }} /></p>
+                        <div className="space-y-2">
+                          {q.options?.map((opt: string, oIdx: number) => (
+                            <div key={oIdx} className={`p-3 rounded-lg border flex items-center ${oIdx === q.correctAnswer ? 'bg-green-50 border-green-200 text-green-800 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
+                              {oIdx === q.correctAnswer && <CheckCircle2 size={16} className="mr-2 text-green-600 flex-shrink-0" />}
+                              <span dangerouslySetInnerHTML={{ __html: opt }} />
+                            </div>
+                          ))}
+                        </div>
+                        {q.explanation && (
+                          <div className="mt-4 p-3 bg-blue-50 text-blue-800 rounded-lg text-sm border border-blue-100">
+                            <strong>Explanation:</strong> <span dangerouslySetInnerHTML={{ __html: q.explanation }} />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </>
+                );
               })()}
             </div>
-          )}
-
-          {item.type === 'ANALYSIS' && item.data?.result && (
+          ) : item.type === 'ANALYSIS' && data?.result ? (
             <div className="space-y-6 w-full mx-auto">
               <div className="bg-gradient-to-br from-indigo-500 to-purple-600 p-6 rounded-2xl text-white text-center shadow-lg">
-                <h3 className="text-xl font-black mb-2">{item.data.result.chapterTitle}</h3>
-                <div className="text-5xl font-black mb-2">{item.data.result.score} <span className="text-2xl opacity-70">/ {item.data.result.totalQuestions}</span></div>
-                <p className="font-bold opacity-90">Total Time: {Math.floor((item.data.result.timeTaken || 0) / 60)}m {(item.data.result.timeTaken || 0) % 60}s</p>
+                <h3 className="text-xl font-black mb-2">{data.result.chapterTitle}</h3>
+                <div className="text-5xl font-black mb-2">{data.result.score} <span className="text-2xl opacity-70">/ {data.result.totalQuestions}</span></div>
+                <p className="font-bold opacity-90">Total Time: {Math.floor((data.result.timeTaken || 0) / 60)}m {(data.result.timeTaken || 0) % 60}s</p>
               </div>
-
               <h4 className="font-bold text-slate-800 text-lg border-b pb-2">Questions Review</h4>
               <div className="space-y-4">
-                {item.data.questions?.map((q: any, idx: number) => {
-                  const userAnswer = item.data.result.answers[idx];
+                {data.questions?.map((q: any, idx: number) => {
+                  const userAnswer = data.result.answers[idx];
                   const isCorrect = userAnswer === q.correctAnswer;
                   const isSkipped = userAnswer === undefined || userAnswer === null || userAnswer === -1;
-
                   return (
                     <div key={idx} className={`p-4 rounded-xl border ${isCorrect ? 'border-green-200 bg-green-50' : isSkipped ? 'border-slate-200 bg-slate-50' : 'border-red-200 bg-red-50'}`}>
                       <div className="flex justify-between items-start mb-2 gap-4">
@@ -204,20 +231,17 @@ export const OfflineDownloads: React.FC<Props> = ({ onBack, hideHeader = false, 
                           {isCorrect ? 'Correct' : isSkipped ? 'Skipped' : 'Wrong'}
                         </span>
                       </div>
-
                       <div className="space-y-1 mt-3">
                         {q.options?.map((opt: string, oIdx: number) => {
                           const isSelected = userAnswer === oIdx;
                           const isActuallyCorrect = q.correctAnswer === oIdx;
-
-                          let bgClass = "bg-white border-slate-200 text-slate-600";
-                          if (isActuallyCorrect) bgClass = "bg-green-100 border-green-300 text-green-800 font-bold";
-                          else if (isSelected && !isActuallyCorrect) bgClass = "bg-red-100 border-red-300 text-red-800";
-
+                          let bgClass = 'bg-white border-slate-200 text-slate-600';
+                          if (isActuallyCorrect) bgClass = 'bg-green-100 border-green-300 text-green-800 font-bold';
+                          else if (isSelected && !isActuallyCorrect) bgClass = 'bg-red-100 border-red-300 text-red-800';
                           return (
                             <div key={oIdx} className={`p-2 rounded-lg border text-sm flex items-center ${bgClass}`}>
-                               {isActuallyCorrect && <CheckCircle2 size={14} className="mr-2 flex-shrink-0" />}
-                               <span dangerouslySetInnerHTML={{ __html: opt }} />
+                              {isActuallyCorrect && <CheckCircle2 size={14} className="mr-2 flex-shrink-0" />}
+                              <span dangerouslySetInnerHTML={{ __html: opt }} />
                             </div>
                           );
                         })}
@@ -226,6 +250,11 @@ export const OfflineDownloads: React.FC<Props> = ({ onBack, hideHeader = false, 
                   );
                 })}
               </div>
+            </div>
+          ) : (
+            <div className="text-center py-20 text-slate-400">
+              <p className="text-3xl mb-3">📄</p>
+              <p className="font-bold text-slate-600">Preview not available for this item type</p>
             </div>
           )}
         </div>
@@ -242,7 +271,11 @@ export const OfflineDownloads: React.FC<Props> = ({ onBack, hideHeader = false, 
         </h3>
         <div className="space-y-3">
           {list.map(item => (
-            <div key={item.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between hover:shadow-md transition-shadow cursor-pointer" onClick={() => setSelectedItem(item)}>
+            <div
+              key={item.id}
+              className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between hover:shadow-md transition-shadow cursor-pointer"
+              onClick={() => handleSelectItem(item)}
+            >
               <div>
                 <h4 className="font-bold text-slate-800 line-clamp-1">{item.title}</h4>
                 <p className="text-xs text-slate-600 mt-1">{item.subtitle} • {new Date(item.timestamp).toLocaleDateString()}</p>
@@ -268,7 +301,6 @@ export const OfflineDownloads: React.FC<Props> = ({ onBack, hideHeader = false, 
           <h1 className="text-xl font-black text-slate-800 px-2">Offline Downloads</h1>
         </div>
       )}
-
       <div className={`${hideHeader ? 'p-0' : 'p-4'} max-w-4xl mx-auto`}>
         {loading ? (
           <div className="flex justify-center py-10"><span className="animate-spin text-2xl">⏳</span></div>
@@ -282,9 +314,9 @@ export const OfflineDownloads: React.FC<Props> = ({ onBack, hideHeader = false, 
           </div>
         ) : (
           <>
-            {renderList("Saved Notes", notes, <FileText size={20} className="text-blue-500" />)}
-            {renderList("Saved MCQs", mcqs, <FileQuestion size={20} className="text-purple-500" />)}
-            {renderList("Analysis Reports", analysis, <BarChart2 size={20} className="text-indigo-500" />)}
+            {renderList('Saved Notes', notes, <FileText size={20} className="text-blue-500" />)}
+            {renderList('Saved MCQs', mcqs, <FileQuestion size={20} className="text-purple-500" />)}
+            {renderList('Analysis Reports', analysis, <BarChart2 size={20} className="text-indigo-500" />)}
           </>
         )}
       </div>

@@ -58,105 +58,81 @@ const THEME_STYLES: Record<ThemeVariant, {
   },
 };
 
+
 export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, isPremium = false, subscriptionLevel = 'FREE' }) => {
   const [progress, setProgress] = useState(0);
   const [stepPhase1, setStepPhase1] = useState(-1);
   const [stepPhase2, setStepPhase2] = useState(-1);
   const [logoTapped, setLogoTapped] = useState(false);
-
   const [themeVariant] = useState<ThemeVariant>(detectTheme);
+
+  const onCompleteRef = useRef(onComplete);
+  useEffect(() => { onCompleteRef.current = onComplete; }, [onComplete]);
 
   const [appName] = useState(() => {
     try {
-      const settingsRaw = localStorage.getItem('nst_system_settings');
-      const settingsObj = settingsRaw ? JSON.parse(settingsRaw) : null;
-      // Prefer short name (used as the splash logo word) — falls back to long name, then "IIC".
-      return settingsObj?.appShortName || settingsObj?.appName || 'IIC';
-    } catch {
-      return 'IIC';
-    }
+      const s = localStorage.getItem('nst_system_settings');
+      const o = s ? JSON.parse(s) : null;
+      return o?.appShortName || o?.appName || 'IIC';
+    } catch { return 'IIC'; }
   });
 
-  // Admin-controlled developer name shown in the bottom "Developed by …" badge.
-  // Reads from systemSettings.developerName (stored in localStorage by Admin > General Settings).
   const [developerName] = useState<string>(() => {
     try {
-      const settingsRaw = localStorage.getItem('nst_system_settings');
-      const settingsObj = settingsRaw ? JSON.parse(settingsRaw) : null;
-      const name = (settingsObj?.developerName ?? '').toString().trim();
-      return name || 'Nadim Anwar';
-    } catch {
-      return 'Nadim Anwar';
-    }
+      const s = localStorage.getItem('nst_system_settings');
+      const o = s ? JSON.parse(s) : null;
+      return (o?.developerName ?? '').toString().trim() || 'Nadim Anwar';
+    } catch { return 'Nadim Anwar'; }
   });
 
-  // Admin-controlled font-size for the splash short name (in pixels).
-  // Reads from systemSettings.appShortNameSize. Clamped to [24, 120].
+  const [showFooter] = useState<boolean>(() => {
+    try {
+      const s = localStorage.getItem('nst_system_settings');
+      const o = s ? JSON.parse(s) : null;
+      return o?.showFooter !== false;
+    } catch { return true; }
+  });
+
   const [appNameSize] = useState<number>(() => {
     try {
-      const settingsRaw = localStorage.getItem('nst_system_settings');
-      const settingsObj = settingsRaw ? JSON.parse(settingsRaw) : null;
-      const raw = Number(settingsObj?.appShortNameSize);
-      if (Number.isFinite(raw) && raw > 0) return Math.min(120, Math.max(24, raw));
-      return 30; // default = matches old text-3xl
-    } catch {
-      return 30;
-    }
+      const s = localStorage.getItem('nst_system_settings');
+      const o = s ? JSON.parse(s) : null;
+      const raw = Number(o?.appShortNameSize);
+      return Number.isFinite(raw) && raw > 0 ? Math.min(120, Math.max(24, raw)) : 30;
+    } catch { return 30; }
   });
 
-  // === Splash Font (admin-controlled, read from system settings) ===
-  // Falls back to a legacy localStorage choice (`nst_splash_font_id`) for
-  // users who picked one before the picker was moved into Admin > General
-  // Settings, then defaults to "default".
   const [splashFontId] = useState<string>(() => {
     try {
-      const settingsRaw = localStorage.getItem('nst_system_settings');
-      const settingsObj = settingsRaw ? JSON.parse(settingsRaw) : null;
-      const adminChoice = settingsObj?.splashFontId;
-      if (adminChoice) return adminChoice as string;
-      return localStorage.getItem('nst_splash_font_id') || 'default';
-    } catch {
-      return 'default';
-    }
+      const s = localStorage.getItem('nst_system_settings');
+      const o = s ? JSON.parse(s) : null;
+      return o?.splashFontId || localStorage.getItem('nst_splash_font_id') || 'default';
+    } catch { return 'default'; }
   });
   const activeFont = getSplashFontById(splashFontId);
 
-  // === Splash LOGO (admin-controlled) ===
-  // When enabled (default), the splash shows an <img> instead of the gradient
-  // short-name text. Admin can upload a custom logo (stored as data: URL) or
-  // remove it (which falls back to the text rendering).
   const [splashLogo] = useState<{ enabled: boolean; url: string; size: number }>(() => {
     try {
-      const settingsRaw = localStorage.getItem('nst_system_settings');
-      const s = settingsRaw ? JSON.parse(settingsRaw) : null;
-      const enabled = s?.splashLogoEnabled !== false; // default ON
-      const url = (s?.splashLogoUrl as string) || '/splash-logo.png';
-      const rawSize = Number(s?.splashLogoSize);
-      const size = Number.isFinite(rawSize) && rawSize > 0
-        ? Math.min(260, Math.max(60, rawSize))
-        : 140;
+      const s = localStorage.getItem('nst_system_settings');
+      const o = s ? JSON.parse(s) : null;
+      const enabled = o?.splashLogoEnabled !== false;
+      const url = (o?.splashLogoUrl as string) || '/splash-logo.png';
+      const rawSize = Number(o?.splashLogoSize);
+      const size = Number.isFinite(rawSize) && rawSize > 0 ? Math.min(260, Math.max(60, rawSize)) : 140;
       return { enabled, url, size };
-    } catch {
-      return { enabled: true, url: '/splash-logo.png', size: 140 };
-    }
+    } catch { return { enabled: true, url: '/splash-logo.png', size: 140 }; }
   });
 
-  // Lazy-load the chosen Google Font on mount AND whenever it changes.
   useEffect(() => {
     if (activeFont.gfontParam) ensureGoogleFontLoaded(activeFont.gfontParam);
   }, [activeFont.gfontParam]);
 
-  const onCompleteRef = useRef(onComplete);
-  const appNameRef = useRef(appName);
-
-  useEffect(() => { onCompleteRef.current = onComplete; }, [onComplete]);
-  useEffect(() => { appNameRef.current = appName; }, [appName]);
-
+  // ── Normal loading progress ────────────────────────────────────────────────
   useEffect(() => {
     const duration = 2000;
     const intervalTime = 50;
     const steps = duration / intervalTime;
-    let currentStep = Math.floor((progress / 100) * steps);
+    let currentStep = 0;
 
     const timer = setInterval(() => {
       currentStep++;
@@ -169,7 +145,6 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
         if (currentProgress >= 30) setStepPhase1(2);
         if (currentProgress >= 40) setStepPhase1(3);
       }
-
       if (currentProgress >= 50) {
         setStepPhase1(-1);
         if (currentProgress >= 50) setStepPhase2(0);
@@ -181,21 +156,19 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
       if (currentStep >= steps) {
         clearInterval(timer);
         try {
-          const utterance = new SpeechSynthesisUtterance('Welcome to ' + appNameRef.current);
+          const utterance = new SpeechSynthesisUtterance('Welcome to ' + appName);
           utterance.lang = 'en-US';
           utterance.rate = 1;
           utterance.pitch = 1;
           window.speechSynthesis.cancel();
           window.speechSynthesis.speak(utterance);
         } catch {}
-        setTimeout(() => {
-          onCompleteRef.current();
-        }, 300);
+        setTimeout(() => onCompleteRef.current(), 300);
       }
     }, intervalTime);
 
     return () => clearInterval(timer);
-  }, []);
+  }, [appName]);
 
   const handleLogoTap = () => {
     if (logoTapped) return;
@@ -205,7 +178,6 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
   };
 
   const t = THEME_STYLES[themeVariant];
-
   const iconColor1 = themeVariant === 'light' ? 'text-blue-500' : 'text-blue-400';
   const iconColor2 = themeVariant === 'light' ? 'text-violet-600' : 'text-purple-400';
   const iconColor3 = themeVariant === 'light' ? 'text-rose-500' : 'text-rose-400';
@@ -217,8 +189,6 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
 
   return (
     <div className={`fixed inset-0 z-[9999] flex flex-col items-center justify-center ${t.bg} ${t.text} overflow-hidden w-full mx-auto`}>
-
-
       {/* Animated background gradient */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none opacity-20">
         <div className={`absolute top-[-10%] left-[-10%] w-[120%] h-[120%] ${
@@ -231,7 +201,6 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
       </div>
 
       <div className="relative z-10 flex flex-col items-center w-full px-8">
-        {/* Logo / App Name — tappable for scale-up animation */}
         <button
           type="button"
           onClick={handleLogoTap}
@@ -239,29 +208,18 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
           style={{ WebkitTapHighlightColor: 'transparent' }}
         >
           {splashLogo.enabled && splashLogo.url ? (
-            // === Image LOGO (admin-controlled, default ON) ===
             <img
               src={splashLogo.url}
               alt={appName}
               draggable={false}
               onError={(e) => {
-                // Agar uploaded logo load nahi hua to default pe wapas chala jaye.
                 const img = e.currentTarget as HTMLImageElement;
-                if (img.src.indexOf('/splash-logo.png') === -1) {
-                  img.src = '/splash-logo.png';
-                }
+                if (img.src.indexOf('/splash-logo.png') === -1) img.src = '/splash-logo.png';
               }}
-              className={`mb-2 mx-auto object-contain transition-transform duration-300 ease-out drop-shadow-xl ${
-                logoTapped ? 'scale-[2.2]' : 'scale-100'
-              }`}
-              style={{
-                width: `${splashLogo.size}px`,
-                height: `${splashLogo.size}px`,
-                maxWidth: '70vw',
-              }}
+              className={`mb-2 mx-auto object-contain transition-transform duration-300 ease-out drop-shadow-xl ${logoTapped ? 'scale-[2.2]' : 'scale-100'}`}
+              style={{ width: `${splashLogo.size}px`, height: `${splashLogo.size}px`, maxWidth: '70vw' }}
             />
           ) : (
-            // === Fallback: gradient short-name text (when admin disables logo) ===
             <h1
               className={`font-black tracking-tight mb-2 uppercase text-center leading-tight transition-transform duration-300 ease-out bg-clip-text text-transparent ${
                 logoTapped ? 'scale-[2.2]' : 'scale-100'
@@ -286,12 +244,10 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
           <p className={`text-xs font-bold tracking-widest ${t.subtext} uppercase mt-2 transition-opacity duration-300 ${logoTapped ? 'opacity-0' : 'opacity-100'}`}>
             Loading your experience...
           </p>
-
         </button>
 
         {/* Feature boxes */}
         <div className="relative w-full h-64 perspective-1000 mb-4">
-          {/* Phase 1 */}
           <div className={`absolute inset-0 grid grid-cols-2 gap-4 w-full transition-all duration-500 ${progress < 50 ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
             <div className={`flex flex-col items-center justify-center p-6 rounded-2xl ${t.boxBg} border ${t.boxBorder} shadow-lg transition-all duration-500 transform ${stepPhase1 >= 0 ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8 scale-95'}`}>
               <BookOpen size={32} className={`${iconColor1} mb-3`} />
@@ -311,7 +267,6 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
             </div>
           </div>
 
-          {/* Phase 2 */}
           <div className={`absolute inset-0 grid grid-cols-2 gap-4 w-full transition-all duration-500 ${progress >= 50 ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
             <div className={`flex flex-col items-center justify-center p-6 rounded-2xl ${t.boxBg} border ${t.boxBorder} shadow-lg transition-all duration-500 transform ${stepPhase2 >= 0 ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8 scale-95'}`}>
               <BrainCircuit size={32} className={`${iconColor5} mb-3`} />
@@ -346,10 +301,14 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
             />
           </div>
           <div className="flex items-center justify-center gap-2 mt-1">
-            <p className={`text-[11px] font-bold ${t.badge} tracking-wide`}>
-              Developed by {developerName}
-            </p>
-            <span className={t.badge}>|</span>
+            {showFooter && (
+              <>
+                <p className={`text-[11px] font-bold ${t.badge} tracking-wide`}>
+                  Developed by {developerName}
+                </p>
+                <span className={t.badge}>|</span>
+              </>
+            )}
             <p className={`text-[11px] ${t.badge} font-mono font-bold tracking-widest`}>
               v{APP_VERSION}
             </p>

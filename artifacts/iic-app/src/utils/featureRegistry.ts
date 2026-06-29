@@ -286,6 +286,15 @@ export const ALL_FEATURES: Feature[] = [
 
     // --- REVISION SUB-FEATURES (Internal to Revision Hub) ---
     {
+        id: 'REVISION_MCQ_MANAGER',
+        label: 'Class MCQ Manager',
+        group: 'REVISION',
+        adminVisible: true,
+        adminTab: 'REVISION_MCQ_MANAGER',
+        icon: 'BookOpenCheck',
+        description: 'Revision Hub ke liye class-wise MCQ add karein (6–12 + Competition).',
+    },
+    {
         id: 'REVISION_AI_PLAN',
         label: 'AI Study Plan',
         group: 'REVISION',
@@ -557,17 +566,6 @@ export const ALL_FEATURES: Feature[] = [
         color: 'cyan'
     },
     {
-        id: 'ADMIN_HOMEWORK',
-        label: 'Homework',
-        group: 'CONTENT',
-        surfaceLevel: 3,
-        adminVisible: true,
-        adminTab: 'HOMEWORK_MANAGER',
-        requiredPermission: 'MANAGE_CONTENT',
-        icon: 'ClipboardList',
-        color: 'indigo'
-    },
-    {
         id: 'ADMIN_BOOK_NOTES',
         label: 'Book Notes',
         group: 'CONTENT',
@@ -588,17 +586,6 @@ export const ALL_FEATURES: Feature[] = [
         requiredPermission: 'MANAGE_CONTENT',
         icon: 'GraduationCap',
         color: 'green'
-    },
-    {
-        id: 'ADMIN_DAILY_GK',
-        label: 'Daily GK',
-        group: 'CONTENT',
-        surfaceLevel: 3,
-        adminVisible: true,
-        adminTab: 'DAILY_GK_MANAGER',
-        requiredPermission: 'MANAGE_CONTENT',
-        icon: 'Book',
-        color: 'teal'
     },
     {
         id: 'ADMIN_TRENDING_NOTES',
@@ -793,17 +780,6 @@ export const ALL_FEATURES: Feature[] = [
         icon: 'Globe',
         color: 'indigo'
     },
-    {
-        id: 'ADMIN_APP_STORE',
-        label: 'App Store Page',
-        group: 'ADVANCED',
-        surfaceLevel: 3,
-        adminVisible: true,
-        adminTab: 'CONFIG_APP_STORE',
-        requiredPermission: 'MANAGE_SETTINGS',
-        icon: 'ShoppingBag',
-        color: 'purple'
-    },
     /* ADMIN_POPUPS / Popup Config — removed (feature deprecated) */
     {
         id: 'ADMIN_CODES',
@@ -815,17 +791,6 @@ export const ALL_FEATURES: Feature[] = [
         requiredPermission: 'MANAGE_GIFT_CODES',
         icon: 'Gift',
         color: 'pink'
-    },
-    {
-        id: 'ADMIN_DEPLOY',
-        label: 'App Update',
-        group: 'ADVANCED',
-        surfaceLevel: 3,
-        adminVisible: true,
-        adminTab: 'DEPLOY',
-        requiresSuperAdmin: true,
-        icon: 'Cloud',
-        color: 'sky'
     },
     {
         id: 'ADMIN_DATABASE',

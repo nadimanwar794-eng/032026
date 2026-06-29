@@ -15,13 +15,13 @@ if (!rawPort && !isBuild) {
   );
 }
 
-const port = Number(rawPort ?? "3000");
+const port = Number(rawPort ?? "8081");
 
 if (!isBuild && (Number.isNaN(port) || port <= 0)) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-const basePath = process.env.BASE_PATH ?? "/";
+const basePath = process.env.BASE_PATH ?? "/__mockup";
 
 export default defineConfig({
   base: basePath,

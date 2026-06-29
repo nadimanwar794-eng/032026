@@ -40,7 +40,7 @@ export interface ReadingScoreState {
   lastScoreEarned: number;        // pts earned in last tick (for popup)
   totalSessionScore: number;
   progressPercent: number;        // net forward progress %
-  mode: 'reading' | 'writing';
+  mode: 'reading' | 'writing' | 'video' | 'audio' | 'pdf';
   isWindowClosed: boolean;        // max window reached
   // Touch Protection (manual tap anti-abuse)
   touchProtectionActive: boolean; // true while 10-sec countdown is running
@@ -53,15 +53,21 @@ export interface ReadingScoreConfig {
   subscriptionLevel?: string;
   isPremium?: boolean;
   boostPercent?: number;
-  mode?: 'reading' | 'writing';
+  mode?: 'reading' | 'writing' | 'video' | 'audio' | 'pdf';
   /** Called whenever score is earned. Parent should update totalScore in Firebase. */
   onScoreEarned?: (pts: number, activity: string) => void;
 }
 
 const READING_INTERVAL_SEC = 30;       // reward every 30s
 const WRITING_INTERVAL_SEC = 300;      // reward every 5 min (300s)
+const VIDEO_INTERVAL_SEC   = 30;       // reward every 30s (same as reading)
+const AUDIO_INTERVAL_SEC   = 30;       // reward every 30s (same as reading)
+const PDF_INTERVAL_SEC     = 30;       // reward every 30s (same as reading)
 const READING_REWARD_BASE = 5;         // +5 base per interval
 const WRITING_REWARD_BASE = 25;        // +25 base per 5 min
+const VIDEO_REWARD_BASE   = 8;         // +8 base per 60s watch
+const AUDIO_REWARD_BASE   = 6;         // +6 base per 60s listen
+const PDF_REWARD_BASE     = 5;         // +5 base per 60s read
 const TTS_HIGHLIGHT_REWARD = 1;        // +1 per TTS topic read
 const VALIDATION_INTERVAL_SEC = 120;   // check progress every 2 min
 const MIN_PROGRESS_PCT = 10;           // 10% net forward required per 2 min
@@ -90,7 +96,7 @@ export class ReadingScoreSession {
   private lastScoreEarned = 0;
   private sessionElapsedSec = 0;
   private isWindowClosed = false;
-  private mode: 'reading' | 'writing';
+  private mode: 'reading' | 'writing' | 'video' | 'audio' | 'pdf';
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private onStateChange?: (state: ReadingScoreState) => void;
   private currentProgress = 0;
@@ -250,7 +256,12 @@ export class ReadingScoreSession {
   }
 
   getState(): ReadingScoreState {
-    const intervalSec = this.mode === 'reading' ? READING_INTERVAL_SEC : WRITING_INTERVAL_SEC;
+    const intervalSec =
+      this.mode === 'reading' ? READING_INTERVAL_SEC :
+      this.mode === 'writing' ? WRITING_INTERVAL_SEC :
+      this.mode === 'video'   ? VIDEO_INTERVAL_SEC   :
+      this.mode === 'audio'   ? AUDIO_INTERVAL_SEC   :
+      PDF_INTERVAL_SEC;
     const now = Date.now();
     const elapsed = this.intervalId ? (now - this.lastRewardTime) / 1000 : 0;
     const nextRewardInSec = Math.max(0, Math.ceil(intervalSec - elapsed));
@@ -292,48 +303,69 @@ export class ReadingScoreSession {
       return;
     }
 
-    // Validation check every 2 min
-    const secSinceValidation = (Date.now() - this.lastValidationTime) / 1000;
-    if (secSinceValidation >= VALIDATION_INTERVAL_SEC) {
-      const netProgress = this.maxProgressReached - this.lastValidationProgress;
-      const minRequired = this.mode === 'reading' ? MIN_PROGRESS_PCT : WRITING_MIN_PROGRESS_PCT;
-      const validProgress = netProgress >= minRequired || this.ttsProgressSinceValidation;
-
-      if (!validProgress) {
-        this.noProgressSec += Math.round(secSinceValidation);
-      } else {
-        this.noProgressSec = 0;
-        this.warningLevel = 0;
-      }
-
-      this.lastValidationProgress = this.maxProgressReached;
-      this.lastValidationTime = Date.now();
-      this.ttsProgressSinceValidation = false;
-    }
-
-    // Warning / pause logic
-    if (this.noProgressSec >= PAUSE_THRESHOLD_SEC) {
-      this.warningLevel = 3;
-      this.isPaused = true;
-    } else if (this.noProgressSec >= WARN2_THRESHOLD_SEC) {
-      this.warningLevel = 2;
-      this.isPaused = false;
-    } else if (this.noProgressSec >= WARN1_THRESHOLD_SEC) {
-      this.warningLevel = 1;
-      this.isPaused = false;
-    } else {
+    // Video/Audio/PDF: no scroll validation — always active, never pause
+    if (this.mode === 'video' || this.mode === 'audio' || this.mode === 'pdf') {
       this.warningLevel = 0;
       this.isPaused = false;
+    } else {
+      // Validation check every 2 min (reading / writing only)
+      const secSinceValidation = (Date.now() - this.lastValidationTime) / 1000;
+      if (secSinceValidation >= VALIDATION_INTERVAL_SEC) {
+        const netProgress = this.maxProgressReached - this.lastValidationProgress;
+        const minRequired = this.mode === 'reading' ? MIN_PROGRESS_PCT : WRITING_MIN_PROGRESS_PCT;
+        const validProgress = netProgress >= minRequired || this.ttsProgressSinceValidation;
+
+        if (!validProgress) {
+          this.noProgressSec += Math.round(secSinceValidation);
+        } else {
+          this.noProgressSec = 0;
+          this.warningLevel = 0;
+        }
+
+        this.lastValidationProgress = this.maxProgressReached;
+        this.lastValidationTime = Date.now();
+        this.ttsProgressSinceValidation = false;
+      }
+
+      // Warning / pause logic
+      if (this.noProgressSec >= PAUSE_THRESHOLD_SEC) {
+        this.warningLevel = 3;
+        this.isPaused = true;
+      } else if (this.noProgressSec >= WARN2_THRESHOLD_SEC) {
+        this.warningLevel = 2;
+        this.isPaused = false;
+      } else if (this.noProgressSec >= WARN1_THRESHOLD_SEC) {
+        this.warningLevel = 1;
+        this.isPaused = false;
+      } else {
+        this.warningLevel = 0;
+        this.isPaused = false;
+      }
     }
 
     // Award score on interval (if not paused / window closed)
     if (!this.isPaused && !this.isWindowClosed) {
-      const intervalSec = this.mode === 'reading' ? READING_INTERVAL_SEC : WRITING_INTERVAL_SEC;
+      const intervalSec =
+        this.mode === 'reading' ? READING_INTERVAL_SEC :
+        this.mode === 'writing' ? WRITING_INTERVAL_SEC :
+        this.mode === 'video'   ? VIDEO_INTERVAL_SEC   :
+        this.mode === 'audio'   ? AUDIO_INTERVAL_SEC   :
+        PDF_INTERVAL_SEC;
       const elapsed = (Date.now() - this.lastRewardTime) / 1000;
       if (elapsed >= intervalSec) {
         this.lastRewardTime = Date.now();
-        const baseScore = this.mode === 'reading' ? READING_REWARD_BASE : WRITING_REWARD_BASE;
-        const activity = this.mode === 'reading' ? 'READ_ACTIVE_30S' : 'WRITE_ACTIVE_5MIN';
+        const baseScore =
+          this.mode === 'reading' ? READING_REWARD_BASE :
+          this.mode === 'writing' ? WRITING_REWARD_BASE :
+          this.mode === 'video'   ? VIDEO_REWARD_BASE   :
+          this.mode === 'audio'   ? AUDIO_REWARD_BASE   :
+          PDF_REWARD_BASE;
+        const activity =
+          this.mode === 'reading' ? 'READ_ACTIVE_30S'    :
+          this.mode === 'writing' ? 'WRITE_ACTIVE_5MIN'  :
+          this.mode === 'video'   ? 'VIDEO_WATCH_60S'    :
+          this.mode === 'audio'   ? 'AUDIO_LISTEN_60S'   :
+          'PDF_READ_60S';
         const pts = tryEarnScore(
           this.config.userId,
           baseScore,

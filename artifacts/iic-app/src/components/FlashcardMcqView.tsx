@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { ArrowLeft, ChevronRight, RotateCw, Volume2, Square, Shuffle } from 'lucide-react';
+import { ArrowLeft, ChevronRight, RotateCw, Volume2, Square, Shuffle, Lightbulb, Edit2, X, MoreVertical, RefreshCw, BookOpen } from 'lucide-react';
 import type { MCQItem } from '../types';
 import type { User, SystemSettings } from '../types';
 import { speakText, stopSpeech } from '../utils/textToSpeech';
@@ -7,7 +7,7 @@ import { recordFlashcardSession } from '../utils/flashcardHistory';
 import { getLevelFromScore, getEffectiveDailyLimit } from '../utils/levelSystem';
 import { getUserTier } from '../utils/permissionUtils';
 import { applyDeduction } from '../utils/creditSystem';
-import { saveUserToLive } from '../firebase';
+import { saveUserToLive, saveSuggestion } from '../firebase';
 import { fireCreditNotify } from '../utils/creditNotify';
 import { useAppTheme } from '../utils/themeContext';
 
@@ -20,6 +20,10 @@ interface Props {
   user?: User;
   settings?: SystemSettings | null;
   onUpdateUser?: (u: User) => void;
+  sourceMeta?: { lessonTitle?: string; subject?: string; classLevel?: string; };
+  /** Firebase key for the source entry — used to link MCQ correction suggestions back to the right entry.
+   *  Format: "lucent_ENTRYID_pPAGEINDEX" or "hw_ENTRYID" */
+  sourceKey?: string;
 }
 
 const CREDIT_COST = 5;
@@ -47,7 +51,7 @@ const addTodayCount = (userId: string, n: number) => {
 };
 
 export const FlashcardMcqView: React.FC<Props> = ({
-  questions, title, subtitle, subject, onBack, user, settings, onUpdateUser
+  questions, title, subtitle, subject, onBack, user, settings, onUpdateUser, sourceMeta, sourceKey
 }) => {
   const isMountedRef = useRef(true);
   const [pickedIndices, setPickedIndices] = useState<number[]>([]);
@@ -58,6 +62,11 @@ export const FlashcardMcqView: React.FC<Props> = ({
 
   // Confidence level per card position
   const [confidenceMap, setConfidenceMap] = useState<Record<number, 'easy'|'medium'|'hard'>>({});
+  // Suggestion / correction panel
+  const [showSuggestion, setShowSuggestion] = useState(false);
+  const [suggestionNote, setSuggestionNote] = useState('');
+  const [suggestionSaved, setSuggestionSaved] = useState(false);
+  const [showTopMenu, setShowTopMenu] = useState(false);
   // Hard-card review queue (stores positions from main session)
   const [hardQueue, setHardQueue] = useState<number[]>([]);
   const hardQueueRef = useRef<number[]>([]);
@@ -294,23 +303,23 @@ export const FlashcardMcqView: React.FC<Props> = ({
         </div>
         <div className="flex-1 flex flex-col items-center justify-center text-center px-8">
           <div className="text-5xl mb-4">⚡</div>
-          <p className="text-white font-black text-xl mb-2">Daily Limit Khatam!</p>
+          <p className="text-white font-black text-xl mb-2">Daily Limit Reached!</p>
           <p className="text-white/70 text-sm mb-2">
-            Aaj ke <span className="font-black text-white">{dailyLimit}</span> free flashcard ho gaye.
+            You've used today's <span className="font-black text-white">{dailyLimit}</span> free flashcards.
           </p>
-          <p className="text-white/50 text-xs mb-8">Kal reset hoga ya credits se continue karo.</p>
+          <p className="text-white/50 text-xs mb-8">Resets tomorrow or continue with credits.</p>
           {canPay ? (
             <button
               onClick={payAndContinue}
               className="bg-white font-black px-8 py-3.5 rounded-2xl text-sm shadow-xl active:scale-95 transition mb-3"
               style={{ color: fcBg2 }}
             >
-              🪙 {CREDIT_COST} Credits se Continue Karo
+              🪙 Continue with {CREDIT_COST} Credits
             </button>
           ) : user?.subscriptionLevel ? (
-            <p className="text-amber-300 text-sm font-bold">Balance kam hai ({user?.credits ?? 0} CR). Credits earn karo!</p>
+            <p className="text-amber-300 text-sm font-bold">Low balance ({user?.credits ?? 0} CR). Earn more credits!</p>
           ) : (
-            <p className="text-amber-300 text-sm font-bold">Plan upgrade karo ya kal vapas aao!</p>
+            <p className="text-amber-300 text-sm font-bold">Upgrade your plan or come back tomorrow!</p>
           )}
           <p className="text-white/30 text-xs mt-4">Balance: {user?.credits ?? 0} CR</p>
         </div>
@@ -326,8 +335,8 @@ export const FlashcardMcqView: React.FC<Props> = ({
           <h2 className="text-base font-black text-white">Flashcards</h2>
         </div>
         <div className="flex-1 flex flex-col items-center justify-center text-center px-6">
-          <p className="text-white font-black">Koi MCQ available nahi hai</p>
-          <p className="text-white/50 text-xs mt-2">Pehle is chapter ka content load karein.</p>
+          <p className="text-white font-black">No MCQs available</p>
+          <p className="text-white/50 text-xs mt-2">Load this chapter's content first.</p>
         </div>
       </div>
     );
@@ -338,7 +347,7 @@ export const FlashcardMcqView: React.FC<Props> = ({
   return (
     <div className="fixed inset-0 z-[200] flex flex-col h-[100dvh]" style={tierBgStyle}>
       {/* Top Bar */}
-      <div className="sticky top-0 z-10 px-4 py-3 flex items-center gap-3">
+      <div className="shrink-0 px-4 py-3 flex items-center gap-3">
         <button
           onClick={onBack}
           className="bg-white/10 hover:bg-white/20 text-white p-2 rounded-full active:scale-95 transition"
@@ -371,15 +380,60 @@ export const FlashcardMcqView: React.FC<Props> = ({
             {getTodayCount(userId)}/{isAdmin ? '∞' : dailyLimit}
           </span>
         </div>
-        {!hardReviewMode && (
+        {/* 💡 Suggestions button — directly in top bar */}
+        <button
+          onClick={() => { setFlipped(true); setShowSuggestion(true); setSuggestionNote(''); setSuggestionSaved(false); }}
+          className={`shrink-0 p-2 rounded-full active:scale-95 transition ${showSuggestion ? 'bg-amber-400 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}
+          title="Suggestions & Corrections"
+        >
+          <Lightbulb size={16} />
+        </button>
+        {/* 3-dot menu */}
+        <div className="relative shrink-0">
           <button
-            onClick={reshuffle}
-            className="bg-white/10 hover:bg-white/20 text-white p-2 rounded-full active:scale-95 transition shrink-0"
-            title="Naye cards"
+            onClick={() => setShowTopMenu(v => !v)}
+            className="bg-white/10 hover:bg-white/20 text-white p-2 rounded-full active:scale-95 transition"
+            title="More"
           >
-            <Shuffle size={15} />
+            <MoreVertical size={16} />
           </button>
-        )}
+          {showTopMenu && (
+            <>
+              {/* Backdrop */}
+              <div className="fixed inset-0 z-[300]" onClick={() => setShowTopMenu(false)} />
+              <div className="absolute right-0 top-10 z-[301] bg-white rounded-2xl shadow-2xl border border-slate-100 py-1.5 w-52 overflow-hidden">
+                {/* Reshuffle — only in normal mode */}
+                {!hardReviewMode && (
+                  <button
+                    onClick={() => { setShowTopMenu(false); reshuffle(); }}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors font-semibold"
+                  >
+                    <Shuffle size={15} className="text-indigo-500 shrink-0" />
+                    Cards Shuffle karo
+                  </button>
+                )}
+                {/* Restart from beginning */}
+                <button
+                  onClick={() => { setShowTopMenu(false); setPos(0); setFlipped(false); setHardReviewMode(false); setHardReviewPos(0); }}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors font-semibold"
+                >
+                  <RefreshCw size={15} className="text-slate-500 shrink-0" />
+                  Shuru se dekho
+                </button>
+                {/* Hard review toggle */}
+                {hardQueueRef.current.length > 0 && (
+                  <button
+                    onClick={() => { setShowTopMenu(false); setHardReviewMode(v => !v); setHardReviewPos(0); setFlipped(false); }}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold transition-colors text-red-600 hover:bg-red-50"
+                  >
+                    <BookOpen size={15} className="text-red-500 shrink-0" />
+                    {hardReviewMode ? 'Normal mode mein jao' : `Hard Cards (${hardQueueRef.current.length}) dekho`}
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Progress */}
@@ -473,16 +527,112 @@ export const FlashcardMcqView: React.FC<Props> = ({
             >
               <div className="flex items-center justify-between mb-3">
                 <span className="bg-emerald-100 text-emerald-700 text-[10px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider">
-                  Sahi Jawab
+                  Correct Answer
                 </span>
-                <button
-                  type="button"
-                  onClick={() => { setFlipped(false); stopSpeech(); setSpeaking(false); }}
-                  className="bg-white border border-slate-200 text-slate-600 text-[10px] font-black px-2.5 py-1.5 rounded-lg active:scale-95"
-                >
-                  ← Question
-                </button>
+                <div className="flex items-center gap-1.5">
+                  {/* 💡 Suggestion button */}
+                  <button
+                    type="button"
+                    onClick={() => { setShowSuggestion(s => !s); setSuggestionNote(''); setSuggestionSaved(false); }}
+                    className={`p-1.5 rounded-lg border transition active:scale-95 ${showSuggestion ? 'bg-amber-500 border-amber-500 text-white' : 'bg-amber-50 border-amber-200 text-amber-500'}`}
+                    title="Suggestion — MCQ improve karein"
+                  >
+                    <Lightbulb size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setFlipped(false); stopSpeech(); setSpeaking(false); }}
+                    className="bg-white border border-slate-200 text-slate-600 text-[10px] font-black px-2.5 py-1.5 rounded-lg active:scale-95"
+                  >
+                    ← Question
+                  </button>
+                </div>
               </div>
+
+              {/* 💡 Suggestion Panel */}
+              {showSuggestion && (
+                <div className="mb-3 bg-amber-50 border-2 border-amber-300 rounded-2xl p-3 space-y-2 animate-in fade-in">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <Lightbulb size={13} className="text-amber-600" />
+                      <span className="text-[10px] font-black text-amber-800 uppercase tracking-wider">Suggestion Mode</span>
+                    </div>
+                    <button type="button" onClick={() => setShowSuggestion(false)} className="w-5 h-5 rounded-full bg-amber-200 text-amber-700 flex items-center justify-center text-[10px] font-black active:scale-90">✕</button>
+                  </div>
+                  {/* Current MCQ context */}
+                  <div className="bg-white rounded-xl p-2.5 border border-amber-200">
+                    <p className="text-[9px] font-black text-amber-700 uppercase mb-1">Yeh MCQ:</p>
+                    <p className="text-[10px] text-slate-700 font-bold leading-snug mb-1">{activeQ!.question}</p>
+                    <p className="text-[9px] text-emerald-700 font-black">Answer: {activeQ!.options?.[activeQ!.correctAnswer] || '—'}</p>
+                  </div>
+                  {/* Self-test questions for MCQ */}
+                  <div className="space-y-1.5">
+                    <p className="text-[9px] font-black text-amber-700 uppercase">🧠 MCQ Self-Check:</p>
+                    {[
+                      'Kya yeh answer 100% sahi hai? Apni book se verify karo.',
+                      'Agar yeh answer galat laga to admin ko flag karo.',
+                      'Is topic se related aur kaunse questions ho sakte hain?',
+                    ].map((q, qi) => (
+                      <div key={qi} className="flex items-start gap-1.5 bg-white/70 rounded-lg p-1.5 border border-amber-100">
+                        <span className="text-[9px] font-black text-amber-600 shrink-0 mt-0.5">Q{qi+1}</span>
+                        <p className="text-[9px] text-amber-800 leading-tight">{q}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Flag wrong answer */}
+                  {suggestionSaved ? (
+                    <div className="bg-emerald-100 border border-emerald-300 rounded-xl p-2 text-center">
+                      <p className="text-[10px] font-black text-emerald-700">✅ Suggestion save ho gaya! Admin review karega.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <p className="text-[9px] font-black text-red-600 uppercase">⚠️ Answer galat lagta hai? Suggestion do:</p>
+                      <textarea
+                        value={suggestionNote}
+                        onChange={e => setSuggestionNote(e.target.value)}
+                        placeholder="Sahi answer kya hona chahiye? Ya koi correction..."
+                        className="w-full p-2 border border-red-200 rounded-xl text-[10px] outline-none min-h-[50px] resize-none focus:border-red-400 bg-white"
+                      />
+                      <button
+                        type="button"
+                        disabled={!suggestionNote.trim()}
+                        onClick={async () => {
+                          if (!suggestionNote.trim()) return;
+                          const key = 'nst_mcq_suggestions';
+                          try {
+                            const existing = JSON.parse(localStorage.getItem(key) || '[]');
+                            existing.unshift({ question: activeQ!.question, currentAnswer: activeQ!.options?.[activeQ!.correctAnswer], suggestion: suggestionNote.trim(), savedAt: new Date().toISOString() });
+                            localStorage.setItem(key, JSON.stringify(existing.slice(0, 50)));
+                          } catch {}
+                          try {
+                            await saveSuggestion({
+                              id: `mcq_${Date.now()}`,
+                              text: `MCQ: "${stripHtml(activeQ!.question).substring(0, 100)}" | Sahi Jawab: ${activeQ!.options?.[activeQ!.correctAnswer] || '—'} | Correction: ${suggestionNote.trim()}`,
+                              uid: user?.id || 'anonymous',
+                              userName: user?.name || user?.email?.split('@')[0] || 'Student',
+                              userBoard: (user as any)?.board || '',
+                              createdAt: new Date().toISOString(),
+                              mode: 'mcq',
+                              lessonTitle: sourceMeta?.lessonTitle || title,
+                              subject: sourceMeta?.subject || subject,
+                              classLevel: sourceMeta?.classLevel,
+                              chapterKey: sourceKey || '',
+                              mcqId: (activeQ as any)?.id || '',
+                              mcqQuestion: stripHtml(activeQ!.question).substring(0, 200),
+                              mcqOptions: activeQ!.options || [],
+                              mcqCurrentAnswer: activeQ!.correctAnswer ?? -1,
+                            });
+                          } catch {}
+                          setSuggestionSaved(true);
+                        }}
+                        className="w-full py-2 bg-red-500 text-white rounded-xl text-[10px] font-black flex items-center justify-center gap-1.5 active:scale-95 transition disabled:opacity-40"
+                      >
+                        <Edit2 size={11} /> Flag as Incorrect & Save Suggestion
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="bg-white border-2 border-emerald-300 rounded-2xl p-4 mb-3">
                 <p className="text-base font-black text-emerald-900 leading-snug">
@@ -519,7 +669,7 @@ export const FlashcardMcqView: React.FC<Props> = ({
               {!hardReviewMode && (
                 <div className="mt-3 pt-3 border-t border-emerald-200">
                   <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider mb-2 text-center">
-                    Yeh card kitna mushkil laga?
+                    How difficult was this card?
                   </p>
                   {confidenceMap[pos] ? (
                     <div className={`text-center py-2 rounded-xl font-black text-sm ${
@@ -527,9 +677,9 @@ export const FlashcardMcqView: React.FC<Props> = ({
                       confidenceMap[pos] === 'medium' ? 'bg-amber-100 text-amber-700' :
                       'bg-red-100 text-red-700'
                     }`}>
-                      {confidenceMap[pos] === 'easy' ? '✅ Easy — Aage badh rahe hain!' :
-                       confidenceMap[pos] === 'medium' ? '🟡 Medium — Thoda aur practice karo' :
-                       '🔴 Hard — Baad mein dobara aayega!'}
+                      {confidenceMap[pos] === 'easy' ? '✅ Easy — Moving forward!' :
+                       confidenceMap[pos] === 'medium' ? '🟡 Medium — Practice a bit more' :
+                       '🔴 Hard — Will come back later!'}
                     </div>
                   ) : (
                     <div className="grid grid-cols-3 gap-2">

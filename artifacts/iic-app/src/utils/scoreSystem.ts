@@ -1,28 +1,32 @@
 /**
  * Score System — daily limits, subscription multipliers, activity milestones
- * Daily score limit: 1500 pts (Free) / 2500 pts (Basic) / 3500 pts (Ultra)
+ * Daily score limit: 5000 pts (Free) / 7000 pts (Basic) / 10000 pts (Ultra)
  * Milestones: 20%=5, 40%=10, 60%=15, 80%=20, 100%=25 base pts
  * Multipliers: Free=1x, Basic=1.2x (+20%), Ultra=1.5x (+50%)
  */
 
-export const DAILY_SCORE_LIMIT = 1500;
+export const DAILY_SCORE_LIMIT = 5000;
 
-/** Fixed daily score limits by tier (Free=1500, Basic=2500, Ultra=3500) */
+/** Fixed daily score limits by tier (Free=5000, Basic=7000, Ultra=10000) */
 const DAILY_TIER_LIMITS: Record<string, number> = {
-  FREE:  1500,
-  BASIC: 2500,
-  ULTRA: 3500,
+  FREE:  5000,
+  BASIC: 7000,
+  ULTRA: 10000,
 };
 
-/** Dynamic daily score limit based on subscription + optional permanent limit boost */
+/** Dynamic daily score limit based on subscription + optional temporary limit boost (from redeem code or event) */
 export const getDailyScoreLimit = (
   subscriptionLevel?: string,
   isPremium?: boolean,
   scoreLimitBoostPercent?: number,
+  scoreLimitBoostExpiry?: string,
 ): number => {
-  const base = isPremium ? (DAILY_TIER_LIMITS[subscriptionLevel ?? 'FREE'] ?? 1500) : 1500;
-  if (scoreLimitBoostPercent && scoreLimitBoostPercent > 0) {
-    return Math.round(base * (1 + scoreLimitBoostPercent / 100));
+  const base = isPremium ? (DAILY_TIER_LIMITS[subscriptionLevel ?? 'FREE'] ?? 5000) : 5000;
+  // Only apply boost if it hasn't expired
+  const boostActive = scoreLimitBoostPercent && scoreLimitBoostPercent > 0
+    && (!scoreLimitBoostExpiry || new Date(scoreLimitBoostExpiry).getTime() > Date.now());
+  if (boostActive) {
+    return Math.round(base * (1 + scoreLimitBoostPercent! / 100));
   }
   return base;
 };
@@ -64,15 +68,32 @@ export const getRemainingDailyScore = (
   subscriptionLevel?: string,
   isPremium?: boolean,
   scoreLimitBoostPercent?: number,
+  scoreLimitBoostExpiry?: string,
 ): number =>
-  Math.max(0, getDailyScoreLimit(subscriptionLevel, isPremium, scoreLimitBoostPercent) - getDailyScoreEarned(userId));
+  Math.max(0, getDailyScoreLimit(subscriptionLevel, isPremium, scoreLimitBoostPercent, scoreLimitBoostExpiry) - getDailyScoreEarned(userId));
 
 /** Get active score boost % for a user (returns 0 if expired or not set) */
-export const getActiveBoost = (user: { scoreBoostPercent?: number; scoreBoostExpiry?: string }): number => {
-  if (!user.scoreBoostPercent || !user.scoreBoostExpiry) return 0;
+export const getActiveBoost = (user: { scoreBoostPercent?: number; scoreBoostExpiry?: string } | null | undefined): number => {
+  if (!user || !user.scoreBoostPercent || !user.scoreBoostExpiry) return 0;
   if (new Date(user.scoreBoostExpiry).getTime() <= Date.now()) return 0;
   return user.scoreBoostPercent;
 };
+
+/** Get active Score Boost Event percent from admin settings (0 if expired/disabled) */
+export const getEventBoostPercent = (settings: any): number => {
+  const sbe = settings?.scoreBoostEvent;
+  if (!sbe?.enabled || !sbe?.boostPercent) return 0;
+  const now = Date.now();
+  if (sbe.startsAt && new Date(sbe.startsAt).getTime() > now) return 0;
+  if (sbe.endsAt && new Date(sbe.endsAt).getTime() <= now) return 0;
+  return sbe.boostPercent as number;
+};
+
+/** Get combined boost: user's personal boost (redeem code) + active Score Boost Event */
+export const getCombinedBoost = (
+  user: { scoreBoostPercent?: number; scoreBoostExpiry?: string } | null | undefined,
+  settings?: any,
+): number => getActiveBoost(user) + getEventBoostPercent(settings);
 
 /** Calculate final score with multiplier + booster */
 export const calculateScore = (
@@ -97,8 +118,8 @@ export interface ScoreLogEntry {
 }
 
 const SCORE_LOG_KEY = (uid: string) => `nst_score_log_${uid}`;
-const MAX_LOG = 600;
-const RETENTION_DAYS = 14;
+const MAX_LOG = 900;
+const RETENTION_DAYS = 30;
 
 export const getScoreLog = (userId: string): ScoreLogEntry[] => {
   try { return JSON.parse(localStorage.getItem(SCORE_LOG_KEY(userId)) || '[]'); } catch { return []; }
@@ -108,14 +129,15 @@ export const logScoreActivity = (userId: string, activity: string, pts: number):
   if (pts <= 0) return;
   try {
     const log = getScoreLog(userId);
-    // Use local timezone date so midnight IST = new day (not 5:30 AM IST)
     log.push({ date: getLocalDateStr(), ts: Date.now(), activity, pts });
-    // Prune entries older than 14 days — auto-delete after retention period
     const cutoff = getLocalDateStr(-RETENTION_DAYS);
     const pruned = log.filter(e => e.date >= cutoff);
-    // Also cap total entries as safety
     if (pruned.length > MAX_LOG) pruned.splice(0, pruned.length - MAX_LOG);
     localStorage.setItem(SCORE_LOG_KEY(userId), JSON.stringify(pruned));
+    // Fire-and-forget Firebase sync so history persists across devices/browser clears
+    import('../firebase').then(({ saveScoreLogToFirebase }) => {
+      saveScoreLogToFirebase(userId, pruned).catch(() => {});
+    }).catch(() => {});
   } catch {}
 };
 
@@ -130,18 +152,28 @@ export const tryEarnScore = (
   isPremium: boolean | undefined,
   boostPercent = 0,
   activity?: string,
+  scoreLimitBoostPercent?: number,
+  scoreLimitBoostExpiry?: string,
 ): number => {
-  const remaining = getRemainingDailyScore(userId, subscriptionLevel, isPremium);
-  if (remaining <= 0) return 0;
+  const remaining = getRemainingDailyScore(userId, subscriptionLevel, isPremium, scoreLimitBoostPercent, scoreLimitBoostExpiry);
   const calc = calculateScore(baseScore, subscriptionLevel, isPremium, boostPercent);
-  const actual = Math.min(calc, remaining);
-  try {
-    const key = getTodayKey(userId);
-    const current = getDailyScoreEarned(userId);
-    localStorage.setItem(key, String(current + actual));
-  } catch {}
-  if (actual > 0 && activity) logScoreActivity(userId, activity, actual);
-  return actual;
+
+  if (remaining > 0) {
+    // Within daily limit — earn normally (capped at remaining)
+    const actual = Math.min(calc, remaining);
+    try {
+      const key = getTodayKey(userId);
+      const current = getDailyScoreEarned(userId);
+      localStorage.setItem(key, String(current + actual));
+    } catch {}
+    if (actual > 0 && activity) logScoreActivity(userId, activity, actual);
+    return actual;
+  } else {
+    // Over daily limit — earn at 0.5x rate (does not count against daily tracker)
+    const overLimitScore = Math.max(1, Math.round(calc * 0.5));
+    if (overLimitScore > 0 && activity) logScoreActivity(userId, `${activity}_OVERLIMIT`, overLimitScore);
+    return overLimitScore;
+  }
 };
 
 /**

@@ -8,7 +8,8 @@ import {
   Package, Wallet, X
 } from 'lucide-react';
 import { saveUserToLive } from '../firebase';
-import { getLevelInfo, getScoreDiscountFromScore, getNextLevelInfo, getLevelProgress } from '../utils/levelSystem';
+import { getLevelInfo, getScoreDiscountFromScore, getNextLevelInfo, getLevelProgress, getLevelDailyLimitsWithOverride, UNLIMITED } from '../utils/levelSystem';
+import { SCORE_MULTIPLIERS, getDailyScoreLimit } from '../utils/scoreSystem';
 import { addSubscription } from '../utils/subscriptionUtils';
 import { recordCreditTx } from '../utils/creditHistory';
 
@@ -826,278 +827,349 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, renderEar
               </div>
             ) : (
               <>
-                {/* ── Features card (redesigned) ── */}
-                <div className="mb-5 rounded-3xl relative overflow-hidden"
-                  style={{ background: ac.bg, border: `2px solid ${ac.border}`, boxShadow: `0 0 32px ${ac.glow}` }}>
-                  {/* Top gradient stripe */}
-                  <div className="h-1 w-full" style={{ background: ac.grad }} />
-                  {/* Glow blob */}
-                  <div className="absolute -top-12 -right-12 w-40 h-40 rounded-full pointer-events-none"
-                    style={{ background: ac.glow, filter: 'blur(40px)', opacity: 0.6 }} />
+                {/* ── FF MAX Style Plan Card ── */}
+                {(() => {
+                  const levelInfo = getLevelInfo(user.totalScore || 0);
+                  const subActive = user.isPremium && user.subscriptionEndDate && new Date(user.subscriptionEndDate) > new Date();
+                  const daysLeft = subActive && user.subscriptionEndDate
+                    ? Math.max(0, Math.ceil((new Date(user.subscriptionEndDate).getTime() - Date.now()) / 86400000))
+                    : 0;
+                  const fmtTimer = (t) => t
+                    ? `${t.days > 0 ? t.days + 'd ' : ''}${String(t.hours).padStart(2,'0')}:${String(t.minutes).padStart(2,'0')}:${String(t.seconds).padStart(2,'0')}`
+                    : '...';
+                  const score = user.totalScore || 0;
+                  const nextLvl = getNextLevelInfo(score);
+                  const lvlProgress = getLevelProgress(score);
+                  const ptsNeeded = nextLvl ? nextLvl.minScore - score : 0;
 
-                  <div className="relative">
-                    {/* Header */}
-                    <div className="flex items-center justify-between px-5 pt-4 pb-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-11 h-11 rounded-2xl flex items-center justify-center text-2xl shrink-0"
-                          style={{ background: ac.pill, border: `1.5px solid ${ac.border}` }}>
-                          {ac.emoji}
-                        </div>
-                        <span className="text-2xl font-black tracking-tight leading-none" style={{ color: ac.color }}>
-                          {isPro ? 'PRO' : 'MAX'}
-                        </span>
-                      </div>
-                      {isSubscribed && (
-                        <span className="text-[10px] font-black px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 shrink-0"
-                          style={{ background: C.greenBg, color: C.green, border: `1px solid ${C.greenBorder}` }}>
-                          <BadgeCheck size={11} /> Active
-                        </span>
-                      )}
-                    </div>
+                  const ffGold = '#FFD700';
+                  const ffGoldDim = 'rgba(255,215,0,0.65)';
+                  const ffCardBg = '#0c0d10';
+                  const ffBorder = isPro ? '#22d3ee' : '#c084fc';
+                  const ffStripe = isPro ? 'rgba(34,211,238,0.18)' : 'rgba(192,132,252,0.18)';
 
-                    {/* Feature list */}
-                    <div className="px-5 pb-4 grid grid-cols-2 gap-x-3 gap-y-2">
-                      {featuresList.map((f, i) => (
-                        <div key={i} className="flex items-center gap-2">
-                          <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0"
-                            style={{ background: ac.pill, border: `1px solid ${ac.border}` }}>
-                            <Check size={10} color={ac.color} strokeWidth={3.5} />
-                          </div>
-                          <span className="text-[11px] font-semibold leading-tight" style={{ color: C.textMuted }}>{f}</span>
-                        </div>
-                      ))}
-                    </div>
+                  return (
+                    <>
+                      <style>{`
+                        @keyframes shimmer-gold {
+                          0%   { background-position: -300% center; }
+                          100% { background-position: 300% center; }
+                        }
+                        .renewal-shimmer {
+                          background: linear-gradient(90deg,#f59e0b 0%,#fcd34d 30%,#fffbeb 50%,#fcd34d 70%,#f59e0b 100%);
+                          background-size: 300% auto;
+                          -webkit-background-clip: text;
+                          background-clip: text;
+                          -webkit-text-fill-color: transparent;
+                          animation: shimmer-gold 2.2s linear infinite;
+                        }
+                        @keyframes pulse-dot {
+                          0%,100%{opacity:1;transform:scale(1);}
+                          50%{opacity:0.4;transform:scale(0.7);}
+                        }
+                        .timer-dot{animation:pulse-dot 1s ease-in-out infinite;}
+                        @keyframes ff-scan {
+                          0%{transform:translateX(-100%);}
+                          100%{transform:translateX(400%);}
+                        }
+                        .ff-scan-line{animation:ff-scan 3s linear infinite;}
+                      `}</style>
 
-                    {/* ── Compact benefit info card ── */}
-                    {(() => {
-                      const levelInfo = getLevelInfo(user.totalScore || 0);
-                      const subActive = user.isPremium && user.subscriptionEndDate && new Date(user.subscriptionEndDate) > new Date();
-                      const daysLeft = subActive && user.subscriptionEndDate
-                        ? Math.max(0, Math.ceil((new Date(user.subscriptionEndDate).getTime() - Date.now()) / 86400000))
-                        : 0;
+                      {/* ── MAIN CARD ── */}
+                      <div className="mb-5 rounded-2xl overflow-hidden relative"
+                        style={{ background: ffCardBg, border: `2px solid ${ffBorder}`, boxShadow: `0 0 0 1px rgba(0,0,0,0.6), 0 8px 32px rgba(0,0,0,0.6), 0 0 24px ${ffStripe}` }}>
 
-                      const fmtTimer = (t) => t
-                        ? `${t.days > 0 ? t.days + 'd ' : ''}${String(t.hours).padStart(2,'0')}:${String(t.minutes).padStart(2,'0')}:${String(t.seconds).padStart(2,'0')}`
-                        : '...';
-
-                      const rows = [];
-
-                      const score = user.totalScore || 0;
-                      const nextLvl = getNextLevelInfo(score);
-                      const lvlProgress = getLevelProgress(score);
-                      const ptsNeeded = nextLvl ? nextLvl.minScore - score : 0;
-
-                      rows.push({
-                        icon: levelInfo.emoji,
-                        label: `Level ${levelInfo.level} ${levelInfo.label}`,
-                        pts: score.toLocaleString('en-IN'),
-                        value: scoreDiscount > 0 ? `${scoreDiscount}% OFF` : null,
-                        vc: levelInfo.color,
-                        extra: nextLvl ? { progress: lvlProgress, ptsNeeded, nextLvl } : null,
-                      });
-
-                      if (activeEvent) {
-                        rows.push({
-                          icon: '🔥',
-                          label: 'Flash Sale',
-                          value: `+${event?.discountPercent || 0}% OFF`,
-                          vc: '#fb923c',
-                          timerBadge: fmtTimer(timeLeft),
-                          timerColor: '#fb923c',
-                          timerGlow: 'rgba(251,146,60,0.4)',
-                        });
-                      } else if (inCooldown) {
-                        rows.push({
-                          icon: '⏳',
-                          label: 'Sale Jald Aayega',
-                          value: null,
-                          vc: C.textMuted,
-                          timerBadge: fmtTimer(timeLeft),
-                          timerColor: C.textMuted,
-                          timerGlow: null,
-                        });
-                      }
-
-                      rows.push({
-                        icon: '💎',
-                        label: 'Subscription',
-                        subLabel: subActive
-                          ? `${(user as any).subscriptionLevel === 'ULTRA' ? 'MAX' : 'PRO'} · ${daysLeft}d left`
-                          : null,
-                        value: isSubscribed ? '+5% OFF' : (subActive ? null : 'None'),
-                        vc: isSubscribed ? C.gold : (subActive ? C.green : C.textDim),
-                        renewalBadge: isSubscribed,
-                      });
-
-                      return (
-                        <>
-                          <style>{`
-                            @keyframes shimmer-gold {
-                              0%   { background-position: -300% center; }
-                              100% { background-position: 300% center; }
-                            }
-                            .renewal-shimmer {
-                              background: linear-gradient(90deg, #f59e0b 0%, #fcd34d 30%, #fffbeb 50%, #fcd34d 70%, #f59e0b 100%);
-                              background-size: 300% auto;
-                              -webkit-background-clip: text;
-                              background-clip: text;
-                              -webkit-text-fill-color: transparent;
-                              animation: shimmer-gold 2.2s linear infinite;
-                            }
-                            @keyframes pulse-dot {
-                              0%, 100% { opacity: 1; transform: scale(1); }
-                              50%       { opacity: 0.4; transform: scale(0.7); }
-                            }
-                            .timer-dot { animation: pulse-dot 1s ease-in-out infinite; }
-                          `}</style>
-                          {/* top divider separating features from discount rows */}
-                          <div style={{ borderTop: `1.5px solid rgba(255,255,255,0.07)` }} />
-                          {rows.map((row, i) => (
-                            <div key={i} style={{ borderBottom: `1.5px solid rgba(255,255,255,0.07)` }}>
-                              {row.renewalBadge && (
-                                <div className="flex items-center gap-1.5 px-5 pt-2.5 pb-0">
-                                  <span className="renewal-shimmer text-[10px] font-black tracking-widest uppercase">✦ RENEWAL BONUS</span>
-                                </div>
-                              )}
-                              {row.timerBadge && (
-                                <div className="flex items-center px-5 pt-2.5 pb-0">
-                                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full"
-                                    style={{
-                                      background: row.timerGlow ? `rgba(45,25,5,0.88)` : 'rgba(20,20,20,0.7)',
-                                      border: `1px solid ${row.timerColor}66`,
-                                    }}>
-                                    {row.timerGlow && (
-                                      <span className="timer-dot w-1.5 h-1.5 rounded-full shrink-0 inline-block"
-                                        style={{ background: row.timerColor }} />
-                                    )}
-                                    <span className="text-[10px] font-black tabular-nums tracking-wider"
-                                      style={{ color: row.timerColor }}>
-                                      {row.timerBadge}
-                                    </span>
-                                  </div>
-                                </div>
-                              )}
-                              <div className="flex items-center justify-between px-5 py-3.5" style={{ paddingTop: (row.renewalBadge || row.timerBadge) ? '6px' : undefined }}>
-                                <span className="text-[12px] font-semibold flex items-center gap-2 min-w-0" style={{ color: C.textMuted }}>
-                                  <span className="text-[15px] leading-none shrink-0">{row.icon}</span>
-                                  <span className="min-w-0">
-                                    <span className="font-bold whitespace-nowrap overflow-hidden text-ellipsis block" style={{ color: row.pts ? C.text : C.textMuted }}>
-                                      {row.label}
-                                      {row.pts && (
-                                        <span className="text-[11px] font-semibold ml-1.5" style={{ color: C.textMuted }}>
-                                          {row.pts} pts
-                                        </span>
-                                      )}
-                                    </span>
-                                    {row.subLabel && (
-                                      <span className="text-[11px] font-semibold whitespace-nowrap block mt-0.5" style={{ color: C.green }}>
-                                        {row.subLabel}
-                                      </span>
-                                    )}
-                                  </span>
-                                </span>
-                                {row.value && (
-                                  <span className="text-[11px] font-black whitespace-nowrap ml-3 shrink-0 px-2.5 py-1 rounded-full"
-                                    style={{
-                                      color: row.pts ? '#0f172a' : (row.renewalBadge ? C.gold : row.vc),
-                                      background: row.pts ? row.vc : (row.renewalBadge ? 'rgba(75,56,0,0.75)' : 'transparent'),
-                                      border: row.renewalBadge ? `1px solid rgba(251,191,36,0.5)` : 'none',
-                                      fontVariantNumeric: row.mono ? 'tabular-nums' : 'normal',
-                                    }}>
-                                    {row.value}
-                                  </span>
-                                )}
+                        {/* ▌▌ FF-style header bar ▌▌ */}
+                        <div className="relative overflow-hidden" style={{ background: isPro ? 'rgba(14,40,50,0.95)' : 'rgba(22,14,50,0.95)', borderBottom: `2px solid ${ffBorder}` }}>
+                          {/* Diagonal hazard stripes */}
+                          <div className="absolute inset-0 pointer-events-none"
+                            style={{ backgroundImage: `repeating-linear-gradient(60deg,transparent,transparent 10px,rgba(255,255,255,0.025) 10px,rgba(255,255,255,0.025) 12px)` }} />
+                          {/* Scan line */}
+                          <div className="ff-scan-line absolute top-0 bottom-0 w-12 pointer-events-none"
+                            style={{ background: `linear-gradient(90deg,transparent,${ffStripe},transparent)` }} />
+                          <div className="relative flex items-center justify-between px-4 py-3">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0 relative"
+                                style={{ background: 'rgba(255,215,0,0.12)', border: `1.5px solid rgba(255,215,0,0.45)`, boxShadow: '0 0 10px rgba(255,215,0,0.2)' }}>
+                                {ac.emoji}
                               </div>
-                              {row.extra && (
-                                <div className="px-5 pb-3.5 -mt-1">
-                                  <div className="h-2 rounded-full mb-2 overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
-                                    <div className="h-full rounded-full transition-all" style={{ width: `${row.extra.progress}%`, background: `linear-gradient(90deg, #d97706, #fbbf24, #fde68a)` }} />
-                                  </div>
-                                  <div className="text-[11px] font-semibold" style={{ color: C.textDim }}>
-                                    {row.extra.ptsNeeded.toLocaleString('en-IN')} aur → Level {row.extra.nextLvl.level} {row.extra.nextLvl.emoji} ({row.extra.nextLvl.discount}% OFF)
-                                  </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[22px] font-black tracking-[0.12em] uppercase leading-none"
+                                    style={{ color: ffGold, textShadow: `0 0 14px rgba(255,215,0,0.55), 0 1px 0 rgba(0,0,0,0.8)` }}>
+                                    {isPro ? 'PRO' : 'MAX'}
+                                  </span>
+                                  <span className="text-[9px] font-black tracking-widest uppercase px-1.5 py-0.5 rounded"
+                                    style={{ background: isPro ? 'rgba(34,211,238,0.15)' : 'rgba(192,132,252,0.15)', color: ffBorder, border: `1px solid ${ffBorder}44` }}>
+                                    PLAN
+                                  </span>
                                 </div>
-                              )}
+                                <span className="text-[10px] font-bold tracking-wider" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                                  {isPro ? 'Standard Tier' : 'Elite Tier'}
+                                </span>
+                              </div>
+                            </div>
+                            {isSubscribed && (
+                              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl shrink-0"
+                                style={{ background: 'rgba(52,211,153,0.12)', border: `1.5px solid rgba(52,211,153,0.4)`, boxShadow: '0 0 8px rgba(52,211,153,0.15)' }}>
+                                <BadgeCheck size={12} color="#34d399" />
+                                <span className="text-[11px] font-black" style={{ color: '#34d399' }}>Active</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* ▌▌ Stat bars — FF-style (dynamic from level system) ▌▌ */}
+                        {(() => {
+                          const userLevel = getLevelInfo(user.totalScore || 0).level;
+                          const ld = getLevelDailyLimitsWithOverride(userLevel, settings);
+                          const tier = isPro ? 'BASIC' : 'ULTRA';
+                          const dailyScore = getDailyScoreLimit(tier, true);
+                          const multiplier = SCORE_MULTIPLIERS[tier] ?? 1.0;
+                          const mcqLimit = ld?.mcq?.[isPro ? 'basic' : 'ultra'] ?? (isPro ? 70 : 100);
+                          const pdfLimit = ld?.pdf?.[isPro ? 'basic' : 'ultra'] ?? (isPro ? 5 : 10);
+                          const videoLimit = ld?.video?.[isPro ? 'basic' : 'ultra'] ?? (isPro ? 4 : 7);
+                          const flashLimit = ld?.flashcard?.[isPro ? 'basic' : 'ultra'] ?? (isPro ? 15 : 20);
+                          const fmtLim = (v: number) => v === UNLIMITED ? '∞' : v.toLocaleString('en-IN');
+
+                          const topStats = [
+                            { icon: '📅', value: dailyScore.toLocaleString('en-IN'), sub: 'PTS/DIN' },
+                            { icon: '⚡', value: `${multiplier}×`, sub: 'SCORE BOOST' },
+                            { icon: '❓', value: fmtLim(mcqLimit), sub: 'MCQ/DIN' },
+                          ];
+                          const bottomStats = [
+                            { icon: '📄', label: 'PDF / Notes', value: fmtLim(pdfLimit) + '/day' },
+                            { icon: '🎬', label: 'Video',       value: fmtLim(videoLimit) + '/day' },
+                            { icon: '🃏', label: 'Flashcard',   value: fmtLim(flashLimit) + '/day' },
+                          ];
+
+                          return (
+                            <div className="relative" style={{ borderBottom: `1.5px solid rgba(255,255,255,0.06)` }}>
+                              <div className="px-3 py-1.5 flex items-center gap-1.5"
+                                style={{ background: 'rgba(255,255,255,0.035)', borderBottom: `1px solid rgba(255,255,255,0.055)` }}>
+                                <Zap size={9} color={ffBorder} />
+                                <span className="text-[9px] font-black uppercase tracking-[0.18em]" style={{ color: ffBorder }}>
+                                  {isPro ? 'PRO' : 'MAX'} PLAN LIMITS — Level {userLevel}
+                                </span>
+                              </div>
+                              {/* Top 3 main stats */}
+                              <div className="grid grid-cols-3" style={{ borderBottom: `1px solid rgba(255,255,255,0.04)` }}>
+                                {topStats.map((item, i) => (
+                                  <div key={i} className="flex flex-col items-center py-3 gap-0.5 relative"
+                                    style={{ borderRight: i < 2 ? `1px solid rgba(255,255,255,0.06)` : 'none' }}>
+                                    <span className="text-[17px] leading-none mb-0.5">{item.icon}</span>
+                                    <span className="text-[13px] font-black tabular-nums" style={{ color: ffGold }}>{item.value}</span>
+                                    <span className="text-[8px] font-black uppercase tracking-wide text-center leading-tight" style={{ color: 'rgba(255,255,255,0.28)' }}>{item.sub}</span>
+                                  </div>
+                                ))}
+                              </div>
+                              {/* Bottom activity limits row */}
+                              <div className="grid grid-cols-3" style={{ background: 'rgba(0,0,0,0.18)' }}>
+                                {bottomStats.map((item, i) => (
+                                  <div key={i} className="flex items-center justify-center gap-1 py-2 px-1"
+                                    style={{ borderRight: i < 2 ? `1px solid rgba(255,255,255,0.05)` : 'none' }}>
+                                    <span className="text-[11px] leading-none">{item.icon}</span>
+                                    <span className="text-[10px] font-black tabular-nums" style={{ color: ffGoldDim }}>{item.value}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {/* ▌▌ Feature list ▌▌ */}
+                        <div className="px-4 py-3 grid grid-cols-2 gap-x-3 gap-y-2" style={{ borderBottom: `1.5px solid rgba(255,255,255,0.06)` }}>
+                          {featuresList.map((f, i) => (
+                            <div key={i} className="flex items-center gap-2">
+                              <div className="w-4 h-4 rounded flex items-center justify-center shrink-0"
+                                style={{ background: 'rgba(255,215,0,0.1)', border: `1px solid rgba(255,215,0,0.3)` }}>
+                                <Check size={9} color={ffGold} strokeWidth={3.5} />
+                              </div>
+                              <span className="text-[11px] font-semibold leading-tight" style={{ color: 'rgba(255,255,255,0.55)' }}>{f}</span>
                             </div>
                           ))}
-                          <div className="flex items-center justify-between px-5 py-3.5"
-                            style={{ background: 'rgba(251,191,36,0.10)', borderTop: `1.5px solid ${C.goldBorder}` }}>
-                            <span className="text-[13px] font-black flex items-center gap-2 whitespace-nowrap" style={{ color: C.gold }}>
+                        </div>
+
+                        {/* ▌▌ Level discount row ▌▌ */}
+                        <div style={{ borderBottom: `1.5px solid rgba(255,255,255,0.06)` }}>
+                          <div className="flex items-center justify-between px-4 py-3">
+                            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                              <span className="text-[16px] leading-none shrink-0">{levelInfo.emoji}</span>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="text-[12px] font-black" style={{ color: '#e2e8f0' }}>
+                                    Level {levelInfo.level} {levelInfo.label}
+                                  </span>
+                                  <span className="text-[10px] font-semibold" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                                    {score.toLocaleString('en-IN')} pts
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                            {scoreDiscount > 0 && (
+                              <span className="text-[11px] font-black px-2.5 py-1 rounded-lg shrink-0 ml-2"
+                                style={{ background: levelInfo.color, color: '#000', boxShadow: `0 0 8px ${levelInfo.color}55` }}>
+                                {scoreDiscount}% OFF
+                              </span>
+                            )}
+                          </div>
+                          {nextLvl && (
+                            <div className="px-4 pb-3 -mt-1">
+                              <div className="h-1.5 rounded-full mb-1.5 overflow-hidden" style={{ background: 'rgba(255,255,255,0.07)' }}>
+                                <div className="h-full rounded-full transition-all" style={{ width: `${lvlProgress}%`, background: 'linear-gradient(90deg,#d97706,#fbbf24,#fde68a)' }} />
+                              </div>
+                              <p className="text-[10px] font-semibold" style={{ color: 'rgba(255,255,255,0.28)' }}>
+                                {ptsNeeded.toLocaleString('en-IN')} aur → Level {nextLvl.level} {nextLvl.emoji} ({nextLvl.discount}% OFF)
+                              </p>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* ▌▌ Flash Sale row ▌▌ */}
+                        {(activeEvent || inCooldown) && (
+                          <div style={{ borderBottom: `1.5px solid rgba(255,255,255,0.06)` }}>
+                            <div className="px-4 pt-2.5 pb-0">
+                              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full"
+                                style={{ background: activeEvent ? 'rgba(40,18,5,0.9)' : 'rgba(20,20,20,0.7)', border: `1px solid ${activeEvent ? '#fb923c66' : '#64748b44'}` }}>
+                                {activeEvent && <span className="timer-dot w-1.5 h-1.5 rounded-full shrink-0 inline-block" style={{ background: '#fb923c' }} />}
+                                <span className="text-[10px] font-black tabular-nums tracking-wider" style={{ color: activeEvent ? '#fb923c' : C.textMuted }}>
+                                  {fmtTimer(timeLeft)}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between px-4 py-2.5">
+                              <span className="text-[12px] font-bold flex items-center gap-2" style={{ color: activeEvent ? '#e2e8f0' : C.textMuted }}>
+                                <span className="text-[15px] leading-none">🔥</span>
+                                {activeEvent ? 'Flash Sale' : 'Sale Jald Aayega'}
+                              </span>
+                              {activeEvent && (
+                                <span className="text-[12px] font-black" style={{ color: '#fb923c' }}>
+                                  +{event?.discountPercent || 0}% OFF
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* ▌▌ Renewal bonus row ▌▌ */}
+                        <div style={{ borderBottom: `1.5px solid rgba(255,255,255,0.06)` }}>
+                          {isSubscribed && (
+                            <div className="flex items-center gap-1.5 px-4 pt-2.5 pb-0">
+                              <span className="renewal-shimmer text-[9px] font-black tracking-[0.18em] uppercase">✦ RENEWAL BONUS</span>
+                            </div>
+                          )}
+                          <div className="flex items-center justify-between px-4 py-3" style={{ paddingTop: isSubscribed ? '6px' : undefined }}>
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span className="text-[16px] leading-none shrink-0">💎</span>
+                              <div>
+                                <span className="text-[12px] font-bold" style={{ color: subActive ? '#e2e8f0' : C.textMuted }}>Subscription</span>
+                                {subActive && (
+                                  <p className="text-[10px] font-semibold mt-0.5" style={{ color: '#34d399' }}>
+                                    {(user as any).subscriptionLevel === 'ULTRA' ? 'MAX' : 'PRO'} · {daysLeft}d left
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                            {isSubscribed ? (
+                              <span className="text-[11px] font-black px-2.5 py-1 rounded-lg shrink-0"
+                                style={{ background: 'rgba(70,52,0,0.8)', color: ffGold, border: `1px solid rgba(255,215,0,0.4)` }}>
+                                +5% OFF
+                              </span>
+                            ) : !subActive ? (
+                              <span className="text-[10px] font-bold" style={{ color: C.textDim }}>None</span>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        {/* ▌▌ Total Discount — FF result-screen style ▌▌ */}
+                        <div className="relative overflow-hidden">
+                          <div className="absolute inset-0 pointer-events-none"
+                            style={{ backgroundImage: `repeating-linear-gradient(60deg,transparent,transparent 10px,rgba(255,215,0,0.03) 10px,rgba(255,215,0,0.03) 12px)` }} />
+                          <div className="relative flex items-center justify-between px-4 py-3.5"
+                            style={{ background: 'rgba(255,215,0,0.08)', borderTop: `1.5px solid rgba(255,215,0,0.25)` }}>
+                            <span className="text-[13px] font-black flex items-center gap-2 uppercase tracking-wider" style={{ color: ffGold }}>
                               <span className="text-[15px] leading-none">🏷️</span> Total Discount
                             </span>
-                            <span className="text-[15px] font-black whitespace-nowrap" style={{ color: C.gold }}>
+                            <span className="text-[18px] font-black tabular-nums"
+                              style={{ color: ffGold, textShadow: '0 0 12px rgba(255,215,0,0.5)' }}>
                               {totalDiscount > 0 ? `${totalDiscount}% OFF` : '0%'}
                             </span>
                           </div>
-                        </>
-                      );
-                    })()}
-                  </div>
-                </div>
-
-                {/* ── Plan cards ── */}
-                <div className="space-y-3 mb-5">
-                  {subscriptionPlans.map((plan, idx) => {
-                    const isSelected = selectedPlanId === plan.id;
-                    const original = isPro ? plan.basicOriginalPrice : plan.ultraOriginalPrice;
-                    const planNameL2 = (plan.name || '').toLowerCase();
-                    const planDurL2 = (plan.duration || '').toLowerCase();
-                    const isLifetimePlan = planNameL2.includes('lifetime') || planDurL2.includes('lifetime') || (plan as any).tier === 'LIFETIME';
-                    let price = isPro ? plan.basicPrice : plan.ultraPrice;
-                    if (isLifetimePlan) price = isPro ? 9999 : 19999;
-                    else if (totalDiscount > 0) price = Math.round(price * (1 - totalDiscount / 100));
-                    const perMonth = getPerMonthPrice(plan, price);
-                    const isPopular = plan.name.toLowerCase().includes('monthly') || (subscriptionPlans.length > 1 && idx === 1);
-
-                    return (
-                      <button key={plan.id} onClick={() => { setSelectedPlanId(plan.id); setShowPaymentChooser(true); }}
-                        className="w-full block px-4 py-2.5 rounded-2xl text-left transition-all relative overflow-hidden"
-                        style={isSelected
-                          ? { background: ac.bg, border: `2px solid ${ac.border}`, boxShadow: `0 0 28px ${ac.glow}` }
-                          : { background: C.surface, border: `1.5px solid ${C.border}` }}>
-                        {/* shimmer on selected */}
-                        {isSelected && (
-                          <div className="absolute inset-0 pointer-events-none"
-                            style={{ background: 'linear-gradient(105deg,transparent 40%,rgba(255,255,255,0.03) 50%,transparent 60%)', animation: 'shimmer-sweep 2.5s linear infinite' }} />
-                        )}
-                        <div className="flex justify-between items-center relative z-10">
-                          <div className="flex-1 pr-2">
-                            <div className="flex items-center gap-2 mb-1">
-                              <p className="text-sm font-black" style={{ color: isSelected ? ac.color : C.text }}>{plan.name}</p>
-                              {isPopular && (
-                                <span className="text-[9px] font-black px-1.5 py-0.5 rounded-md"
-                                  style={{ background: C.goldBg, color: C.gold, border: `1px solid ${C.goldBorder}` }}>🔥 Popular</span>
-                              )}
-                            </div>
-                            <div className="flex items-baseline gap-2.5">
-                              <span className="text-2xl font-black" style={{ color: C.text }}>₹{price.toLocaleString('en-IN')}</span>
-                              {original > price && (
-                                <span className="text-sm line-through" style={{ color: C.textDim }}>₹{original.toLocaleString('en-IN')}</span>
-                              )}
-                            </div>
-                            {perMonth && (
-                              <p className="text-[11px] mt-0.5 font-medium" style={{ color: C.textMuted }}>≈ ₹{perMonth}/month</p>
-                            )}
-                          </div>
-                          <div className="flex flex-col items-end gap-2 shrink-0">
-                            {/* Total discount badge on each slot */}
-                            {totalDiscount > 0 && (
-                              <span className="text-[10px] font-black px-2 py-0.5 rounded-full"
-                                style={{ background: 'rgba(251,191,36,0.15)', color: C.gold, border: `1px solid ${C.goldBorder}` }}>
-                                {totalDiscount}% OFF
-                              </span>
-                            )}
-                            {/* Radio indicator */}
-                            <div className="w-6 h-6 rounded-full flex items-center justify-center"
-                              style={{ background: isSelected ? ac.bg : C.surfaceHigh, border: `2px solid ${isSelected ? ac.color : C.borderMed}` }}>
-                              {isSelected && <div className="w-2.5 h-2.5 rounded-full" style={{ background: ac.color }} />}
-                            </div>
-                          </div>
                         </div>
-                      </button>
-                    );
-                  })}
-                </div>
+                      </div>
+
+                      {/* ── Plan cards — FF card style ── */}
+                      <div className="space-y-3 mb-5">
+                        {subscriptionPlans.map((plan, idx) => {
+                          const isSelected = selectedPlanId === plan.id;
+                          const original = isPro ? plan.basicOriginalPrice : plan.ultraOriginalPrice;
+                          const planNameL2 = (plan.name || '').toLowerCase();
+                          const planDurL2 = (plan.duration || '').toLowerCase();
+                          const isLifetimePlan = planNameL2.includes('lifetime') || planDurL2.includes('lifetime') || (plan as any).tier === 'LIFETIME';
+                          let price = isPro ? plan.basicPrice : plan.ultraPrice;
+                          if (isLifetimePlan) price = isPro ? 9999 : 19999;
+                          else if (totalDiscount > 0) price = Math.round(price * (1 - totalDiscount / 100));
+                          const perMonth = getPerMonthPrice(plan, price);
+                          const isPopular = plan.name.toLowerCase().includes('monthly') || (subscriptionPlans.length > 1 && idx === 1);
+
+                          return (
+                            <button key={plan.id} onClick={() => { setSelectedPlanId(plan.id); setShowPaymentChooser(true); }}
+                              className="w-full block text-left transition-all relative overflow-hidden rounded-2xl"
+                              style={isSelected
+                                ? { background: 'rgba(14,25,30,0.95)', border: `2px solid ${ffBorder}`, boxShadow: `0 0 20px ${ffStripe}, 0 4px 16px rgba(0,0,0,0.5)` }
+                                : { background: '#0e0f14', border: `1.5px solid rgba(255,255,255,0.08)` }}>
+
+                              {/* Popular corner ribbon */}
+                              {isPopular && (
+                                <div className="absolute top-0 right-0 overflow-hidden w-16 h-16 pointer-events-none">
+                                  <div className="absolute top-3 -right-5 rotate-45 text-[8px] font-black px-6 py-0.5 text-center"
+                                    style={{ background: '#f97316', color: '#fff' }}>
+                                    🔥
+                                  </div>
+                                </div>
+                              )}
+
+                              <div className="px-4 py-3 flex justify-between items-center relative z-10">
+                                <div className="flex-1 pr-3">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <p className="text-sm font-black" style={{ color: isSelected ? ffBorder : '#e2e8f0' }}>{plan.name}</p>
+                                    {isPopular && (
+                                      <span className="text-[9px] font-black px-1.5 py-0.5 rounded"
+                                        style={{ background: 'rgba(249,115,22,0.18)', color: '#fb923c', border: '1px solid rgba(249,115,22,0.35)' }}>
+                                        Popular
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-baseline gap-2">
+                                    <span className="text-2xl font-black" style={{ color: '#fff' }}>₹{price.toLocaleString('en-IN')}</span>
+                                    {original > price && (
+                                      <span className="text-sm line-through" style={{ color: 'rgba(255,255,255,0.22)' }}>₹{original.toLocaleString('en-IN')}</span>
+                                    )}
+                                  </div>
+                                  {perMonth && (
+                                    <p className="text-[10px] mt-0.5 font-medium" style={{ color: 'rgba(255,255,255,0.32)' }}>≈ ₹{perMonth}/month</p>
+                                  )}
+                                </div>
+                                <div className="flex flex-col items-end gap-2 shrink-0">
+                                  {totalDiscount > 0 && (
+                                    <span className="text-[10px] font-black px-2 py-0.5 rounded-lg"
+                                      style={{ background: 'rgba(255,215,0,0.12)', color: ffGold, border: `1px solid rgba(255,215,0,0.35)` }}>
+                                      {totalDiscount}% OFF
+                                    </span>
+                                  )}
+                                  <div className="w-6 h-6 rounded-full flex items-center justify-center"
+                                    style={{ background: isSelected ? ffStripe : 'rgba(255,255,255,0.05)', border: `2px solid ${isSelected ? ffBorder : 'rgba(255,255,255,0.15)'}` }}>
+                                    {isSelected && <div className="w-2.5 h-2.5 rounded-full" style={{ background: ffBorder }} />}
+                                  </div>
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  );
+                })()}
 
                 {/* Credit purchase success/error message */}
                 {creditPurchaseMsg && (

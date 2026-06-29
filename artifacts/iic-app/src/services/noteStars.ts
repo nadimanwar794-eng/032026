@@ -122,6 +122,56 @@ export const recordNoteUnstar = async (
   }
 };
 
+// ─── Admin Global Important Topics ───────────────────────────────────────────
+// When an admin marks a topic as important, it is written to
+// `admin_important_topics/{hash}` in RTDB. All students subscribe to this
+// path and get a permanent visual indicator on those topics.
+
+export const setAdminImportantTopic = async (
+  adminId: string,
+  topicText: string,
+  noteKey: string,
+  isImportant: boolean,
+  source?: NoteStarSource
+): Promise<void> => {
+  if (!topicText) return;
+  const hash = hashTopic(topicText);
+  const r = ref(rtdb, `admin_important_topics/${hash}`);
+  try {
+    if (isImportant) {
+      const src = cleanSource(source);
+      const entry: any = {
+        label: safeLabel(topicText),
+        noteKey,
+        markedAt: Date.now(),
+        markedBy: adminId,
+      };
+      if (src) entry.source = src;
+      await set(r, entry);
+    } else {
+      await remove(r);
+    }
+  } catch (e) {
+    console.warn('setAdminImportantTopic failed', e);
+  }
+};
+
+export const subscribeToAdminImportantTopics = (
+  callback: (hashes: Set<string>) => void
+): (() => void) => {
+  try {
+    const unsub = onValue(ref(rtdb, 'admin_important_topics'), (snap) => {
+      const hashes = new Set<string>();
+      snap.forEach((child) => { if (child.key) hashes.add(child.key); });
+      callback(hashes);
+    });
+    return () => unsub();
+  } catch (e) {
+    console.warn('subscribeToAdminImportantTopics failed', e);
+    return () => {};
+  }
+};
+
 /**
  * Admin-only: permanently delete a trending note entry by its hash.
  * This removes the entire node from note_stars/{hash}, resetting count to 0.

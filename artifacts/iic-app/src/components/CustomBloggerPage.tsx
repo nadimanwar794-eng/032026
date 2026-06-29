@@ -4,6 +4,8 @@ import { rtdb } from '../firebase';
 import { ref, onValue } from 'firebase/database';
 import { APP_VERSION } from '../constants';
 import { SystemSettings } from '../types';
+import { CustomPlayer } from './CustomPlayer';
+import { renderMathInHtml } from '../utils/mathUtils';
 
 interface Props {
   onBack: () => void;
@@ -59,33 +61,16 @@ export const CustomBloggerPage: React.FC<Props> = ({ onBack, settings }) => {
             </div>
             <div className="flex flex-col items-end text-[10px] text-slate-600 font-medium leading-tight">
                 <span>App Version: {APP_VERSION}</span>
-                <span>Developed by {settings?.developerName?.trim() || 'Nadim Anwar'}</span>
+                {settings?.showFooter !== false && <span>Developed by {settings?.developerName?.trim() || 'Nadim Anwar'}</span>}
             </div>
         </div>
         
         <div className="p-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
             {driveId && (
                 <div className="mb-6">
-                    <div className="rounded-xl overflow-hidden shadow-md bg-black relative pt-[56.25%] group">
-                        <iframe
-                            src={`https://drive.google.com/file/d/${driveId}/preview`}
-                            className="absolute top-0 left-0 w-full h-full border-0"
-                            allowFullScreen
-                        />
-                        {/* Overlay to block external Drive links on the top right */}
-                        <div
-                            className="absolute top-0 right-0 w-24 h-16 z-[60] cursor-default bg-transparent"
-                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                            onTouchStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                        />
-                        {/* Optional full top overlay like CustomPlayer for better masking */}
-                        <div
-                            className="absolute top-0 left-0 right-0 h-14 bg-gradient-to-b from-black/80 to-transparent z-[50] pointer-events-auto cursor-default flex items-center justify-between px-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                        >
-                             <span className="text-white/80 text-xs font-bold tracking-wider">VIDEO PLAYER</span>
+                    <div className="rounded-xl overflow-hidden shadow-md bg-black relative" style={{ aspectRatio: '16/9' }}>
+                        <div style={{ position: 'absolute', inset: 0 }}>
+                            <CustomPlayer videoUrl={`https://drive.google.com/file/d/${driveId}/view`} />
                         </div>
                     </div>
                 </div>
@@ -93,7 +78,7 @@ export const CustomBloggerPage: React.FC<Props> = ({ onBack, settings }) => {
 
              {/* Render Custom HTML Content */}
              {content ? (
-                 <div className="custom-html-content dark-mode-text blue-mode-text" dangerouslySetInnerHTML={{ __html: content }} />
+                 <div className="custom-html-content dark-mode-text blue-mode-text" dangerouslySetInnerHTML={{ __html: renderMathInHtml(content) }} />
              ) : (
                  <div className="text-center py-20 text-slate-500">
                      <p>No content available.</p>

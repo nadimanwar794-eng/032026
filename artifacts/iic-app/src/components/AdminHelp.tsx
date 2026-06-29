@@ -39,31 +39,31 @@ const SECTIONS: HelpSection[] = [
         groupTitle: 'Top Bar Buttons',
         groupIcon: <Zap size={18} />,
         groupColor: 'amber',
-        groupDesc: 'Admin dashboard ke upar jo 3 buttons hain — unka kaam samjhein',
+        groupDesc: 'The 3 buttons at the top of the admin dashboard — understand what each does',
         items: [
             {
                 icon: <Moon size={16} />,
                 title: 'Light / Black / Blue (Theme)',
                 subtitle: 'Dark Mode Toggle',
-                desc: 'Is button se admin dashboard ka theme badalta hai. Ek baar click karo → Black Dark Mode. Dubara click karo → Blue Dark Mode. Teesri baar → Wapas Light Mode. Sirf admin ko dikhta hai, students pe koi asar nahi.',
+                desc: 'This button changes the admin dashboard theme. Click once → Black Dark Mode. Click again → Blue Dark Mode. Third click → Back to Light Mode. Only visible to admin — no effect on students.',
                 color: 'slate',
-                tip: 'Raat ko kaam karne ke liye Black ya Blue mode use karo — aankhon pe kam strain padti hai.'
+                tip: 'Use Black or Blue mode for late-night work — less eye strain.'
             },
             {
                 icon: <RefreshCw size={16} />,
                 title: 'Force Update',
-                subtitle: 'Sabhi students ke app forcefully reload karo',
-                desc: 'Yeh button dabane par sabhi students ke devices pe ek force-reload command jaati hai. Jab koi naya content ya settings update ki ho aur students ko turant woh dekhna ho — tab use karo. Confirmation maangta hai pehle.',
+                subtitle: 'Force reload the app for all students',
+                desc: 'Pressing this button sends a force-reload command to all students\' devices. Use it when new content or settings have been updated and you want students to see the changes immediately. Asks for confirmation first.',
                 color: 'red',
-                warning: '⚠️ Sabhi users ka app turant reload hoga — koi ongoing kaam (MCQ attempt, notes reading) interrupt ho sakta hai. Sirf zaroori hone par use karo.'
+                warning: '⚠️ All users\' apps will reload immediately — any ongoing work (MCQ attempt, notes reading) will be interrupted. Use only when necessary.'
             },
             {
                 icon: <Save size={16} />,
                 title: 'Save Settings',
-                subtitle: 'Sab changes Firebase pe save karo',
-                desc: 'Yeh admin dashboard ka sabse important button hai. Jab bhi koi bhi setting change karo — pricing, limits, visibility, text, kuch bhi — Save Settings dabana zaroori hai. Bina save kiye page se jaoge toh saare changes kho jayenge.',
+                subtitle: 'Save all changes to Firebase',
+                desc: 'This is the most important button in the admin dashboard. Whenever you change any setting — pricing, limits, visibility, text, anything — you must press Save Settings. If you leave the page without saving, all changes will be lost.',
                 color: 'indigo',
-                warning: '⚠️ Har change ke baad Save karna mat bhoolein! Saving ke waqt button "Saving..." dikhata hai — tab kuch aur mat karo.'
+                warning: '⚠️ Don\'t forget to Save after every change! The button shows "Saving..." while saving — don\'t do anything else at that time.'
             },
         ]
     },
@@ -72,58 +72,58 @@ const SECTIONS: HelpSection[] = [
         groupTitle: 'Core Management',
         groupIcon: <Users size={18} />,
         groupColor: 'blue',
-        groupDesc: 'Users, subscriptions, store aur subjects manage karo',
+        groupDesc: 'Manage users, subscriptions, store and subjects',
         items: [
             {
                 icon: <Users size={16} />,
                 title: 'Users',
-                subtitle: 'Saare students ka database',
-                desc: 'Yahan sabhi registered students ki list hoti hai. Kisi bhi student ko search kar sakte ho naam ya UID se. Student ka naam, email, subscription plan dekh sakte ho. Subscription manually badal sakte ho (Free → Basic → Ultra). Credits add/remove kar sakte ho. Student ka account block/unblock kar sakte ho. Student ke waqt impersonate (unke account se dekh sakte ho) kar sakte ho debug ke liye.',
+                subtitle: 'Database of all students',
+                desc: 'This section lists all registered students. Search any student by name or UID. View student name, email, and subscription plan. Manually change subscription (Free → Basic → Ultra). Add/remove credits. Block/unblock student accounts. Impersonate a student (view from their account) for debugging.',
                 color: 'blue',
                 tags: ['Students', 'Search', 'Edit', 'Subscription', 'Credits'],
-                tip: 'Kisi student ne payment ki aur plan update nahi hua → yahan manually update karo.'
+                tip: 'A student paid but plan didn\'t update → manually update it here.'
             },
             {
                 icon: <ShieldCheck size={16} />,
                 title: 'Sub-Admins',
-                subtitle: 'Helper admins create aur manage karo',
-                desc: 'Agar aap kisi teacher ya helper ko limited admin access dena chahte ho — toh yahan unka Sub-Admin account banao. Har Sub-Admin ko specific permissions do: content upload, users dekhna, demands handle karna, etc. Main Admin ke paas sab permissions hoti hain, Sub-Admins ke paas sirf woh joh aap dete ho.',
+                subtitle: 'Create and manage helper admins',
+                desc: 'If you want to give a teacher or helper limited admin access — create their Sub-Admin account here. Give each Sub-Admin specific permissions: content upload, view users, handle demands, etc. Main Admin has all permissions; Sub-Admins only have what you grant.',
                 color: 'indigo',
                 tags: ['Permissions', 'Teacher Access', 'Limited Admin'],
-                tip: 'Teacher ko sirf Homework aur Content upload ka access do — Store ya Users ka nahi.'
+                tip: 'Give a teacher only Homework and Content upload access — not Store or Users.'
             },
             {
                 icon: <GraduationCap size={16} />,
                 title: 'Teachers',
-                subtitle: 'Teacher accounts manage karo',
-                desc: 'Teachers ka alag section jahan teacher-specific features manage hote hain. Teachers students ko lock kar sakte hain (teacher lock feature), homework assign kar sakte hain, aur apni class ke students track kar sakte hain.',
+                subtitle: 'Manage teacher accounts',
+                desc: 'A dedicated section for teacher-specific features. Teachers can lock students (teacher lock feature), assign homework, and track students in their class.',
                 color: 'purple',
                 tags: ['Teacher Lock', 'Class Management']
             },
             {
                 icon: <CreditCard size={16} />,
                 title: 'Subscriptions',
-                subtitle: 'Active subscriptions aur plans ka overview',
-                desc: 'Yahan sabhi active subscriptions ki list hoti hai. Kaunse students ke paas Basic plan hai, kaunke paas Ultra. Manually kisi ka plan badal sakte ho. Subscription history dekh sakte ho. Expire hone wale plans track kar sakte ho.',
+                subtitle: 'Overview of active subscriptions and plans',
+                desc: 'Lists all active subscriptions. See which students have Basic and which have Ultra. Manually change any plan. View subscription history. Track plans that are about to expire.',
                 color: 'purple',
                 tags: ['Basic Plan', 'Ultra Plan', 'Expiry', 'Manual Upgrade']
             },
             {
                 icon: <Book size={16} />,
                 title: 'Subjects',
-                subtitle: 'Subjects ka naam, icon aur color badlo',
-                desc: 'App mein jo subjects dikhte hain (Physics, Chemistry, History, etc.) unka naam, icon aur color yahan se change kar sakte ho. Naya subject add kar sakte ho ya purana hataa sakte ho. Subject ka syllabus mode (School ya Competition) bhi yahan set hota hai.',
+                subtitle: 'Change subject names, icons and colors',
+                desc: 'Change the name, icon and color of subjects shown in the app (Physics, Chemistry, History, etc.). Add a new subject or remove an old one. Set the syllabus mode (School or Competition) for each subject.',
                 color: 'emerald',
                 tags: ['Subject List', 'Icons', 'Colors', 'Add/Remove']
             },
             {
                 icon: <ShoppingBag size={16} />,
                 title: 'Store Manager',
-                subtitle: 'Coin store aur subscription packages configure karo',
-                desc: 'Students jo Store page pe jaate hain — woh yahan se configure hota hai. Coin packages ka price set karo (kitne coins kitne rupees mein milenge). Subscription plans ka pricing decide karo. Special discount event activate karo countdown timer ke saath. Coin exchange rates configure karo.',
+                subtitle: 'Configure the coin store and subscription packages',
+                desc: 'Configure what students see on the Store page. Set coin package prices (how many coins for how much money). Decide subscription plan pricing. Activate a special discount event with a countdown timer. Configure coin exchange rates.',
                 color: 'purple',
                 tags: ['Coins', 'Plans', 'Pricing', 'Discount Event'],
-                tip: 'Diwali ya exam season pe special discount event activate karo — Store pe countdown timer dikhega.'
+                tip: 'Activate a special discount event during Diwali or exam season — a countdown timer will appear in the Store.'
             },
         ]
     },
@@ -132,42 +132,42 @@ const SECTIONS: HelpSection[] = [
         groupTitle: 'User Requests',
         groupIcon: <Inbox size={18} />,
         groupColor: 'indigo',
-        groupDesc: 'Students ke messages, demands aur login requests handle karo',
+        groupDesc: 'Handle student messages, demands and login requests',
         items: [
             {
                 icon: <Megaphone size={16} />,
                 title: 'Notify Users',
-                subtitle: 'Sabhi students ko notification bhejo',
-                desc: 'Is feature se aap sabhi students ko ek saath in-app notification bhej sakte ho. Title aur message likho. Optional: image ya link bhi add kar sakte ho. Notification sabke "Notifications" tab mein dikhega. Useful for: Exam alerts, new content announcement, holiday notice, etc.',
+                subtitle: 'Send a notification to all students',
+                desc: 'Use this feature to send an in-app notification to all students at once. Write a title and message. Optionally add an image or link. The notification appears in every student\'s "Notifications" tab. Useful for: exam alerts, new content announcements, holiday notices, etc.',
                 color: 'pink',
                 tags: ['Broadcast', 'Alert', 'Announcement'],
-                tip: 'Exam schedule, naya content, ya maintenance notice — sab yahan se bhejo.'
+                tip: 'Send exam schedules, new content notices, or maintenance alerts from here.'
             },
             {
                 icon: <Megaphone size={16} />,
                 title: 'Demands',
-                subtitle: 'Students ki content demands dekho',
-                desc: 'Jab koi student koi specific topic ya content maangta hai — woh demand yahan aati hai. Pending demands dekh sakte ho. Demand ko mark as completed kar sakte ho. Popular demands count se samjho kaunsa content zyada chahiye.',
+                subtitle: 'View student content requests',
+                desc: 'When a student requests a specific topic or content — it appears here as a demand. View pending demands. Mark demands as completed. Use popular demand counts to understand what content is most needed.',
                 color: 'orange',
                 tags: ['Content Requests', 'Pending', 'Student Feedback']
             },
             {
                 icon: <MessageSquare size={16} />,
                 title: 'Chat Hub',
-                subtitle: 'Global chat aur student support moderate karo',
-                desc: 'Do sections hain: Global Chat (sabhi students ka community chat) aur Support Chat (individual student ne admin ko directly message kiya). Global Chat mein abusive messages delete kar sakte ho. Support mein students ke sawaalon ka jawab de sakte ho. MCQ Community bhi yahan moderatable hai.',
+                subtitle: 'Moderate global chat and student support',
+                desc: 'Two sections: Global Chat (community chat for all students) and Support Chat (individual student messages to admin). Delete abusive messages in Global Chat. Answer student questions in Support. MCQ Community is also moderatable here.',
                 color: 'blue',
                 tags: ['Moderation', 'Global Chat', 'Support', 'Delete Messages'],
-                tip: 'Support Chat mein har student ki baat alag thread mein hoti hai — organized rehta hai.'
+                tip: 'Each student\'s conversation in Support Chat is a separate thread — stays organized.'
             },
             {
                 icon: <Key size={16} />,
                 title: 'Login Requests',
-                subtitle: 'Naye login requests approve/reject karo',
-                desc: 'Agar "One Device Login" ya approval-based login on hai — toh naye students yahan pending rahenge. Admin ko manually approve karna hoga. Approve karne ke baad student login kar payega. Reject karne par unhe access nahi milega. Security ke liye useful — bina permission ke koi access nahi kar sakta.',
+                subtitle: 'Approve or reject new login requests',
+                desc: 'If "One Device Login" or approval-based login is on — new students will be pending here. Admin must manually approve them. After approval, the student can log in. Rejected students won\'t get access. Useful for security — no one can access without permission.',
                 color: 'purple',
                 tags: ['Approval', 'Security', 'Access Control'],
-                warning: 'Agar bahut saare pending requests hain toh students login nahi kar pa rahe hain — jaldi approve karo.'
+                warning: 'If there are many pending requests, students can\'t log in — approve them quickly.'
             },
         ]
     },
@@ -176,80 +176,80 @@ const SECTIONS: HelpSection[] = [
         groupTitle: 'Content & Analysis',
         groupIcon: <BarChart3 size={18} />,
         groupColor: 'purple',
-        groupDesc: 'Notes, videos, audio, MCQs, homework aur syllabus manage karo',
+        groupDesc: 'Manage notes, videos, audio, MCQs, homework and syllabus',
         items: [
             {
                 icon: <FileText size={16} />,
                 title: 'Main Notes (PDF)',
-                subtitle: 'Chapter-wise notes upload karo',
-                desc: 'Har subject ke har chapter ke liye PDF ya HTML notes yahan upload hote hain. Free Notes (sabke liye) aur Premium Notes (Basic/Ultra ke liye) alag-alag upload kar sakte ho. School Mode aur Competition Mode ke notes alag hote hain. AI se notes generate bhi kar sakte ho. Notes ka draft save karo — publish karne se pehle preview karo.',
+                subtitle: 'Upload chapter-wise notes',
+                desc: 'Upload PDF or HTML notes for each chapter of every subject. Upload Free Notes (for everyone) and Premium Notes (for Basic/Ultra) separately. School Mode and Competition Mode notes are separate. Generate notes with AI. Save notes as draft — preview before publishing.',
                 color: 'blue',
                 tags: ['PDF Links', 'HTML Notes', 'Free Notes', 'Premium Notes', 'AI Generate', 'Draft'],
-                tip: 'Pehle draft mein save karo — ek baar preview karo — phir publish karo. Galti hone ki sambhavna kam hogi.'
+                tip: 'Save as draft first — preview once — then publish. Reduces the chance of mistakes.'
             },
             {
                 icon: <Video size={16} />,
                 title: 'Video Lectures',
-                subtitle: 'YouTube/Google Drive videos link karo',
-                desc: 'Har chapter ke liye video lecture link karo. Free video alag, Premium video alag. Video ka credit cost set kar sakte ho (students kitne coins deke dekhenge). School aur Competition mode ke videos alag hote hain.',
+                subtitle: 'Link YouTube/Google Drive videos',
+                desc: 'Link a video lecture for each chapter. Free and Premium videos are separate. Set a credit cost for videos (how many coins students pay to watch). School and Competition mode videos are separate.',
                 color: 'red',
                 tags: ['YouTube Links', 'Google Drive', 'Credit Cost', 'Free/Premium']
             },
             {
                 icon: <Headphones size={16} />,
                 title: 'Audio Series',
-                subtitle: 'Audio lectures aur audio notes manage karo',
-                desc: 'Audio format mein content — students sunke padh sakte hain. Har chapter ke liye audio file ka link add karo. Useful for students jo notes sunna pasand karte hain ya visually impaired students ke liye.',
+                subtitle: 'Manage audio lectures and audio notes',
+                desc: 'Audio format content — students can listen and learn. Add an audio file link for each chapter. Useful for students who prefer listening to notes or for visually impaired students.',
                 color: 'pink',
                 tags: ['Audio Links', 'TTS', 'Accessibility']
             },
             {
                 icon: <ClipboardList size={16} />,
                 title: 'Homework',
-                subtitle: 'Daily homework assign karo students ko',
-                desc: 'Teacher ya admin students ko daily homework assign kar sakta hai. Specific chapter ka content (notes, video, MCQ) homework ke roop mein bhejo. Students ke Homework tab mein dikhega. Deadline set kar sakte ho. Completed/Pending track kar sakte ho.',
+                subtitle: 'Assign daily homework to students',
+                desc: 'Teachers or admins can assign daily homework to students. Send specific chapter content (notes, video, MCQ) as homework. It appears in students\' Homework tab. Set a deadline. Track Completed/Pending status.',
                 color: 'indigo',
                 tags: ['Assign', 'Deadline', 'Track', 'Content Link'],
-                tip: 'Homework assign karne se students disciplined rehte hain — daily reminder milta hai.'
+                tip: 'Assigning homework keeps students disciplined — they get a daily reminder.'
             },
             {
                 icon: <BookMarked size={16} />,
                 title: 'Book Notes',
-                subtitle: 'Lucent, NCERT jaise books ke page-by-page notes',
-                desc: 'Yeh ek special feature hai jahan aap kisi book (jaise Lucent GK) ke page-by-page ya chapter-by-chapter notes upload kar sakte ho. Students "Lucent Reader" style mein padh sakte hain — edge-to-edge clean reading experience ke saath.',
+                subtitle: 'Page-by-page notes for books like Lucent and NCERT',
+                desc: 'A special feature where you can upload page-by-page or chapter-by-chapter notes for a book (like Lucent GK). Students can read in a clean "Lucent Reader" edge-to-edge experience.',
                 color: 'amber',
                 tags: ['Lucent', 'Book Pages', 'Competition', 'Reader Mode']
             },
             {
                 icon: <Book size={16} />,
                 title: 'Daily GK',
-                subtitle: 'Roz naya GK content add karo',
-                desc: 'Har din ek naya GK (General Knowledge) question/article add karo. Students Home screen pe daily GK dekhenge. Current affairs, important events, facts — sab yahan manage hote hain.',
+                subtitle: 'Add new GK content every day',
+                desc: 'Add a new GK (General Knowledge) question or article every day. Students see the daily GK on the Home screen. Current affairs, important events, facts — all managed here.',
                 color: 'teal',
                 tags: ['Current Affairs', 'Daily Update', 'GK Facts']
             },
             {
                 icon: <TrendingUp size={16} />,
                 title: 'Trending Notes',
-                subtitle: 'Home page pe trending/important notes feature karo',
-                desc: 'Kuch notes ko "Trending" mark karo — woh Home page pe specially dikhenge. Exam ke nazdeek important topics ko highlight karo. Students seedha trending notes pe click karke padh sakte hain.',
+                subtitle: 'Feature trending/important notes on the Home page',
+                desc: 'Mark certain notes as "Trending" — they appear prominently on the Home page. Highlight important topics near exam time. Students can click trending notes directly to read them.',
                 color: 'amber',
                 tags: ['Featured', 'Home Page', 'Important Topics', 'Exam Ready']
             },
             {
                 icon: <ListChecks size={16} />,
                 title: 'Syllabus Manager',
-                subtitle: 'Board, class aur stream ka syllabus configure karo',
-                desc: 'App mein School Mode aur Competition Mode hote hain. Is section mein aap har class (6th-12th) ka syllabus set karte ho. Stream (Science, Commerce, Arts) ke subjects define karo. CBSE, BSEB board ke chapters configure karo. School aur Competition mode ke beech switch karo.',
+                subtitle: 'Configure board, class and stream syllabus',
+                desc: 'The app has School Mode and Competition Mode. In this section you set the syllabus for each class (6th–12th). Define subjects for each stream (Science, Commerce, Arts). Configure chapters for CBSE and BSEB boards. Switch between School and Competition mode.',
                 color: 'indigo',
                 tags: ['CBSE', 'BSEB', 'Class 6-12', 'Stream', 'Chapters'],
-                warning: 'Super Admin only — Syllabus changes students ke poore navigation structure ko affect karta hai.'
+                warning: 'Super Admin only — Syllabus changes affect the entire navigation structure for students.'
             },
             {
                 icon: <PlaySquare size={16} />,
                 title: 'Universal Playlist',
-                subtitle: 'Bina subject ke universal video playlist banao',
-                desc: 'Kuch videos kisi specific subject se nahi hote — jaise motivational lectures, general tips. Inhe Universal Playlist mein add karo. Students ko direct link se ya home screen se access mil sakta hai.',
+                subtitle: 'Create a universal video playlist not tied to any subject',
+                desc: 'Some videos don\'t belong to a specific subject — like motivational lectures or general tips. Add them to the Universal Playlist. Students can access them via direct link or from the home screen.',
                 color: 'rose',
                 tags: ['General Videos', 'Playlist', 'Non-subject']
             },
@@ -260,49 +260,49 @@ const SECTIONS: HelpSection[] = [
         groupTitle: 'Gamification',
         groupIcon: <Gamepad2 size={18} />,
         groupColor: 'orange',
-        groupDesc: 'Games, rewards, prizes aur challenges configure karo',
+        groupDesc: 'Configure games, rewards, prizes and challenges',
         items: [
             {
                 icon: <Gamepad2 size={16} />,
                 title: 'Game Config',
-                subtitle: 'Spin Wheel game setup karo',
-                desc: 'Students coins earn karne ke liye Spin Wheel khelte hain. Yahan aap Spin Wheel configure karte ho: Spin karne ki cost (kitne coins lagenge), Possible rewards (coin amounts), Har reward ki probability (chance), Win/Lose ratio set karo.',
+                subtitle: 'Set up the Spin Wheel game',
+                desc: 'Students play the Spin Wheel to earn coins. Configure it here: Spin cost (how many coins per spin), Possible rewards (coin amounts), Probability of each reward, Win/Lose ratio.',
                 color: 'orange',
                 tags: ['Spin Wheel', 'Rewards', 'Probability', 'Coin Cost'],
-                tip: 'Students ko zyada engage rakhna ho toh rewards aur probabilities attractive rakho.'
+                tip: 'To keep students more engaged, make rewards and probabilities attractive.'
             },
             {
                 icon: <Gift size={16} />,
                 title: 'Engagement Rewards',
-                subtitle: 'Daily login bonus aur engagement rewards set karo',
-                desc: 'Students ko roz app kholne pe bonus milta hai. Yahan set karo kitne coins milenge daily login pe. Streak bonus (7 din lagatar) ka amount. Referral bonus. Task complete karne pe rewards. In settings se students daily app use karne ke liye motivated rehte hain.',
+                subtitle: 'Set daily login bonus and engagement rewards',
+                desc: 'Students get a bonus for opening the app every day. Set how many coins they earn per daily login, the streak bonus (7 consecutive days), referral bonus, and task-completion rewards. These settings keep students motivated to use the app daily.',
                 color: 'rose',
                 tags: ['Daily Bonus', 'Streak', 'Referral', 'Login Reward']
             },
             {
                 icon: <Trophy size={16} />,
                 title: 'Prize Settings',
-                subtitle: 'Competition prizes configure karo',
-                desc: 'Leaderboard ya challenge winners ke liye prizes set karo. Prize ki description, image, aur value define karo. Top 3 ya top 10 winners ke liye alag prizes. Physical prizes (gift vouchers, books) ya digital prizes (coins, subscription).',
+                subtitle: 'Configure competition prizes',
+                desc: 'Set prizes for leaderboard or challenge winners. Define prize description, image and value. Set different prizes for top 3 or top 10. Physical prizes (gift vouchers, books) or digital prizes (coins, subscription).',
                 color: 'yellow',
                 tags: ['Leaderboard Prize', 'Winners', 'Challenge Reward']
             },
             {
                 icon: <Trophy size={16} />,
                 title: 'Challenge Config',
-                subtitle: 'Daily/Weekly challenges ka basic setup',
-                desc: 'Challenge feature ka general configuration — kitne time mein challenge complete hona chahiye, challenge ke rewards, difficulty level. (Basic settings; detailed challenge creation ke liye Challenge 2.0 use karo.)',
+                subtitle: 'Basic setup for daily/weekly challenges',
+                desc: 'General configuration for the challenge feature — how long to complete a challenge, challenge rewards, difficulty level. (Basic settings; use Challenge 2.0 for detailed challenge creation.)',
                 color: 'red',
                 tags: ['Challenge Rules', 'Time Limit', 'Difficulty']
             },
             {
                 icon: <Rocket size={16} />,
                 title: 'Challenge 2.0',
-                subtitle: 'Advanced challenge creator — detailed MCQ challenges banao',
-                desc: 'Ek powerful tool jisse aap custom MCQ-based challenges create kar sakte ho. Subject, topic, difficulty aur time limit choose karo. Students compete karte hain leaderboard pe. Weekly ya daily challenges schedule karo. Winners automatically detect hote hain.',
+                subtitle: 'Advanced challenge creator — build detailed MCQ challenges',
+                desc: 'A powerful tool to create custom MCQ-based challenges. Choose subject, topic, difficulty and time limit. Students compete on the leaderboard. Schedule weekly or daily challenges. Winners are automatically detected.',
                 color: 'violet',
                 tags: ['MCQ Challenge', 'Leaderboard', 'Schedule', 'Custom Questions'],
-                tip: 'Exam se pehle mock challenge banao — students practice bhi karein aur compete bhi karein!'
+                tip: 'Create a mock challenge before exams — students get both practice and competition!'
             },
         ]
     },
@@ -311,58 +311,58 @@ const SECTIONS: HelpSection[] = [
         groupTitle: 'NSTA Control',
         groupIcon: <Sliders size={18} />,
         groupColor: 'violet',
-        groupDesc: 'App ka core identity, animations aur advanced power settings',
+        groupDesc: 'Core app identity, animations and advanced power settings',
         items: [
             {
                 icon: <Sparkles size={16} />,
                 title: 'Animations',
-                subtitle: 'Top bar aur splash screen effects configure karo',
-                desc: 'App mein visual effects on/off karo. Available effects: ❄️ Snow (snowflakes), 🎆 Fireworks, 🎊 Confetti. Effect ka color aur intensity adjust karo. Splash screen (loading screen) pe bhi effect dikhega. Special occasions pe festive effects on karo.',
+                subtitle: 'Configure top bar and splash screen effects',
+                desc: 'Turn visual effects on/off in the app. Available effects: ❄️ Snow (snowflakes), 🎆 Fireworks, 🎊 Confetti. Adjust effect color and intensity. Effects also appear on the splash screen (loading screen). Turn on festive effects for special occasions.',
                 color: 'violet',
                 tags: ['Snow Effect', 'Fireworks', 'Confetti', 'Festive'],
-                tip: 'Diwali pe fireworks, 15 August pe confetti — students ko accha laga!',
+                tip: 'Fireworks on Diwali, confetti on Independence Day — students love it!',
                 warning: 'Super Admin only.'
             },
             {
                 icon: <Monitor size={16} />,
                 title: 'General Settings',
-                subtitle: 'App ka naam, contact info aur footer configure karo',
-                desc: 'App ka naam (splash screen pe dikhne wala), version number, short name. Admin WhatsApp number (contact button pe). Official email address. Website link. Footer text ("Developed by...") toggle karo. Yahan changes karne par poori app ka identity badal jaata hai.',
+                subtitle: 'Configure app name, contact info and footer',
+                desc: 'App name (shown on splash screen), version number, short name. Admin WhatsApp number (for the contact button). Official email address. Website link. Toggle footer text ("Developed by..."). Changes here affect the entire app identity.',
                 color: 'blue',
                 tags: ['App Name', 'WhatsApp', 'Email', 'Website', 'Footer'],
-                warning: 'App name change karne se splash screen pe turant change dikhega.'
+                warning: 'Changing the app name will immediately reflect on the splash screen.'
             },
             {
                 icon: <Shield size={16} />,
                 title: 'Security',
-                subtitle: 'One-device login aur access control',
-                desc: 'One-Device Login toggle: On karne par ek account ek hi device pe chal sakta hai. Student Logout capability: Students logout kar sakte hain ya nahi. Force logout: Admin kisi bhi student ko remotely logout kar sakta hai. API keys secure storage yahan hoti hai.',
+                subtitle: 'One-device login and access control',
+                desc: 'One-Device Login toggle: When on, one account can only run on one device. Student Logout: Whether students can log out or not. Force logout: Admin can remotely log out any student. Secure API key storage is also here.',
                 color: 'red',
                 tags: ['One Device', 'Force Logout', 'API Keys', 'Access Control'],
-                warning: 'One Device Login on karne par students dusre device pe login nahi kar paenge — pehle soch lein.'
+                warning: 'Turning on One Device Login means students can\'t log in from another device — think before enabling.'
             },
             {
                 icon: <Eye size={16} />,
                 title: 'Visibility & Watermark',
-                subtitle: 'Features show/hide karo aur watermark set karo',
-                desc: 'Master switches se poori features on/off karo: Notes section hide karo, MCQ section hide karo, Video section hide karo. Watermark text set karo (content pe student ka naam ya custom text dikhega). Kisi feature ko temporarily disable karna ho toh yahan karein.',
+                subtitle: 'Show/hide features and set watermark',
+                desc: 'Use master switches to turn entire features on/off: hide the Notes section, MCQ section, Video section. Set watermark text (the student\'s name or custom text will appear on content). Use this to temporarily disable a feature.',
                 color: 'amber',
                 tags: ['Hide Features', 'Watermark', 'Master Toggle', 'Maintenance Mode']
             },
             {
                 icon: <Settings size={16} />,
                 title: 'Advanced Settings (Power Manager)',
-                subtitle: 'Daily limits, pricing matrix aur visibility toggles',
-                desc: 'Yeh sabse powerful settings section hai. 6 sub-tabs hain: 💰 Pricing — subscription plan pricing. 🎯 Daily Limits — MCQ, Notes, Video, PDF limits per plan. 👁️ Visibility — features show/hide. 📍 Top Bar — top bar buttons show/hide. 🗂️ Bottom Nav — bottom navigation tabs. 🏠 Home Grid — home page sections on/off.',
+                subtitle: 'Daily limits, pricing matrix and visibility toggles',
+                desc: 'The most powerful settings section. 6 sub-tabs: 💰 Pricing — subscription plan pricing. 🎯 Daily Limits — MCQ, Notes, Video, PDF limits per plan. 👁️ Visibility — show/hide features. 📍 Top Bar — show/hide top bar buttons. 🗂️ Bottom Nav — bottom navigation tabs. 🏠 Home Grid — home page sections on/off.',
                 color: 'slate',
                 tags: ['Pricing', 'Daily Limits', 'Visibility', 'Navigation', 'Home Grid'],
-                tip: 'Niche Power Manager ke 6 sub-tabs ki detailed explanation bhi padho!'
+                tip: 'Also read the detailed explanation of the 6 Power Manager sub-tabs below!'
             },
             {
                 icon: <PenTool size={16} />,
                 title: 'Blogger Hub',
-                subtitle: 'Custom blog aur external links manage karo',
-                desc: 'Agar aapka ek separate blog ya website hai — usse app se link karo. Students ko Blogger Hub section se redirect kar sakte ho aapke blog pe. External app links (YouTube channel, Telegram, WhatsApp group) yahan add karo.',
+                subtitle: 'Manage custom blog and external links',
+                desc: 'If you have a separate blog or website — link it to the app. Redirect students from the Blogger Hub section to your blog. Add external app links (YouTube channel, Telegram, WhatsApp group) here.',
                 color: 'orange',
                 tags: ['Blog Link', 'External Apps', 'Telegram', 'YouTube'],
                 warning: 'Super Admin only.'
@@ -370,11 +370,11 @@ const SECTIONS: HelpSection[] = [
             {
                 icon: <Bot size={16} />,
                 title: 'AI Configuration',
-                subtitle: 'AI model select karo aur API keys manage karo',
-                desc: 'AI features ke liye yahan configuration hoti hai: AI Model choose karo (Llama 3.1 8B — fast, Llama 3.1 70B — smart, Mixtral — balanced). Groq API keys add karo (multiple keys add kar sakte ho for load balancing). Gemini API key as fallback. API key test karo — "Test Keys" button se check karo sab kaam kar rahe hain ya nahi. AI Chat feature on/off karo.',
+                subtitle: 'Select AI model and manage API keys',
+                desc: 'Configuration for AI features: Choose AI model (Llama 3.1 8B — fast, Llama 3.1 70B — smart, Mixtral — balanced). Add Groq API keys (add multiple keys for load balancing). Gemini API key as fallback. Test API keys — use the "Test Keys" button to check everything is working. Toggle AI Chat on/off.',
                 color: 'teal',
                 tags: ['Groq API', 'Gemini', 'Model Selection', 'Test Keys', 'AI Toggle'],
-                tip: 'Multiple Groq API keys add karo — agar ek rate-limited ho jaye toh dusri automatically use hogi.'
+                tip: 'Add multiple Groq API keys — if one gets rate-limited, the next one is used automatically.'
             },
         ]
     },
@@ -383,42 +383,42 @@ const SECTIONS: HelpSection[] = [
         groupTitle: 'Advanced / Other Sections',
         groupIcon: <Settings size={18} />,
         groupColor: 'slate',
-        groupDesc: 'Database, events, payment aur codes manage karo',
+        groupDesc: 'Manage database, events, payments and codes',
         items: [
             {
                 icon: <Calendar size={16} />,
                 title: 'Event Manager',
-                subtitle: 'Special discount events aur countdown configure karo',
-                desc: 'Store pe special event (jaise Diwali Sale, Board Exam Offer) activate karo. Event ka naam, discount percentage (jaise 30% off), start time aur end time set karo. Store pe countdown timer automatically dikhega. Event active hote hi saare plans pe discount lag jaata hai.',
+                subtitle: 'Configure special discount events and countdown',
+                desc: 'Activate a special event on the Store (e.g. Diwali Sale, Board Exam Offer). Set the event name, discount percentage (e.g. 30% off), start time and end time. A countdown timer automatically appears in the Store. As soon as the event is active, the discount applies to all plans.',
                 color: 'rose',
                 tags: ['Discount', 'Countdown', 'Sale Event', 'Store Pricing'],
-                tip: 'Exam season mein 20-30% discount event activate karo — conversions badh jaate hain!'
+                tip: 'Activate a 20–30% discount event during exam season — conversions go up!'
             },
             {
                 icon: <Hash size={16} />,
                 title: 'Codes',
-                subtitle: 'Gift codes aur teacher codes generate karo',
-                desc: 'Yahan se redeemable codes generate karo: 🎁 Gift Codes — students kisi bhi redeem page pe enter karke coins ya subscription pa sakte hain. 👩‍🏫 Teacher Codes — teachers ko special access dene ke liye. Content Unlock Codes — kisi specific notes/video ko unlock karne ke liye limited-time code. Code ka maximum uses aur expiry time set karo.',
+                subtitle: 'Generate gift codes and teacher codes',
+                desc: 'Generate redeemable codes here: 🎁 Gift Codes — students enter on any redeem page to get coins or a subscription. 👩‍🏫 Teacher Codes — give teachers special access. Content Unlock Codes — limited-time code to unlock specific notes or videos. Set maximum uses and expiry time for each code.',
                 color: 'teal',
                 tags: ['Gift Code', 'Teacher Code', 'Redeem', 'Expiry', 'Max Uses'],
-                tip: 'Giveaway ke liye bulk codes generate karo — har code ek baar hi use ho sakta hai.'
+                tip: 'Generate bulk codes for giveaways — each code can only be used once.'
             },
             {
                 icon: <Bell size={16} />,
                 title: 'Notices',
-                subtitle: 'Home page notice bar configure karo',
-                desc: 'Students ke Home page pe ek notice bar dikhta hai. Uska text yahan se change karo. Jaise: "Board exam 15 March se start" ya "New batch joining open hai". Notice bar enable/disable bhi kar sakte ho.',
+                subtitle: 'Configure the Home page notice bar',
+                desc: 'A notice bar is shown on students\' Home page. Change its text here. For example: "Board exam starts 15 March" or "New batch registration is open". You can also enable/disable the notice bar.',
                 color: 'yellow',
                 tags: ['Notice Bar', 'Home Page Text', 'Announcement']
             },
             {
                 icon: <Globe size={16} />,
                 title: 'Database (Firebase)',
-                subtitle: 'Direct Firebase data view/edit karo',
-                desc: 'Yeh ek advanced tool hai — seedha Firebase Realtime Database aur Firestore ka data dekh aur edit kar sakte ho. Technical errors debug karne ke liye useful. Kisi specific user ya content ka raw data check karna ho toh yahan aao.',
+                subtitle: 'View/edit Firebase data directly',
+                desc: 'An advanced tool — view and edit data directly in Firebase Realtime Database and Firestore. Useful for debugging technical errors. Use this when you need to check the raw data of a specific user or content.',
                 color: 'slate',
                 tags: ['Firebase', 'Realtime DB', 'Firestore', 'Raw Data', 'Debug'],
-                warning: '⚠️ Directly data edit karne se app crash ho sakta hai. Sirf tab use karo jab aap sure ho.'
+                warning: '⚠️ Directly editing data can crash the app. Only use this when you are certain.'
             },
         ]
     },
@@ -427,55 +427,55 @@ const SECTIONS: HelpSection[] = [
         groupTitle: 'Power Manager — 6 Sub-Tabs Detail',
         groupIcon: <Settings size={18} />,
         groupColor: 'violet',
-        groupDesc: '"Advanced Settings" button ke andar 6 sub-tabs hain — har ek ka kaam yahan samjhein',
+        groupDesc: 'Inside the "Advanced Settings" button are 6 sub-tabs — understand what each one does',
         items: [
             {
                 icon: <DollarSign size={16} />,
                 title: '💰 Pricing Tab',
-                subtitle: 'Subscription plans ki actual price set karo',
-                desc: 'Basic aur Ultra subscription ke liye monthly, quarterly aur yearly pricing set karo (₹ mein). Coin packages ki pricing (kitne coins = kitne rupees). Yeh price Store page pe students ko dikhti hai. Changes Save karne ke baad turant Store pe reflect hota hai.',
+                subtitle: 'Set the actual price for subscription plans',
+                desc: 'Set monthly, quarterly and yearly pricing (in ₹) for Basic and Ultra subscriptions. Set coin package pricing (how many coins = how much money). These prices are shown to students on the Store page. Changes reflect on the Store immediately after saving.',
                 color: 'emerald',
                 tags: ['Basic Price', 'Ultra Price', 'Monthly', 'Yearly', 'Coin Packages']
             },
             {
                 icon: <AlertCircle size={16} />,
                 title: '🎯 Daily Limits Tab',
-                subtitle: 'Har plan ke liye daily usage limits set karo',
-                desc: 'FREE USER: Coins deke content unlock karta hai. BASIC USER: X free views per day, phir coins. ULTRA USER: Zyada free views, ya unlimited. Yahan control karo: Write Mode (HTML Notes) — Basic ko 5/day, Ultra ko 10/day. MCQ Practice — Free 50/day, Basic 70/day, Ultra 100/day. HTML Downloads — plan-wise daily download limit. Video Lectures — Basic aur Ultra ke liye free videos/day. PDF Access — Basic aur Ultra ke liye free PDFs/day.',
+                subtitle: 'Set daily usage limits for each plan',
+                desc: 'FREE USER: Unlocks content by spending coins. BASIC USER: X free views per day, then coins. ULTRA USER: More free views, or unlimited. Control here: Write Mode (HTML Notes) — Basic 5/day, Ultra 10/day. MCQ Practice — Free 50/day, Basic 70/day, Ultra 100/day. HTML Downloads — daily download limit per plan. Video Lectures — free videos/day for Basic and Ultra. PDF Access — free PDFs/day for Basic and Ultra.',
                 color: 'amber',
                 tags: ['MCQ Limit', 'HTML Notes Limit', 'Video Limit', 'PDF Limit', 'Credit Cost'],
-                tip: 'Limits thodi kam rakho toh students upgrade karne ke liye motivated rehte hain.'
+                tip: 'Keep limits a bit lower to motivate students to upgrade.'
             },
             {
                 icon: <Eye size={16} />,
                 title: '👁️ Visibility Tab',
-                subtitle: 'Bottom nav aur features toggle karo (Power Manager ke andar)',
-                desc: 'Revision Hub, App Store, aur doosre major tabs ko show/hide karo. Yahan se specific features temporarily disable kar sakte ho. Maintenance mode ya feature rollout ke waqt useful.',
+                subtitle: 'Toggle bottom nav and features (inside Power Manager)',
+                desc: 'Show/hide major tabs like Revision Hub and App Store. Temporarily disable specific features from here. Useful during maintenance mode or feature rollout.',
                 color: 'blue',
                 tags: ['Feature Toggle', 'Tab Visibility', 'Maintenance']
             },
             {
                 icon: <Zap size={16} />,
                 title: '📍 Top Bar Tab',
-                subtitle: 'Top bar buttons show/hide karo',
-                desc: 'Students ke screen ke upar jo buttons dikhte hain unhe control karo: Language toggle button (Hindi/English switch). Coin/Credits display. Sale banner. Search button. Notification bell. Koi bhi button hide karo agar chahte ho screen clean rakhna.',
+                subtitle: 'Show/hide top bar buttons',
+                desc: 'Control the buttons shown at the top of students\' screens: Language toggle button (Hindi/English switch), Coin/Credits display, Sale banner, Search button, Notification bell. Hide any button to keep the screen clean.',
                 color: 'sky',
                 tags: ['Language Button', 'Credits Button', 'Search', 'Notifications', 'Sale Badge']
             },
             {
                 icon: <Navigation2 size={16} />,
                 title: '🗂️ Bottom Nav Tab',
-                subtitle: 'Bottom navigation ke tabs control karo',
-                desc: 'Students ke screen ke neeche 4-5 navigation tabs hote hain. Yahan decide karo kaunse tabs dikhenge: Home, Study, MCQ, Store, Profile, Chat, Revision, etc. Tab ki order bhi yahan set hoti hai. Zyada tabs na rakhein — 4-5 max best experience dete hain.',
+                subtitle: 'Control bottom navigation tabs',
+                desc: 'Students have 4–5 navigation tabs at the bottom of their screen. Decide which tabs to show: Home, Study, MCQ, Store, Profile, Chat, Revision, etc. Tab order is also set here. Don\'t add too many tabs — 4–5 max gives the best experience.',
                 color: 'indigo',
                 tags: ['Home Tab', 'Study Tab', 'MCQ Tab', 'Profile Tab', 'Tab Order'],
-                tip: 'Sirf woh tabs rakhein jo students regularly use karte hain — confusion kam hogi.'
+                tip: 'Only keep tabs that students use regularly — reduces confusion.'
             },
             {
                 icon: <LayoutGrid size={16} />,
                 title: '🏠 Home Grid Tab',
-                subtitle: 'Home page ke sections on/off karo',
-                desc: 'Home page pe kai sections hote hain: Notice Bar (announcement text). Promo Banners (sliding images). Quick Action Buttons (Start Study, MCQ, etc.). Trending Notes section. Daily GK card. Homework reminder. Har section ko alag se on/off karo apni zaroorat ke hisaab se.',
+                subtitle: 'Turn Home page sections on/off',
+                desc: 'The Home page has several sections: Notice Bar (announcement text), Promo Banners (sliding images), Quick Action Buttons (Start Study, MCQ, etc.), Trending Notes section, Daily GK card, Homework reminder. Turn each section on/off individually as needed.',
                 color: 'teal',
                 tags: ['Notice Bar', 'Promo Banners', 'Quick Actions', 'Trending Notes', 'Daily GK']
             },
@@ -555,12 +555,12 @@ const AdminHelp: React.FC = () => {
                     </div>
                     <div>
                         <h1 className="text-lg font-black">Admin Help Guide</h1>
-                        <p className="text-indigo-200 text-[11px]">Har button ka kaam — full details mein</p>
+                        <p className="text-indigo-200 text-[11px]">What every button does — in full detail</p>
                     </div>
                 </div>
                 <p className="text-indigo-100 text-[12px] leading-relaxed">
-                    Admin dashboard ke <strong>saare sections, tabs aur buttons</strong> ka poora explanation yahan milega.
-                    Kuch bhi samajh na aaye — yahan dhundho.
+                    Full explanation of <strong>all sections, tabs and buttons</strong> in the admin dashboard is here.
+                    If you don't understand anything — search for it here.
                 </p>
             </div>
 
@@ -569,7 +569,7 @@ const AdminHelp: React.FC = () => {
                 <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                     type="text"
-                    placeholder="Koi bhi button ya feature search karo..."
+                    placeholder="Search any button or feature..."
                     value={search}
                     onChange={e => setSearch(e.target.value)}
                     className="w-full pl-9 pr-4 py-3 bg-white border border-slate-200 rounded-xl text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 font-medium"

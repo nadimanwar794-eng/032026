@@ -19,32 +19,32 @@ const QUESTIONS: Array<{
   {
     id: 'overall',
     question: 'Overall, how would you rate this app?',
-    questionHindi: 'Overall app ko kitne stars doge?',
+    questionHindi: 'Overall app rating',
     type: 'rating',
   },
   {
     id: 'best_feature',
     question: 'Which feature do you use the most?',
-    questionHindi: 'Sabse zyada kaunsa feature use karte ho?',
+    questionHindi: 'Most used feature',
     type: 'choice',
-    options: ['Notes / Reading', 'MCQ Practice', 'AI Chat', 'Revision Hub', 'Community Chat', 'Videos', 'Aur kuch'],
+    options: ['Notes / Reading', 'MCQ Practice', 'AI Chat', 'Revision Hub', 'Community Chat', 'Videos', 'Something else'],
   },
   {
     id: 'difficulty',
     question: 'Is the app easy to use?',
-    questionHindi: 'App use karna kitna aasaan lagta hai?',
+    questionHindi: 'Ease of use',
     type: 'rating',
   },
   {
     id: 'content_quality',
     question: 'How is the quality of study content?',
-    questionHindi: 'Study content ki quality kaisi lagti hai?',
+    questionHindi: 'Content quality',
     type: 'rating',
   },
   {
     id: 'suggestion',
     question: 'Any suggestion or improvement you want?',
-    questionHindi: 'Koi suggestion ya improvement chahiye?',
+    questionHindi: 'Suggestions & improvements',
     type: 'text',
   },
 ];
@@ -100,7 +100,7 @@ const AppFeedback: React.FC<Props> = ({ user, onBack }) => {
 
   const handleSubmit = async () => {
     if (overallRating === 0) {
-      setError('Overall rating dena zaroori hai ⭐');
+      setError('Overall rating is required ⭐');
       return;
     }
     setError('');
@@ -122,7 +122,7 @@ const AppFeedback: React.FC<Props> = ({ user, onBack }) => {
       await saveAppFeedback(entry);
       setSubmitted(true);
     } catch {
-      setError('Submit nahi hua. Internet check karke try karo.');
+      setError('Submission failed. Check your internet connection and try again.');
     } finally {
       setSubmitting(false);
     }
@@ -134,15 +134,15 @@ const AppFeedback: React.FC<Props> = ({ user, onBack }) => {
         <div className="w-20 h-20 rounded-full bg-emerald-100 flex items-center justify-center mb-5">
           <CheckCircle2 size={40} className="text-emerald-500" />
         </div>
-        <h2 className="text-xl font-black text-slate-800 mb-2">Shukriya! 🙏</h2>
+        <h2 className="text-xl font-black text-slate-800 mb-2">Thank you! 🙏</h2>
         <p className="text-sm text-slate-500 mb-6 max-w-xs">
-          Tumhara feedback mil gaya. Isse app ko aur behtar banane mein madad milegi.
+          Your feedback has been received. It will help us make the app even better.
         </p>
         <button
           onClick={onBack}
           className="px-8 py-3 bg-indigo-600 text-white font-bold rounded-xl shadow active:scale-95 transition-transform"
         >
-          Profile pe wapas jao
+          Back to Profile
         </button>
       </div>
     );
@@ -160,7 +160,7 @@ const AppFeedback: React.FC<Props> = ({ user, onBack }) => {
         </button>
         <div>
           <h1 className="text-base font-black text-slate-800 leading-tight">App Feedback</h1>
-          <p className="text-[10px] text-slate-400 leading-tight">Apna anubhav share karo</p>
+          <p className="text-[10px] text-slate-400 leading-tight">Share your experience</p>
         </div>
       </div>
 
@@ -169,9 +169,9 @@ const AppFeedback: React.FC<Props> = ({ user, onBack }) => {
         <div className="bg-indigo-50 border border-indigo-200 rounded-2xl px-4 py-3 flex items-start gap-3">
           <span className="text-2xl mt-0.5">💬</span>
           <div>
-            <p className="text-sm font-bold text-indigo-800">Tumhara feedback bahut important hai!</p>
+            <p className="text-sm font-bold text-indigo-800">Your feedback matters!</p>
             <p className="text-[11px] text-indigo-600 mt-0.5">
-              Seedha admin tak pahunchega. Sach mein batao — good ya bad, sab suno.
+              Goes directly to the admin. Be honest — good or bad, we want to hear it all.
             </p>
           </div>
         </div>
@@ -226,7 +226,7 @@ const AppFeedback: React.FC<Props> = ({ user, onBack }) => {
                 onChange={e =>
                   setAnswer(q.id, { type: 'text', text: e.target.value }, q.questionHindi)
                 }
-                placeholder="Yahan likho..."
+                placeholder="Write here..."
                 rows={3}
                 className="w-full mt-1 p-3 border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400 resize-none bg-slate-50 text-slate-800 placeholder-slate-400"
               />
@@ -249,11 +249,11 @@ const AppFeedback: React.FC<Props> = ({ user, onBack }) => {
           ) : (
             <Send size={16} />
           )}
-          {submitting ? 'Submit ho raha hai...' : 'Feedback Submit Karo'}
+          {submitting ? 'Submitting...' : 'Submit Feedback'}
         </button>
 
         <p className="text-[10px] text-slate-400 text-center pb-4">
-          Tumhara naam aur basic info feedback ke saath save hogi.
+          Your name and basic info will be saved with the feedback.
         </p>
       </div>
     </div>

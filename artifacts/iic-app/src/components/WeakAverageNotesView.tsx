@@ -8,6 +8,7 @@ import { SpeakButton } from './SpeakButton';
 import { DEFAULT_SUBJECTS } from '../constants';
 import { formatMcqNotes, findRelevantNote } from '../utils/noteFormatter';
 import { ChunkedNotesReader } from './ChunkedNotesReader';
+import { renderMathInHtml } from '../utils/mathUtils';
 
 interface Props {
     user: User;
@@ -357,7 +358,7 @@ export const WeakAverageNotesView: React.FC<Props> = ({ user, topics, onClose, o
                                     ) : (
                                         <div
                                             className="prose prose-sm prose-slate max-w-none text-justify"
-                                            dangerouslySetInnerHTML={{ __html: topic.content }}
+                                            dangerouslySetInnerHTML={{ __html: renderMathInHtml(topic.content) }}
                                         />
                                     )}
                                 </div>

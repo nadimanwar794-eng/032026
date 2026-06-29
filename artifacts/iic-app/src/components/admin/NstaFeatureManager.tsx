@@ -189,10 +189,10 @@ export const NstaFeatureManager: React.FC<Props> = ({ settings, onUpdateSettings
                             <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Subscription Tier Colors (Free / Basic / Ultra)</p>
                             <div className="grid grid-cols-3 gap-3">
                                 {([
-                                    { key: 'free',  label: 'Free',  emoji: '🎓', accent: '#10b981', bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-800' },
-                                    { key: 'basic', label: 'Basic', emoji: '⭐', accent: '#2563eb', bg: 'bg-blue-50',    border: 'border-blue-200',    text: 'text-blue-800'    },
-                                    { key: 'ultra', label: 'Ultra', emoji: '⚡', accent: '#c8a020', bg: 'bg-amber-50',   border: 'border-amber-200',   text: 'text-amber-800'   },
-                                ] as const).map(({ key, label, emoji, bg, border, text }) => (
+                                    { key: 'free',  label: 'Free',  emoji: '💎', accent: '#366669', bg: 'bg-teal-50',   border: 'border-teal-200',   text: 'text-teal-800'   },
+                                    { key: 'basic', label: 'Basic', emoji: '⭐', accent: '#213252', bg: 'bg-blue-50',   border: 'border-blue-200',   text: 'text-blue-800'   },
+                                    { key: 'ultra', label: 'Ultra', emoji: '⬛', accent: '#374151', bg: 'bg-slate-50',  border: 'border-slate-200',  text: 'text-slate-800'  },
+                                ] as const).map(({ key, label, emoji, accent, bg, border, text }) => (
                                     <div key={key} className={`${bg} ${border} border rounded-xl p-2.5 flex flex-col gap-2`}>
                                         <div className="flex items-center justify-between">
                                             <span className={`text-[10px] font-black ${text} uppercase`}>{emoji} {label}</span>
@@ -207,7 +207,7 @@ export const NstaFeatureManager: React.FC<Props> = ({ settings, onUpdateSettings
                                         <div className="flex items-center gap-1.5">
                                             <input
                                                 type="color"
-                                                value={tierColors[key] || '#888888'}
+                                                value={tierColors[key] || accent}
                                                 onChange={e => setTierColors(p => ({ ...p, [key]: e.target.value }))}
                                                 className="w-8 h-8 rounded-lg border-none cursor-pointer shrink-0"
                                             />

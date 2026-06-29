@@ -8,6 +8,7 @@ import { DEFAULT_SUBJECTS } from '../constants';
 import { SpeakButton } from './SpeakButton';
 import { formatMcqNotes, findRelevantNote } from '../utils/noteFormatter';
 import { ChunkedNotesReader } from './ChunkedNotesReader';
+import { renderMathInHtml } from '../utils/mathUtils';
 
 interface Props {
     user: User;
@@ -334,29 +335,10 @@ export const TodayRevisionView: React.FC<Props> = ({ user, topics, onClose, onCo
                                                     if (next.has(topic.id)) next.delete(topic.id); else next.add(topic.id);
                                                     return next;
                                                 })}
-                                                className={`p-2 rounded-full transition-all flex items-center gap-1 ${chunkTopics.has(topic.id) ? 'bg-amber-100 text-amber-700 ring-2 ring-amber-400' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-                                                title={chunkTopics.has(topic.id) ? 'Styled Notes mein switch karo' : 'TTS Reader mein switch karo'}
+                                                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 ${chunkTopics.has(topic.id) ? 'bg-amber-500 text-white shadow-md shadow-amber-200' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-200'}`}
                                             >
-                                                {chunkTopics.has(topic.id) ? <FileText size={18} /> : <Volume2 size={18} />}
+                                                {chunkTopics.has(topic.id) ? <><FileText size={15} /> Notes</> : <><Volume2 size={15} /> TTS</>}
                                             </button>
-                                            <SpeakButton
-                                                text={topic.plainText}
-                                                className="bg-indigo-50 text-indigo-600 hover:bg-indigo-100"
-                                                autoPlay={isPlayingAll && currentPlayingIndex === index}
-                                                onEnd={() => {
-                                                    if (isPlayingAll) {
-                                                        const next = index + 1;
-                                                        if (next < displayList.length) {
-                                                            setCurrentPlayingIndex(next);
-                                                            // Auto scroll
-                                                            topicRefs.current[next]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                                        } else {
-                                                            setIsPlayingAll(false);
-                                                            setCurrentPlayingIndex(null);
-                                                        }
-                                                    }
-                                                }}
-                                            />
                                             <button
                                                 onClick={() => toggleTopicComplete(topic.id)}
                                                 className={`p-2 rounded-full transition-all flex items-center gap-1 ${completedTopicIds.has(topic.id) ? 'bg-green-100 text-green-700 ring-2 ring-green-500' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
@@ -384,7 +366,7 @@ export const TodayRevisionView: React.FC<Props> = ({ user, topics, onClose, onCo
                                     ) : (
                                         <div
                                             className="prose prose-sm prose-slate max-w-none text-justify"
-                                            dangerouslySetInnerHTML={{ __html: topic.content }}
+                                            dangerouslySetInnerHTML={{ __html: renderMathInHtml(topic.content) }}
                                         />
                                     )}
                                 </div>
@@ -426,7 +408,7 @@ export const TodayRevisionView: React.FC<Props> = ({ user, topics, onClose, onCo
                                     {/* MODIFIED: Always show notes instead of hiding them behind expanded state */}
                                     <div className="mt-2 text-xs text-slate-700 leading-relaxed p-3 bg-slate-50 rounded-lg border border-slate-100 animate-in fade-in slide-in-from-top-2 duration-200">
                                         {t.content && t.content.trim() && !t.content.includes("Content not available") && !t.content.includes("No specific notes found") ? (
-                                            <div dangerouslySetInnerHTML={{ __html: t.content }} className="prose prose-sm prose-slate max-w-none text-justify" />
+                                            <div dangerouslySetInnerHTML={{ __html: renderMathInHtml(t.content) }} className="prose prose-sm prose-slate max-w-none text-justify" />
                                         ) : (
                                             <div className="italic text-slate-500 text-center py-2">Sorry, detailed notes could not be automatically generated for this specific sub-topic at this time. Please refer to the main chapter material.</div>
                                         )}

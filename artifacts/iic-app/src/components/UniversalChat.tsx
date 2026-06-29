@@ -384,7 +384,7 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
     const canReply = activeTab === 'MCQ' || activeTab === 'SUPPORT' || !!roomId || isAdminOrSub;
 
     return (
-        <div className="fixed inset-0 z-[100] bg-slate-900/90 backdrop-blur-sm flex items-stretch justify-stretch p-0">
+        <div className="fixed inset-0 z-[170] bg-slate-900/90 backdrop-blur-sm flex items-stretch justify-stretch p-0">
 
             {/* Profile popup */}
             {selectedUserProfile && (

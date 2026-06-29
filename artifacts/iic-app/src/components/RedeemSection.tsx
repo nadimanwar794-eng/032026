@@ -291,12 +291,14 @@ export const RedeemSection: React.FC<Props> = ({ user, onSuccess }) => {
             (updatedUser as any).scoreBoostExpiry = expiry;
             successMessage = `🚀 Score Boost Activated! +${boostPct}% extra score for the next ${durationHrs} hour${durationHrs === 1 ? '' : 's'}!`;
         } else if (targetCode.type === 'SCORE_LIMIT_BOOST') {
-            // Handle Daily Score Limit Boost — permanently increases the user's daily limit by %
+            // Handle Daily Score Limit Boost — temporarily increases the user's daily limit by %
             const limitBoostPct = (targetCode as any).scoreLimitBoostPercent || 10;
-            const prevBoost = (updatedUser as any).scoreLimitBoostPercent || 0;
-            // Stacks additively with previous boosts
-            (updatedUser as any).scoreLimitBoostPercent = prevBoost + limitBoostPct;
-            successMessage = `📈 Daily Score Limit Boost! +${limitBoostPct}% limit badh gayi permanently! (Total Boost: ${prevBoost + limitBoostPct}%)`;
+            const durationHrs = (targetCode as any).scoreLimitBoostDurationHours || 24;
+            const expiry = new Date(Date.now() + durationHrs * 60 * 60 * 1000).toISOString();
+            (updatedUser as any).scoreLimitBoostPercent = limitBoostPct;
+            (updatedUser as any).scoreLimitBoostExpiry = expiry;
+            const timeLabel = durationHrs >= 24 ? `${Math.round(durationHrs / 24)} din` : `${durationHrs} ghante`;
+            successMessage = `📈 Daily Limit Boost Active! +${limitBoostPct}% zyada score limit ${timeLabel} ke liye! Expiry ke baad default limit pe wapis aa jayegi.`;
         } else if (targetCode.type === 'THEME_COLOR') {
             // Handle Temporary App Theme Color
             const color = (targetCode as any).themeColor || '#3b82f6';

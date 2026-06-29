@@ -9,7 +9,7 @@ import {
   ReadingFont,
 } from '../utils/notesFonts';
 
-const FONT_SIZES = [13, 15, 17, 20] as const;
+const FONT_SIZES = [13, 15, 17, 20, 24, 28, 32, 36, 40] as const;
 const FONT_SIZE_KEY = 'nst_reading_font_size';
 const FONT_FAMILY_KEY = 'nst_reading_font_family';
 export const FONT_WEIGHT_KEY = 'nst_reading_font_weight';
@@ -38,7 +38,7 @@ export const dispatchReadingStyleChange = () => {
 const readStoredIdx = (): number => {
   try {
     const v = parseInt(localStorage.getItem(FONT_SIZE_KEY) || '1', 10);
-    return isNaN(v) || v < 0 || v > 3 ? 1 : v;
+    return isNaN(v) || v < 0 || v > 8 ? 1 : v;
   } catch {
     return 1;
   }

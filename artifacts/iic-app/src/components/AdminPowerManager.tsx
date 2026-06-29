@@ -115,13 +115,13 @@ export const AdminPowerManager: React.FC<Props> = ({ settings, onUpdate }) => {
             {activeTab === 'DAILY_LIMITS' && (
                 <div className="space-y-5">
                     <p className="text-[11px] text-slate-500 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 font-medium">
-                        ⚠️ Yahan changes karne par sab students pe turant effect hoga. Save karna mat bhoolein.
+                        ⚠️ Changes here take effect on all students immediately. Don't forget to save.
                     </p>
 
                     {/* WRITE MODE LIMITS */}
                     <div className="bg-teal-50 border border-teal-200 rounded-xl p-4">
                         <h4 className="font-black text-teal-800 text-sm mb-1 flex items-center gap-2">✍️ Write Mode (HTML Notes)</h4>
-                        <p className="text-[10px] text-teal-600 mb-3">Free views/day per plan aur credit system config</p>
+                        <p className="text-[10px] text-teal-600 mb-3">Free views/day per plan and credit system config</p>
                         <div className="grid grid-cols-3 gap-3 mb-3">
                             <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
                                 <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Free (0 free)</label>
@@ -170,7 +170,7 @@ export const AdminPowerManager: React.FC<Props> = ({ settings, onUpdate }) => {
                     {/* MCQ LIMITS */}
                     <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
                         <h4 className="font-black text-amber-800 text-sm mb-1 flex items-center gap-2">📝 MCQ Practice (Daily Limit)</h4>
-                        <p className="text-[10px] text-amber-600 mb-3">Har plan ke liye daily MCQ questions limit</p>
+                        <p className="text-[10px] text-amber-600 mb-3">Daily MCQ questions limit per plan</p>
                         <div className="grid grid-cols-3 gap-3">
                             <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
                                 <label className="text-[9px] font-black text-slate-500 uppercase block mb-1">Free/Day</label>
@@ -329,7 +329,7 @@ export const AdminPowerManager: React.FC<Props> = ({ settings, onUpdate }) => {
                     <div className="space-y-4">
                         <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3">
                             <p className="text-[11px] font-black text-indigo-800 mb-1">📊 Level-wise Daily Limits Override</p>
-                            <p className="text-[10px] text-indigo-600">Har level aur subscription tier ka alag limit set karo. Default values level system se aate hain.</p>
+                            <p className="text-[10px] text-indigo-600">Set separate daily limits for each level and subscription tier. Default values come from the level system.</p>
                         </div>
 
                         {/* Level selector */}
@@ -405,7 +405,7 @@ export const AdminPowerManager: React.FC<Props> = ({ settings, onUpdate }) => {
 
                         {/* Copy from level */}
                         <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
-                            <p className="text-[10px] font-black text-amber-800">💡 Tip: 9999 enter karo = Unlimited. Changes turant save hote hain. Ek level change karne ke baad doosra level select karo.</p>
+                            <p className="text-[10px] font-black text-amber-800">💡 Tip: Enter 9999 = Unlimited. Changes save instantly. Select another level after updating one.</p>
                         </div>
                     </div>
                 );
@@ -522,7 +522,7 @@ export const AdminPowerManager: React.FC<Props> = ({ settings, onUpdate }) => {
                             <HomeIcon size={16} className="text-emerald-600" /> Home Page Buttons
                         </h4>
                         <p className="text-[11px] text-slate-600 mb-4">
-                            Sabhi home grid feature buttons. Hide karne par yeh button student ke home par nahi dikhega.
+                            All home grid feature buttons. Hiding a button will remove it from the student's home page.
                         </p>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[480px] overflow-y-auto pr-1">
                             {HOME_GRID_FEATURES.map(f => {
@@ -562,7 +562,7 @@ export const AdminPowerManager: React.FC<Props> = ({ settings, onUpdate }) => {
                             <h4 className="font-black text-amber-900 flex items-center gap-2 text-sm">
                                 <Star size={16} className="text-amber-600" /> Level Score Thresholds
                             </h4>
-                            <p className="text-[11px] text-amber-700 mt-0.5">Har level ke liye minimum score set karo. Khali chhodo = default system value use hogi.</p>
+                            <p className="text-[11px] text-amber-700 mt-0.5">Set minimum score for each level. Leave blank = use default system value.</p>
                         </div>
                         <div className="grid grid-cols-1 gap-2 max-h-[420px] overflow-y-auto pr-1">
                             {[

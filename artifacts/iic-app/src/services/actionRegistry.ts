@@ -55,14 +55,10 @@ const getSettings = async (): Promise<SystemSettings | null> => {
 
 // --- ACTION IMPLEMENTATIONS ---
 
-const deleteUser = async (userId: string) => {
-    try {
-        await deleteDoc(doc(db, "users", userId));
-        await remove(ref(rtdb, `users/${userId}`));
-        return `User ${userId} deleted successfully from Firestore and RTDB.`;
-    } catch (e: any) {
-        throw new Error(`Failed to delete user ${userId}: ${e.message}`);
-    }
+const deleteUser = async (_userId: string) => {
+    // PROTECTED: User deletion is permanently disabled to prevent accidental data loss.
+    // Users can be deactivated (role change) but never deleted from the database.
+    throw new Error("User deletion is disabled. Use role change to deactivate a user instead.");
 };
 
 const updateUser = async (userId: string, updates: Partial<User>) => {
@@ -183,7 +179,7 @@ const sendInboxMessage = async (userId: string, text: string) => {
 };
 
 // SUPER PILOT UPGRADE: Autonomous Question Generation
-const createWeeklyTest = async (name: string, subject: string, questionCount: number, classLevel: ClassLevel = '10', board: Board = 'CBSE') => {
+const createWeeklyTest = async (name: string, subject: string, questionCount: number, classLevel: ClassLevel = '10', board: Board = 'NCERT_EN') => {
     const settings = await getSettings();
     if (!settings) throw new Error("Settings not found");
     

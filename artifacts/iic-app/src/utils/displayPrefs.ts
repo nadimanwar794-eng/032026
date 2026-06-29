@@ -104,43 +104,68 @@ export const isRotatingForOrientation = (): boolean => _rotatingForOrientation;
 /**
  * Rotate the screen between portrait and landscape. Returns the new
  * orientation on success, or `null` if the device/browser doesn't
- * support programmatic orientation locking (most desktop browsers and
- * iOS Safari).
+ * support programmatic orientation locking.
  *
- * The screen.orientation.lock API requires a fullscreen context on most
- * browsers — so we transparently enter fullscreen first.
+ * Strategy:
+ *  1. Try WITHOUT fullscreen first (works on PWA-installed apps).
+ *  2. If that fails, enter fullscreen briefly just to allow the lock API,
+ *     lock the orientation, then immediately EXIT fullscreen.
+ *     → The browser notice appears for ~1 second then vanishes automatically.
+ *     → The orientation lock persists after fullscreen is exited.
+ *  3. The _rotatingForOrientation flag guards fullscreenchange handlers so
+ *     isFullscreenMode / isDocFullscreen are NOT toggled during this dance.
  */
 export const rotateScreen = async (): Promise<'portrait' | 'landscape' | null> => {
   try {
     const so: any = (screen as any).orientation;
     if (!so || typeof so.lock !== 'function') return null;
 
-    // Need fullscreen for the lock to be honoured on most browsers.
-    if (!isFullscreen()) {
-      _rotatingForOrientation = true;
-      const ok = await requestFullscreenSafe();
-      if (!ok) { _rotatingForOrientation = false; return null; }
-    }
-
-    // Decide the target — flip from current orientation type.
     const current: string = (so.type || '').toLowerCase();
     const goingTo: 'portrait' | 'landscape' = current.startsWith('landscape')
       ? 'portrait'
       : 'landscape';
 
-    // Try the most-specific lock first, then fall back to generic.
     const candidates = goingTo === 'landscape'
       ? ['landscape-primary', 'landscape']
       : ['portrait-primary', 'portrait'];
+
+    // Attempt 1: lock without fullscreen (PWA / some Android builds)
     for (const target of candidates) {
       try {
         await so.lock(target);
-        _rotatingForOrientation = false;
         return goingTo;
-      } catch { /* try next candidate */ }
+      } catch { /* try next */ }
     }
-    _rotatingForOrientation = false;
-    return null;
+
+    // Attempt 2: enter fullscreen briefly, lock, then exit fullscreen
+    _rotatingForOrientation = true;
+    try {
+      const alreadyFullscreen = isFullscreen();
+      if (!alreadyFullscreen) {
+        const ok = await requestFullscreenSafe();
+        if (!ok) { _rotatingForOrientation = false; return null; }
+      }
+
+      let locked = false;
+      for (const target of candidates) {
+        try {
+          await so.lock(target);
+          locked = true;
+          break;
+        } catch { /* try next */ }
+      }
+
+      // NOTE: do NOT exit fullscreen here — Chrome releases the orientation
+      // lock the moment fullscreen ends, causing the screen to snap back.
+      // The fullscreenchange handler is guarded by _rotatingForOrientation
+      // so isFullscreenMode / isDocFullscreen won't be toggled during this.
+
+      _rotatingForOrientation = false;
+      return locked ? goingTo : null;
+    } catch {
+      _rotatingForOrientation = false;
+      return null;
+    }
   } catch {
     _rotatingForOrientation = false;
     return null;

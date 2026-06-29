@@ -12,25 +12,120 @@ export interface LevelInfo {
 }
 
 export const LEVEL_INFO: LevelInfo[] = [
-  { level: 1,  minScore: 0,         label: 'Beginner',    emoji: '🌱', color: '#94a3b8', gradient: 'from-slate-400 to-slate-500',                  glowColor: 'rgba(148,163,184,0.35)', discount: 0,  animationIntensity: 0 },
-  { level: 2,  minScore: 200,       label: 'Apprentice',  emoji: '🌿', color: '#6ee7b7', gradient: 'from-emerald-300 to-teal-400',                 glowColor: 'rgba(110,231,183,0.35)', discount: 0,  animationIntensity: 0 },
-  { level: 3,  minScore: 500,       label: 'Explorer',    emoji: '🔍', color: '#38bdf8', gradient: 'from-sky-400 to-cyan-500',                     glowColor: 'rgba(56,189,248,0.4)',   discount: 2,  animationIntensity: 1 },
-  { level: 4,  minScore: 1000,      label: 'Scholar',     emoji: '✨', color: '#06b6d4', gradient: 'from-cyan-400 to-sky-500',                     glowColor: 'rgba(6,182,212,0.45)',   discount: 3,  animationIntensity: 1, nameColor: '#06b6d4' },
-  { level: 5,  minScore: 5000,      label: 'Expert',      emoji: '⚡', color: '#3b82f6', gradient: 'from-blue-400 to-indigo-500',                  glowColor: 'rgba(59,130,246,0.5)',   discount: 5,  animationIntensity: 2 },
-  { level: 6,  minScore: 10000,     label: 'Veteran',     emoji: '🔥', color: '#f97316', gradient: 'from-orange-400 to-red-500',                   glowColor: 'rgba(249,115,22,0.55)',  discount: 8,  animationIntensity: 2 },
-  { level: 7,  minScore: 20000,     label: 'Master',      emoji: '💫', color: '#a855f7', gradient: 'from-violet-400 to-purple-600',                glowColor: 'rgba(168,85,247,0.6)',   discount: 10, animationIntensity: 2, nameColor: '#a855f7' },
-  { level: 8,  minScore: 50000,     label: 'GrandMaster', emoji: '💎', color: '#f59e0b', gradient: 'from-amber-400 to-yellow-500',                 glowColor: 'rgba(245,158,11,0.65)',  discount: 13, animationIntensity: 3, nameColor: '#f59e0b' },
-  { level: 9,  minScore: 100000,    label: 'Titan',       emoji: '🌟', color: '#eab308', gradient: 'from-yellow-400 to-amber-500',                 glowColor: 'rgba(234,179,8,0.75)',   discount: 17, animationIntensity: 3, nameColor: '#eab308' },
-  { level: 10, minScore: 500000,    label: 'Mythic',      emoji: '👑', color: '#f59e0b', gradient: 'from-amber-400 to-orange-400',                 glowColor: 'rgba(245,158,11,0.8)',   discount: 20, animationIntensity: 3, nameColor: '#f59e0b' },
-  { level: 11, minScore: 2500000,   label: 'Supreme',     emoji: '🏆', color: '#10b981', gradient: 'from-emerald-400 via-cyan-400 to-violet-500',  glowColor: 'rgba(16,185,129,0.9)',  discount: 20, animationIntensity: 4, nameColor: '#10b981' },
-  { level: 12, minScore: 5000000,   label: 'Legend',      emoji: '🔮', color: '#8b5cf6', gradient: 'from-violet-400 via-purple-500 to-pink-500',   glowColor: 'rgba(139,92,246,0.9)',  discount: 22, animationIntensity: 4, nameColor: '#8b5cf6' },
-  { level: 13, minScore: 10000000,  label: 'Immortal',    emoji: '⚜️', color: '#ec4899', gradient: 'from-pink-400 via-rose-500 to-red-500',        glowColor: 'rgba(236,72,153,0.9)',  discount: 25, animationIntensity: 4, nameColor: '#ec4899' },
-  { level: 14, minScore: 20000000,  label: 'Divine',      emoji: '🌠', color: '#f43f5e', gradient: 'from-rose-400 via-red-500 to-orange-500',      glowColor: 'rgba(244,63,94,0.95)',  discount: 28, animationIntensity: 4, nameColor: '#f43f5e' },
-  { level: 15, minScore: 50000000,  label: 'Absolute',    emoji: '💠', color: '#a5f3fc', gradient: 'from-white via-cyan-200 to-violet-400',         glowColor: 'rgba(165,243,252,0.95)', discount: 30, animationIntensity: 4, nameColor: '#7c3aed' },
+  { level: 1,  minScore: 0,          label: 'Beginner',         emoji: '🌱', color: '#94a3b8', gradient: 'from-slate-400 to-slate-500',                  glowColor: 'rgba(148,163,184,0.35)', discount: 0,  animationIntensity: 0 },
+  { level: 2,  minScore: 1000,       label: 'Learner',          emoji: '🌿', color: '#6ee7b7', gradient: 'from-emerald-300 to-teal-400',                 glowColor: 'rgba(110,231,183,0.35)', discount: 0,  animationIntensity: 0 },
+  { level: 3,  minScore: 2500,       label: 'Active Learner',   emoji: '🔍', color: '#38bdf8', gradient: 'from-sky-400 to-cyan-500',                     glowColor: 'rgba(56,189,248,0.4)',   discount: 2,  animationIntensity: 1 },
+  { level: 4,  minScore: 5000,       label: 'Consistent Learner', emoji: '✨', color: '#06b6d4', gradient: 'from-cyan-400 to-sky-500',                   glowColor: 'rgba(6,182,212,0.45)',   discount: 3,  animationIntensity: 1, nameColor: '#06b6d4' },
+  { level: 5,  minScore: 10000,      label: 'Dedicated Student', emoji: '⚡', color: '#3b82f6', gradient: 'from-blue-400 to-indigo-500',                 glowColor: 'rgba(59,130,246,0.5)',   discount: 5,  animationIntensity: 2 },
+  { level: 6,  minScore: 25000,      label: 'Rising Achiever',  emoji: '🔥', color: '#f97316', gradient: 'from-orange-400 to-red-500',                   glowColor: 'rgba(249,115,22,0.55)',  discount: 8,  animationIntensity: 2 },
+  { level: 7,  minScore: 75000,      label: 'Expert Learner',   emoji: '💫', color: '#a855f7', gradient: 'from-violet-400 to-purple-600',                glowColor: 'rgba(168,85,247,0.6)',   discount: 10, animationIntensity: 2, nameColor: '#a855f7' },
+  { level: 8,  minScore: 200000,     label: 'Master Learner',   emoji: '💎', color: '#f59e0b', gradient: 'from-amber-400 to-yellow-500',                 glowColor: 'rgba(245,158,11,0.65)',  discount: 13, animationIntensity: 3, nameColor: '#f59e0b' },
+  { level: 9,  minScore: 500000,     label: 'Elite',            emoji: '🌟', color: '#eab308', gradient: 'from-yellow-400 to-amber-500',                 glowColor: 'rgba(234,179,8,0.75)',   discount: 17, animationIntensity: 3, nameColor: '#eab308' },
+  { level: 10, minScore: 1000000,    label: 'Champion',         emoji: '👑', color: '#f59e0b', gradient: 'from-amber-400 to-orange-400',                 glowColor: 'rgba(245,158,11,0.8)',   discount: 20, animationIntensity: 3, nameColor: '#f59e0b' },
+  { level: 11, minScore: 2500000,    label: 'Legend',           emoji: '🏆', color: '#10b981', gradient: 'from-emerald-400 via-cyan-400 to-violet-500',  glowColor: 'rgba(16,185,129,0.9)',   discount: 20, animationIntensity: 4, nameColor: '#10b981' },
+  { level: 12, minScore: 5000000,    label: 'Mythic',           emoji: '🔮', color: '#8b5cf6', gradient: 'from-violet-400 via-purple-500 to-pink-500',   glowColor: 'rgba(139,92,246,0.9)',   discount: 22, animationIntensity: 4, nameColor: '#8b5cf6' },
+  { level: 13, minScore: 10000000,   label: 'Supreme',          emoji: '⚜️', color: '#ec4899', gradient: 'from-pink-400 via-rose-500 to-red-500',        glowColor: 'rgba(236,72,153,0.9)',   discount: 25, animationIntensity: 4, nameColor: '#ec4899' },
+  { level: 14, minScore: 25000000,   label: 'Eternal',          emoji: '🌠', color: '#f43f5e', gradient: 'from-rose-400 via-red-500 to-orange-500',      glowColor: 'rgba(244,63,94,0.95)',   discount: 28, animationIntensity: 4, nameColor: '#f43f5e' },
+  { level: 15, minScore: 50000000,   label: 'Absolute Legend',  emoji: '💠', color: '#a5f3fc', gradient: 'from-white via-cyan-200 to-violet-400',         glowColor: 'rgba(165,243,252,0.95)', discount: 30, animationIntensity: 4, nameColor: '#7c3aed' },
 ];
 
 export const MAX_LEVEL = 15;
 export const LEVEL_THRESHOLDS = LEVEL_INFO.map(l => l.minScore);
+
+// ── Progress Bonus System ─────────────────────────────────────────────────────
+// Unlocks at Level 4. Bonus % based on how much of the daily goal is complete.
+// Level 8+ caps at the L8 table. Max bonus = 45%.
+// Each row: [at 10%, 20%, 30%, 40%, 50%, 60%, 70%, 80%, 90%, 100%]
+const _PROGRESS_BONUS_ROWS: Record<number, number[]> = {
+  4: [ 1,  3,  5,  7,  9, 11, 13, 14, 15, 15],
+  5: [ 2,  5,  8, 11, 14, 17, 19, 20, 21, 22],
+  6: [ 3,  7, 11, 15, 19, 23, 26, 28, 29, 30],
+  7: [ 4,  9, 14, 19, 24, 29, 33, 35, 37, 38],
+  8: [ 5, 11, 17, 23, 29, 34, 39, 42, 44, 45],
+};
+
+export const PROGRESS_BONUS_MAX_PCT = 45;
+
+/**
+ * Returns the progress bonus percentage (0–45) for a given level and daily
+ * progress percentage (0–100). Returns 0 for levels below 4.
+ * L9–L15 still receive the L8 Progress Bonus (45% max) in addition to Daily Limit Bonus.
+ */
+export const getProgressBonus = (level: number, dailyProgressPct: number): number => {
+  if (level < 4 || dailyProgressPct <= 0) return 0;
+  const effectiveLevel = Math.min(level, 8); // L8+ uses L8 table (45% cap)
+  const row = _PROGRESS_BONUS_ROWS[effectiveLevel];
+  if (!row) return 0;
+  const bucketIdx = Math.min(9, Math.floor(Math.max(0, dailyProgressPct - 1) / 10));
+  return row[bucketIdx] ?? 0;
+};
+
+/**
+ * Applies the progress bonus to a base score amount.
+ * Returns the final score after adding the bonus.
+ */
+export const applyProgressBonus = (
+  baseScore: number,
+  level: number,
+  dailyProgressPct: number,
+): number => {
+  const bonusPct = getProgressBonus(level, dailyProgressPct);
+  if (bonusPct <= 0) return baseScore;
+  return Math.round(baseScore * (1 + bonusPct / 100));
+};
+
+// ── Daily Limit Bonus System (L9–L15) ────────────────────────────────────────
+// Unlocks at Level 9. Scales linearly with daily progress (per 10% bucket).
+// L15 is capped at the same max as L14 (500%). Max cap = 500%.
+// The bonus multiplies the effective daily score/limit cap for that session.
+//
+// Base bonus added per 10%-progress bucket:
+//   L9 → 10% per bucket (max 100%)
+//   L10 → 20%           (max 200%)
+//   L11 → 25%           (max 250%)
+//   L12 → 32%           (max 320%)
+//   L13 → 40%           (max 400%)
+//   L14 → 50%           (max 500%)
+//   L15 → 50% (capped)  (max 500%)
+const _DAILY_LIMIT_BONUS_PER_BUCKET: Record<number, number> = {
+  9:  10,
+  10: 20,
+  11: 25,
+  12: 32,
+  13: 40,
+  14: 50,
+  15: 50, // same cap as L14
+};
+
+export const DAILY_LIMIT_BONUS_MAX_PCT = 500;
+
+/**
+ * Returns the Daily Limit Bonus percentage (0–500) for a given level and
+ * daily progress percentage (0–100). Applies only to L9+.
+ * Scales linearly: each completed 10% of daily goal adds the level's bucket bonus.
+ * L15 is capped at 500% (same as L14).
+ */
+export const getDailyLimitBonus = (level: number, dailyProgressPct: number): number => {
+  if (level < 9 || dailyProgressPct <= 0) return 0;
+  const effectiveLevel = Math.min(level, 15);
+  const perBucket = _DAILY_LIMIT_BONUS_PER_BUCKET[effectiveLevel] ?? 0;
+  const buckets = Math.min(10, Math.floor(dailyProgressPct / 10));
+  return Math.min(DAILY_LIMIT_BONUS_MAX_PCT, buckets * perBucket);
+};
+
+/**
+ * Applies the Daily Limit Bonus multiplier to a daily limit value.
+ * e.g. if daily MCQ limit is 100 and bonus is 200%, returns 300.
+ */
+export const applyDailyLimitBonus = (
+  baseLimit: number,
+  level: number,
+  dailyProgressPct: number,
+): number => {
+  const bonusPct = getDailyLimitBonus(level, dailyProgressPct);
+  if (bonusPct <= 0) return baseLimit;
+  return Math.round(baseLimit * (1 + bonusPct / 100));
+};
 
 // ── Per-tier limit structure ─────────────────────────────────────────────────
 export interface LevelTierLimits {

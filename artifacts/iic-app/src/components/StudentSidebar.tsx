@@ -33,9 +33,6 @@ export const StudentSidebar: React.FC<Props> = ({ isOpen, onClose, onNavigate, u
         { id: 'PRIZES', icon: Award, label: 'Prizes', color: 'text-purple-600', featureId: 'f6', category: 'FUN' },
         { id: 'LEADERBOARD', icon: Trophy, label: 'Leaderboard', color: 'text-yellow-500', featureId: 'f5', category: 'FUN' },
 
-        // --- CREATIVE ---
-        { id: 'THEME_BUILDER' as StudentTab, icon: Palette, label: 'My Theme Studio', color: 'text-violet-600', category: 'CREATIVE' },
-
         // --- ACCOUNT ---
         { id: 'PROFILE', icon: User, label: 'My Profile', color: 'text-slate-800', featureId: 'f13', category: 'ACCOUNT' },
     ];

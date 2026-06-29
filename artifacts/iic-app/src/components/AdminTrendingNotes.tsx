@@ -31,7 +31,7 @@ export const AdminTrendingNotes: React.FC = () => {
       await adminDeleteNoteStarEntry(hash);
       setConfirmHash(null);
     } catch {
-      alert('Delete nahi hua. Firebase rules check karo.');
+      alert('Delete failed. Check Firebase rules.');
     } finally {
       setDeletingHash(null);
     }
@@ -53,7 +53,7 @@ export const AdminTrendingNotes: React.FC = () => {
               <span className="text-[10px] font-black text-white bg-amber-500 px-2 py-0.5 rounded-full uppercase tracking-wider">Live</span>
             </h3>
             <p className="text-[11px] text-slate-500 font-semibold mt-0.5">
-              Students kis topic ko sabse jyada Important mark kar rahe hain
+              Which topics students are marking as Important the most
             </p>
           </div>
           <button
@@ -84,15 +84,15 @@ export const AdminTrendingNotes: React.FC = () => {
         <div className="flex items-start gap-2 bg-red-50 border border-red-100 rounded-xl px-3 py-2.5 mb-4">
           <AlertTriangle size={13} className="text-red-400 shrink-0 mt-0.5" />
           <p className="text-[11px] text-red-700 font-semibold leading-snug">
-            Delete karne par wo topic ki <strong>saari student saves</strong> hata jaayengi aur trending list se hat jaayega. Ye action undo nahi hota.
+            Deleting will remove <strong>all student saves</strong> for that topic and remove it from the trending list. This action cannot be undone.
           </p>
         </div>
 
         {ranked.length === 0 ? (
           <div className="text-center py-12 bg-amber-50/50 rounded-2xl border border-dashed border-amber-200">
             <Star size={42} className="text-amber-300 mx-auto mb-2" />
-            <p className="text-sm font-black text-slate-600">Abhi koi student ne note save nahi kiya</p>
-            <p className="text-[11px] text-slate-400 mt-1 font-semibold">Pehla ⭐ aate hi yahan dikhega</p>
+            <p className="text-sm font-black text-slate-600">No student has saved a note yet</p>
+            <p className="text-[11px] text-slate-400 mt-1 font-semibold">Will appear here as soon as the first ⭐ is added</p>
           </div>
         ) : (
           <div className="space-y-3 max-h-[560px] overflow-y-auto pr-1 -mr-1">
@@ -148,17 +148,17 @@ export const AdminTrendingNotes: React.FC = () => {
                           onClick={() => setConfirmHash(entry.hash)}
                           className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-50 text-red-500 border border-red-200 text-[10px] font-bold hover:bg-red-100 transition-all"
                         >
-                          <Trash2 size={11} /> Hatao
+                          <Trash2 size={11} /> Remove
                         </button>
                       ) : (
                         <div className="flex flex-col gap-1.5 items-end">
-                          <p className="text-[10px] text-red-600 font-black text-right">Pakka delete karein?</p>
+                          <p className="text-[10px] text-red-600 font-black text-right">Confirm delete?</p>
                           <div className="flex gap-1.5">
                             <button
                               onClick={() => setConfirmHash(null)}
                               className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 text-[10px] font-bold hover:bg-slate-200 transition-all"
                             >
-                              Ruko
+                              Cancel
                             </button>
                             <button
                               onClick={() => handleDelete(entry.hash)}
@@ -170,7 +170,7 @@ export const AdminTrendingNotes: React.FC = () => {
                               ) : (
                                 <Trash2 size={10} />
                               )}
-                              {isDeleting ? 'Hata raha...' : 'Haan, Hatao'}
+                              {isDeleting ? 'Removing...' : 'Yes, Remove'}
                             </button>
                           </div>
                         </div>
@@ -212,8 +212,8 @@ export const AdminTrendingNotes: React.FC = () => {
                 <GitCompare size={17} />
               </div>
               <div>
-                <h4 className="font-black text-slate-800 text-sm">Compare Mode — Student Kaise Use Karta Hai?</h4>
-                <p className="text-[10px] text-slate-400 font-semibold">Shortcut kahan kahan milta hai</p>
+                <h4 className="font-black text-slate-800 text-sm">Compare Mode — How Students Use It</h4>
+                <p className="text-[10px] text-slate-400 font-semibold">Where to find the shortcut</p>
               </div>
             </div>
             <button onClick={() => setShowCompareGuide(false)} className="text-slate-400 hover:text-slate-600 p-1">
@@ -228,19 +228,19 @@ export const AdminTrendingNotes: React.FC = () => {
               <div className="w-7 h-7 rounded-full bg-violet-600 text-white text-xs font-black flex items-center justify-center shrink-0">1</div>
               <div>
                 <p className="text-xs font-black text-violet-800 flex items-center gap-1.5">
-                  <Search size={12} /> Home Screen — Search Bar mein topic likhein
+                  <Search size={12} /> Home Screen — Type a topic in the Search Bar
                 </p>
                 <p className="text-[11px] text-slate-600 mt-1 leading-relaxed">
-                  Student home screen pe search bar mein koi bhi topic type kare (jaise <strong>"Bharat ki Rajvyavastha"</strong>). Turant neeche:
+                  Student types any topic in the home screen search bar (e.g. <strong>"Indian Polity"</strong>). Instantly below:
                 </p>
                 <ul className="mt-1.5 space-y-1">
                   <li className="flex items-center gap-1.5 text-[10px] text-slate-600">
                     <span className="w-2 h-2 rounded-full bg-violet-500 shrink-0" />
-                    <strong className="text-violet-700">⚖️ Points se Compare</strong> — Ek topic ke common aur extra points side-by-side
+                    <strong className="text-violet-700">⚖️ Compare by Points</strong> — Common and extra points for a topic side-by-side
                   </li>
                   <li className="flex items-center gap-1.5 text-[10px] text-slate-600">
                     <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
-                    <strong className="text-emerald-700">📚 Topic se Compare</strong> — Puri notes side-by-side (AI se topic extract hoti hai)
+                    <strong className="text-emerald-700">📚 Compare by Topic</strong> — Full notes side-by-side (AI extracts the topic)
                   </li>
                 </ul>
               </div>
@@ -250,9 +250,9 @@ export const AdminTrendingNotes: React.FC = () => {
             <div className="flex gap-3 bg-slate-50 border border-slate-200 rounded-xl p-3">
               <div className="w-7 h-7 rounded-full bg-slate-600 text-white text-xs font-black flex items-center justify-center shrink-0">2</div>
               <div>
-                <p className="text-xs font-black text-slate-800">Search Results mein "Compare" Button</p>
+                <p className="text-xs font-black text-slate-800">"Compare" Button in Search Results</p>
                 <p className="text-[11px] text-slate-600 mt-1 leading-relaxed">
-                  Agar search results mein 2+ books ke notes milein to har section ke header mein <strong>⚖️ Compare N Books</strong> button aata hai — directly wahi se compare khul jaata hai.
+                  If 2+ books have notes in search results, each section header shows a <strong>⚖️ Compare N Books</strong> button — tapping it opens Compare directly.
                 </p>
                 <div className="mt-1.5 flex flex-wrap gap-1.5">
                   <span className="px-2 py-0.5 rounded-lg bg-violet-100 text-violet-700 text-[9px] font-black">Class 6-12 Notes</span>
@@ -267,7 +267,7 @@ export const AdminTrendingNotes: React.FC = () => {
               <div>
                 <p className="text-xs font-black text-blue-800">Search Mode toggle — "Compare Mode"</p>
                 <p className="text-[11px] text-slate-600 mt-1 leading-relaxed">
-                  Search bar ke paas ek mode switcher hota hai. Student <strong>"Compare"</strong> mode choose kare, phir topic type kare — bade Compare buttons seedha dikhte hain bina scroll kiye.
+                  There is a mode switcher near the search bar. Student selects <strong>"Compare"</strong> mode, then types a topic — large Compare buttons appear immediately without scrolling.
                 </p>
               </div>
             </div>
@@ -275,24 +275,24 @@ export const AdminTrendingNotes: React.FC = () => {
             {/* What happens inside */}
             <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3">
               <p className="text-[11px] font-black text-indigo-800 mb-2 flex items-center gap-1.5">
-                <Info size={12} /> Compare View andar kya hota hai?
+                <Info size={12} /> What's inside Compare View?
               </p>
               <ul className="space-y-1.5">
                 <li className="flex items-start gap-1.5 text-[10px] text-slate-700">
                   <span className="text-green-600 font-black mt-0.5">✓</span>
-                  <span><strong>Common Points</strong> — Jo baat dono/sabhi books mein likhi hai (green highlight)</span>
+                  <span><strong>Common Points</strong> — Points found in both/all books (green highlight)</span>
                 </li>
                 <li className="flex items-start gap-1.5 text-[10px] text-slate-700">
                   <span className="text-blue-600 font-black mt-0.5">+</span>
-                  <span><strong>Extra/Unique Points</strong> — Jo sirf ek book mein hai, doosri mein nahi (blue highlight)</span>
+                  <span><strong>Extra/Unique Points</strong> — Points only in one book, not others (blue highlight)</span>
                 </li>
                 <li className="flex items-start gap-1.5 text-[10px] text-slate-700">
                   <span className="text-violet-600 font-black mt-0.5">📖</span>
-                  <span><strong>Study Mode</strong> — Floating button dabao, top bar hat jaata hai — distraction-free reading</span>
+                  <span><strong>Study Mode</strong> — Tap the floating button to hide the top bar — distraction-free reading</span>
                 </li>
                 <li className="flex items-start gap-1.5 text-[10px] text-slate-700">
                   <span className="text-amber-600 font-black mt-0.5">🤖</span>
-                  <span><strong>AI Summary</strong> — Dono books ka AI-generated comparison summary</span>
+                  <span><strong>AI Summary</strong> — AI-generated comparison summary of both books</span>
                 </li>
               </ul>
             </div>
@@ -300,10 +300,10 @@ export const AdminTrendingNotes: React.FC = () => {
             {/* TopicName tip */}
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
               <p className="text-[11px] font-black text-amber-800 mb-1 flex items-center gap-1.5">
-                <Star size={11} className="text-amber-500" /> Admin Tip — TopicName Tag karo
+                <Star size={11} className="text-amber-500" /> Admin Tip — Tag the TopicName
               </p>
               <p className="text-[10px] text-slate-600 leading-relaxed">
-                Book Notes add karte waqt <strong>Topic Name</strong> field fill karo (violet badge wala field). Agar alag-alag books ke notes ka topicName same ho, to Compare View us topic ka exact section automatically nikal leta hai — zyada precise result milta hai.
+                When adding Book Notes, fill the <strong>Topic Name</strong> field (the violet badge field). If notes from different books share the same topicName, Compare View automatically extracts the exact section for that topic — giving a more precise result.
               </p>
             </div>
 

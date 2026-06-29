@@ -1,6 +1,6 @@
 kind = "web"
 previewPath = "/"
-title = "IIC App"
+title = "IIC Student App"
 version = "1.0.0"
 id = "artifacts/iic-app"
 router = "path"

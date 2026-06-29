@@ -617,7 +617,7 @@ export const CompareView: React.FC<Props> = ({ hits, query, onClose, user, setti
           <div className="flex-1 min-w-0">
             <p className="text-[11px] font-black leading-tight text-white truncate">
               {books.length === 0
-                ? `"${query}" — nahi mila`
+                ? `"${query}" — not found`
                 : books.length === 1
                   ? `"${query}" — 1 book`
                   : `"${query}" — ${books.length} books`}
@@ -641,21 +641,21 @@ export const CompareView: React.FC<Props> = ({ hits, query, onClose, user, setti
           <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center mb-4">
             <Lock size={30} className="text-amber-600" />
           </div>
-          <h3 className="text-lg font-black text-slate-800 mb-1">Aaj ki limit poori ho gayi!</h3>
+          <h3 className="text-lg font-black text-slate-800 mb-1">Today's limit reached!</h3>
           <p className="text-sm text-slate-500 text-center mb-2">
-            Free mein aap ek din mein <strong>{FREE_DAILY_LIMIT} topics</strong> compare kar sakte hain.
+            On the free plan you can compare <strong>{FREE_DAILY_LIMIT} topics</strong> per day.
           </p>
-          <p className="text-xs text-slate-400 text-center mb-6">Kal fir {FREE_DAILY_LIMIT} topics milenge — ya Ultra lo aur unlimited compare karo.</p>
+          <p className="text-xs text-slate-400 text-center mb-6">Come back tomorrow for {FREE_DAILY_LIMIT} more topics — or get Ultra for unlimited compares.</p>
           <div className="flex flex-col gap-3 w-full max-w-xs">
             <div className="bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-2xl px-5 py-3.5 flex items-center gap-3 shadow-lg">
               <Crown size={22} />
               <div>
-                <p className="font-black text-sm">Ultra lo — Unlimited</p>
-                <p className="text-[11px] text-amber-100">Ek baar — lifetime access milega</p>
+                <p className="font-black text-sm">Get Ultra — Unlimited</p>
+                <p className="text-[11px] text-amber-100">One time — lifetime access</p>
               </div>
             </div>
             <button onClick={onClose} className="text-xs text-slate-400 py-2 hover:text-slate-600 transition-colors">
-              Kal aana — Band karo
+              Come back tomorrow — Close
             </button>
           </div>
         </div>
@@ -703,14 +703,14 @@ export const CompareView: React.FC<Props> = ({ hits, query, onClose, user, setti
               <div className="bg-amber-50 border border-amber-200 rounded-2xl overflow-hidden">
                 <div className="px-3 py-2 flex items-center gap-2">
                   <span className="text-base">📌</span>
-                  <p className="text-[11px] font-black text-amber-800">Topic chunein — sirf us topic ka compare hoga</p>
+                  <p className="text-[11px] font-black text-amber-800">Select a topic — only that topic will be compared</p>
                 </div>
                 <div className="flex gap-2 overflow-x-auto px-3 pb-3 scrollbar-none" style={{ WebkitOverflowScrolling: 'touch' }}>
                   <button
                     onClick={() => setActiveTopicQuery(query)}
                     className={`shrink-0 px-3 py-1.5 rounded-full text-[11px] font-black border transition-all ${activeTopicQuery === query ? 'bg-amber-600 text-white border-amber-600' : 'bg-white text-amber-700 border-amber-300 hover:bg-amber-100'}`}
                   >
-                    🔍 Sab
+                    🔍 All
                   </button>
                   {pinTopics.map((topic, ti) => (
                     <button
@@ -829,7 +829,7 @@ export const CompareView: React.FC<Props> = ({ hits, query, onClose, user, setti
 
             {!topicLoading && !topicResult && (
               <div className="text-center py-10">
-                <p className="text-xs text-slate-400 mb-3">Data load nahi hua.</p>
+                <p className="text-xs text-slate-400 mb-3">Data could not be loaded.</p>
                 <button onClick={loadTopicCompare} className="px-5 py-2 bg-emerald-600 text-white text-xs font-bold rounded-xl">Retry</button>
               </div>
             )}
@@ -912,8 +912,8 @@ export const CompareView: React.FC<Props> = ({ hits, query, onClose, user, setti
               ) : (
                 <div className="text-center py-12">
                   <p className="text-2xl mb-2">📭</p>
-                  <p className="text-sm font-bold text-slate-500">Koi content nahi mila</p>
-                  <p className="text-xs text-slate-400 mt-1">"{query}" topic ka content kisi book mein available nahi hai.</p>
+                  <p className="text-sm font-bold text-slate-500">No content found</p>
+                  <p className="text-xs text-slate-400 mt-1">"{query}" topic is not available in any book.</p>
                 </div>
               )}
             </div>
