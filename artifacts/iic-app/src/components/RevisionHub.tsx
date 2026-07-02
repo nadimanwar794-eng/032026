@@ -1022,6 +1022,7 @@ const RevisionHubComponent: React.FC<Props> = ({ user, onTabChange, settings, on
                     user={user}
                     topics={pendingMcqs}
                     settings={settings}
+                    onUpdateUser={onUpdateUser}
                     onClose={() => setShowTodayMcqSession(false)}
                     onComplete={(results, questions) => {
                         try {

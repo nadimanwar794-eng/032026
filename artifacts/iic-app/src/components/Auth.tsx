@@ -893,42 +893,11 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
 
               {view === 'RECOVERY' && (
                   <>
-                     {/* ── Mode toggle ── */}
-                     <div className="flex rounded-xl overflow-hidden border border-slate-200 mb-4">
-                       <button type="button"
-                         onClick={() => setRecoveryMode('id')}
-                         className={`flex-1 py-2.5 text-xs font-black transition-colors ${recoveryMode === 'id' ? 'bg-blue-600 text-white' : 'bg-slate-50 text-slate-500'}`}
-                       >📱 Mobile / Email / UID</button>
-                       <button type="button"
-                         onClick={() => setRecoveryMode('profile')}
-                         className={`flex-1 py-2.5 text-xs font-black transition-colors ${recoveryMode === 'profile' ? 'bg-blue-600 text-white' : 'bg-slate-50 text-slate-500'}`}
-                       >👤 Name + Class</button>
-                     </div>
-
                      {/* ── ID / Mobile / Email mode ── */}
-                     {recoveryMode === 'id' && (
-                       <div className="space-y-1.5">
-                         <label className="text-xs font-bold text-slate-600 uppercase">Mobile / Email / Account ID</label>
-                         <input name="id" type="text" placeholder="Mobile Number / Email / UID" value={formData.id} onChange={handleChange} className="w-full px-4 py-3 border border-slate-200 rounded-xl font-bold bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
-                       </div>
-                     )}
-
-                     {/* ── Name + Class mode ── */}
-                     {recoveryMode === 'profile' && (<>
-                       <div className="space-y-1.5">
-                         <label className="text-xs font-bold text-slate-600 uppercase">Apna Naam</label>
-                         <input name="name" type="text" placeholder="Poora naam likhो (e.g. Rahul Sharma)" value={formData.name} onChange={handleChange} className="w-full px-4 py-3 border border-slate-200 rounded-xl font-bold bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
-                       </div>
-                       <div className="space-y-1.5">
-                         <label className="text-xs font-bold text-slate-600 uppercase">Class / Level</label>
-                         <select name="classLevel" value={formData.classLevel} onChange={handleChange} className="w-full px-4 py-3 border border-slate-200 rounded-xl font-bold bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none">
-                           <option value="">-- Class select karo --</option>
-                           {['6','7','8','9','10','11','12','COMPETITION'].map(c => (
-                             <option key={c} value={c}>Class {c}</option>
-                           ))}
-                         </select>
-                       </div>
-                     </>)}
+                     <div className="space-y-1.5">
+                       <label className="text-xs font-bold text-slate-600 uppercase">Mobile / Email / Account ID</label>
+                       <input name="id" type="text" placeholder="Mobile Number / Email / UID" value={formData.id} onChange={handleChange} className="w-full px-4 py-3 border border-slate-200 rounded-xl font-bold bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
+                     </div>
 
                      <div className="space-y-1.5">
                          <label className="text-xs font-bold text-slate-600 uppercase">Password</label>

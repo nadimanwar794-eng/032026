@@ -584,8 +584,11 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   const [homeworkTab, setHomeworkTab] = useState<'ADD' | 'HISTORY' | 'COMP_MCQ' | 'CLASS_MCQ'>('ADD');
   const [bookNotesTab, setBookNotesTab] = useState<'ADD' | 'HISTORY'>('ADD');
   const [bnBookFilter, setBnBookFilter] = useState<string>('ALL');
+  const [bnHistorySearch, setBnHistorySearch] = useState<string>('');
+  const [bnBoardFilter, setBnBoardFilter] = useState<string>('ALL');
+  const [bnClassFilter, setBnClassFilter] = useState<string>('ALL');
   const [bnEditingId, setBnEditingId] = useState<string | null>(null);
-  const [newBookNote, setNewBookNote] = useState({ date: new Date().toISOString().split('T')[0], title: '', notes: '', chunkNotes: '', htmlNotes: '', lightCSS: '', darkCSS: '', mcqText: '', audioUrl: '', videoUrl: '', pdfUrl: '', targetSubject: 'sarSangrah', pageNo: '', topicName: '', classTarget: 'ALL' as 'COMPETITION' | 'ALL' | '6' | '7' | '8' | '9' | '10' | '11' | '12' });
+  const [newBookNote, setNewBookNote] = useState({ date: new Date().toISOString().split('T')[0], title: '', notes: '', chunkNotes: '', htmlNotes: '', lightCSS: '', darkCSS: '', mcqText: '', audioUrl: '', videoUrl: '', pdfUrl: '', targetSubject: 'sarSangrah', pageNo: '', topicName: '', classTarget: 'ALL' as 'COMPETITION' | 'ALL' | '6' | '7' | '8' | '9' | '10' | '11' | '12', board: '' as '' | 'NCERT_EN' | 'NCERT_HI' | 'BSEB' });
   const [editingPt, setEditingPt] = React.useState<{srcId: string; ptIdx: number; text: string} | null>(null);
   // Mode for custom book entries: 'single' = one-page per entry (like Speedy), 'multi' = Lucent-style multi-page
   const [newBookNoteMode, setNewBookNoteMode] = useState<'single' | 'multi' | 'mcq'>('single');
@@ -674,6 +677,16 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   const [lucentPageBulk, setLucentPageBulk] = useState<Record<string, string>>({});
   const [cn612EditingId, setCn612EditingId] = useState<string | null>(null);
   const [cn612FilterClass, setCn612FilterClass] = useState<string>('ALL');
+  const [bnMoveCopyModal, setBnMoveCopyModal] = useState<{ entry: any; origIdx: number; mode: 'move' | 'copy' } | null>(null);
+  const [bnMcTargetClass, setBnMcTargetClass] = useState<string>('COMPETITION');
+  const [bnMcTargetSubject, setBnMcTargetSubject] = useState<string>('biology');
+  const [bnMcTargetBook, setBnMcTargetBook] = useState<string>('');
+  const [bnMcTargetBoard, setBnMcTargetBoard] = useState<'' | 'NCERT_EN' | 'NCERT_HI' | 'BSEB'>('');
+  const [bnMcWorking, setBnMcWorking] = useState(false);
+  // Board move/copy modal for bnItems (Sar Sangrah / Speedy / Custom page-wise entries)
+  const [bnBoardMoveModal, setBnBoardMoveModal] = useState<{ hw: any; origIdx: number; mode: 'move' | 'copy' } | null>(null);
+  const [bnBoardMoveTarget, setBnBoardMoveTarget] = useState<'' | 'NCERT_EN' | 'NCERT_HI' | 'BSEB'>('NCERT_EN');
+  const [bnBoardMoveWorking, setBnBoardMoveWorking] = useState(false);
   const [cn612FilterBook, setCn612FilterBook] = useState<string>('ALL');
   const [cn612FilterSubject, setCn612FilterSubject] = useState<string>('ALL');
 
@@ -684,6 +697,8 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   const [homeworkHistorySearch, setHomeworkHistorySearch] = useState<string>('');
   const [expandedHomework, setExpandedHomework] = useState<Record<string, boolean>>({});
   const [expandedLucent, setExpandedLucent] = useState<Record<string, boolean>>({});
+  const [showAddSubjectUI, setShowAddSubjectUI] = useState(false);
+  const [newSubjectInput, setNewSubjectInput] = useState('');
   const [expandedLucentPage, setExpandedLucentPage] = useState<Record<string, boolean>>({});
 
   // Normalize common Hindi / shorthand MCQ paste formats so they parse with parseMCQText().
@@ -889,15 +904,18 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   // Derived from localSettings — declared here (after useState) to avoid TDZ.
   // Custom books appear as additional page-wise subject options across the UI.
   const customBooksList = (localSettings.customBooks || []).filter(b => b && b.id && b.name);
+  // Custom subjects saved by admin (stored in localSettings.customLucentSubjects)
+  const customLucentSubjectsList: { id: string; name: string }[] = (localSettings.customLucentSubjects || []).filter((s: any) => s && s.id && s.name);
   // Lucent GK subject dropdown — only academic subjects (Biology, Chemistry, etc.)
   // Custom page-wise books (Speedy, Sar Sangrah, custom) must NOT appear here.
   const LUCENT_SUBJECT_OPTIONS: { id: string; name: string }[] = [
     ...LUCENT_SUBJECT_OPTIONS_BASE,
+    ...customLucentSubjectsList,
   ];
   // Dynamic subject options — changes based on which classLevel admin selected.
-  // For COMPETITION: competition subjects. For class 6-12: all subjects of that class.
+  // For COMPETITION: competition subjects (built-in + custom). For class 6-12: all subjects of that class.
   const activeLucentSubjectOptions: { id: string; name: string }[] = (() => {
-    if (newLucent.classLevel === 'COMPETITION') return LUCENT_SUBJECT_OPTIONS_BASE;
+    if (newLucent.classLevel === 'COMPETITION') return [...LUCENT_SUBJECT_OPTIONS_BASE, ...customLucentSubjectsList];
     try {
       const seen = new Set<string>();
       const results: { id: string; name: string }[] = [];
@@ -2043,6 +2061,75 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
       } finally {
           setIsSavingLucent(false);
       }
+  };
+
+  const handleBnMoveCopy = async () => {
+      if (!bnMoveCopyModal || !bnMcTargetClass || !bnMcTargetSubject) return;
+      setBnMcWorking(true);
+      try {
+          const { entry, origIdx, mode } = bnMoveCopyModal;
+          const ts = Date.now();
+          const boardVal = bnMcTargetBoard || undefined;
+          const newEntry: any = {
+              ...entry,
+              id: `lucent_${ts}_${Math.random().toString(36).slice(2)}`,
+              classLevel: bnMcTargetClass,
+              subject: bnMcTargetSubject,
+              bookName: bnMcTargetBook || entry.bookName || '',
+              updatedAt: new Date().toISOString(),
+          };
+          if (boardVal) newEntry.board = boardVal; else delete newEntry.board;
+          const currentNotes: any[] = [...(localSettings.lucentNotes || [])];
+          if (mode === 'move') {
+              currentNotes.splice(origIdx, 1, newEntry);
+              await saveLucentEntryDirectly(currentNotes, `✅ "${entry.lessonTitle}" move ho gaya → Class ${bnMcTargetClass} / ${bnMcTargetSubject}`);
+          } else {
+              currentNotes.push(newEntry);
+              await saveLucentEntryDirectly(currentNotes, `✅ "${entry.lessonTitle}" copy ho gaya → Class ${bnMcTargetClass} / ${bnMcTargetSubject}`);
+          }
+          setBnMoveCopyModal(null);
+      } catch (e: any) {
+          setAlertConfig({ isOpen: true, message: `❌ Error: ${e?.message || 'Failed'}` });
+      }
+      setBnMcWorking(false);
+  };
+
+  const handleBnBoardMoveCopy = async () => {
+      if (!bnBoardMoveModal) return;
+      const { hw, origIdx, mode } = bnBoardMoveModal;
+      if (origIdx < 0) {
+          setAlertConfig({ isOpen: true, message: '❌ Entry nahi mili — refresh karke dobara try karein.' });
+          setBnBoardMoveModal(null);
+          return;
+      }
+      setBnBoardMoveWorking(true);
+      try {
+          const boardValue = bnBoardMoveTarget || undefined; // '' → undefined (clears board tag)
+          const currentHomework: any[] = [...(localSettings.homework || [])];
+          if (mode === 'move') {
+              const updated = { ...hw };
+              if (boardValue) updated.board = boardValue; else delete updated.board;
+              currentHomework[origIdx] = updated;
+              const newSettings = { ...localSettings, homework: currentHomework };
+              setLocalSettings(newSettings);
+              handleSaveSettings(newSettings);
+              const dest = boardValue || 'All Boards';
+              setAlertConfig({ isOpen: true, message: `✅ "${hw.title || `Page ${hw.pageNo}`}" → ${dest} mein move ho gaya!` });
+          } else {
+              const newEntry: any = { ...hw, id: `${Date.now()}_${Math.random().toString(36).slice(2)}` };
+              if (boardValue) newEntry.board = boardValue; else delete newEntry.board;
+              currentHomework.push(newEntry);
+              const newSettings = { ...localSettings, homework: currentHomework };
+              setLocalSettings(newSettings);
+              handleSaveSettings(newSettings);
+              const dest = boardValue || 'All Boards';
+              setAlertConfig({ isOpen: true, message: `✅ "${hw.title || `Page ${hw.pageNo}`}" → ${dest} mein copy ho gaya!` });
+          }
+          setBnBoardMoveModal(null);
+      } catch (e: any) {
+          setAlertConfig({ isOpen: true, message: `❌ Error: ${e?.message || 'Failed'}` });
+      }
+      setBnBoardMoveWorking(false);
   };
 
   // Always writes directly to Firebase + localStorage.
@@ -3959,118 +4046,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                   userRole={currentUser?.role || 'STUDENT'}
                   settings={localSettings}
               />
-              {/* COMPARE ANALYTICS PANEL */}
-              {(() => {
-                const freq = new Map<string, { displayQuery: string; count: number; totalHits: number; last: string }>();
-                for (const e of compareAnalytics) {
-                  const key = (e.query || '').trim().toLowerCase();
-                  if (!key) continue;
-                  const prev = freq.get(key);
-                  if (prev) {
-                    prev.count += 1;
-                    prev.totalHits += e.hitCount || 0;
-                    if ((e.ts || 0) > new Date(prev.last).getTime()) prev.last = e.timestamp || prev.last;
-                  } else {
-                    freq.set(key, { displayQuery: e.displayQuery || e.query, count: 1, totalHits: e.hitCount || 0, last: e.timestamp || '' });
-                  }
-                }
-                const allSorted = Array.from(freq.values()).sort((a, b) => b.count - a.count);
-                const sorted = allSorted.slice(0, 5);
-                return (
-                  <div className="mt-4 bg-white border border-violet-100 rounded-2xl shadow-sm overflow-hidden">
-                    <div className="flex items-center gap-3 px-4 py-3 bg-gradient-to-r from-violet-50 to-indigo-50 border-b border-violet-100">
-                      <div className="w-8 h-8 rounded-xl bg-violet-600 text-white flex items-center justify-center shrink-0">
-                        <Activity size={16} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-black text-slate-800">Compare Trending Topics</p>
-                        <p className="text-[10px] text-violet-500 font-medium">
-                          {compareAnalytics.length} compare event{compareAnalytics.length !== 1 ? 's' : ''} · {freq.size} unique topic{freq.size !== 1 ? 's' : ''} · Top 5 shown
-                        </p>
-                      </div>
-                      <GitCompare size={18} className="text-violet-400 shrink-0" />
-                    </div>
-                    {sorted.length === 0 ? (
-                      <p className="text-center text-xs text-slate-400 py-6">Abhi tak koi compare nahi hua</p>
-                    ) : (
-                      <div className="divide-y divide-slate-50">
-                        {sorted.map((item, i) => (
-                          <div key={item.displayQuery} className="flex items-center gap-3 px-4 py-2.5 group">
-                            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 ${i === 0 ? 'bg-amber-400 text-white' : i === 1 ? 'bg-slate-300 text-white' : i === 2 ? 'bg-orange-300 text-white' : 'bg-slate-100 text-slate-500'}`}>
-                              {i + 1}
-                            </span>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs font-bold text-slate-800 truncate">{item.displayQuery}</p>
-                              <p className="text-[10px] text-slate-400">Last: {item.last ? new Date(item.last).toLocaleDateString('hi-IN') : '—'}</p>
-                            </div>
-                            <div className="text-right shrink-0 flex items-center gap-2">
-                              <div>
-                                <p className="text-xs font-black text-violet-600">{item.count}×</p>
-                                <p className="text-[10px] text-slate-400">{item.totalHits} books</p>
-                              </div>
-                              <button
-                                onClick={async () => {
-                                  if (!window.confirm(`"${item.displayQuery}" ko trending list se hata dein? Ye sirf compare log hatega, notes safe rahenge.`)) return;
-                                  await deleteCompareAnalyticsByQuery((item.displayQuery || '').trim().toLowerCase());
-                                }}
-                                className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 text-red-400 hover:text-red-600 flex items-center justify-center transition-colors shrink-0"
-                                title="Is topic ko list se hatao"
-                              >
-                                <X size={13} />
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {/* ── Compare Limit Config ── */}
-                    <div className="border-t border-violet-100 px-4 py-3 bg-violet-50/40">
-                      <p className="text-[10px] font-black uppercase tracking-wider text-violet-500 mb-2">Compare Limit — Tier ke hisaab se (0 = unlimited)</p>
-                      <div className="grid grid-cols-3 gap-2">
-                        {([
-                          { label: 'Free', key: 'compareLimitFree' as const, default: 2, color: 'slate' },
-                          { label: 'Basic', key: 'compareLimitBasic' as const, default: 5, color: 'indigo' },
-                          { label: 'Ultra', key: 'compareLimitUltra' as const, default: 0, color: 'amber' },
-                        ] as const).map(({ label, key, default: def, color }) => (
-                          <div key={key} className="flex flex-col gap-1">
-                            <label className={`text-[9px] font-black uppercase tracking-wider text-${color}-600`}>{label}</label>
-                            <input
-                              type="number"
-                              min={0}
-                              max={20}
-                              value={localSettings[key] ?? def}
-                              onChange={e => setLocalSettings((s: any) => ({ ...s, [key]: Number(e.target.value) }))}
-                              className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold text-center text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-300"
-                            />
-                          </div>
-                        ))}
-                      </div>
-                      <button
-                        onClick={handleSaveSettings}
-                        className="mt-2 w-full bg-violet-600 text-white text-[10px] font-black py-1.5 rounded-lg hover:bg-violet-700 active:scale-95 transition-all"
-                      >
-                        Save Compare Limits
-                      </button>
-                    </div>
-                  </div>
-                );
-              })()}
 
-              {/* CONTENT HISTORY QUICK ACCESS */}
-              <div className="mt-4 bg-emerald-50 rounded-2xl border border-emerald-200 p-4 flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
-                          <Activity size={18} />
-                      </div>
-                      <div>
-                          <p className="font-black text-slate-800 text-sm">Content History</p>
-                          <p className="text-[10px] text-emerald-700">Kab kya add hua — lifetime log</p>
-                      </div>
-                  </div>
-                  <button onClick={() => setActiveTab('CONTENT_HISTORY')} className="bg-emerald-600 text-white px-4 py-2 rounded-xl font-bold text-xs hover:bg-emerald-700 transition-all whitespace-nowrap">
-                      View Log →
-                  </button>
-              </div>
 
               <div className="mt-4 flex justify-end">
                   <button onClick={() => onNavigate('STUDENT_DASHBOARD')} className="bg-slate-800 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-slate-900 transition-all shadow-md text-xs">
@@ -7230,6 +7206,120 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                   )}
                   {activeTab === 'CONFIG_GAME' && (
                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-5">
+
+                           {/* COMPARE ANALYTICS PANEL */}
+                           {(() => {
+                             const freq = new Map<string, { displayQuery: string; count: number; totalHits: number; last: string }>();
+                             for (const e of compareAnalytics) {
+                               const key = (e.query || '').trim().toLowerCase();
+                               if (!key) continue;
+                               const prev = freq.get(key);
+                               if (prev) {
+                                 prev.count += 1;
+                                 prev.totalHits += e.hitCount || 0;
+                                 if ((e.ts || 0) > new Date(prev.last).getTime()) prev.last = e.timestamp || prev.last;
+                               } else {
+                                 freq.set(key, { displayQuery: e.displayQuery || e.query, count: 1, totalHits: e.hitCount || 0, last: e.timestamp || '' });
+                               }
+                             }
+                             const allSorted = Array.from(freq.values()).sort((a, b) => b.count - a.count);
+                             const sorted = allSorted.slice(0, 5);
+                             return (
+                               <div className="bg-white border border-violet-100 rounded-2xl shadow-sm overflow-hidden">
+                                 <div className="flex items-center gap-3 px-4 py-3 bg-gradient-to-r from-violet-50 to-indigo-50 border-b border-violet-100">
+                                   <div className="w-8 h-8 rounded-xl bg-violet-600 text-white flex items-center justify-center shrink-0">
+                                     <Activity size={16} />
+                                   </div>
+                                   <div className="flex-1 min-w-0">
+                                     <p className="text-sm font-black text-slate-800">Compare Trending Topics</p>
+                                     <p className="text-[10px] text-violet-500 font-medium">
+                                       {compareAnalytics.length} compare event{compareAnalytics.length !== 1 ? 's' : ''} · {freq.size} unique topic{freq.size !== 1 ? 's' : ''} · Top 5 shown
+                                     </p>
+                                   </div>
+                                   <GitCompare size={18} className="text-violet-400 shrink-0" />
+                                 </div>
+                                 {sorted.length === 0 ? (
+                                   <p className="text-center text-xs text-slate-400 py-6">Abhi tak koi compare nahi hua</p>
+                                 ) : (
+                                   <div className="divide-y divide-slate-50">
+                                     {sorted.map((item, i) => (
+                                       <div key={item.displayQuery} className="flex items-center gap-3 px-4 py-2.5 group">
+                                         <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 ${i === 0 ? 'bg-amber-400 text-white' : i === 1 ? 'bg-slate-300 text-white' : i === 2 ? 'bg-orange-300 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                                           {i + 1}
+                                         </span>
+                                         <div className="flex-1 min-w-0">
+                                           <p className="text-xs font-bold text-slate-800 truncate">{item.displayQuery}</p>
+                                           <p className="text-[10px] text-slate-400">Last: {item.last ? new Date(item.last).toLocaleDateString('hi-IN') : '—'}</p>
+                                         </div>
+                                         <div className="text-right shrink-0 flex items-center gap-2">
+                                           <div>
+                                             <p className="text-xs font-black text-violet-600">{item.count}×</p>
+                                             <p className="text-[10px] text-slate-400">{item.totalHits} books</p>
+                                           </div>
+                                           <button
+                                             onClick={async () => {
+                                               if (!window.confirm(`"${item.displayQuery}" ko trending list se hata dein? Ye sirf compare log hatega, notes safe rahenge.`)) return;
+                                               await deleteCompareAnalyticsByQuery((item.displayQuery || '').trim().toLowerCase());
+                                             }}
+                                             className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 text-red-400 hover:text-red-600 flex items-center justify-center transition-colors shrink-0"
+                                             title="Is topic ko list se hatao"
+                                           >
+                                             <X size={13} />
+                                           </button>
+                                         </div>
+                                       </div>
+                                     ))}
+                                   </div>
+                                 )}
+                                 {/* ── Compare Limit Config ── */}
+                                 <div className="border-t border-violet-100 px-4 py-3 bg-violet-50/40">
+                                   <p className="text-[10px] font-black uppercase tracking-wider text-violet-500 mb-2">Compare Limit — Tier ke hisaab se (0 = unlimited)</p>
+                                   <div className="grid grid-cols-3 gap-2">
+                                     {([
+                                       { label: 'Free', key: 'compareLimitFree' as const, default: 2, color: 'slate' },
+                                       { label: 'Basic', key: 'compareLimitBasic' as const, default: 5, color: 'indigo' },
+                                       { label: 'Ultra', key: 'compareLimitUltra' as const, default: 0, color: 'amber' },
+                                     ] as const).map(({ label, key, default: def, color }) => (
+                                       <div key={key} className="flex flex-col gap-1">
+                                         <label className={`text-[9px] font-black uppercase tracking-wider text-${color}-600`}>{label}</label>
+                                         <input
+                                           type="number"
+                                           min={0}
+                                           max={20}
+                                           value={localSettings[key] ?? def}
+                                           onChange={e => setLocalSettings((s: any) => ({ ...s, [key]: Number(e.target.value) }))}
+                                           className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold text-center text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-300"
+                                         />
+                                       </div>
+                                     ))}
+                                   </div>
+                                   <button
+                                     onClick={handleSaveSettings}
+                                     className="mt-2 w-full bg-violet-600 text-white text-[10px] font-black py-1.5 rounded-lg hover:bg-violet-700 active:scale-95 transition-all"
+                                   >
+                                     Save Compare Limits
+                                   </button>
+                                 </div>
+                               </div>
+                             );
+                           })()}
+
+                           {/* CONTENT HISTORY QUICK ACCESS */}
+                           <div className="bg-emerald-50 rounded-2xl border border-emerald-200 p-4 flex items-center justify-between gap-4">
+                               <div className="flex items-center gap-3">
+                                   <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                                       <Activity size={18} />
+                                   </div>
+                                   <div>
+                                       <p className="font-black text-slate-800 text-sm">Content History</p>
+                                       <p className="text-[10px] text-emerald-700">Kab kya add hua — lifetime log</p>
+                                   </div>
+                               </div>
+                               <button onClick={() => setActiveTab('CONTENT_HISTORY')} className="bg-emerald-600 text-white px-4 py-2 rounded-xl font-bold text-xs hover:bg-emerald-700 transition-all whitespace-nowrap">
+                                   View Log →
+                               </button>
+                           </div>
+
                            {/* Show/Hide toggle for the entire game */}
                            <div className="flex items-center justify-between bg-white rounded-xl border border-slate-200 p-3">
                                <div className="flex items-center gap-3">
@@ -8475,6 +8565,78 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                   <option key={opt.id} value={opt.id}>{opt.name}</option>
                                               ))}
                                           </select>
+                                          <button
+                                              type="button"
+                                              onClick={() => setShowAddSubjectUI(v => !v)}
+                                              className="mt-1 text-[10px] font-black text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
+                                          >
+                                              {showAddSubjectUI ? '✕ Band karo' : '＋ Add Subject'}
+                                          </button>
+                                          {/* Custom subjects list with remove buttons */}
+                                          {customLucentSubjectsList.length > 0 && (
+                                              <div className="mt-1.5 space-y-1">
+                                                  {customLucentSubjectsList.map(s => (
+                                                      <div key={s.id} className="flex items-center gap-1 bg-indigo-50 border border-indigo-200 rounded px-2 py-1">
+                                                          <span className="flex-1 text-xs font-bold text-indigo-800 truncate">{s.name}</span>
+                                                          <button
+                                                              type="button"
+                                                              onClick={() => {
+                                                                  if (!confirm(`"${s.name}" subject hata dein?`)) return;
+                                                                  const next = (localSettings.customLucentSubjects || []).filter((x: any) => x.id !== s.id);
+                                                                  setLocalSettings({ ...localSettings, customLucentSubjects: next });
+                                                                  if (newLucent.subject === s.id) setNewLucent({ ...newLucent, subject: LUCENT_SUBJECT_OPTIONS_BASE[0]?.id || 'biology' });
+                                                              }}
+                                                              className="p-0.5 text-rose-500 hover:text-rose-700 shrink-0"
+                                                              title="Remove subject"
+                                                          ><Trash2 size={12} /></button>
+                                                      </div>
+                                                  ))}
+                                              </div>
+                                          )}
+                                          {showAddSubjectUI && (
+                                              <div className="mt-1 flex gap-1">
+                                                  <input
+                                                      type="text"
+                                                      value={newSubjectInput}
+                                                      onChange={e => setNewSubjectInput(e.target.value)}
+                                                      onKeyDown={e => {
+                                                          if (e.key === 'Enter') {
+                                                              e.preventDefault();
+                                                              const raw = newSubjectInput.trim();
+                                                              if (!raw) return;
+                                                              let baseId = ('subj_' + raw.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')).slice(0, 32) || 'subj_' + Date.now();
+                                                              const existingIds = new Set([...LUCENT_SUBJECT_OPTIONS_BASE.map(s => s.id), ...customLucentSubjectsList.map(s => s.id)]);
+                                                              let id = baseId; let n = 2;
+                                                              while (existingIds.has(id)) { id = `${baseId}_${n++}`; }
+                                                              const next = [...(localSettings.customLucentSubjects || []), { id, name: raw }];
+                                                              setLocalSettings({ ...localSettings, customLucentSubjects: next });
+                                                              setNewLucent({ ...newLucent, subject: id });
+                                                              setNewSubjectInput('');
+                                                              setShowAddSubjectUI(false);
+                                                          }
+                                                      }}
+                                                      placeholder="e.g. भूगोल (Geography)"
+                                                      className="flex-1 p-1.5 border border-indigo-300 rounded text-xs outline-none focus:border-indigo-500"
+                                                  />
+                                                  <button
+                                                      type="button"
+                                                      onClick={() => {
+                                                          const raw = newSubjectInput.trim();
+                                                          if (!raw) return;
+                                                          let baseId = ('subj_' + raw.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')).slice(0, 32) || 'subj_' + Date.now();
+                                                          const existingIds = new Set([...LUCENT_SUBJECT_OPTIONS_BASE.map(s => s.id), ...customLucentSubjectsList.map(s => s.id)]);
+                                                          let id = baseId; let n = 2;
+                                                          while (existingIds.has(id)) { id = `${baseId}_${n++}`; }
+                                                          const next = [...(localSettings.customLucentSubjects || []), { id, name: raw }];
+                                                          setLocalSettings({ ...localSettings, customLucentSubjects: next });
+                                                          setNewLucent({ ...newLucent, subject: id });
+                                                          setNewSubjectInput('');
+                                                          setShowAddSubjectUI(false);
+                                                      }}
+                                                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs px-2 py-1 rounded active:scale-95"
+                                                  >✓</button>
+                                              </div>
+                                          )}
                                       </div>
                                   </div>
                                   {/* Board filter */}
@@ -11987,7 +12149,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                   <button
                                       onClick={() => {
                                           setBnEditingId(null);
-                                          setNewBookNote({ date: new Date().toISOString().split('T')[0], title: '', notes: '', chunkNotes: '', htmlNotes: '', lightCSS: '', darkCSS: '', mcqText: '', audioUrl: '', videoUrl: '', pdfUrl: '', targetSubject: 'sarSangrah', pageNo: '', topicName: '', classTarget: 'ALL' });
+                                          setNewBookNote({ date: new Date().toISOString().split('T')[0], title: '', notes: '', chunkNotes: '', htmlNotes: '', lightCSS: '', darkCSS: '', mcqText: '', audioUrl: '', videoUrl: '', pdfUrl: '', targetSubject: 'sarSangrah', pageNo: '', topicName: '', classTarget: 'ALL', board: '' });
                                           setNewBookNoteMcqs([]);
                                       }}
                                       className="flex items-center gap-1 bg-amber-100 text-amber-700 border border-amber-300 px-3 py-1.5 rounded-lg text-xs font-black hover:bg-amber-200"
@@ -12131,6 +12293,57 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                   <select value={newLucent.subject} onChange={e => setNewLucent({...newLucent, subject: e.target.value})} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500 bg-white">
                                                       {activeLucentSubjectOptions.map(opt => <option key={opt.id} value={opt.id}>{opt.name}</option>)}
                                                   </select>
+                                                  <button
+                                                      type="button"
+                                                      onClick={() => setShowAddSubjectUI(v => !v)}
+                                                      className="mt-1 text-[10px] font-black text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
+                                                  >
+                                                      {showAddSubjectUI ? '✕ Band karo' : '＋ Add Subject'}
+                                                  </button>
+                                                  {showAddSubjectUI && (
+                                                      <div className="mt-1 flex gap-1">
+                                                          <input
+                                                              type="text"
+                                                              value={newSubjectInput}
+                                                              onChange={e => setNewSubjectInput(e.target.value)}
+                                                              onKeyDown={e => {
+                                                                  if (e.key === 'Enter') {
+                                                                      e.preventDefault();
+                                                                      const raw = newSubjectInput.trim();
+                                                                      if (!raw) return;
+                                                                      let baseId = ('subj_' + raw.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')).slice(0, 32) || 'subj_' + Date.now();
+                                                                      const existingIds = new Set([...LUCENT_SUBJECT_OPTIONS_BASE.map(s => s.id), ...customLucentSubjectsList.map(s => s.id)]);
+                                                                      let id = baseId; let n = 2;
+                                                                      while (existingIds.has(id)) { id = `${baseId}_${n++}`; }
+                                                                      const next = [...(localSettings.customLucentSubjects || []), { id, name: raw }];
+                                                                      setLocalSettings({ ...localSettings, customLucentSubjects: next });
+                                                                      setNewLucent({ ...newLucent, subject: id });
+                                                                      setNewSubjectInput('');
+                                                                      setShowAddSubjectUI(false);
+                                                                  }
+                                                              }}
+                                                              placeholder="e.g. भूगोल (Geography)"
+                                                              className="flex-1 p-1.5 border border-indigo-300 rounded text-xs outline-none focus:border-indigo-500"
+                                                          />
+                                                          <button
+                                                              type="button"
+                                                              onClick={() => {
+                                                                  const raw = newSubjectInput.trim();
+                                                                  if (!raw) return;
+                                                                  let baseId = ('subj_' + raw.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')).slice(0, 32) || 'subj_' + Date.now();
+                                                                  const existingIds = new Set([...LUCENT_SUBJECT_OPTIONS_BASE.map(s => s.id), ...customLucentSubjectsList.map(s => s.id)]);
+                                                                  let id = baseId; let n = 2;
+                                                                  while (existingIds.has(id)) { id = `${baseId}_${n++}`; }
+                                                                  const next = [...(localSettings.customLucentSubjects || []), { id, name: raw }];
+                                                                  setLocalSettings({ ...localSettings, customLucentSubjects: next });
+                                                                  setNewLucent({ ...newLucent, subject: id });
+                                                                  setNewSubjectInput('');
+                                                                  setShowAddSubjectUI(false);
+                                                              }}
+                                                              className="bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs px-2 py-1 rounded active:scale-95"
+                                                          >✓</button>
+                                                      </div>
+                                                  )}
                                               </div>
                                           </div>
                                           <p className="text-[10px] text-teal-700 font-bold">📗 Book: <span className="font-black">{_cBookName}</span> (auto-set)</p>
@@ -12240,6 +12453,57 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                               <select value={newLucent.subject} onChange={e => setNewLucent({...newLucent, subject: e.target.value})} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500 bg-white">
                                                   {activeLucentSubjectOptions.map(opt => <option key={opt.id} value={opt.id}>{opt.name}</option>)}
                                               </select>
+                                              <button
+                                                  type="button"
+                                                  onClick={() => setShowAddSubjectUI(v => !v)}
+                                                  className="mt-1 text-[10px] font-black text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
+                                              >
+                                                  {showAddSubjectUI ? '✕ Band karo' : '＋ Add Subject'}
+                                              </button>
+                                              {showAddSubjectUI && (
+                                                  <div className="mt-1 flex gap-1">
+                                                      <input
+                                                          type="text"
+                                                          value={newSubjectInput}
+                                                          onChange={e => setNewSubjectInput(e.target.value)}
+                                                          onKeyDown={e => {
+                                                              if (e.key === 'Enter') {
+                                                                  e.preventDefault();
+                                                                  const raw = newSubjectInput.trim();
+                                                                  if (!raw) return;
+                                                                  let baseId = ('subj_' + raw.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')).slice(0, 32) || 'subj_' + Date.now();
+                                                                  const existingIds = new Set([...LUCENT_SUBJECT_OPTIONS_BASE.map(s => s.id), ...customLucentSubjectsList.map(s => s.id)]);
+                                                                  let id = baseId; let n = 2;
+                                                                  while (existingIds.has(id)) { id = `${baseId}_${n++}`; }
+                                                                  const next = [...(localSettings.customLucentSubjects || []), { id, name: raw }];
+                                                                  setLocalSettings({ ...localSettings, customLucentSubjects: next });
+                                                                  setNewLucent({ ...newLucent, subject: id });
+                                                                  setNewSubjectInput('');
+                                                                  setShowAddSubjectUI(false);
+                                                              }
+                                                          }}
+                                                          placeholder="e.g. भूगोल (Geography)"
+                                                          className="flex-1 p-1.5 border border-indigo-300 rounded text-xs outline-none focus:border-indigo-500"
+                                                      />
+                                                      <button
+                                                          type="button"
+                                                          onClick={() => {
+                                                              const raw = newSubjectInput.trim();
+                                                              if (!raw) return;
+                                                              let baseId = ('subj_' + raw.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')).slice(0, 32) || 'subj_' + Date.now();
+                                                              const existingIds = new Set([...LUCENT_SUBJECT_OPTIONS_BASE.map(s => s.id), ...customLucentSubjectsList.map(s => s.id)]);
+                                                              let id = baseId; let n = 2;
+                                                              while (existingIds.has(id)) { id = `${baseId}_${n++}`; }
+                                                              const next = [...(localSettings.customLucentSubjects || []), { id, name: raw }];
+                                                              setLocalSettings({ ...localSettings, customLucentSubjects: next });
+                                                              setNewLucent({ ...newLucent, subject: id });
+                                                              setNewSubjectInput('');
+                                                              setShowAddSubjectUI(false);
+                                                          }}
+                                                          className="bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs px-2 py-1 rounded active:scale-95"
+                                                      >✓</button>
+                                                  </div>
+                                              )}
                                           </div>
                                       </div>
                                       <div>
@@ -12523,6 +12787,26 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           </div>
                                       </div>
 
+                                      {/* ── BOARD SELECTOR ── */}
+                                      <div>
+                                          <label className="text-[10px] font-black text-indigo-700 uppercase block mb-2">🏫 Board (Optional)</label>
+                                          <div className="flex gap-2">
+                                              {([
+                                                  { id: '' as const,         label: '🌐 All Boards', desc: 'Sabhi students' },
+                                                  { id: 'NCERT_EN' as const, label: '📘 NCERT EN',   desc: 'English medium' },
+                                                  { id: 'NCERT_HI' as const, label: '📙 NCERT HI',   desc: 'Hindi medium' },
+                                                  { id: 'BSEB' as const,     label: '🟠 BSEB',       desc: 'Bihar board' },
+                                              ]).map(b => (
+                                                  <button key={b.id} type="button"
+                                                      onClick={() => setNewBookNote({ ...newBookNote, board: b.id })}
+                                                      className={`flex-1 flex flex-col items-center px-2 py-2 rounded-xl border-2 text-xs font-black transition-all ${newBookNote.board === b.id ? 'bg-indigo-600 text-white border-indigo-600 shadow-md scale-[1.03]' : 'bg-white text-indigo-700 border-indigo-200 hover:border-indigo-400'}`}>
+                                                      <span>{b.label}</span>
+                                                      <span className={`text-[9px] font-medium ${newBookNote.board === b.id ? 'opacity-80' : 'opacity-50'}`}>{b.desc}</span>
+                                                  </button>
+                                              ))}
+                                          </div>
+                                      </div>
+
                                       {/* ── MCQ-ONLY FORM ── */}
                                       {newBookNoteMode === 'mcq' && (
                                           <div className="space-y-3 bg-emerald-50 border border-emerald-200 rounded-xl p-4">
@@ -12595,12 +12879,13 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                       targetSubject: newBookNote.targetSubject,
                                                       pageNo: '',
                                                       isMcqOnly: true,
+                                                      board: newBookNote.board || undefined,
                                                   };
                                                   const updated = [...(localSettings.homework || []), hwItem];
                                                   const newSettings = { ...localSettings, homework: updated };
                                                   setLocalSettings(newSettings);
                                                   handleSaveSettings(newSettings);
-                                                  setNewBookNote({ date: new Date().toISOString().split('T')[0], title: '', notes: '', chunkNotes: '', htmlNotes: '', lightCSS: '', darkCSS: '', mcqText: '', audioUrl: '', videoUrl: '', pdfUrl: '', targetSubject: newBookNote.targetSubject, pageNo: '', topicName: '', classTarget: newBookNote.classTarget });
+                                                  setNewBookNote({ date: new Date().toISOString().split('T')[0], title: '', notes: '', chunkNotes: '', htmlNotes: '', lightCSS: '', darkCSS: '', mcqText: '', audioUrl: '', videoUrl: '', pdfUrl: '', targetSubject: newBookNote.targetSubject, pageNo: '', topicName: '', classTarget: newBookNote.classTarget, board: newBookNote.board });
                                                   setNewBookNoteMcqs([]);
                                                   setNewBookNoteBulk(undefined);
                                                   setAlertConfig({ isOpen: true, message: `✅ "${titleVal}" MCQ Saved! (${structuredMcqs.length} questions)` });
@@ -12873,6 +13158,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                               videoUrl: newBookNote.videoUrl,
                                               targetSubject: newBookNote.targetSubject,
                                               pageNo: pg,
+                                              board: newBookNote.board || undefined,
                                           };
                                           let updated: any[];
                                           let msg: string;
@@ -12891,7 +13177,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           const newSettings = { ...localSettings, homework: updated };
                                           setLocalSettings(newSettings);
                                           handleSaveSettings(newSettings);
-                                          setNewBookNote({ date: new Date().toISOString().split('T')[0], title: '', notes: '', chunkNotes: '', htmlNotes: '', lightCSS: '', darkCSS: '', mcqText: '', audioUrl: '', videoUrl: '', pdfUrl: '', targetSubject: newBookNote.targetSubject, pageNo: '', topicName: '', classTarget: newBookNote.classTarget });
+                                          setNewBookNote({ date: new Date().toISOString().split('T')[0], title: '', notes: '', chunkNotes: '', htmlNotes: '', lightCSS: '', darkCSS: '', mcqText: '', audioUrl: '', videoUrl: '', pdfUrl: '', targetSubject: newBookNote.targetSubject, pageNo: '', topicName: '', classTarget: newBookNote.classTarget, board: newBookNote.board });
                                           setNewBookNoteMcqs([]);
                                           setNewBookNoteBulk(undefined);
                                           setAlertConfig({ isOpen: true, message: msg });
@@ -12912,11 +13198,28 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                       {/* ── HISTORY TAB ── */}
                       {bookNotesTab === 'HISTORY' && (
                           <div className="animate-in fade-in space-y-3">
-                              {/* Book-wise Filter */}
+                              {/* Book-wise Filter + Search */}
                               <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
+                                  {/* Search box */}
+                                  <div className="relative">
+                                      <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-amber-500 pointer-events-none"/>
+                                      <input
+                                          type="text"
+                                          value={bnHistorySearch}
+                                          onChange={e => setBnHistorySearch(e.target.value)}
+                                          placeholder="🔍 Page no., notes, topic se search karein…"
+                                          className="w-full pl-7 pr-8 py-2 border border-amber-300 rounded-lg text-xs outline-none focus:border-amber-500 bg-white"
+                                      />
+                                      {bnHistorySearch && (
+                                          <button onClick={() => setBnHistorySearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                                              <X size={13}/>
+                                          </button>
+                                      )}
+                                  </div>
+                                  {/* Book + Board + Class filters */}
                                   <div className="flex gap-2 items-end flex-wrap">
-                                      <div className="flex-1 min-w-[140px]">
-                                          <label className="text-[9px] font-bold text-amber-700 uppercase block mb-1">📚 Book Filter</label>
+                                      <div className="flex-1 min-w-[120px]">
+                                          <label className="text-[9px] font-bold text-amber-700 uppercase block mb-1">📚 Book</label>
                                           <select
                                               value={bnBookFilter}
                                               onChange={e => setBnBookFilter(e.target.value)}
@@ -12930,18 +13233,100 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                               ))}
                                           </select>
                                       </div>
-                                      {bnBookFilter !== 'ALL' && (
+                                      <div className="flex-1 min-w-[95px]">
+                                          <label className="text-[9px] font-bold text-amber-700 uppercase block mb-1">🏫 Board</label>
+                                          <select
+                                              value={bnBoardFilter}
+                                              onChange={e => setBnBoardFilter(e.target.value)}
+                                              className="w-full p-1.5 border border-amber-300 rounded-lg text-xs outline-none focus:border-amber-500 bg-white font-bold"
+                                          >
+                                              <option value="ALL">All Boards</option>
+                                              <option value="">🌐 Untagged</option>
+                                              <option value="NCERT_EN">📘 NCERT EN</option>
+                                              <option value="NCERT_HI">📙 NCERT HI</option>
+                                              <option value="BSEB">🟠 BSEB</option>
+                                          </select>
+                                      </div>
+                                      <div className="flex-1 min-w-[85px]">
+                                          <label className="text-[9px] font-bold text-amber-700 uppercase block mb-1">🎓 Class</label>
+                                          <select
+                                              value={bnClassFilter}
+                                              onChange={e => setBnClassFilter(e.target.value)}
+                                              className="w-full p-1.5 border border-amber-300 rounded-lg text-xs outline-none focus:border-amber-500 bg-white font-bold"
+                                          >
+                                              <option value="ALL">All Classes</option>
+                                              {(['6','7','8','9','10','11','12','COMPETITION'] as string[]).map(c => (
+                                                  <option key={c} value={c}>{c === 'COMPETITION' ? '🏆 Comp.' : `Class ${c}`}</option>
+                                              ))}
+                                          </select>
+                                      </div>
+                                      {(bnBookFilter !== 'ALL' || bnBoardFilter !== 'ALL' || bnClassFilter !== 'ALL' || bnHistorySearch) && (
                                           <button
-                                              onClick={() => setBnBookFilter('ALL')}
+                                              onClick={() => { setBnBookFilter('ALL'); setBnBoardFilter('ALL'); setBnClassFilter('ALL'); setBnHistorySearch(''); }}
                                               className="px-2 py-1.5 text-[10px] font-bold text-slate-500 hover:text-slate-700 bg-white hover:bg-slate-100 rounded-lg border border-slate-200 shrink-0"
-                                          >✕ Clear</button>
+                                          >✕ Reset</button>
                                       )}
                                   </div>
                               </div>
+                              {/* Computed filtered list (used for count display + render below) */}
+                              {(() => {
+                                  const _sq = bnHistorySearch.trim().toLowerCase();
+                                  const _bf = bnBookFilter;
+                                  const _bdf = bnBoardFilter;
+                                  const _matchSearch = (hw: HomeworkItem) => {
+                                      if (!_sq) return true;
+                                      const haystack = [
+                                          (hw as any).pageNo, hw.title, hw.notes,
+                                          (hw as any).chunkNotes, (hw as any).topicName, hw.date,
+                                          ((hw as any).htmlNotes || '').replace(/<[^>]+>/g, ' '),
+                                          ...(hw.parsedMcqs || []).map((m: any) => m.question),
+                                      ].filter(Boolean).join(' ').toLowerCase();
+                                      return haystack.includes(_sq);
+                                  };
+                                  const _matchBoard = (hw: HomeworkItem) => {
+                                      if (_bdf === 'ALL') return true;
+                                      if (_bdf === '') return !(hw as any).board;
+                                      return (hw as any).board === _bdf;
+                                  };
+                                  const _matchClass = (hw: HomeworkItem) => bnClassFilter === 'ALL' || (hw as any).classTarget === bnClassFilter;
+                                  const _filtered = bnItems
+                                      .filter(hw => _bf === 'ALL' || hw.targetSubject === _bf)
+                                      .filter(_matchBoard)
+                                      .filter(_matchClass)
+                                      .filter(_matchSearch);
+                                  return null; // Just precomputing — actual render block references same logic below
+                              })()}
                               <div className="flex justify-between items-center">
-                                  <p className="text-xs font-bold text-amber-800 uppercase tracking-wider">
-                                      Saved Book Notes ({bnBookFilter === 'ALL' ? bnItems.length : bnItems.filter(hw => hw.targetSubject === bnBookFilter).length}{bnBookFilter !== 'ALL' ? ` of ${bnItems.length} total` : ''})
-                                  </p>
+                                  {(() => {
+                                      const _sq = bnHistorySearch.trim().toLowerCase();
+                                      const _bf = bnBookFilter;
+                                      const _bdf = bnBoardFilter;
+                                      const _matchSearch = (hw: HomeworkItem) => {
+                                          if (!_sq) return true;
+                                          const haystack = [
+                                              (hw as any).pageNo, hw.title, hw.notes,
+                                              (hw as any).chunkNotes, (hw as any).topicName, hw.date,
+                                              ((hw as any).htmlNotes || '').replace(/<[^>]+>/g, ' '),
+                                              ...(hw.parsedMcqs || []).map((m: any) => m.question),
+                                          ].filter(Boolean).join(' ').toLowerCase();
+                                          return haystack.includes(_sq);
+                                      };
+                                      const _matchBoard = (hw: HomeworkItem) => {
+                                          if (_bdf === 'ALL') return true;
+                                          if (_bdf === '') return !(hw as any).board;
+                                          return (hw as any).board === _bdf;
+                                      };
+                                      const _matchClass = (hw: HomeworkItem) => bnClassFilter === 'ALL' || (hw as any).classTarget === bnClassFilter;
+                                      const filtered = bnItems.filter(hw => _bf === 'ALL' || hw.targetSubject === _bf).filter(_matchBoard).filter(_matchClass).filter(_matchSearch);
+                                      return (
+                                          <p className="text-xs font-bold text-amber-800 uppercase tracking-wider">
+                                              {_sq || _bf !== 'ALL' || _bdf !== 'ALL' || bnClassFilter !== 'ALL'
+                                                  ? `${filtered.length} matches (of ${bnItems.length})`
+                                                  : `Saved Book Notes (${bnItems.length})`}
+                                          </p>
+                                      );
+                                  })()}
+                              
                                   <button onClick={() => { handleSaveSettings(localSettings); setAlertConfig({isOpen:true,message:'✅ Edits Saved!'}); }} className="bg-amber-600 text-white px-4 py-2 rounded-lg font-bold text-xs shadow hover:bg-amber-700 flex items-center gap-2"><Save size={14}/> Save Edits</button>
                               </div>
 
@@ -12968,6 +13353,20 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                           setCn612EditingId(entry.id);
                                                           setBookNotesTab('ADD');
                                                       }} className="p-1 text-amber-500 hover:text-amber-700 hover:bg-amber-50 rounded transition-colors" title="Edit lesson"><Edit3 size={13}/></button>
+                                                      <button onClick={() => {
+                                                          setBnMcTargetClass('COMPETITION');
+                                                          setBnMcTargetSubject('biology');
+                                                          setBnMcTargetBook(entry.bookName || '');
+                                                          setBnMcTargetBoard((entry.board as '' | 'NCERT_EN' | 'NCERT_HI' | 'BSEB') || '');
+                                                          setBnMoveCopyModal({ entry, origIdx, mode: 'move' });
+                                                      }} className="p-1 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded transition-colors" title="Dusri class mein move karein"><ArrowRight size={13}/></button>
+                                                      <button onClick={() => {
+                                                          setBnMcTargetClass('COMPETITION');
+                                                          setBnMcTargetSubject('biology');
+                                                          setBnMcTargetBook(entry.bookName || '');
+                                                          setBnMcTargetBoard((entry.board as '' | 'NCERT_EN' | 'NCERT_HI' | 'BSEB') || '');
+                                                          setBnMoveCopyModal({ entry, origIdx, mode: 'copy' });
+                                                      }} className="p-1 text-emerald-500 hover:text-emerald-700 hover:bg-emerald-50 rounded transition-colors" title="Dusri class mein copy karein"><Copy size={13}/></button>
                                                       <button onClick={() => {
                                                           if (!confirm(`⚠️ DELETE\n\n"${entry.lessonTitle}"\n\nHamesha ke liye delete hoga.\n\nSure?`)) return;
                                                           const updated = (localSettings.lucentNotes || []).filter((_, i) => i !== origIdx);
@@ -13029,12 +13428,170 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                   </div>
                               )}
 
+                              {/* ── Book Notes Move / Copy Modal ─────────────────────────────────── */}
+                              {bnMoveCopyModal && (
+                                  <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4">
+                                      <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl p-5 space-y-4">
+                                          <div className="flex items-center justify-between">
+                                              <h3 className="font-black text-slate-800 text-base">
+                                                  {bnMoveCopyModal.mode === 'move' ? '➡️ Lesson Move Karein' : '📋 Lesson Copy Karein'}
+                                              </h3>
+                                              <button onClick={() => setBnMoveCopyModal(null)} className="p-1 rounded-lg bg-slate-100 text-slate-500 active:scale-95"><X size={15}/></button>
+                                          </div>
+                                          <div className="px-3 py-2 bg-amber-50 rounded-xl text-xs text-amber-800 font-bold truncate">
+                                              "{bnMoveCopyModal.entry.lessonTitle || '(untitled)'}"
+                                          </div>
+                                          <div className="space-y-1">
+                                              <label className="text-[10px] font-bold text-slate-500 uppercase">Target Class</label>
+                                              <div className="grid grid-cols-4 gap-1.5">
+                                                  {(['6','7','8','9','10','11','12'] as string[]).map(c => (
+                                                      <button key={c} onClick={() => { setBnMcTargetClass(c); setBnMcTargetSubject('biology'); }}
+                                                          className={`py-2 rounded-xl text-xs font-black transition-all active:scale-95 ${bnMcTargetClass === c ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-700 border border-indigo-100'}`}
+                                                      >{c}</button>
+                                                  ))}
+                                                  <button onClick={() => { setBnMcTargetClass('COMPETITION'); setBnMcTargetSubject('biology'); }}
+                                                      className={`col-span-4 py-2 rounded-xl text-xs font-black transition-all active:scale-95 ${bnMcTargetClass === 'COMPETITION' ? 'bg-amber-500 text-white' : 'bg-amber-50 text-amber-700 border border-amber-100'}`}
+                                                  >🏆 Competition / Govt. Exams</button>
+                                              </div>
+                                          </div>
+                                          <div className="space-y-1">
+                                              <label className="text-[10px] font-bold text-slate-500 uppercase">Target Subject</label>
+                                              <select value={bnMcTargetSubject} onChange={e => setBnMcTargetSubject(e.target.value)}
+                                                  className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-indigo-400 bg-white"
+                                              >
+                                                  {LUCENT_SUBJECT_OPTIONS_BASE.map(opt => (
+                                                      <option key={opt.id} value={opt.id}>{opt.name}</option>
+                                                  ))}
+                                              </select>
+                                          </div>
+                                          <div className="space-y-1">
+                                              <label className="text-[10px] font-bold text-slate-500 uppercase">Book Name (optional)</label>
+                                              <input type="text" value={bnMcTargetBook} onChange={e => setBnMcTargetBook(e.target.value)}
+                                                  placeholder="e.g. Lucent GK, Speedy Science…"
+                                                  className="w-full p-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400"
+                                              />
+                                          </div>
+                                          <div className="space-y-1">
+                                              <label className="text-[10px] font-bold text-slate-500 uppercase">🏫 Board (optional)</label>
+                                              <div className="grid grid-cols-4 gap-1.5">
+                                                  {([
+                                                      { id: '' as const,         label: '🌐 All' },
+                                                      { id: 'NCERT_EN' as const, label: '📘 EN' },
+                                                      { id: 'NCERT_HI' as const, label: '📙 HI' },
+                                                      { id: 'BSEB' as const,     label: '🟠 BSEB' },
+                                                  ]).map(b => (
+                                                      <button key={b.id} onClick={() => setBnMcTargetBoard(b.id)}
+                                                          className={`py-2 rounded-xl text-xs font-black transition-all active:scale-95 ${bnMcTargetBoard === b.id ? 'bg-indigo-600 text-white shadow-md' : 'bg-indigo-50 text-indigo-700 border border-indigo-100 hover:border-indigo-300'}`}
+                                                      >{b.label}</button>
+                                                  ))}
+                                              </div>
+                                          </div>
+                                          {bnMoveCopyModal.mode === 'move' && (
+                                              <p className="text-[10px] text-rose-500 font-bold bg-rose-50 px-3 py-2 rounded-xl">
+                                                  ⚠️ Move karne ke baad original entry current class se hat jayegi.
+                                              </p>
+                                          )}
+                                          <button onClick={handleBnMoveCopy} disabled={bnMcWorking || !bnMcTargetSubject}
+                                              className={`w-full py-3 rounded-xl font-black text-white text-sm flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-50 ${bnMoveCopyModal.mode === 'move' ? 'bg-indigo-600' : 'bg-emerald-600'}`}
+                                          >
+                                              {bnMcWorking ? (bnMoveCopyModal.mode === 'move' ? 'Moving...' : 'Copying...') : (bnMoveCopyModal.mode === 'move' ? `➡️ Move → Class ${bnMcTargetClass}` : `📋 Copy → Class ${bnMcTargetClass}`)}
+                                          </button>
+                                      </div>
+                                  </div>
+                              )}
+
+                              {/* ── bnItem Board Move / Copy Modal ── */}
+                              {bnBoardMoveModal && (
+                                  <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4">
+                                      <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl p-5 space-y-4">
+                                          <div className="flex items-center justify-between">
+                                              <h3 className="font-black text-slate-800 text-base">
+                                                  {bnBoardMoveModal.mode === 'move' ? '➡️ Dusre Board Mein Move' : '📋 Dusre Board Mein Copy'}
+                                              </h3>
+                                              <button onClick={() => setBnBoardMoveModal(null)} className="p-1 rounded-lg bg-slate-100 text-slate-500 active:scale-95"><X size={15}/></button>
+                                          </div>
+                                          <div className="px-3 py-2 bg-amber-50 rounded-xl text-xs text-amber-800 font-bold truncate">
+                                              "{bnBoardMoveModal.hw.title || `Page ${bnBoardMoveModal.hw.pageNo}`}"
+                                          </div>
+                                          {(bnBoardMoveModal.hw as any).board && (
+                                              <p className="text-[10px] text-indigo-600 font-bold">Current board: <span className="bg-indigo-100 px-1.5 py-0.5 rounded">{(bnBoardMoveModal.hw as any).board}</span></p>
+                                          )}
+                                          <div className="space-y-2">
+                                              <label className="text-[10px] font-bold text-slate-500 uppercase">Target Board Chunein</label>
+                                              <div className="grid grid-cols-2 gap-2">
+                                                  {([
+                                                      { id: '' as const,         label: '🌐 All Boards' },
+                                                      { id: 'NCERT_EN' as const, label: '📘 NCERT EN' },
+                                                      { id: 'NCERT_HI' as const, label: '📙 NCERT HI' },
+                                                      { id: 'BSEB' as const,     label: '🟠 BSEB' },
+                                                  ]).map(b => (
+                                                      <button key={b.id} onClick={() => setBnBoardMoveTarget(b.id)}
+                                                          className={`py-2.5 rounded-xl text-xs font-black transition-all active:scale-95 ${bnBoardMoveTarget === b.id ? 'bg-indigo-600 text-white shadow-md' : 'bg-indigo-50 text-indigo-700 border border-indigo-100 hover:border-indigo-300'}`}
+                                                      >{b.label}</button>
+                                                  ))}
+                                              </div>
+                                          </div>
+                                          {bnBoardMoveModal.mode === 'move' && (
+                                              <p className="text-[10px] text-rose-500 font-bold bg-rose-50 px-3 py-2 rounded-xl">
+                                                  ⚠️ Move karne par is entry ka board change ho jayega.
+                                              </p>
+                                          )}
+                                          <button onClick={handleBnBoardMoveCopy} disabled={bnBoardMoveWorking}
+                                              className={`w-full py-3 rounded-xl font-black text-white text-sm flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-50 ${bnBoardMoveModal.mode === 'move' ? 'bg-indigo-600' : 'bg-emerald-600'}`}
+                                          >
+                                              {bnBoardMoveWorking
+                                                  ? (bnBoardMoveModal.mode === 'move' ? 'Moving...' : 'Copying...')
+                                                  : (bnBoardMoveModal.mode === 'move' ? `➡️ Move → ${bnBoardMoveTarget}` : `📋 Copy → ${bnBoardMoveTarget}`)}
+                                          </button>
+                                      </div>
+                                  </div>
+                              )}
+
                               {bnItems.length === 0 && (localSettings.lucentNotes || []).length === 0 && <p className="text-xs text-slate-400 text-center py-8">Abhi koi book notes nahi hain.</p>}
                               {bnItems.length === 0 && (localSettings.lucentNotes || []).length > 0 && <p className="text-xs text-slate-400 text-center py-4">Sar Sangrah / Speedy / Custom book notes abhi nahi hain.</p>}
-                              {bnItems.length > 0 && bnBookFilter !== 'ALL' && bnItems.filter(hw => hw.targetSubject === bnBookFilter).length === 0 && (
-                                  <p className="text-xs text-slate-400 text-center py-6 bg-slate-50 rounded-xl border border-slate-100">Is book mein koi notes nahi hain.</p>
-                              )}
-                              {(bnBookFilter === 'ALL' ? bnItems : bnItems.filter(hw => hw.targetSubject === bnBookFilter)).map((hw, idx) => {
+                              {bnItems.length > 0 && (() => {
+                                  const _sq = bnHistorySearch.trim().toLowerCase();
+                                  const _matchSearch = (hw: HomeworkItem) => {
+                                      if (!_sq) return true;
+                                      const haystack = [
+                                          (hw as any).pageNo, hw.title, hw.notes,
+                                          (hw as any).chunkNotes, (hw as any).topicName, hw.date,
+                                          ((hw as any).htmlNotes || '').replace(/<[^>]+>/g, ' '),
+                                          ...(hw.parsedMcqs || []).map((m: any) => m.question),
+                                      ].filter(Boolean).join(' ').toLowerCase();
+                                      return haystack.includes(_sq);
+                                  };
+                                  const _matchBoard = (hw: HomeworkItem) => {
+                                      if (bnBoardFilter === 'ALL') return true;
+                                      if (bnBoardFilter === '') return !(hw as any).board;
+                                      return (hw as any).board === bnBoardFilter;
+                                  };
+                                  const _matchClass = (hw: HomeworkItem) => bnClassFilter === 'ALL' || (hw as any).classTarget === bnClassFilter;
+                                  const filtered = bnItems.filter(hw => bnBookFilter === 'ALL' || hw.targetSubject === bnBookFilter).filter(_matchBoard).filter(_matchClass).filter(_matchSearch);
+                                  if (filtered.length === 0) {
+                                      return <p className="text-xs text-slate-400 text-center py-6 bg-slate-50 rounded-xl border border-slate-100">Koi result nahi mila — filter ya search badlein.</p>;
+                                  }
+                                  return null;
+                              })()}
+                              {(() => {
+                                  const _sq = bnHistorySearch.trim().toLowerCase();
+                                  const _matchSearch = (hw: HomeworkItem) => {
+                                      if (!_sq) return true;
+                                      const haystack = [
+                                          (hw as any).pageNo, hw.title, hw.notes,
+                                          (hw as any).chunkNotes, (hw as any).topicName, hw.date,
+                                          ((hw as any).htmlNotes || '').replace(/<[^>]+>/g, ' '),
+                                          ...(hw.parsedMcqs || []).map((m: any) => m.question),
+                                      ].filter(Boolean).join(' ').toLowerCase();
+                                      return haystack.includes(_sq);
+                                  };
+                                  const _matchBoard = (hw: HomeworkItem) => {
+                                      if (bnBoardFilter === 'ALL') return true;
+                                      if (bnBoardFilter === '') return !(hw as any).board;
+                                      return (hw as any).board === bnBoardFilter;
+                                  };
+                                  const _matchClass = (hw: HomeworkItem) => bnClassFilter === 'ALL' || (hw as any).classTarget === bnClassFilter;
+                                  return (bnItems.filter(hw => bnBookFilter === 'ALL' || hw.targetSubject === bnBookFilter).filter(_matchBoard).filter(_matchClass).filter(_matchSearch)).map((hw, idx) => {
                                   const bookMeta = BOOK_TYPES.find(b => b.id === hw.targetSubject);
                                   const mcqs: MCQItem[] = hw.parsedMcqs || [];
                                   const handleCopyAll = () => {
@@ -13080,6 +13637,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           lightCSS: (hw as any).lightCSS || '',
                                           darkCSS: (hw as any).darkCSS || '',
                                           classTarget: (hw as any).classTarget || 'ALL',
+                                          board: (hw as any).board || '' as '' | 'NCERT_EN' | 'NCERT_HI' | 'BSEB',
                                       });
                                       setNewBookNoteMcqs(mcqs.map(m => ({ id: m.id || `mcq_${Date.now()}_${Math.random()}`, question: m.question || '', options: m.options || ['', '', '', ''], correctAnswer: m.correctAnswer ?? 0 })));
                                       setBnEditingId(hw.id || null);
@@ -13094,11 +13652,22 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                   {bookMeta && <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${bookMeta.active.split(' ').slice(0, 2).join(' ')}`}>{bookMeta.label}</span>}
                                                   {(hw as any).pageNo && <span className="text-[10px] bg-slate-100 text-slate-600 font-bold px-2 py-0.5 rounded-full">Pg {(hw as any).pageNo}</span>}
                                                   {(hw as any).topicName && <span className="text-[10px] bg-violet-100 text-violet-700 font-bold px-2 py-0.5 rounded-full">🏷️ {(hw as any).topicName}</span>}
+                                                  {(hw as any).board && <span className="text-[10px] bg-indigo-100 text-indigo-700 font-bold px-2 py-0.5 rounded-full">🏫 {(hw as any).board}</span>}
                                                   <span className="text-[10px] text-slate-400">{hw.date}</span>
                                               </div>
                                               <div className="flex items-center gap-1">
                                                   <button onClick={handleCopyAll} className="p-1.5 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors" title="Copy all notes + MCQs"><Copy size={14}/></button>
                                                   <button onClick={handleEdit} className="p-1.5 text-amber-500 hover:text-amber-700 hover:bg-amber-50 rounded-lg transition-colors" title="Edit this entry"><Edit3 size={14}/></button>
+                                                  <button onClick={() => {
+                                                      const realIdx = (localSettings.homework || []).findIndex((h: any) => h.id === hw.id);
+                                                      setBnBoardMoveTarget('NCERT_EN');
+                                                      setBnBoardMoveModal({ hw, origIdx: realIdx, mode: 'move' });
+                                                  }} className="p-1.5 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors" title="Dusre board mein move karein"><ArrowRight size={14}/></button>
+                                                  <button onClick={() => {
+                                                      const realIdx = (localSettings.homework || []).findIndex((h: any) => h.id === hw.id);
+                                                      setBnBoardMoveTarget('NCERT_EN');
+                                                      setBnBoardMoveModal({ hw, origIdx: realIdx, mode: 'copy' });
+                                                  }} className="p-1.5 text-emerald-500 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors" title="Dusre board mein copy karein"><Copy size={14}/></button>
                                                   <button onClick={() => {
                                                       if (!confirm(`⚠️ PERMANENT DELETE\n\n"${hw.title}"\n\nYeh note hamesha ke liye delete ho jaayega — wapis nahi aayega.\n\nKya aap sure hain?`)) return;
                                                       const updated = (localSettings.homework || []).filter(h => h.id !== hw.id);
@@ -13137,7 +13706,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           </div>
                                       </div>
                                   );
-                              })}
+                              }); })()}
                           </div>
                       )}
                   </div>
@@ -17553,7 +18122,6 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
             }}
           />
           {/* REVISION HUB — INTERVAL CONFIGURATION */}
-          {(localSettings.revisionConfig?.trackWrongAnswers ?? true) && (
               <div className="bg-white p-4 rounded-xl border border-indigo-200 shadow-inner mb-4 animate-in fade-in slide-in-from-top-2">
                   <h5 className="font-bold text-indigo-800 mb-1 flex items-center gap-2">
                       <BrainCircuit size={16} className="text-indigo-600" /> Revision Hub — Interval Settings
@@ -17689,8 +18257,13 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                   <p className="text-[10px] text-slate-500 mt-3">
                       ℹ️ Weak = score &lt; Average%; Average = score &lt; Strong%; Strong = score &lt; Mastery%; Mastered = score ≥ Mastery%
                   </p>
+                  <button
+                      onClick={() => handleSaveSettings()}
+                      className="mt-4 w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 transition-colors shadow"
+                  >
+                      <Save size={15} /> Save Interval Settings
+                  </button>
               </div>
-          )}
 
         </div>
       )}

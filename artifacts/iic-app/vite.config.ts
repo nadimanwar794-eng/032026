@@ -8,18 +8,34 @@ import { VitePWA } from "vite-plugin-pwa";
 const isBuild = process.env.NODE_ENV === "production" || process.argv.includes("build");
 
 const rawPort = process.env.PORT;
-const port = Number(rawPort ?? "5000");
+const port = rawPort ? Number(rawPort) : 5173;
+
+const basePath = process.env.BASE_PATH || "/";
+
+if (!isBuild) {
+  if (!rawPort) {
+    throw new Error("PORT environment variable is required but was not provided.");
+  }
+  if (Number.isNaN(port) || port <= 0) {
+    throw new Error(`Invalid PORT value: "${rawPort}"`);
+  }
+}
 
 export default defineConfig({
-  base: process.env.BASE_PATH ?? "/",
+  base: basePath,
   plugins: [
     react(),
     tailwindcss(),
     runtimeErrorOverlay(),
     VitePWA({
-      registerType: 'autoUpdate',
+      registerType: "autoUpdate",
       devOptions: { enabled: true },
-      workbox: { maximumFileSizeToCacheInBytes: 8 * 1024 * 1024 },
+      workbox: {
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+        globIgnores: ["**/*.map"],
+        skipWaiting: true,
+        clientsClaim: true,
+      },
     }),
     ...(process.env.NODE_ENV !== "production" &&
     process.env.REPL_ID !== undefined
@@ -53,7 +69,7 @@ export default defineConfig({
     host: "0.0.0.0",
     allowedHosts: true,
     fs: {
-      strict: true,
+      strict: false,
     },
   },
   preview: {

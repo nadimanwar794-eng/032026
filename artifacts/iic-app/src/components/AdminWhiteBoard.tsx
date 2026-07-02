@@ -9,7 +9,7 @@
  * Max size: 95vw × 95vh. Admin can freely resize between 160×120 and the max.
  */
 import React, { useRef, useState, useCallback, useEffect } from 'react';
-import { X, Minus, GripVertical } from 'lucide-react';
+import { X, Minus, GripVertical, Presentation } from 'lucide-react';
 
 interface Props {
   onClose: () => void;
@@ -106,16 +106,9 @@ export const AdminWhiteBoard: React.FC<Props> = ({ onClose }) => {
           }}
           aria-label="Open Whiteboard"
         >
-          <img
-            src="/splash-logo.png"
-            alt="IIC"
-            style={{ width: 54, height: 54, objectFit: 'cover', borderRadius: '50%', pointerEvents: 'none' }}
-            onError={(e) => {
-              (e.currentTarget as HTMLImageElement).style.display = 'none';
-              const p = e.currentTarget.parentElement;
-              if (p) p.innerHTML = '<span style="font-size:18px;font-weight:900;color:#1e293b">IIC</span>';
-            }}
-          />
+          <div style={{ width: 54, height: 54, borderRadius: '50%', background: 'linear-gradient(135deg, #1e293b 0%, #334155 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+            <Presentation size={26} color="#ffffff" />
+          </div>
         </button>
       </div>
     );
@@ -155,12 +148,9 @@ export const AdminWhiteBoard: React.FC<Props> = ({ onClose }) => {
         onTouchMove={(e) => { const t = e.touches[0]; moveDrag(t.clientX, t.clientY); }}
         onTouchEnd={endDrag}
       >
-        <img
-          src="/splash-logo.png"
-          alt="IIC"
-          style={{ width: 22, height: 22, objectFit: 'cover', borderRadius: '50%', flexShrink: 0, border: '1px solid rgba(255,255,255,0.2)', pointerEvents: 'none' }}
-          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-        />
+        <div style={{ width: 22, height: 22, borderRadius: '50%', background: 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, pointerEvents: 'none' }}>
+          <Presentation size={13} color="#ffffff" />
+        </div>
         <GripVertical size={13} style={{ color: 'rgba(255,255,255,0.35)', flexShrink: 0, pointerEvents: 'none' }} />
         <span style={{ flex: 1, fontSize: 10, fontWeight: 800, color: '#fff', letterSpacing: '0.07em', textTransform: 'uppercase', pointerEvents: 'none' }}>
           Admin Board

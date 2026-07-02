@@ -176,6 +176,7 @@ import {
   Flame,
   Lightbulb,
   Pencil,
+  Presentation,
 } from "lucide-react";
 import { speakText, stopSpeech, stripHtml } from "../utils/textToSpeech";
 import { getMistakeBankSync, getMistakeBank, addMistakes, removeMistakeByQuestion, MistakeEntry } from "../utils/mistakeBank";
@@ -1830,8 +1831,9 @@ export const StudentDashboard: React.FC<Props> = ({
   const [editMode, setEditMode] = useState(false);
   const [showRecoveryModal, setShowRecoveryModal] = useState(false);
   const [recoveryData, setRecoveryData] = useState({
-    mobile: user.mobile || "",
-    password: user.password || "",
+    mobile: (user as any).mobile || "",
+    password: (user as any).password || "",
+    email: user.email || "",
   });
   const [profileData, setProfileData] = useState({
     classLevel: activeSessionClass || user.classLevel || "10",
@@ -5403,7 +5405,8 @@ export const StudentDashboard: React.FC<Props> = ({
     }
   };
 
-  const LUCENT_CATEGORIES = [
+  const _customLucentSubjects: { id: string; name: string }[] = ((settings as any)?.customLucentSubjects || []).filter((s: any) => s && s.id && s.name);
+  const LUCENT_CATEGORIES: Subject[] = [
     { id: 'biology', name: 'जीव विज्ञान (Biology)', icon: 'bio', color: 'bg-white text-slate-700' },
     { id: 'chemistry', name: 'रसायन शास्त्र (Chemistry)', icon: 'flask', color: 'bg-white text-slate-700' },
     { id: 'physics', name: 'भौतिकी (Physics)', icon: 'physics', color: 'bg-white text-slate-700' },
@@ -5411,7 +5414,8 @@ export const StudentDashboard: React.FC<Props> = ({
     { id: 'geography', name: 'भूगोल (Geography)', icon: 'geo', color: 'bg-white text-slate-700' },
     { id: 'polity', name: 'राजनीति विज्ञान (Polity)', icon: 'gov', color: 'bg-white text-slate-700' },
     { id: 'history', name: 'इतिहास (History)', icon: 'history', color: 'bg-white text-slate-700' },
-  ] as Subject[];
+    ..._customLucentSubjects.map(s => ({ id: s.id, name: s.name, icon: 'book', color: 'bg-white text-slate-700' })),
+  ];
 
   const renderContentSection = (
     type: "VIDEO" | "PDF" | "MCQ" | "AUDIO" | "GENERIC",
@@ -5947,7 +5951,7 @@ export const StudentDashboard: React.FC<Props> = ({
                           className="w-8 h-8 flex items-center justify-center rounded-xl bg-white/20 border border-white/30 active:scale-90 transition-all shrink-0"
                           title="Admin WhiteBoard"
                         >
-                          <img src="/splash-logo.png" alt="WB" className="w-5 h-5 object-contain" />
+                          <Presentation size={16} />
                         </button>
                       )}
                       {/* Admin Edit (Pencil) — inline HTML editor */}
@@ -6064,7 +6068,7 @@ export const StudentDashboard: React.FC<Props> = ({
                       className="w-8 h-8 flex items-center justify-center rounded-xl bg-white/20 border border-white/30 active:scale-90 transition-all shrink-0"
                       title="Admin WhiteBoard"
                     >
-                      <img src="/splash-logo.png" alt="WB" className="w-5 h-5 object-contain" />
+                      <Presentation size={16} />
                     </button>
                   )}
                   {/* More button — non-write modes */}
@@ -7444,8 +7448,15 @@ export const StudentDashboard: React.FC<Props> = ({
       // Pre-compute lesson counts per subject so we can show badges and block empty navigation
       const _allCompNotes = ((settings?.lucentNotes || []) as LucentNoteEntry[])
         .filter(n => (n.classLevel === 'COMPETITION' || !n.classLevel) && (n.board === _curBoard || (!n.board && _curBoard === 'NCERT_EN')));
-      const _lucentSubjectCount = (catId: string) =>
-        _allCompNotes.filter(n => n.subject?.toLowerCase().trim() === catId.toLowerCase().trim() && (n.bookName?.trim() || 'Lucent') === 'Lucent').length;
+      const _customSubjectIds = new Set(_customLucentSubjects.map(s => s.id.toLowerCase()));
+      const _lucentSubjectCount = (catId: string) => {
+        const id = catId.toLowerCase().trim();
+        const isCustom = _customSubjectIds.has(id);
+        return _allCompNotes.filter(n =>
+          n.subject?.toLowerCase().trim() === id &&
+          (isCustom || (n.bookName?.trim() || 'Lucent') === 'Lucent')
+        ).length;
+      };
 
       return (
         <div className="max-w-3xl mx-auto pb-8 animate-in fade-in">
@@ -7474,8 +7485,9 @@ export const StudentDashboard: React.FC<Props> = ({
                 };
                 // Admin lessons for this subject under 'Lucent' book — board-filtered
                 const allLucentNotes = (settings?.lucentNotes || []) as LucentNoteEntry[];
+                const _isCustomCat = _customSubjectIds.has(cat.id?.toLowerCase() || '');
                 const subjectEntries = allLucentNotes
-                  .filter(n => (n.classLevel === 'COMPETITION' || !n.classLevel) && n.subject?.toLowerCase().trim() === cat.id?.toLowerCase().trim() && (n.bookName?.trim() || 'Lucent') === 'Lucent' && (n.board === _curBoard || (!n.board && _curBoard === 'NCERT_EN')))
+                  .filter(n => (n.classLevel === 'COMPETITION' || !n.classLevel) && n.subject?.toLowerCase().trim() === cat.id?.toLowerCase().trim() && (_isCustomCat || (n.bookName?.trim() || 'Lucent') === 'Lucent') && (n.board === _curBoard || (!n.board && _curBoard === 'NCERT_EN')))
                   .sort((a, b) => _minPg(a) - _minPg(b));
 
                 // No lessons yet — don't navigate to a blank page
@@ -7768,7 +7780,7 @@ export const StudentDashboard: React.FC<Props> = ({
     if (activeTab === "HOME") {
       return (
         <PullToRefresh onRefresh={() => window.location.reload()}>
-        <div className="flex flex-col gap-4 pb-4">
+        <div className="flex flex-col gap-2 pb-4">
           {/* RESUME READING — page-wise (chapters + ALL homework notes), sorted by latest activity */}
           <div className="order-1">
           {isHomeSectionVisible('home_continue_reading', settings) && (() => {
@@ -8157,31 +8169,6 @@ export const StudentDashboard: React.FC<Props> = ({
             onToggleVisibility={toggleLayoutVisibility}
           >
 
-            {/* ── CONTENT TYPE FILTER (compact) ── */}
-            <div className="flex justify-center mb-3">
-              <div className="flex items-center gap-1 p-1 rounded-full bg-slate-100">
-                {([
-                  { label: 'All',   val: 'ALL'   },
-                  { label: 'Notes', val: 'PDF'   },
-                  { label: 'MCQ',   val: 'MCQ'   },
-                  { label: 'Video', val: 'VIDEO' },
-                ] as {label:string;val:string}[]).map(f => {
-                  const isActive2 = contentTypePref === f.val || (f.val === 'MCQ' && contentTypePref === 'MCQ');
-                  return (
-                    <button
-                      key={f.val}
-                      onClick={() => { hapticStrong(); setContentTypePref(f.val as any); }}
-                      className="px-3 py-1 rounded-full text-[11px] font-black transition-all"
-                      style={isActive2
-                        ? { background: tierTheme.primary, color: '#fff' }
-                        : { background: 'transparent', color: '#64748b' }}
-                    >
-                      {f.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
 
             {/* ── CLASS 6-12 GRID + QUICK ACTIONS (themed to top-bar color) ── */}
             {(() => {
@@ -8413,6 +8400,7 @@ export const StudentDashboard: React.FC<Props> = ({
         {showMistakePractice && (
           <MistakePracticeView
             mistakes={homeMistakes}
+            user={user}
             onClose={() => setShowMistakePractice(false)}
             onComplete={() => {
               setMistakeCount(getMistakeBankSync().length);
@@ -9550,6 +9538,20 @@ export const StudentDashboard: React.FC<Props> = ({
               <div className="px-4 pt-3 pb-2 flex items-center gap-2" style={{ borderBottom: _pSep }}>
                 <span className="text-sm">🔐</span>
                 <p className={`text-[11px] font-black uppercase tracking-wider flex-1 ${_pTxt}`}>Account Recovery Options</p>
+                <button
+                  onClick={() => {
+                    setRecoveryData({
+                      mobile: (user as any).mobile || '',
+                      password: (user as any).password || '',
+                      email: user.email || '',
+                    });
+                    setShowRecoveryModal(true);
+                  }}
+                  className="shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-black active:opacity-60"
+                  style={{ background: `${tierTheme.primary}18`, color: tierTheme.primary }}
+                >
+                  ✏️ Edit
+                </button>
               </div>
               {/* Mobile */}
               <div className="flex items-center gap-3 px-4 py-3" style={{ borderBottom: _pSep }}>
@@ -9578,20 +9580,6 @@ export const StudentDashboard: React.FC<Props> = ({
                   background: user.email ? 'rgba(34,197,94,0.12)' : 'rgba(148,163,184,0.12)',
                   color: user.email ? '#16a34a' : '#94a3b8',
                 }}>{user.email ? '✓ Active' : 'Inactive'}</span>
-              </div>
-              {/* Name + Class */}
-              <div className="flex items-center gap-3 px-4 py-3" style={{ borderBottom: _pSep }}>
-                <span className="text-base">👤</span>
-                <div className="flex-1 min-w-0">
-                  <p className={`text-[10px] font-bold uppercase tracking-wide ${_pTxtSub}`}>Naam + Class</p>
-                  <p className={`text-xs font-bold truncate ${_pTxt}`}>
-                    {user.name} {(user as any).classLevel ? `· Class ${(user as any).classLevel}` : ''}
-                  </p>
-                </div>
-                <span className="text-[9px] font-black px-2 py-0.5 rounded-full" style={{
-                  background: 'rgba(34,197,94,0.12)',
-                  color: '#16a34a',
-                }}>✓ Active</span>
               </div>
               {/* UID */}
               <div className="flex items-center gap-3 px-4 py-3">
@@ -12004,7 +11992,7 @@ export const StudentDashboard: React.FC<Props> = ({
         const _nb_b = parseInt(_nb_hex.substring(4,6),16);
         return (
           <div
-            className="text-white p-3 mb-4 rounded-xl shadow-md animate-in slide-in-from-top-4 relative mx-2 mt-2 overflow-hidden"
+            className="text-white p-3 mb-1 rounded-xl shadow-md animate-in slide-in-from-top-4 relative mx-2 mt-1 overflow-hidden"
             style={{
               background: `linear-gradient(135deg, rgba(${_nb_r},${_nb_g},${_nb_b},0.85) 0%, rgba(${_nb_r},${_nb_g},${_nb_b},0.65) 100%)`,
               border: `1px solid rgba(${_nb_r},${_nb_g},${_nb_b},0.5)`,
@@ -12509,11 +12497,11 @@ export const StudentDashboard: React.FC<Props> = ({
       )}
 
       {showRecoveryModal && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-white rounded-2xl p-6 w-full shadow-xl border-t-4 border-orange-500">
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4" style={{ background: 'rgba(15,23,42,0.55)' }}>
+          <div className="bg-white rounded-2xl p-6 w-full shadow-xl border-t-4 border-orange-500" style={{ maxWidth: 420 }}>
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
-                <Lock className="text-orange-500" /> Setup Recovery
+                <Lock className="text-orange-500" /> Edit Recovery Info
               </h3>
               <button
                 onClick={() => setShowRecoveryModal(false)}
@@ -12522,10 +12510,6 @@ export const StudentDashboard: React.FC<Props> = ({
                 <X size={20} />
               </button>
             </div>
-            <p className="text-xs font-bold text-slate-600 mb-4 bg-orange-50 p-3 rounded-lg border border-orange-100">
-              Set a Mobile Number and Password. If Google Auth fails, you can
-              use these to login via the Recovery option.
-            </p>
             <div className="space-y-4">
               <div>
                 <label className="text-xs font-bold text-slate-600 uppercase block mb-1">
@@ -12542,6 +12526,23 @@ export const StudentDashboard: React.FC<Props> = ({
                   }
                   className="w-full p-3 rounded-xl border border-slate-200 font-bold"
                   placeholder="10-digit mobile number"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 uppercase block mb-1">
+                  Email
+                </label>
+                <input
+                  type="email"
+                  value={recoveryData.email}
+                  onChange={(e) =>
+                    setRecoveryData({
+                      ...recoveryData,
+                      email: e.target.value,
+                    })
+                  }
+                  className="w-full p-3 rounded-xl border border-slate-200 font-bold"
+                  placeholder="your@email.com"
                 />
               </div>
               <div>
@@ -12590,6 +12591,7 @@ export const StudentDashboard: React.FC<Props> = ({
                     ...user,
                     mobile: recoveryData.mobile,
                     password: recoveryData.password,
+                    email: recoveryData.email || user.email,
                   });
                   setShowRecoveryModal(false);
                   showAlert("Recovery details saved successfully!", "SUCCESS");
@@ -15088,7 +15090,7 @@ export const StudentDashboard: React.FC<Props> = ({
             : activeTab === "REVISION" || activeTab === "AI_HUB"
               ? ""
               : activeTab === "HOME"
-                ? "px-4 pt-3 pb-20"
+                ? "px-4 pt-1 pb-20"
                 : activeTab === "PROFILE"
                   ? "p-0"
                   : "p-4 pb-20"
@@ -17318,7 +17320,7 @@ export const StudentDashboard: React.FC<Props> = ({
                         className="w-8 h-8 flex items-center justify-center rounded-xl bg-white/20 border border-white/30 active:scale-90 transition-all shrink-0"
                         title="Admin WhiteBoard"
                       >
-                        <img src="/splash-logo.png" alt="WB" className="w-5 h-5 object-contain" />
+                        <Presentation size={16} />
                       </button>
                     )}
                     {/* Admin Edit (Pencil) button — inline editor */}
@@ -17422,7 +17424,7 @@ export const StudentDashboard: React.FC<Props> = ({
                       className="w-8 h-8 flex items-center justify-center rounded-xl bg-white/20 border border-white/30 active:scale-90 transition-all shrink-0"
                       title="Admin WhiteBoard"
                     >
-                      <img src="/splash-logo.png" alt="WB" className="w-5 h-5 object-contain" />
+                      <Presentation size={16} />
                     </button>
                   )}
                   {/* Page counter + controls for non-NOTES tabs */}
@@ -18476,6 +18478,7 @@ RULES:
             setShowRevisionHubScreen(false);
           }}
           onUpdateUser={handleUserUpdate}
+          onMcqAnswer={trackDailyMcqAnswer}
         />
       )}
 

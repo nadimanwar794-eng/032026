@@ -1133,6 +1133,7 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
                 {showPractice && (
                   <MistakePracticeView
                     mistakes={mistakes}
+                    user={user}
                     onClose={() => { setShowPractice(false); refreshMistakes(); }}
                     onComplete={() => refreshMistakes()}
                   />

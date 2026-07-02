@@ -172,11 +172,16 @@ export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, su
                         setNotesContent(combinedNotes.map((n: any) => formatMcqNotes(n.content)).join('<hr class="my-6 border-slate-200" />'));
                     }
 
-                    // Filter MCQs (Normalize Matching)
+                    // Filter MCQs (Normalize Matching) + Randomize order each session
                     if (data.manualMcqData) {
                         const normSubTopic = subTopic.toLowerCase().trim();
                         const relevantMcqs = data.manualMcqData.filter((q: any) => q.topic && q.topic.toLowerCase().trim() === normSubTopic);
-                        setMcqData(relevantMcqs);
+                        const shuffled = [...relevantMcqs];
+                        for (let i = shuffled.length - 1; i > 0; i--) {
+                            const j = Math.floor(Math.random() * (i + 1));
+                            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+                        }
+                        setMcqData(shuffled);
                     }
                 } else {
                     // 4. Ultimate Fallback: Try to fetch using only Chapter ID from content_data collection directly
@@ -200,7 +205,12 @@ export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, su
                             if (directData.manualMcqData) {
                                 const normSubTopic = subTopic.toLowerCase().trim();
                                 const relevantMcqs = directData.manualMcqData.filter((q: any) => q.topic && q.topic.toLowerCase().trim() === normSubTopic);
-                                setMcqData(relevantMcqs);
+                                const shuffled = [...relevantMcqs];
+                                for (let i = shuffled.length - 1; i > 0; i--) {
+                                    const j = Math.floor(Math.random() * (i + 1));
+                                    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+                                }
+                                setMcqData(shuffled);
                             }
                         }
                     } catch(e) { console.error("Ultimate Firebase fallback failed", e); }

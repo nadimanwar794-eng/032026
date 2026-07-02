@@ -10,6 +10,7 @@ import { applyDeduction } from '../utils/creditSystem';
 import { saveUserToLive, saveSuggestion } from '../firebase';
 import { fireCreditNotify } from '../utils/creditNotify';
 import { useAppTheme } from '../utils/themeContext';
+import { tryEarnScore } from '../utils/scoreSystem';
 
 interface Props {
   questions: MCQItem[];
@@ -76,6 +77,18 @@ export const FlashcardMcqView: React.FC<Props> = ({
   const sessionStartRef = useRef(Date.now());
   const viewedIdxRef = useRef<Set<number>>(new Set([0]));
   const sessionCommittedRef = useRef(false); // prevents double-counting on exit
+
+  // ── MCQ Score Popup ────────────────────────────────────────────────────────
+  const [mcqScorePopup, setMcqScorePopup] = useState<number | null>(null);
+  const [mcqScoreVisible, setMcqScoreVisible] = useState<boolean>(false);
+  const mcqPopupTimerRef = useRef<any>(null);
+
+  const showMcqScore = (pts: number) => {
+    if (mcqPopupTimerRef.current) clearTimeout(mcqPopupTimerRef.current);
+    setMcqScorePopup(pts);
+    setMcqScoreVisible(true);
+    mcqPopupTimerRef.current = setTimeout(() => setMcqScoreVisible(false), 1800);
+  };
 
   const isAdmin = user?.role === 'ADMIN';
   const userId = user?.id || 'guest';
@@ -243,6 +256,11 @@ export const FlashcardMcqView: React.FC<Props> = ({
       hardQueueRef.current = newQ;
       setHardQueue(newQ);
     }
+    // ── Award score when "Easy" (student knew the answer) ─────────────────
+    if (level === 'easy' && user?.id && !isAdmin) {
+      const pts = tryEarnScore(user.id, 1, userTier, userTier !== 'FREE', 0, 'FLASHCARD_MCQ_CORRECT');
+      if (pts > 0) showMcqScore(pts);
+    }
     // Auto-advance after brief visual feedback
     setTimeout(() => { if (isMountedRef.current) goNext(); }, 480);
   };
@@ -346,6 +364,22 @@ export const FlashcardMcqView: React.FC<Props> = ({
 
   return (
     <div className="fixed inset-0 z-[200] flex flex-col h-[100dvh]" style={tierBgStyle}>
+      {/* MCQ Score Popup */}
+      {mcqScorePopup !== null && (
+        <div style={{
+          position: 'fixed', bottom: 80, right: 20, zIndex: 9999,
+          background: 'linear-gradient(135deg,#6366f1,#8b5cf6)',
+          color: '#fff', borderRadius: 14, padding: '8px 16px',
+          fontSize: 14, fontWeight: 900,
+          boxShadow: '0 6px 20px rgba(99,102,241,0.4)',
+          opacity: mcqScoreVisible ? 1 : 0,
+          transform: mcqScoreVisible ? 'translateY(0) scale(1)' : 'translateY(8px) scale(0.95)',
+          transition: 'opacity 0.25s, transform 0.25s',
+          pointerEvents: 'none',
+        }}>
+          ⭐ +{mcqScorePopup} pts
+        </div>
+      )}
       {/* Top Bar */}
       <div className="shrink-0 px-4 py-3 flex items-center gap-3">
         <button

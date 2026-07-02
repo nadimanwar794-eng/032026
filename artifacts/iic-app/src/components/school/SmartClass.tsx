@@ -4,6 +4,8 @@ import type { SchoolLesson } from "../../school-types";
 import { LessonView } from "../LessonView";
 import { AdminWhiteBoard } from "../AdminWhiteBoard";
 import type { LessonContent, Subject, Chapter, MCQItem } from "../../types";
+import { ReadingScoreSession, ReadingScoreState } from "../../utils/readingScoreEngine";
+import { ReadingScoreHUD } from "../ReadingScoreHUD";
 import {
   BookOpen, Edit3, FileText, HelpCircle, X,
   Download, WifiOff, ExternalLink, LayoutGrid, ChevronDown,
@@ -92,7 +94,7 @@ function getPdfIframeUrl(pdfUrl: string): string {
 }
 
 export const SmartClass: React.FC<Props> = ({
-  lesson, initialMode, onBack, onMCQComplete, isAdmin,
+  lesson, initialMode, onBack, onMCQComplete, isAdmin, studentId, studentName,
 }) => {
   const schoolControlsRef = useRef<(() => void) | null>(null);
 
@@ -111,6 +113,47 @@ export const SmartClass: React.FC<Props> = ({
   const [showContextSheet, setShowContextSheet]   = useState(false);
   const [showAdminBoard, setShowAdminBoard]        = useState(false);
   const [savedMsg, setSavedMsg]                   = useState<string | null>(null);
+
+  // ── Write Mode Score Session ────────────────────────────────────────────────
+  const writeScoreSessionRef  = useRef<ReadingScoreSession | null>(null);
+  const [writeScoreState, setWriteScoreState] = useState<ReadingScoreState | null>(null);
+  const writeScrollPctRef     = useRef(0);
+
+  useEffect(() => {
+    if (mode !== "writing") {
+      writeScoreSessionRef.current?.stop();
+      writeScoreSessionRef.current = null;
+      setWriteScoreState(null);
+      writeScrollPctRef.current = 0;
+      return;
+    }
+
+    const userId = studentId || "anon_write";
+    const session = new ReadingScoreSession(
+      { userId, userLevel: 1, mode: "writing" },
+      (state) => setWriteScoreState(state),
+    );
+    writeScoreSessionRef.current = session;
+    session.start();
+
+    const onScroll = () => {
+      const el = document.scrollingElement || document.documentElement;
+      const max = el.scrollHeight - el.clientHeight;
+      const pct = max > 0 ? Math.round((el.scrollTop / max) * 100) : 0;
+      if (pct > writeScrollPctRef.current) {
+        writeScrollPctRef.current = pct;
+        session.updateProgress(pct);
+      }
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+
+    return () => {
+      session.stop();
+      writeScoreSessionRef.current = null;
+      window.removeEventListener("scroll", onScroll);
+      writeScrollPctRef.current = 0;
+    };
+  }, [mode, studentId]);
 
   // ── Quick Edit (admin only) ─────────────────────────────────────────────────
   const [showEditSheet, setShowEditSheet]         = useState(false);
@@ -1078,6 +1121,15 @@ export const SmartClass: React.FC<Props> = ({
 
   return (
     <div className="relative flex flex-col min-h-screen">
+      {/* ── Write Mode Score HUD ── */}
+      {mode === "writing" && writeScoreState && (
+        <ReadingScoreHUD
+          state={writeScoreState}
+          visible={true}
+          levelColor="#7c3aed"
+          levelLabel="✍️ Writing Mode"
+        />
+      )}
       <LessonView
         key={`${lesson.id}-${mode}`}
         content={content}

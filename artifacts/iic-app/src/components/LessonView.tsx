@@ -27,7 +27,7 @@ import { saveOfflineItem } from '../utils/offlineStorage';
 import { rotateScreen, isDesktopModeOn, setDesktopMode } from '../utils/displayPrefs';
 import { applyDeduction, getTotalCredits } from '../utils/creditSystem';
 import { getLevelFromScore } from '../utils/levelSystem';
-import { getActiveBoost } from '../utils/scoreSystem';
+import { getActiveBoost, tryEarnScore, subtractDailyScore, getMcqStreakBonus } from '../utils/scoreSystem';
 import { ReadingScoreSession, ReadingScoreState } from '../utils/readingScoreEngine';
 import { ReadingScoreHUD } from './ReadingScoreHUD';
 import { PdfViewer } from './PdfViewer';
@@ -90,6 +90,16 @@ export const LessonView: React.FC<Props> = ({
   onAdminEdit,
 }) => {
   const [mcqState, setMcqState] = useState<Record<number, number | null>>({});
+  const [mcqStreak, setMcqStreak] = useState(0);
+  const [mcqScorePopup, setMcqScorePopup] = useState<number | null>(null);
+  const [mcqScoreVisible, setMcqScoreVisible] = useState(false);
+  const mcqPopupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showMcqScore = (pts: number) => {
+    if (mcqPopupTimerRef.current) clearTimeout(mcqPopupTimerRef.current);
+    setMcqScorePopup(pts);
+    setMcqScoreVisible(true);
+    mcqPopupTimerRef.current = setTimeout(() => setMcqScoreVisible(false), 1800);
+  };
   const [revealedAnswers, setRevealedAnswers] = useState<Set<number>>(new Set());
   const [timeSpentPerQuestion, setTimeSpentPerQuestion] = useState<Record<number, number>>({});
   const [showResults, setShowResults] = useState(false); // Used to trigger Analysis Mode
@@ -147,6 +157,8 @@ export const LessonView: React.FC<Props> = ({
     boostPercent: getActiveBoost(user),
     onScoreEarned: handleReadingScoreEarned,
   } : undefined;
+
+  const writingScoreConfig = readingScoreConfig ? { ...readingScoreConfig, mode: 'writing' as const } : undefined;
 
   // ── Media (Video / Audio) time-based score session ───────────────────────
   const mediaScoreSessionRef = useRef<ReadingScoreSession | null>(null);
@@ -1173,7 +1185,7 @@ export const LessonView: React.FC<Props> = ({
                           triggerControlsRef={schoolControlsRef}
                           onMoreOptions={schoolMode && onSchoolModeSwitch ? onSchoolModeSwitch : undefined}
                           onDesktopModeChange={setIsDesktopMode}
-                          readingScoreConfig={readingScoreConfig}
+                          readingScoreConfig={writingScoreConfig}
                           isAdmin={isAdmin}
                           useImportantMark2={false}
                           isMarked2={isTopicMark2}
@@ -1331,8 +1343,42 @@ export const LessonView: React.FC<Props> = ({
       };
 
       const handleOptionSelect = (qIdx: number, oIdx: number) => {
+          if (mcqState[qIdx] !== undefined && mcqState[qIdx] !== null) return;
           setMcqState(prev => ({ ...prev, [qIdx]: oIdx }));
           const isCorrect = oIdx === displayData[qIdx].correctAnswer;
+
+          // ── MCQ Scoring: +2 correct, -1 wrong, streak bonuses ────────────────
+          if (user?.id && !showResults) {
+              const _subValid = !!(user.isPremium || (user.subscriptionTier && user.subscriptionTier !== 'FREE'));
+              const _tier = user.subscriptionTier || 'FREE';
+              if (isCorrect) {
+                  const newStreak = mcqStreak + 1;
+                  setMcqStreak(newStreak);
+                  const pts = tryEarnScore(user.id, 2, _tier, _subValid, 0, 'MCQ_CORRECT');
+                  const bonus = getMcqStreakBonus(newStreak);
+                  const bonusPts = bonus > 0 ? tryEarnScore(user.id, bonus, _tier, _subValid, 0, `MCQ_STREAK_${newStreak}`) : 0;
+                  const totalPts = pts + bonusPts;
+                  if (totalPts > 0) {
+                      const _u = userRef.current;
+                      if (_u && onUpdateUserRef.current) {
+                          const updated = { ..._u, totalScore: (_u.totalScore || 0) + totalPts };
+                          onUpdateUserRef.current(updated);
+                          saveUserToLive(updated);
+                      }
+                      showMcqScore(totalPts);
+                  }
+              } else {
+                  setMcqStreak(0);
+                  subtractDailyScore(user.id, 1);
+                  const _u = userRef.current;
+                  if (_u && onUpdateUserRef.current) {
+                      const updated = { ..._u, totalScore: Math.max(0, (_u.totalScore || 0) - 1) };
+                      onUpdateUserRef.current(updated);
+                      saveUserToLive(updated);
+                  }
+                  showMcqScore(-1);
+              }
+          }
 
           // Auto-Next Logic — only for instantExplanation (premium) mode
           if (!showResults && (batchIndex + 1) * BATCH_SIZE < displayData.length) {
@@ -1722,6 +1768,22 @@ export const LessonView: React.FC<Props> = ({
 
       return (
           <div className="flex flex-col h-full bg-slate-50 relative mcq-container overflow-y-auto">
+               {/* MCQ Score Popup */}
+               {mcqScorePopup !== null && (
+                   <div style={{
+                       position: 'fixed', bottom: 80, right: 20, zIndex: 9999,
+                       background: mcqScorePopup < 0 ? 'linear-gradient(135deg,#ef4444,#dc2626)' : 'linear-gradient(135deg,#6366f1,#8b5cf6)',
+                       color: '#fff', borderRadius: 14, padding: '8px 16px',
+                       fontSize: 14, fontWeight: 900,
+                       boxShadow: mcqScorePopup < 0 ? '0 6px 20px rgba(239,68,68,0.4)' : '0 6px 20px rgba(99,102,241,0.4)',
+                       opacity: mcqScoreVisible ? 1 : 0,
+                       transform: mcqScoreVisible ? 'translateY(0) scale(1)' : 'translateY(8px) scale(0.95)',
+                       transition: 'opacity 0.25s, transform 0.25s',
+                       pointerEvents: 'none',
+                   }}>
+                       {mcqScorePopup < 0 ? `❌ ${mcqScorePopup} pts` : `⭐ +${mcqScorePopup} pts`}
+                   </div>
+               )}
                <CustomAlert 
                    isOpen={alertConfig.isOpen} 
                    message={alertConfig.message} 

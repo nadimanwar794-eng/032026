@@ -1,6 +1,6 @@
 // @ts-nocheck
 import React, { useState, useEffect } from 'react';
-import { Save, Trash2, ChevronRight, ArrowLeft, Plus, BookOpen, Edit2, X } from 'lucide-react';
+import { Save, Trash2, ChevronRight, ArrowLeft, Plus, BookOpen, Edit2, X, ArrowRight, Copy } from 'lucide-react';
 import { parseMCQText } from '../utils/mcqParser';
 import { saveTopicNotes } from '../utils/revisionTrackerV2';
 import { saveMcqLesson, deleteMcqLesson, subscribeMcqLessons } from '../firebase';
@@ -15,7 +15,7 @@ const SUBJECTS_BY_CLASS: Record<string, string[]> = {
   '10': ['Mathematics', 'Physics', 'Chemistry', 'Biology', 'Social Science', 'English', 'Hindi'],
   '11': ['Mathematics', 'Physics', 'Chemistry', 'Biology', 'English', 'Economics', 'History', 'Political Science'],
   '12': ['Mathematics', 'Physics', 'Chemistry', 'Biology', 'English', 'Economics', 'History', 'Political Science'],
-  'COMPETITION': ['General Knowledge', 'Reasoning', 'Mathematics', 'English', 'Science', 'Current Affairs'],
+  'COMPETITION': ['Physics', 'Chemistry', 'Biology', 'History', 'Geography', 'Political Science', 'Economics'],
 };
 
 function normalizeMcqPaste(raw: string): string {
@@ -65,18 +65,33 @@ interface Props {
 
 type Screen = 'CLASS' | 'SUBJECT' | 'LESSON_LIST' | 'ADD_LESSON';
 
+const BOARD_OPTIONS = [
+  { id: '' as const,         label: '🌐 All',       desc: 'All Boards' },
+  { id: 'NCERT_EN' as const, label: '📘 NCERT EN',  desc: 'English medium' },
+  { id: 'NCERT_HI' as const, label: '📙 NCERT HI',  desc: 'Hindi medium' },
+  { id: 'BSEB' as const,     label: '🟠 BSEB',      desc: 'Bihar board' },
+];
+
 export const AdminClassMcqManager: React.FC<Props> = ({ settings, onSave }) => {
   const [screen, setScreen]               = useState<Screen>('CLASS');
   const [selectedClass, setSelectedClass] = useState<string | null>(null);
   const [selectedSubject, setSelectedSubject] = useState<string | null>(null);
   const [allLessons, setAllLessons]       = useState<any[]>([]);
   const [editingLesson, setEditingLesson] = useState<any | null>(null);
+  const [boardFilter, setBoardFilter]     = useState<'' | 'NCERT_EN' | 'NCERT_HI' | 'BSEB'>('');
 
   // Add lesson form state
   const [lessonTitle, setLessonTitle] = useState('');
   const [pasteText, setPasteText]     = useState('');
   const [saving, setSaving]           = useState(false);
   const [alert, setAlert]             = useState('');
+
+  // Move/Copy modal state
+  const [moveCopyModal, setMoveCopyModal] = useState<{ lesson: any; mode: 'move' | 'copy' } | null>(null);
+  const [mcTargetClass, setMcTargetClass] = useState<string>('6');
+  const [mcTargetSubject, setMcTargetSubject] = useState<string>('');
+  const [mcTargetBoard, setMcTargetBoard] = useState<'' | 'NCERT_EN' | 'NCERT_HI' | 'BSEB'>('');
+  const [mcWorking, setMcWorking] = useState(false);
 
   const showAlert = (msg: string) => { setAlert(msg); setTimeout(() => setAlert(''), 4000); };
 
@@ -86,18 +101,36 @@ export const AdminClassMcqManager: React.FC<Props> = ({ settings, onSave }) => {
     return unsub;
   }, []);
 
-  // Lessons filtered for current class+subject
+  // Lessons filtered for current class+subject+board
   const filteredLessons = allLessons.filter(
-    l => l.classLevel === selectedClass && l.subject === selectedSubject
+    l => l.classLevel === selectedClass && l.subject === selectedSubject && (boardFilter === '' || l.board === boardFilter)
   );
 
   // Count lessons per subject for subject screen
   const lessonCountForSubject = (cls: string, sub: string) =>
-    allLessons.filter(l => l.classLevel === cls && l.subject === sub).length;
+    allLessons.filter(l => l.classLevel === cls && l.subject === sub && (boardFilter === '' || l.board === boardFilter)).length;
 
   // Count total lessons per class for class screen
   const lessonCountForClass = (cls: string) =>
-    allLessons.filter(l => l.classLevel === cls).length;
+    allLessons.filter(l => l.classLevel === cls && (boardFilter === '' || l.board === boardFilter)).length;
+
+  // Reusable board switcher bar
+  const BoardBar = (
+    <div className="flex gap-1.5 mb-3">
+      {BOARD_OPTIONS.map(b => (
+        <button key={b.id} type="button"
+          onClick={() => setBoardFilter(b.id)}
+          className={`flex-1 py-1.5 rounded-xl text-[10px] font-black transition-all border ${
+            boardFilter === b.id
+              ? 'bg-indigo-600 text-white border-indigo-600 shadow'
+              : 'bg-white text-indigo-700 border-indigo-200 hover:border-indigo-400'
+          }`}
+        >
+          {b.label}
+        </button>
+      ))}
+    </div>
+  );
 
   const handleSaveLesson = async () => {
     if (!lessonTitle.trim()) { showAlert('❌ Lesson title daalein'); return; }
@@ -137,15 +170,26 @@ export const AdminClassMcqManager: React.FC<Props> = ({ settings, onSave }) => {
       const topics = [...new Set(parsed.map((q: any) => q.topic).filter(Boolean))] as string[];
       const lessonId = editingLesson ? editingLesson.id : `lesson_${ts}_${Math.random().toString(36).slice(2)}`;
 
+      // Merge topicNotes: keep existing + add new ones (dedup by title)
+      const existingNotes: { title: string; content: string }[] = editingLesson?.topicNotes || [];
+      const mergedNotes = [...existingNotes];
+      for (const n of notesToSave) {
+        const idx = mergedNotes.findIndex(e => e.title.trim().toLowerCase() === n.title.trim().toLowerCase());
+        if (idx >= 0) mergedNotes[idx] = n;
+        else mergedNotes.push(n);
+      }
+
       const lesson = {
         id: lessonId,
         classLevel: selectedClass,
         subject: selectedSubject,
+        board: boardFilter || null,
         lessonTitle: lessonTitle.trim(),
         mcqs: editingLesson ? [...(editingLesson.mcqs || []), ...parsed] : parsed,
         mcqCount: (editingLesson ? (editingLesson.mcqs || []).length : 0) + parsed.length,
         topics,
         topicCount: topics.length,
+        topicNotes: mergedNotes,
         createdAt: editingLesson ? editingLesson.createdAt : new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -182,6 +226,44 @@ export const AdminClassMcqManager: React.FC<Props> = ({ settings, onSave }) => {
     showAlert(`✅ Q${mcqIdx + 1} delete ho gaya. Remaining: ${newMcqs.length}`);
   };
 
+  const openMoveCopy = (lesson: any, mode: 'move' | 'copy') => {
+    const defaultClass = CLASSES.filter(c => c !== lesson.classLevel)[0] || '6';
+    setMcTargetClass(defaultClass);
+    setMcTargetSubject((SUBJECTS_BY_CLASS[defaultClass] || [])[0] || '');
+    setMcTargetBoard(lesson.board || '');
+    setMoveCopyModal({ lesson, mode });
+  };
+
+  const handleConfirmMoveCopy = async () => {
+    if (!moveCopyModal || !mcTargetClass || !mcTargetSubject) return;
+    const { lesson, mode } = moveCopyModal;
+    setMcWorking(true);
+    try {
+      const ts = Date.now();
+      const newId = `lesson_${ts}_${Math.random().toString(36).slice(2)}`;
+      const newLesson = {
+        ...lesson,
+        id: newId,
+        classLevel: mcTargetClass,
+        subject: mcTargetSubject,
+        board: mcTargetBoard || null,
+        updatedAt: new Date().toISOString(),
+      };
+      await saveMcqLesson(newLesson);
+      const boardLabel = mcTargetBoard ? ` / ${BOARD_OPTIONS.find(b => b.id === mcTargetBoard)?.label ?? mcTargetBoard}` : '';
+      if (mode === 'move') {
+        await deleteMcqLesson(lesson.id);
+        showAlert(`✅ "${lesson.lessonTitle}" move ho gaya → Class ${mcTargetClass} / ${mcTargetSubject}${boardLabel}`);
+      } else {
+        showAlert(`✅ "${lesson.lessonTitle}" copy ho gaya → Class ${mcTargetClass} / ${mcTargetSubject}${boardLabel}`);
+      }
+      setMoveCopyModal(null);
+    } catch (err: any) {
+      showAlert(`❌ Error: ${err?.message || 'Failed'}`);
+    }
+    setMcWorking(false);
+  };
+
   const goBack = () => {
     if (screen === 'ADD_LESSON')  { setScreen('LESSON_LIST'); setLessonTitle(''); setPasteText(''); setEditingLesson(null); return; }
     if (screen === 'LESSON_LIST') { setScreen('SUBJECT'); setSelectedSubject(null); return; }
@@ -191,6 +273,7 @@ export const AdminClassMcqManager: React.FC<Props> = ({ settings, onSave }) => {
   // ── Screen: CLASS ────────────────────────────────────────────────────────────
   if (screen === 'CLASS') return (
     <div className="space-y-3 p-4">
+      {BoardBar}
       <p className="text-xs font-bold text-slate-500 uppercase mb-3">Class Choose Karein</p>
       <div className="grid grid-cols-4 gap-2">
         {CLASSES.filter(c => c !== 'COMPETITION').map(c => {
@@ -230,6 +313,7 @@ export const AdminClassMcqManager: React.FC<Props> = ({ settings, onSave }) => {
   // ── Screen: SUBJECT ───────────────────────────────────────────────────────────
   if (screen === 'SUBJECT') return (
     <div className="space-y-2 p-4">
+      {BoardBar}
       <button onClick={goBack} className="flex items-center gap-1 text-xs text-indigo-600 font-bold mb-3">
         <ArrowLeft size={14} /> Back to Classes
       </button>
@@ -258,6 +342,7 @@ export const AdminClassMcqManager: React.FC<Props> = ({ settings, onSave }) => {
   // ── Screen: LESSON LIST ───────────────────────────────────────────────────────
   if (screen === 'LESSON_LIST') return (
     <div className="p-4 space-y-4">
+      {BoardBar}
       <div className="flex items-center gap-2">
         <button onClick={goBack} className="flex items-center gap-1 text-xs text-indigo-600 font-bold">
           <ArrowLeft size={14} /> Back
@@ -289,8 +374,119 @@ export const AdminClassMcqManager: React.FC<Props> = ({ settings, onSave }) => {
               onEdit={() => { setEditingLesson(lesson); setLessonTitle(lesson.lessonTitle); setPasteText(''); setScreen('ADD_LESSON'); }}
               onDelete={() => handleDeleteLesson(lesson)}
               onDeleteMcq={(idx) => handleDeleteSingleMcq(lesson, idx)}
+              onMove={() => openMoveCopy(lesson, 'move')}
+              onCopy={() => openMoveCopy(lesson, 'copy')}
             />
           ))}
+        </div>
+      )}
+
+      {/* ── Move / Copy Modal ───────────────────────────────────────────── */}
+      {moveCopyModal && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-black text-slate-800 text-base">
+                {moveCopyModal.mode === 'move' ? '➡️ Lesson Move Karein' : '📋 Lesson Copy Karein'}
+              </h3>
+              <button onClick={() => setMoveCopyModal(null)} className="p-1 rounded-lg bg-slate-100 text-slate-500 active:scale-95">
+                <X size={15} />
+              </button>
+            </div>
+
+            <div className="px-3 py-2 bg-indigo-50 rounded-xl text-xs text-indigo-700 font-bold truncate">
+              "{moveCopyModal.lesson.lessonTitle}" ({moveCopyModal.lesson.mcqCount} MCQs)
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-slate-500 uppercase">Target Class</label>
+              <div className="grid grid-cols-4 gap-1.5">
+                {CLASSES.filter(c => c !== 'COMPETITION').map(c => (
+                  <button
+                    key={c}
+                    onClick={() => {
+                      setMcTargetClass(c);
+                      setMcTargetSubject((SUBJECTS_BY_CLASS[c] || [])[0] || '');
+                    }}
+                    className={`py-2 rounded-xl text-xs font-black transition-all active:scale-95 ${
+                      mcTargetClass === c
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-indigo-50 text-indigo-700 border border-indigo-100'
+                    }`}
+                  >
+                    {c}
+                  </button>
+                ))}
+                <button
+                  onClick={() => {
+                    setMcTargetClass('COMPETITION');
+                    setMcTargetSubject((SUBJECTS_BY_CLASS['COMPETITION'] || [])[0] || '');
+                  }}
+                  className={`col-span-4 py-2 rounded-xl text-xs font-black transition-all active:scale-95 ${
+                    mcTargetClass === 'COMPETITION'
+                      ? 'bg-amber-500 text-white'
+                      : 'bg-amber-50 text-amber-700 border border-amber-100'
+                  }`}
+                >
+                  🏆 Competition
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-slate-500 uppercase">Target Subject</label>
+              <select
+                value={mcTargetSubject}
+                onChange={e => setMcTargetSubject(e.target.value)}
+                className="w-full p-2.5 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-indigo-400 bg-white"
+              >
+                {(SUBJECTS_BY_CLASS[mcTargetClass] || []).map(sub => (
+                  <option key={sub} value={sub}>{sub}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-slate-500 uppercase">Target Board</label>
+              <div className="grid grid-cols-2 gap-1.5">
+                {BOARD_OPTIONS.map(b => (
+                  <button
+                    key={b.id}
+                    type="button"
+                    onClick={() => setMcTargetBoard(b.id as '' | 'NCERT_EN' | 'NCERT_HI' | 'BSEB')}
+                    className={`py-2 rounded-xl text-[11px] font-black transition-all active:scale-95 ${
+                      mcTargetBoard === b.id
+                        ? 'bg-indigo-600 text-white shadow'
+                        : 'bg-indigo-50 text-indigo-700 border border-indigo-100'
+                    }`}
+                  >
+                    {b.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {moveCopyModal.mode === 'move' && (
+              <p className="text-[10px] text-rose-500 font-bold bg-rose-50 px-3 py-2 rounded-xl">
+                ⚠️ Move karne ke baad yeh lesson current class se hat jayega.
+              </p>
+            )}
+
+            <button
+              onClick={handleConfirmMoveCopy}
+              disabled={mcWorking || !mcTargetSubject}
+              className={`w-full py-3 rounded-xl font-black text-white text-sm flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-50 ${
+                moveCopyModal.mode === 'move' ? 'bg-indigo-600' : 'bg-emerald-600'
+              }`}
+            >
+              {moveCopyModal.mode === 'move' ? <ArrowRight size={15} /> : <Copy size={15} />}
+              {mcWorking
+                ? (moveCopyModal.mode === 'move' ? 'Moving...' : 'Copying...')
+                : (moveCopyModal.mode === 'move'
+                    ? `Move → Class ${mcTargetClass}`
+                    : `Copy → Class ${mcTargetClass}`)}
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -304,6 +500,11 @@ export const AdminClassMcqManager: React.FC<Props> = ({ settings, onSave }) => {
           <ArrowLeft size={14} /> Back
         </button>
         <span className="text-xs text-slate-400">{selectedClass} → {selectedSubject}</span>
+        {boardFilter && (
+          <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
+            {BOARD_OPTIONS.find(b => b.id === boardFilter)?.label}
+          </span>
+        )}
         <span className="ml-auto text-xs font-black text-indigo-600">
           {editingLesson ? `Edit: ${editingLesson.lessonTitle}` : 'New Lesson'}
         </span>
@@ -384,11 +585,13 @@ Answer: B) H2O`}</pre>
 };
 
 // ── Lesson Card component ─────────────────────────────────────────────────────
-function LessonCard({ lesson, onEdit, onDelete, onDeleteMcq }: {
+function LessonCard({ lesson, onEdit, onDelete, onDeleteMcq, onMove, onCopy }: {
   lesson: any;
   onEdit: () => void;
   onDelete: () => void;
   onDeleteMcq: (idx: number) => void;
+  onMove: () => void;
+  onCopy: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -418,8 +621,14 @@ function LessonCard({ lesson, onEdit, onDelete, onDeleteMcq }: {
           </div>
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          <button onClick={onEdit} className="p-1.5 rounded-lg bg-violet-50 text-violet-600 active:scale-95 transition-all" title="Add more MCQs">
+          <button onClick={onEdit} className="p-1.5 rounded-lg bg-violet-50 text-violet-600 active:scale-95 transition-all" title="MCQs add karein">
             <Edit2 size={13} />
+          </button>
+          <button onClick={onMove} className="p-1.5 rounded-lg bg-blue-50 text-blue-600 active:scale-95 transition-all" title="Dusri class mein move karein">
+            <ArrowRight size={13} />
+          </button>
+          <button onClick={onCopy} className="p-1.5 rounded-lg bg-emerald-50 text-emerald-600 active:scale-95 transition-all" title="Dusri class mein copy karein">
+            <Copy size={13} />
           </button>
           <button onClick={onDelete} className="p-1.5 rounded-lg bg-rose-50 text-rose-500 active:scale-95 transition-all" title="Delete lesson">
             <Trash2 size={13} />

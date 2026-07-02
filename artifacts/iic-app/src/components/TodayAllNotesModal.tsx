@@ -20,7 +20,8 @@ import type { WeakBucket } from '../utils/revisionTrackerV2';
 import { getTopicNote, keywordsForBucket } from '../utils/revisionTrackerV2';
 import { searchNotesByWords } from '../utils/noteSearcher';
 import { speakText, stopSpeech } from '../utils/textToSpeech';
-import { saveSuggestion } from '../firebase';
+import { saveSuggestion, fetchMcqLesson, fetchTopicNoteFromChapters } from '../firebase';
+import { saveTopicNotes } from '../utils/revisionTrackerV2';
 
 interface TopicEntry {
   bucket: WeakBucket;
@@ -89,19 +90,77 @@ export const TodayAllNotesModal: React.FC<Props> = ({ dueNotes, user, onClose, o
             const words = keywordsForBucket(b);
             const results = await searchNotesByWords(words, 1);
             const r = results[0];
-            if (!cancelled) {
-              if (r) {
-                setEntries(prev => {
-                  const updated = [...prev];
-                  updated[i] = {
-                    ...updated[i],
-                    content: r.noteFullContent || r.noteContent || '',
-                    title: r.noteTitle || b.topic,
-                    loading: false,
-                  };
-                  return updated;
-                });
-              } else {
+            if (cancelled) break;
+            if (r) {
+              setEntries(prev => {
+                const updated = [...prev];
+                updated[i] = {
+                  ...updated[i],
+                  content: r.noteFullContent || r.noteContent || '',
+                  title: r.noteTitle || b.topic,
+                  loading: false,
+                };
+                return updated;
+              });
+            } else {
+              // Fallback 1 — Firebase MCQ lesson's topicNotes
+              let fetched = false;
+              try {
+                const lesson = await fetchMcqLesson(b.chapterId);
+                if (lesson?.topicNotes?.length) {
+                  const topicLower = (b.topic || '').trim().toLowerCase();
+                  const note = lesson.topicNotes.find((n: any) =>
+                    n?.title && n.title.trim().toLowerCase() === topicLower
+                  ) || lesson.topicNotes.find((n: any) =>
+                    n?.title && (
+                      n.title.trim().toLowerCase().includes(topicLower) ||
+                      topicLower.includes(n.title.trim().toLowerCase())
+                    )
+                  );
+                  if (note?.content && !cancelled) {
+                    fetched = true;
+                    saveTopicNotes([{ title: note.title || b.topic, content: note.content }]);
+                    setEntries(prev => {
+                      const updated = [...prev];
+                      updated[i] = {
+                        ...updated[i],
+                        content: note.content,
+                        title: note.title || b.topic,
+                        loading: false,
+                      };
+                      return updated;
+                    });
+                  }
+                }
+              } catch (_) {}
+
+              // Fallback 2 — search chapter content_data in Firebase by board/class/subject
+              if (!fetched && !cancelled) {
+                try {
+                  const note = await fetchTopicNoteFromChapters(
+                    (user as any)?.board || '',
+                    (user as any)?.classLevel || '',
+                    b.subjectName || b.subjectId || '',
+                    b.topic || ''
+                  );
+                  if (note?.content && !cancelled) {
+                    fetched = true;
+                    saveTopicNotes([{ title: note.title || b.topic, content: note.content }]);
+                    setEntries(prev => {
+                      const updated = [...prev];
+                      updated[i] = {
+                        ...updated[i],
+                        content: note.content,
+                        title: note.title || b.topic,
+                        loading: false,
+                      };
+                      return updated;
+                    });
+                  }
+                } catch (_) {}
+              }
+
+              if (!fetched && !cancelled) {
                 setEntries(prev => {
                   const updated = [...prev];
                   updated[i] = { ...updated[i], loading: false, error: true };
@@ -280,7 +339,7 @@ export const TodayAllNotesModal: React.FC<Props> = ({ dueNotes, user, onClose, o
             </div>
 
             {/* Action buttons */}
-            <div className="px-4 py-4 border-t border-slate-100 space-y-2.5 shrink-0">
+            <div className="px-4 pt-4 pb-[calc(env(safe-area-inset-bottom,0px)+76px)] border-t border-slate-100 space-y-2.5 shrink-0">
               <button
                 onClick={handleConfirmExit}
                 className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white font-black py-4 rounded-2xl text-sm shadow-lg shadow-indigo-200 transition-all"
@@ -454,7 +513,7 @@ export const TodayAllNotesModal: React.FC<Props> = ({ dueNotes, user, onClose, o
                   <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-3">
                     <AlertCircle size={14} className="shrink-0 mt-0.5" />
                     <span>
-                      Is topic ke notes cache mein nahi mile. Pehle chapter notes ek baar kholo, phir dobara try karo.
+                      Is topic ke notes abhi available nahi hain. Admin lesson mein notes add karein — phir yahan dikhenge.
                     </span>
                   </div>
                 )}

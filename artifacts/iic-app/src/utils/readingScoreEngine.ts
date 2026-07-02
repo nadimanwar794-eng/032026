@@ -10,8 +10,8 @@
  *   • Manual topic tap: user must stay on topic for 10 sec → +2 score (Touch Protection)
  *
  * Writing Mode:
- *   • Every 5 min of validated writing → +25 score
- *   • Need ≥5% forward progress every 5 min
+ *   • Every 1 min of writing → +10 score
+ *   • Need ≥5% net scroll progress per minute — if scroll < 5%, reward is skipped for that minute
  */
 
 import { tryEarnScore, logScoreActivity } from './scoreSystem';
@@ -59,12 +59,12 @@ export interface ReadingScoreConfig {
 }
 
 const READING_INTERVAL_SEC = 30;       // reward every 30s
-const WRITING_INTERVAL_SEC = 300;      // reward every 5 min (300s)
+const WRITING_INTERVAL_SEC = 60;       // reward every 1 min (60s)
 const VIDEO_INTERVAL_SEC   = 30;       // reward every 30s (same as reading)
 const AUDIO_INTERVAL_SEC   = 30;       // reward every 30s (same as reading)
 const PDF_INTERVAL_SEC     = 30;       // reward every 30s (same as reading)
 const READING_REWARD_BASE = 5;         // +5 base per interval
-const WRITING_REWARD_BASE = 25;        // +25 base per 5 min
+const WRITING_REWARD_BASE = 10;        // +10 base per 1 min
 const VIDEO_REWARD_BASE   = 8;         // +8 base per 60s watch
 const AUDIO_REWARD_BASE   = 6;         // +6 base per 60s listen
 const PDF_REWARD_BASE     = 5;         // +5 base per 60s read
@@ -90,6 +90,7 @@ export class ReadingScoreSession {
   private lastValidationProgress = 0;
   private maxProgressReached = 0;      // highest % seen (anti-spam)
   private noProgressSec = 0;           // continuous seconds without progress
+  private lastWritingRewardProgress = 0; // scroll % at last writing reward (for per-min 5% check)
   private warningLevel: WarningLevel = 0;
   private isPaused = false;
   private totalSessionScore = 0;
@@ -132,6 +133,7 @@ export class ReadingScoreSession {
     this.isWindowClosed = false;
     this.ttsProgressSinceValidation = false;
     this.lastTtsHighlightRewardTime = 0;
+    this.lastWritingRewardProgress = 0;
     this._clearTouchProtection();
 
     this.intervalId = setInterval(() => this.tick(), 1000);
@@ -304,16 +306,16 @@ export class ReadingScoreSession {
     }
 
     // Video/Audio/PDF: no scroll validation — always active, never pause
-    if (this.mode === 'video' || this.mode === 'audio' || this.mode === 'pdf') {
+    // Writing: simplified per-minute scroll check (handled in reward section below — no warn/pause)
+    if (this.mode === 'video' || this.mode === 'audio' || this.mode === 'pdf' || this.mode === 'writing') {
       this.warningLevel = 0;
       this.isPaused = false;
     } else {
-      // Validation check every 2 min (reading / writing only)
+      // Validation check every 2 min (reading only)
       const secSinceValidation = (Date.now() - this.lastValidationTime) / 1000;
       if (secSinceValidation >= VALIDATION_INTERVAL_SEC) {
         const netProgress = this.maxProgressReached - this.lastValidationProgress;
-        const minRequired = this.mode === 'reading' ? MIN_PROGRESS_PCT : WRITING_MIN_PROGRESS_PCT;
-        const validProgress = netProgress >= minRequired || this.ttsProgressSinceValidation;
+        const validProgress = netProgress >= MIN_PROGRESS_PCT || this.ttsProgressSinceValidation;
 
         if (!validProgress) {
           this.noProgressSec += Math.round(secSinceValidation);
@@ -327,7 +329,7 @@ export class ReadingScoreSession {
         this.ttsProgressSinceValidation = false;
       }
 
-      // Warning / pause logic
+      // Warning / pause logic (reading only)
       if (this.noProgressSec >= PAUSE_THRESHOLD_SEC) {
         this.warningLevel = 3;
         this.isPaused = true;
@@ -354,6 +356,19 @@ export class ReadingScoreSession {
       const elapsed = (Date.now() - this.lastRewardTime) / 1000;
       if (elapsed >= intervalSec) {
         this.lastRewardTime = Date.now();
+
+        // Writing mode: per-minute 5% scroll check — skip reward if not enough progress
+        if (this.mode === 'writing') {
+          const netScroll = this.currentProgress - this.lastWritingRewardProgress;
+          if (netScroll < WRITING_MIN_PROGRESS_PCT) {
+            // Not enough scroll this minute — skip reward silently
+            this.lastScoreEarned = 0;
+            this.emitState();
+            return;
+          }
+          this.lastWritingRewardProgress = this.currentProgress;
+        }
+
         const baseScore =
           this.mode === 'reading' ? READING_REWARD_BASE :
           this.mode === 'writing' ? WRITING_REWARD_BASE :
@@ -362,7 +377,7 @@ export class ReadingScoreSession {
           PDF_REWARD_BASE;
         const activity =
           this.mode === 'reading' ? 'READ_ACTIVE_30S'    :
-          this.mode === 'writing' ? 'WRITE_ACTIVE_5MIN'  :
+          this.mode === 'writing' ? 'WRITE_ACTIVE_1MIN'  :
           this.mode === 'video'   ? 'VIDEO_WATCH_60S'    :
           this.mode === 'audio'   ? 'AUDIO_LISTEN_60S'   :
           'PDF_READ_60S';

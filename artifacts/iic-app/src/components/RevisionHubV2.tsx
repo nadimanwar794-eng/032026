@@ -272,15 +272,30 @@ export const RevisionHubV2: React.FC<Props> = ({ user, settings, onBack, onOpenC
 
   // ── Inline Practice All ───────────────────────────────────────────────────
   const startPracticeAll = () => {
-    const allQs: PracticeQ[] = [];
+    // Build per-topic buckets first, then interleave round-robin so questions
+    // from different topics are mixed instead of appearing topic-by-topic.
+    const topicBuckets: PracticeQ[][] = [];
     dueMcq.forEach(b => {
       const bk = bucketKey(b.subjectId, b.chapterId, b.pageKey, b.topic);
-      b.wrongQuestions.forEach(q => {
-        if (q.question && q.correctOption) {
-          allQs.push({ question: q.question, correctOption: q.correctOption, allOptions: q.allOptions, topic: b.topic, bucketKey: bk });
-        }
-      });
+      const qs: PracticeQ[] = b.wrongQuestions
+        .filter(q => q.question && q.correctOption)
+        .map(q => ({ question: q.question, correctOption: q.correctOption!, allOptions: q.allOptions, topic: b.topic, bucketKey: bk }));
+      // Fisher-Yates shuffle within each topic bucket
+      for (let i = qs.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [qs[i], qs[j]] = [qs[j], qs[i]];
+      }
+      if (qs.length > 0) topicBuckets.push(qs);
     });
+    if (topicBuckets.length === 0) return;
+    // Round-robin interleave across topic buckets
+    const allQs: PracticeQ[] = [];
+    const maxLen = Math.max(...topicBuckets.map(b => b.length));
+    for (let row = 0; row < maxLen; row++) {
+      for (let col = 0; col < topicBuckets.length; col++) {
+        if (row < topicBuckets[col].length) allQs.push(topicBuckets[col][row]);
+      }
+    }
     if (allQs.length === 0) return;
     setPracticeQs(allQs);
     setPracticeIdx(0);
@@ -537,6 +552,7 @@ export const RevisionHubV2: React.FC<Props> = ({ user, settings, onBack, onOpenC
           user={user}
           topics={revMcqTopics}
           settings={settings}
+          onUpdateUser={onUpdateUser}
           onClose={() => setRevMcqSessionActive(false)}
           onComplete={(_results) => {
             setRevMcqSessionActive(false);
@@ -930,13 +946,16 @@ export const RevisionHubV2: React.FC<Props> = ({ user, settings, onBack, onOpenC
                   ? <EmptyCard msg="No MCQs pending today!" />
                   : (
                     <>
-                      {/* Flat scrollable topic list — ~5 rows visible */}
+                      {/* Topic list — clicking any topic starts full mixed session */}
                       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                        <div className="px-4 py-2 bg-emerald-50 border-b border-emerald-100">
+                          <p className="text-[10px] font-bold text-emerald-700">Kisi bhi topic pe tap karo — sab topics mixed milenge ⚡</p>
+                        </div>
                         <div className="overflow-y-auto" style={{ maxHeight: '280px' }}>
                           {dueMcq.map((b) => (
                             <button
                               key={`${b.subjectId}::${b.chapterId}::${b.pageKey}::${b.topic}`}
-                              onClick={() => startPracticeTopic(b)}
+                              onClick={startPracticeAll}
                               className="w-full flex items-center gap-3 px-4 py-3 border-b border-slate-100 last:border-b-0 hover:bg-emerald-50 active:bg-emerald-100 transition-colors text-left"
                             >
                               <div className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
@@ -949,7 +968,7 @@ export const RevisionHubV2: React.FC<Props> = ({ user, settings, onBack, onOpenC
                               {b.subjectName && (
                                 <span className="text-[10px] text-slate-400 shrink-0 truncate max-w-[70px]">{b.subjectName}</span>
                               )}
-                              <ChevronRight size={13} className="text-slate-300 shrink-0" />
+                              <Zap size={13} className="text-emerald-400 shrink-0" />
                             </button>
                           ))}
                         </div>

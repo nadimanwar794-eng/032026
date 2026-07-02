@@ -87,8 +87,8 @@ export const ReadingScoreHUD: React.FC<Props> = ({
   const isAudio    = state.mode === 'audio';
   const isPdf      = state.mode === 'pdf';
   const modeIcon   = isVideo ? '🎬' : isAudio ? '🎧' : isPdf ? '📄' : isReading ? '📖' : '✍️';
-  const rewardBase = isVideo ? 8 : isAudio ? 6 : isPdf ? 5 : isReading ? 5 : 25;
-  const intervalLabel = isVideo || isAudio || isPdf ? '30s' : isReading ? '30s' : '5min';
+  const rewardBase = isVideo ? 8 : isAudio ? 6 : isPdf ? 5 : isReading ? 5 : 10;
+  const intervalLabel = isVideo || isAudio || isPdf ? '30s' : isReading ? '30s' : '1min';
   const remaining  = Math.max(0, state.maxWindowSec - state.sessionElapsedSec);
   const remMin     = Math.floor(remaining / 60);
   const remSec     = fmt2(remaining % 60);

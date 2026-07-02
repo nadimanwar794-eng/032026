@@ -31,6 +31,7 @@ interface Props {
   onTabChange: (tab: StudentTab) => void;
   onNavigateContent?: (type: 'PDF' | 'MCQ', chapterId: string, topicName?: string, subjectName?: string) => void;
   onUpdateUser?: (user: User) => void;
+  onMcqAnswer?: (isCorrect: boolean) => boolean;
 }
 
 const TABS: { id: HubTab; label: string; icon: React.ReactNode }[] = [
@@ -73,7 +74,7 @@ const TIER_STYLES: Record<string, { bg: string; text: string; label: string }> =
 };
 
 export const RevisionHubScreen: React.FC<Props> = ({
-  user, settings, onBack, onTabChange, onNavigateContent, onUpdateUser,
+  user, settings, onBack, onTabChange, onNavigateContent, onUpdateUser, onMcqAnswer,
 }) => {
   const theme = useAppTheme();
   const primary = theme.primary || '#6366f1';
@@ -90,6 +91,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
   const [sessionDone, setSessionDone]       = useState(false);
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [showFeedback, setShowFeedback]     = useState(false);
+  const [sessionMcqs, setSessionMcqs]       = useState<any[]>([]);
 
   // Subscribe to mcq_lessons from Firebase
   useEffect(() => {
@@ -100,12 +102,14 @@ export const RevisionHubScreen: React.FC<Props> = ({
   const mcqSubjects = mcqSelectedClass
     ? mcqSelectedClass === 'COMPETITION'
       ? [
-          { id: 'GK',          name: 'General Knowledge' },
-          { id: 'REASONING',   name: 'Reasoning' },
-          { id: 'MATHEMATICS', name: 'Mathematics' },
-          { id: 'ENGLISH',     name: 'English' },
-          { id: 'SCIENCE',     name: 'Science' },
-          { id: 'CURRENT',     name: 'Current Affairs' },
+          { id: 'physics',   name: 'Physics' },
+          { id: 'chemistry', name: 'Chemistry' },
+          { id: 'biology',   name: 'Biology' },
+          { id: 'history',   name: 'History' },
+          { id: 'geography', name: 'Geography' },
+          { id: 'polity',    name: 'Political Science' },
+          { id: 'economics', name: 'Economics' },
+          ...((settings as any)?.customLucentSubjects || []).filter((s: any) => s && s.id && s.name),
         ]
       : getSubjectsList(mcqSelectedClass, user?.stream || null, user?.board || 'CBSE')
     : [];
@@ -120,13 +124,13 @@ export const RevisionHubScreen: React.FC<Props> = ({
     ? (mcqSelectedLesson.mcqs || [])
     : [];
 
-  const currentQ = sessionActive ? classMcqs[sessionQIndex] : null;
+  const currentQ = sessionActive ? sessionMcqs[sessionQIndex] : null;
 
   const topicResults = useMemo(() => {
-    if (!sessionDone || !classMcqs.length) return [];
+    if (!sessionDone || !sessionMcqs.length) return [];
     const map: Record<string, { topic: string; correct: number; total: number }> = {};
-    classMcqs.forEach((q: any, i: number) => {
-      const t = q.topic || 'General';
+    sessionMcqs.forEach((q: any, i: number) => {
+      const t = (q.topic || 'General').trim();
       if (!map[t]) map[t] = { topic: t, correct: 0, total: 0 };
       map[t].total += 1;
       if (sessionAnswers[i] !== null && sessionAnswers[i] === q.correctAnswer) {
@@ -134,12 +138,35 @@ export const RevisionHubScreen: React.FC<Props> = ({
       }
     });
     return Object.values(map);
-  }, [sessionDone, classMcqs, sessionAnswers]);
+  }, [sessionDone, sessionMcqs, sessionAnswers]);
 
   const revCfg = (settings as any)?.revisionConfig;
 
   function startSession() {
-    setSessionAnswers(new Array(classMcqs.length).fill(null));
+    // Group questions by topic, shuffle within each group, then round-robin interleave
+    const topicBuckets: Record<string, any[]> = {};
+    classMcqs.forEach((q: any) => {
+      const t = (q.topic || 'General').trim();
+      if (!topicBuckets[t]) topicBuckets[t] = [];
+      topicBuckets[t].push(q);
+    });
+    const buckets = Object.values(topicBuckets).map(qs => {
+      const arr = [...qs];
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    });
+    const mixed: any[] = [];
+    const maxLen = Math.max(...buckets.map(b => b.length), 0);
+    for (let row = 0; row < maxLen; row++) {
+      for (const bucket of buckets) {
+        if (row < bucket.length) mixed.push(bucket[row]);
+      }
+    }
+    setSessionMcqs(mixed);
+    setSessionAnswers(new Array(mixed.length).fill(null));
     setSessionQIndex(0);
     setSelectedOption(null);
     setShowFeedback(false);
@@ -150,6 +177,11 @@ export const RevisionHubScreen: React.FC<Props> = ({
   function handleOptionSelect(optIdx: number) {
     // Only record if not already answered for this question
     if (sessionAnswers[sessionQIndex] !== null && sessionAnswers[sessionQIndex] !== undefined) return;
+    // Apply level-based daily MCQ limit (if parent provides the tracker)
+    if (onMcqAnswer) {
+      const isCorrect = optIdx === (sessionMcqs[sessionQIndex]?.correctAnswer);
+      if (!onMcqAnswer(isCorrect)) return;
+    }
     setSelectedOption(optIdx);
     setSessionAnswers(prev => {
       const next = [...prev];
@@ -160,7 +192,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
 
   function handleNext() {
     const nextIdx = sessionQIndex + 1;
-    if (nextIdx >= classMcqs.length) {
+    if (nextIdx >= sessionMcqs.length) {
       finishSession();
     } else {
       setSessionQIndex(nextIdx);
@@ -190,11 +222,10 @@ export const RevisionHubScreen: React.FC<Props> = ({
     const chapterTitle = mcqSelectedLesson?.lessonTitle || `Class ${mcqSelectedClass} — ${mcqSelectedSubject}`;
 
     const topicMap: Record<string, { questions: any[]; answers: (number | null)[] }> = {};
-    classMcqs.forEach((q: any, i: number) => {
-      // Only include questions the user actually answered — skip unanswered ones
-      // so they don't get counted as wrong in the revision tracker.
+    sessionMcqs.forEach((q: any, i: number) => {
       if (sessionAnswers[i] === null || sessionAnswers[i] === undefined) return;
-      const t = q.topic || 'General';
+      // Trim topic name to match recordAttempt's trimming — prevents key mismatch
+      const t = (q.topic || 'General').trim();
       if (!topicMap[t]) topicMap[t] = { questions: [], answers: [] };
       topicMap[t].questions.push(q);
       topicMap[t].answers.push(sessionAnswers[i]);
@@ -224,6 +255,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
     setSessionDone(false);
     setSessionQIndex(0);
     setSessionAnswers([]);
+    setSessionMcqs([]);
     setSelectedOption(null);
     setShowFeedback(false);
   }
@@ -247,14 +279,14 @@ export const RevisionHubScreen: React.FC<Props> = ({
 
   const titleText =
     sessionDone   ? 'Session Results'                        :
-    sessionActive ? `Q${sessionQIndex + 1} / ${classMcqs.length}` :
+    sessionActive ? `Q${sessionQIndex + 1} / ${sessionMcqs.length}` :
     activeTab === 'MCQ' && mcqSelectedLesson  ? mcqSelectedLesson.lessonTitle :
     activeTab === 'MCQ' && mcqSelectedSubject ? `MCQ — ${mcqSelectedSubject}` :
     activeTab === 'MCQ' && mcqSelectedClass   ? (mcqSelectedClass === 'COMPETITION' ? 'Competition MCQs' : `Class ${mcqSelectedClass}`) :
     'Revision Hub';
 
-  const progress = sessionActive && classMcqs.length > 0
-    ? ((sessionQIndex) / classMcqs.length) * 100
+  const progress = sessionActive && sessionMcqs.length > 0
+    ? ((sessionQIndex) / sessionMcqs.length) * 100
     : 0;
 
   return (
@@ -322,10 +354,10 @@ export const RevisionHubScreen: React.FC<Props> = ({
         {/* ══ SESSION MODE ══ */}
         {sessionActive && currentQ && (() => {
           const answered   = sessionAnswers.filter(a => a !== null && a !== undefined).length;
-          const correct    = sessionAnswers.filter((a, i) => a !== null && a !== undefined && a === classMcqs[i]?.correctAnswer).length;
+          const correct    = sessionAnswers.filter((a, i) => a !== null && a !== undefined && a === sessionMcqs[i]?.correctAnswer).length;
           const wrong      = answered - correct;
           const isAnswered = sessionAnswers[sessionQIndex] !== null && sessionAnswers[sessionQIndex] !== undefined;
-          const minRequired = Math.min(30, classMcqs.length);
+          const minRequired = Math.min(30, sessionMcqs.length);
           const ready      = answered >= minRequired;
 
           return (
@@ -336,7 +368,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
               <span className="text-[10px] font-black uppercase tracking-wider bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">
                 {currentQ.topic || 'General'}
               </span>
-              <span className="text-[10px] text-slate-400 ml-auto">{sessionQIndex + 1}/{classMcqs.length}</span>
+              <span className="text-[10px] text-slate-400 ml-auto">{sessionQIndex + 1}/{sessionMcqs.length}</span>
               <div className="flex items-center gap-1.5">
                 <span className="text-[10px] font-black bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full flex items-center gap-1">
                   <CheckCircle size={10} /> {correct}
@@ -388,7 +420,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
                 </button>
 
                 {/* Next button — shows as soon as option selected */}
-                {isAnswered && sessionQIndex < classMcqs.length - 1 ? (
+                {isAnswered && sessionQIndex < sessionMcqs.length - 1 ? (
                   <button
                     onClick={handleNext}
                     className="flex-1 flex items-center justify-center gap-2 active:scale-[0.99] text-white font-bold py-3.5 rounded-2xl transition-all"
@@ -478,7 +510,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
             <div>
               <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 text-center mb-3">Sawaal-wise Review</p>
               <div className="space-y-2">
-                {classMcqs.map((q: any, qi: number) => {
+                {sessionMcqs.map((q: any, qi: number) => {
                   const userAns = sessionAnswers[qi];
                   const isCorrect = userAns !== null && userAns !== undefined && userAns === q.correctAnswer;
                   const isSkipped = userAns === null || userAns === undefined;

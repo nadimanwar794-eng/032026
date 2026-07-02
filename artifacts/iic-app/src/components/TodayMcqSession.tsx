@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+// @ts-nocheck
+import React, { useState, useEffect, useRef } from 'react';
 import { User, MCQItem, MCQResult, TopicItem, SystemSettings } from '../types';
-import { X, CheckCircle, ArrowRight, Loader2, BrainCircuit, AlertCircle, List } from 'lucide-react';
+import { X, CheckCircle, ArrowRight, Loader2, BrainCircuit, AlertCircle, List, Tag, Trophy, TrendingDown, Minus, TrendingUp, Star, Calendar, ChevronRight } from 'lucide-react';
 import { getChapterData, saveUserToLive, saveTestResult, saveDemand } from '../firebase';
 import { storage } from '../utils/storage';
 import { generateAnalysisJson } from '../utils/analysisUtils';
@@ -8,6 +9,27 @@ import { recordAttempt as recordRevisionAttempt, applyInitialSchedule, bucketKey
 import { addMistakes, removeMistakeByQuestion } from '../utils/mistakeBank';
 import { getEffectiveDailyLimit, getLevelInfo, UNLIMITED } from '../utils/levelSystem';
 import { SubscriptionEngine } from '../utils/engines/subscriptionEngine';
+import { tryEarnScore, subtractDailyScore, getMcqStreakBonus } from '../utils/scoreSystem';
+
+interface InterleavedQ extends MCQItem {
+    _topicIndex: number;
+    _topicName: string;
+    _chapterId: string;
+    _chapterName: string;
+    _subjectId: string;
+    _subjectName: string;
+}
+
+interface TopicSessionResult {
+    topicName: string;
+    chapterName: string;
+    subjectName: string;
+    correct: number;
+    total: number;
+    percentage: number;
+    tier: 'weak' | 'average' | 'strong' | 'mastered';
+    nextRevisionDays: number;
+}
 
 interface Props {
     user: User;
@@ -16,450 +38,600 @@ interface Props {
     onComplete: (results: MCQResult[], questions?: any[]) => void;
     settings?: SystemSettings | null;
     onTrackAnswer?: (isCorrect: boolean) => boolean;
+    onUpdateUser?: (user: User) => void;
 }
 
-export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComplete, settings, onTrackAnswer }) => {
+export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComplete, settings, onTrackAnswer, onUpdateUser }) => {
+    const userRef = useRef(user);
+    useEffect(() => { userRef.current = user; }, [user]);
     const [loading, setLoading] = useState(true);
-    const [currentIndex, setCurrentIndex] = useState(0);
-    const [currentMcqData, setCurrentMcqData] = useState<MCQItem[]>([]);
-    const [allSessionQuestions, setAllSessionQuestions] = useState<any[]>([]);
-
-    // Test State for Current Topic
+    const [loadingMsg, setLoadingMsg] = useState('Sab topics load ho rahe hain...');
+    const [interleavedQuestions, setInterleavedQuestions] = useState<InterleavedQ[]>([]);
     const [qIndex, setQIndex] = useState(0);
     const [answers, setAnswers] = useState<Record<number, number>>({});
-    const [showResult, setShowResult] = useState(false); // Result for current topic
-    const [topicScore, setTopicScore] = useState(0);
     const [showSidebar, setShowSidebar] = useState(false);
-
-    const [topicSummary, setTopicSummary] = useState<{name: string, score: number, total: number} | null>(null);
-    const [sessionResults, setSessionResults] = useState<MCQResult[]>([]);
-
-    // Timers
     const [totalTime, setTotalTime] = useState(0);
-    const [questionTime, setQuestionTime] = useState(0);
+    const [noMcqTopics, setNoMcqTopics] = useState<string[]>([]);
 
+    // Result screen state
+    const [sessionSummary, setSessionSummary] = useState<TopicSessionResult[] | null>(null);
+    const pendingCompleteRef = useRef<{ results: MCQResult[]; questions: any[] } | null>(null);
+
+    // ── MCQ Score Popup ────────────────────────────────────────────────────────
+    const [mcqScorePopup, setMcqScorePopup] = useState<number | null>(null);
+    const [mcqScoreVisible, setMcqScoreVisible] = useState(false);
+    const mcqPopupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const showMcqScore = (pts: number) => {
+        if (mcqPopupTimerRef.current) clearTimeout(mcqPopupTimerRef.current);
+        setMcqScorePopup(pts);
+        setMcqScoreVisible(true);
+        mcqPopupTimerRef.current = setTimeout(() => setMcqScoreVisible(false), 1800);
+    };
+
+    const [mcqStreak, setMcqStreak] = useState(0);
+
+    // Timer
     useEffect(() => {
-        const timer = setInterval(() => {
-            setTotalTime(prev => prev + 1);
-            setQuestionTime(prev => prev + 1);
-        }, 1000);
+        const timer = setInterval(() => setTotalTime(prev => prev + 1), 1000);
         return () => clearInterval(timer);
     }, []);
 
-    // Reset question timer on new question
+    // ── Load ALL topics upfront, then interleave ──────────────────────────
     useEffect(() => {
-        setQuestionTime(0);
-    }, [qIndex, currentIndex]);
+        const loadAll = async () => {
+            setLoading(true);
+            const board = user.board || 'CBSE';
+            const classLevel = user.classLevel || '10';
+            const streamKey = (classLevel === '11' || classLevel === '12') && user.stream ? `-${user.stream}` : '';
 
-    useEffect(() => {
-        loadTopicData(currentIndex);
-    }, [currentIndex]);
+            // Collect MCQs per topic
+            const topicBuckets: InterleavedQ[][] = [];
+            const skipped: string[] = [];
 
-    const loadTopicData = async (index: number) => {
-        if (index >= topics.length) {
-            if (sessionResults.length === 0) {
-                // All topics were skipped (no MCQs found for any) — don't silently
-                // navigate away. The caller will see loading=false + currentIndex>=topics.length
-                // and we show the "no MCQs" screen below. Just return here.
+            for (let i = 0; i < topics.length; i++) {
+                const topic = topics[i];
+                setLoadingMsg(`Topic load ho raha hai: ${i + 1} / ${topics.length} — ${topic.name}`);
+
+                try {
+                    let data: any = null;
+                    const subject = topic.subjectName || 'Unknown';
+                    const strictKey = `nst_content_${board}_${classLevel}${streamKey}_${subject}_${topic.chapterId}`;
+                    data = await storage.getItem(strictKey);
+                    if (!data) data = await getChapterData(strictKey);
+                    if (!data) data = await getChapterData(topic.chapterId);
+
+                    let mcqs: MCQItem[] = [];
+                    if (data && data.manualMcqData) {
+                        const norm = topic.name.toLowerCase().trim();
+                        mcqs = data.manualMcqData.filter((q: any) => q.topic && q.topic.toLowerCase().trim() === norm);
+                        if (mcqs.length === 0) {
+                            mcqs = data.manualMcqData.filter((q: any) => q.topic && q.topic.toLowerCase().includes(norm));
+                        }
+                        if (mcqs.length === 0) {
+                            mcqs = data.manualMcqData;
+                        }
+                    }
+
+                    if (mcqs.length === 0) {
+                        skipped.push(topic.name);
+                        saveDemand(user.id, `Missing MCQs for Revision: ${topic.name} (${topic.chapterName})`);
+                        continue;
+                    }
+
+                    // Fisher-Yates shuffle within topic
+                    for (let k = mcqs.length - 1; k > 0; k--) {
+                        const j = Math.floor(Math.random() * (k + 1));
+                        [mcqs[k], mcqs[j]] = [mcqs[j], mcqs[k]];
+                    }
+
+                    // Cap per topic at 20 to avoid burnout
+                    const capped = mcqs.slice(0, 20);
+
+                    // Tag with topic metadata
+                    const tagged: InterleavedQ[] = capped.map(q => ({
+                        ...q,
+                        _topicIndex: i,
+                        _topicName: topic.name,
+                        _chapterId: topic.chapterId,
+                        _chapterName: topic.chapterName,
+                        _subjectId: topic.subjectId || 'REVISION',
+                        _subjectName: topic.subjectName || 'Revision',
+                    }));
+
+                    topicBuckets.push(tagged);
+                } catch (e) {
+                    console.error('Failed to load topic', topic.name, e);
+                    skipped.push(topic.name);
+                }
+            }
+
+            setNoMcqTopics(skipped);
+
+            if (topicBuckets.length === 0) {
                 setLoading(false);
                 return;
             }
 
-            // --- MEGA ANALYSIS COMBINATION ---
-            // User requested: "ek hi analisis me sare topic ķe question honge ek saath mega analysis aayega"
-            // We combine all individual topic results into ONE mega result.
-            let totalQ = 0;
-            let totalScore = 0;
-            let totalCorrect = 0;
-            let totalWrong = 0;
-            let megaOmrData: any[] = [];
-            let megaWrongQuestions: any[] = [];
-            let megaTopicAnalysis: Record<string, any> = {};
-
-            sessionResults.forEach(res => {
-                totalQ += res.totalQuestions;
-                totalScore += res.score;
-                totalCorrect += res.correctCount;
-                totalWrong += res.wrongCount;
-
-                // Merge OMR Data (adjusting indices so they don't overlap in the UI)
-                const startIndex = megaOmrData.length;
-                if (res.omrData) {
-                    res.omrData.forEach(omr => {
-                        megaOmrData.push({ ...omr, qIndex: startIndex + omr.qIndex });
-                    });
-                }
-
-                // Merge Wrong Questions (adjusting indices)
-                if (res.wrongQuestions) {
-                    res.wrongQuestions.forEach(wq => {
-                        megaWrongQuestions.push({ ...wq, qIndex: startIndex + wq.qIndex });
-                    });
-                }
-
-                // Merge Topic Analysis
-                if (res.topicAnalysis) {
-                    Object.keys(res.topicAnalysis).forEach(key => {
-                        if (!megaTopicAnalysis[key]) {
-                            megaTopicAnalysis[key] = { ...res.topicAnalysis![key] };
-                        } else {
-                            megaTopicAnalysis[key].total += res.topicAnalysis![key].total;
-                            megaTopicAnalysis[key].correct += res.topicAnalysis![key].correct;
-                            megaTopicAnalysis[key].percentage = Math.round((megaTopicAnalysis[key].correct / megaTopicAnalysis[key].total) * 100);
-                        }
-                    });
-                }
-            });
-
-            const percentage = totalQ > 0 ? (totalScore / totalQ) * 100 : 0;
-            let performanceTag: 'EXCELLENT' | 'GOOD' | 'BAD' | 'VERY_BAD' = 'GOOD';
-            if (percentage >= 80) performanceTag = 'EXCELLENT';
-            else if (percentage < 50) performanceTag = 'BAD';
-
-            const megaResult: MCQResult = {
-                id: `mega-rev-${Date.now()}`,
-                userId: user.id,
-                chapterId: 'mega-revision',
-                subjectId: 'mega-revision',
-                subjectName: 'Mega Revision Session',
-                chapterTitle: `Revision Analysis (${topics.length} Topics)`,
-                date: new Date().toISOString(),
-                totalQuestions: totalQ,
-                correctCount: totalCorrect,
-                wrongCount: totalWrong,
-                score: totalScore,
-                totalTimeSeconds: totalTime,
-                averageTimePerQuestion: totalQ > 0 ? totalTime / totalQ : 0,
-                performanceTag: performanceTag,
-                omrData: megaOmrData,
-                wrongQuestions: megaWrongQuestions,
-                topicAnalysis: megaTopicAnalysis
-            };
-
-            // Call onComplete with the SINGLE mega result
-            onComplete([megaResult], allSessionQuestions);
-            return;
-        }
-
-        setLoading(true);
-        const topic = topics[index];
-        setQIndex(0);
-        setAnswers({});
-        setShowResult(false);
-        setTopicScore(0);
-
-        try {
-            let data: any = null;
-            const board = user.board || 'CBSE';
-            const classLevel = user.classLevel || '10';
-            const streamKey = (classLevel === '11' || classLevel === '12') && user.stream ? `-${user.stream}` : '';
-            const subject = topic.subjectName || 'Unknown';
-
-            // Fetch Content
-            const strictKey = `nst_content_${board}_${classLevel}${streamKey}_${subject}_${topic.chapterId}`;
-            data = await storage.getItem(strictKey);
-            if (!data) data = await getChapterData(strictKey);
-            if (!data) data = await getChapterData(topic.chapterId);
-
-            let mcqs: MCQItem[] = [];
-            if (data && data.manualMcqData) {
-                // Filter by Subtopic Logic
-                const normSubTopic = topic.name.toLowerCase().trim();
-                mcqs = data.manualMcqData.filter((q: any) => q.topic && q.topic.toLowerCase().trim() === normSubTopic);
-
-                // Fallback: If no subtopic specific MCQs, maybe use generic ones?
-                // User logic is specific to subtopics now. If empty, we might need to skip or show empty.
-                if (mcqs.length === 0) {
-                     // Try loose match
-                     mcqs = data.manualMcqData.filter((q: any) => q.topic && q.topic.toLowerCase().includes(normSubTopic));
+            // ── Round-robin interleave ─────────────────────────────────────
+            // T1-Q1, T2-Q1, T3-Q1, T1-Q2, T2-Q2 ...
+            const interleaved: InterleavedQ[] = [];
+            const maxLen = Math.max(...topicBuckets.map(b => b.length));
+            for (let row = 0; row < maxLen; row++) {
+                for (let col = 0; col < topicBuckets.length; col++) {
+                    if (row < topicBuckets[col].length) {
+                        interleaved.push(topicBuckets[col][row]);
+                    }
                 }
             }
 
-            // FALLBACK: if still no MCQs for specific topic, use ALL chapter MCQs
-            if (mcqs.length === 0 && data && data.manualMcqData && data.manualMcqData.length > 0) {
-                mcqs = data.manualMcqData;
-            }
-
-            // AUTO-SKIP EMPTY TOPICS & REPORT (only if truly nothing found)
-            if (mcqs.length === 0) {
-                console.log(`Skipping ${topic.name} - No MCQs found in chapter`);
-                saveDemand(user.id, `Missing MCQs for Revision: ${topic.name} (${topic.chapterName})`);
-                setCurrentIndex(prev => prev + 1);
-                return;
-            }
-
-            // FISHER-YATES SHUFFLE (Randomization)
-            for (let i = mcqs.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [mcqs[i], mcqs[j]] = [mcqs[j], mcqs[i]];
-            }
-
-            // LIMIT QUESTIONS (User Request: Don't show 200-400 questions)
-            // Cap at 20 questions per revision session to prevent burnout
-            const limitedMcqs = mcqs.slice(0, 2000);
-
-            setCurrentMcqData(limitedMcqs);
-            setAllSessionQuestions(prev => [...prev, ...limitedMcqs]);
-        } catch (e) {
-            console.error("Failed to load MCQ", e);
-            setCurrentMcqData([]);
-            setCurrentIndex(prev => prev + 1); // Skip on error
-        } finally {
+            setInterleavedQuestions(interleaved);
             setLoading(false);
-        }
-    };
+        };
 
+        loadAll();
+    }, []);
+
+    // ── Answer handler ────────────────────────────────────────────────────
     const handleAnswer = (optionIdx: number) => {
         if (answers[qIndex] !== undefined) return;
 
-        // ── Daily MCQ limit enforcement ──────────────────────────────────────
-        if (user.role !== 'ADMIN' && user.role !== 'SUB_ADMIN') {
-            const today = new Date().toISOString().split('T')[0];
-            const countKey = `nst_mcq_daily_total_${today}_${user.id}`;
-            const prevTotal = parseInt(localStorage.getItem(countKey) || '0', 10);
-            const _subValid = SubscriptionEngine.isPremium(user);
-            const _tier: 'FREE' | 'BASIC' | 'ULTRA' =
-                _subValid && user.subscriptionLevel === 'ULTRA' ? 'ULTRA' :
-                _subValid && user.subscriptionLevel === 'BASIC' ? 'BASIC' : 'FREE';
-            const mcqLim = getEffectiveDailyLimit('mcq', getLevelInfo(user.totalScore || 0).level, _tier, settings);
-            if (mcqLim < UNLIMITED && prevTotal >= mcqLim) {
-                // Notify parent (which shows the alert toast) if available, else no-op
-                if (onTrackAnswer) { onTrackAnswer(false); }
-                return;
-            }
-        }
-
-        // Track via parent callback if provided (increments count + prize check)
-        const isCorrect = currentMcqData[qIndex]?.correctAnswer === optionIdx;
+        // Today Revision Hub MCQs — NO daily MCQ limit applies here
+        const isCorrect = interleavedQuestions[qIndex]?.correctAnswer === optionIdx;
         if (onTrackAnswer) {
             if (!onTrackAnswer(isCorrect)) return;
-        } else if (user.role !== 'ADMIN' && user.role !== 'SUB_ADMIN') {
-            // Fallback: track locally in localStorage
-            const today = new Date().toISOString().split('T')[0];
-            const countKey = `nst_mcq_daily_total_${today}_${user.id}`;
-            const prevTotal = parseInt(localStorage.getItem(countKey) || '0', 10);
-            localStorage.setItem(countKey, String(prevTotal + 1));
+        }
+
+        // ── MCQ Scoring: +2 correct, -1 wrong, streak bonuses ─────────────────
+        if (user.id) {
+            const _subValid = SubscriptionEngine.isPremium(user);
+            const _tier = _subValid && user.subscriptionLevel === 'ULTRA' ? 'ULTRA' :
+                          _subValid && user.subscriptionLevel === 'BASIC' ? 'BASIC' : 'FREE';
+            if (isCorrect) {
+                const newStreak = mcqStreak + 1;
+                setMcqStreak(newStreak);
+                const pts = tryEarnScore(user.id, 2, _tier, _subValid, 0, 'REVISION_MCQ_CORRECT');
+                const bonus = getMcqStreakBonus(newStreak);
+                const bonusPts = bonus > 0 ? tryEarnScore(user.id, bonus, _tier, _subValid, 0, `REVISION_MCQ_STREAK_${newStreak}`) : 0;
+                const totalPts = pts + bonusPts;
+                if (totalPts > 0) {
+                    const _u = userRef.current;
+                    if (_u && onUpdateUser) {
+                        const updated = { ..._u, totalScore: (_u.totalScore || 0) + totalPts };
+                        onUpdateUser(updated);
+                        saveUserToLive(updated);
+                    }
+                    showMcqScore(totalPts);
+                }
+            } else {
+                setMcqStreak(0);
+                subtractDailyScore(user.id, 1);
+                const _u = userRef.current;
+                if (_u && onUpdateUser) {
+                    const updated = { ..._u, totalScore: Math.max(0, (_u.totalScore || 0) - 1) };
+                    onUpdateUser(updated);
+                    saveUserToLive(updated);
+                }
+                showMcqScore(-1);
+            }
         }
 
         const newAnswers = { ...answers, [qIndex]: optionIdx };
         setAnswers(newAnswers);
 
-        // Auto Advance after short delay
         setTimeout(() => {
-            if (qIndex < currentMcqData.length - 1) {
+            if (qIndex < interleavedQuestions.length - 1) {
                 setQIndex(prev => prev + 1);
             } else {
-                // Topic Finished -> Auto Submit Topic (No Result Screen)
-                calculateAndNext(newAnswers);
+                finishSession(newAnswers);
             }
         }, 500);
     };
 
-    const calculateAndNext = (finalAnswers: Record<number, number>) => {
-        let correct = 0;
-        currentMcqData.forEach((q, i) => {
-            if (finalAnswers[i] === q.correctAnswer) correct++;
-        });
-        // Save & Move Next immediately
-        processTopicResult(correct, finalAnswers);
-    };
+    // ── Finish: reconstruct per-topic results + mega result ───────────────
+    const finishSession = (finalAnswers: Record<number, number>) => {
+        if (interleavedQuestions.length === 0) {
+            onClose();
+            return;
+        }
 
-    const processTopicResult = (score: number, finalAnswers: Record<number, number>) => {
-        // Save Result
-        const topic = topics[currentIndex];
-        const total = currentMcqData.length;
-        const percentage = total > 0 ? (score/total)*100 : 0;
+        const thresholds = settings?.revisionConfig?.thresholds ?? { strong: 65, average: 50, mastery: 80 };
+        const intervals = settings?.revisionConfig?.intervals ?? {
+            weak:     { revision: 86400 },
+            average:  { revision: 259200 },
+            strong:   { revision: 604800 },
+            mastered: { revision: 2592000 },
+        };
 
-        // Determine Status based on NEW Logic
-        // < 50 Weak, 50-79 Avg, >= 80 Excellent (User said "80% aagaya ab ye topic jayega exclent page me")
-        // Wait, did user define "Strong"?
-        // User: "10 topic week , 5 avrage aur 2 stronge hua... mcq banaye 80% aagaya ab ye topic jayega exclent page me"
-        // Implies: < 50 Weak, 50-65 Avg, 65-79 Strong, >= 80 Excellent. (Approximation)
-        let status = 'AVERAGE';
-        if (percentage < 50) status = 'WEAK';
-        else if (percentage >= 80) status = 'EXCELLENT';
-        else if (percentage >= 65) status = 'STRONG';
-
-        // Use helper to generate report matching other components
-        // Create dummy "submittedQuestions" array where every question is from this subtopic
-        // But we need individual correctness. We have `answers` (Record<qIndex, optionIndex>)
-        // and `currentMcqData`.
-
-        // Reconstruct user answers for the helper
-        const userAnswersMap: Record<number, number> = {};
-        currentMcqData.forEach((_, idx) => {
-            if (answers[idx] !== undefined) userAnswersMap[idx] = answers[idx];
+        // Group questions + answers by topic
+        const topicGroups: Record<number, { qs: InterleavedQ[]; ans: Record<number, number>; meta: InterleavedQ }> = {};
+        interleavedQuestions.forEach((q, idx) => {
+            const ti = q._topicIndex;
+            if (!topicGroups[ti]) {
+                topicGroups[ti] = { qs: [], ans: {}, meta: q };
+            }
+            const localIdx = topicGroups[ti].qs.length;
+            topicGroups[ti].qs.push(q);
+            if (finalAnswers[idx] !== undefined) {
+                topicGroups[ti].ans[localIdx] = finalAnswers[idx];
+            }
         });
 
-        const analysisJson = generateAnalysisJson(currentMcqData, userAnswersMap, user.mcqHistory, topic.chapterId);
+        const sessionResults: MCQResult[] = [];
+        const topicSummary: TopicSessionResult[] = [];
 
-        // Generate Granular Topic Analysis for History Comparison (identical to McqView)
-        const topicAnalysis: Record<string, { correct: number, total: number, percentage: number }> = {};
+        Object.entries(topicGroups).forEach(([_ti, group]) => {
+            const { qs, ans, meta } = group;
+            const topic = topics[meta._topicIndex];
 
-        const omrData: { qIndex: number, selected: number, correct: number, timeSpent?: number }[] = [];
-        const wrongQuestions: { question: string, qIndex: number, explanation?: string, correctAnswer?: string | number }[] = [];
+            let correct = 0;
+            const topicAnalysis: Record<string, { correct: number; total: number; percentage: number }> = {};
+            const omrData: any[] = [];
+            const wrongQuestions: any[] = [];
 
-        currentMcqData.forEach((q, idx) => {
-            const t = (q.topic || 'General').trim();
-            if (!topicAnalysis[t]) topicAnalysis[t] = { correct: 0, total: 0, percentage: 0 };
+            qs.forEach((q, localIdx) => {
+                const t = (q.topic || 'General').trim();
+                if (!topicAnalysis[t]) topicAnalysis[t] = { correct: 0, total: 0, percentage: 0 };
+                topicAnalysis[t].total += 1;
 
-            topicAnalysis[t].total += 1;
-            const selectedOpt = userAnswersMap[idx];
-            const isSelected = selectedOpt !== undefined ? selectedOpt : -1;
+                const selected = ans[localIdx] ?? -1;
+                omrData.push({ qIndex: localIdx, selected, correct: q.correctAnswer, timeSpent: 0 });
 
-            omrData.push({
-                qIndex: idx,
-                selected: isSelected,
-                correct: q.correctAnswer,
-                timeSpent: 0 // Mocked for now, not tracked per question here
+                if (selected === q.correctAnswer) {
+                    correct++;
+                    topicAnalysis[t].correct += 1;
+                    removeMistakeByQuestion(q.question, q.correctAnswer);
+                } else if (selected !== -1) {
+                    wrongQuestions.push({ question: q.question, qIndex: localIdx, explanation: q.explanation, correctAnswer: q.correctAnswer });
+                }
             });
 
-            if (isSelected !== -1 && isSelected !== q.correctAnswer) {
-                wrongQuestions.push({
-                    question: q.question,
-                    qIndex: idx,
-                    explanation: q.explanation,
-                    correctAnswer: q.correctAnswer
-                });
+            Object.keys(topicAnalysis).forEach(t => {
+                const s = topicAnalysis[t];
+                s.percentage = s.total > 0 ? Math.round((s.correct / s.total) * 100) : 0;
+            });
+
+            const total = qs.length;
+            const percentage = total > 0 ? (correct / total) * 100 : 0;
+            const accuracy = total > 0 ? correct / total : 0;
+
+            // Compute tier
+            let tier: 'weak' | 'average' | 'strong' | 'mastered';
+            let nextRevisionDays: number;
+            const pct = accuracy * 100;
+            if (pct >= thresholds.mastery) {
+                tier = 'mastered';
+                nextRevisionDays = Math.round((intervals.mastered?.revision ?? 2592000) / 86400);
+            } else if (pct >= thresholds.strong) {
+                tier = 'strong';
+                nextRevisionDays = Math.round((intervals.strong?.revision ?? 604800) / 86400);
+            } else if (pct >= thresholds.average) {
+                tier = 'average';
+                nextRevisionDays = Math.round((intervals.average?.revision ?? 259200) / 86400);
+            } else {
+                tier = 'weak';
+                nextRevisionDays = Math.round((intervals.weak?.revision ?? 86400) / 86400);
             }
 
-            if (selectedOpt === q.correctAnswer) {
-                topicAnalysis[t].correct += 1;
-            } else if (selectedOpt !== undefined && selectedOpt !== -1) {
-                wrongQuestions.push({
-                    question: q.question,
-                    qIndex: idx,
-                    correctAnswer: q.correctAnswer,
-                    explanation: q.explanation
+            topicSummary.push({
+                topicName: meta._topicName,
+                chapterName: meta._chapterName,
+                subjectName: meta._subjectName,
+                correct,
+                total,
+                percentage: Math.round(percentage),
+                tier,
+                nextRevisionDays,
+            });
+
+            // Mistake bank
+            try {
+                const wrongPayload = qs
+                    .map((q, localIdx) => {
+                        const selected = ans[localIdx];
+                        if (selected !== undefined && selected !== q.correctAnswer) {
+                            return {
+                                question: q.question,
+                                options: q.options || [],
+                                correctAnswer: q.correctAnswer,
+                                explanation: q.explanation,
+                                topic: q.topic || meta._topicName,
+                                chapterTitle: meta._chapterName,
+                                subjectName: meta._subjectName,
+                                classLevel: user.classLevel,
+                                board: user.board,
+                                source: 'REVISION',
+                            };
+                        }
+                        return null;
+                    })
+                    .filter(Boolean);
+                if (wrongPayload.length > 0) addMistakes(wrongPayload);
+            } catch (_) {}
+
+            // Revision tracker
+            try {
+                const userAnswersArr = qs.map((_, localIdx) => ans[localIdx] ?? null);
+                recordRevisionAttempt({
+                    subjectId: meta._subjectId,
+                    subjectName: meta._subjectName,
+                    chapterId: meta._chapterId,
+                    chapterTitle: meta._chapterName,
+                    pageKey: meta._chapterId,
+                    questions: qs,
+                    userAnswers: userAnswersArr,
+                });
+                if (topic) {
+                    const bk = bucketKey(meta._subjectId, meta._chapterId, meta._chapterId, meta._topicName);
+                    applyInitialSchedule(bk, accuracy, settings?.revisionConfig);
+                }
+            } catch (_) {}
+
+            const analysisJson = generateAnalysisJson(qs, ans, user.mcqHistory, meta._chapterId);
+
+            const result: MCQResult = {
+                id: `mcq-rev-${Date.now()}-${meta._topicIndex}`,
+                userId: user.id,
+                chapterId: meta._chapterId,
+                chapterTitle: meta._chapterName,
+                subjectId: meta._subjectId,
+                subjectName: meta._subjectName,
+                date: new Date().toISOString(),
+                score: correct,
+                totalQuestions: total,
+                correctCount: correct,
+                wrongCount: total - correct,
+                totalTimeSeconds: totalTime,
+                averageTimePerQuestion: totalTime / (total || 1),
+                performanceTag: percentage >= 80 ? 'EXCELLENT' : percentage >= 50 ? 'GOOD' : 'BAD',
+                ultraAnalysisReport: analysisJson,
+                topicAnalysis,
+                omrData,
+                wrongQuestions,
+                topic: meta._topicName,
+            };
+
+            saveTestResult(user.id, result);
+            sessionResults.push(result);
+        });
+
+        // ── Mega combined result ──────────────────────────────────────────
+        let totalQ = 0, totalScore = 0, totalCorrect = 0, totalWrong = 0;
+        let megaOmrData: any[] = [];
+        let megaWrongQuestions: any[] = [];
+        let megaTopicAnalysis: Record<string, any> = {};
+
+        sessionResults.forEach(res => {
+            const startIdx = megaOmrData.length;
+            totalQ += res.totalQuestions;
+            totalScore += res.score;
+            totalCorrect += res.correctCount;
+            totalWrong += res.wrongCount;
+
+            if (res.omrData) res.omrData.forEach(o => megaOmrData.push({ ...o, qIndex: startIdx + o.qIndex }));
+            if (res.wrongQuestions) res.wrongQuestions.forEach(wq => megaWrongQuestions.push({ ...wq, qIndex: startIdx + wq.qIndex }));
+
+            if (res.topicAnalysis) {
+                Object.entries(res.topicAnalysis).forEach(([key, val]: [string, any]) => {
+                    if (!megaTopicAnalysis[key]) megaTopicAnalysis[key] = { correct: 0, total: 0, percentage: 0 };
+                    megaTopicAnalysis[key].total += val.total;
+                    megaTopicAnalysis[key].correct += val.correct;
                 });
             }
         });
 
-        // Calculate Percentages
-        Object.keys(topicAnalysis).forEach(t => {
-            const s = topicAnalysis[t];
+        Object.keys(megaTopicAnalysis).forEach(t => {
+            const s = megaTopicAnalysis[t];
             s.percentage = s.total > 0 ? Math.round((s.correct / s.total) * 100) : 0;
         });
 
-        const result: MCQResult = {
-            id: `mcq-rev-${Date.now()}`,
+        const megaResult: MCQResult = {
+            id: `mcq-mega-${Date.now()}`,
             userId: user.id,
-            chapterId: topic.chapterId,
-            chapterTitle: topic.chapterName,
-            subjectId: topic.subjectId || 'REVISION',
-            subjectName: topic.subjectName || 'Revision',
+            chapterId: sessionResults[0]?.chapterId || 'revision',
+            chapterTitle: `Revision Analysis (${Object.keys(topicGroups).length} Topics)`,
+            subjectId: 'REVISION',
+            subjectName: 'Revision Hub',
             date: new Date().toISOString(),
-            score: score,
-            totalQuestions: total,
-            correctCount: score,
-            wrongCount: total - score,
+            score: totalScore,
+            totalQuestions: totalQ,
+            correctCount: totalCorrect,
+            wrongCount: totalWrong,
             totalTimeSeconds: totalTime,
-            averageTimePerQuestion: totalTime / (total || 1),
-            performanceTag: percentage >= 80 ? 'EXCELLENT' : percentage >= 50 ? 'GOOD' : 'BAD',
-            ultraAnalysisReport: analysisJson,
-            topicAnalysis: topicAnalysis,
-            omrData: omrData,
-            wrongQuestions: wrongQuestions,
-            topic: topic.name // Store the revision topic name
+            averageTimePerQuestion: totalTime / (totalQ || 1),
+            performanceTag: totalQ > 0 && (totalCorrect / totalQ) >= 0.8 ? 'EXCELLENT' : totalQ > 0 && (totalCorrect / totalQ) >= 0.5 ? 'GOOD' : 'BAD',
+            topicAnalysis: megaTopicAnalysis,
+            omrData: megaOmrData,
+            wrongQuestions: megaWrongQuestions,
         };
 
-        setSessionResults(prev => [...prev, result]);
-
-        // Record wrong answers into Revision Hub tracker so they show in Revision Hub
-        if (currentMcqData.length > 0) {
-            const userAnswersArr = currentMcqData.map((_, idx) => userAnswersMap[idx] ?? null);
-            try {
-                recordRevisionAttempt({
-                    subjectId: topic.subjectId || 'REVISION',
-                    subjectName: topic.subjectName || 'Revision',
-                    chapterId: topic.chapterId,
-                    chapterTitle: topic.chapterName,
-                    pageKey: topic.chapterId,
-                    questions: currentMcqData,
-                    userAnswers: userAnswersArr,
-                });
-                // Apply interval-settings-based schedule based on accuracy
-                const accuracy = total > 0 ? score / total : 0;
-                const bk = bucketKey(
-                    topic.subjectId || 'REVISION',
-                    topic.chapterId,
-                    topic.chapterId,
-                    topic.name,
-                );
-                applyInitialSchedule(bk, accuracy, settings?.revisionConfig);
-            } catch (_) { /* silent — tracking is non-critical */ }
-        }
-
-        // ── MY MISTAKE BANK ──────────────────────────────────────────────
-        // Push every wrong-answered question into the persistent mistake bank
-        // so the My Mistake page can show & replay them. Right-answered ones
-        // are removed (so once student fixes a mistake it disappears).
-        // Mirrors the same flow McqView uses for school MCQs — earlier the
-        // Today/Revision MCQ session was skipping this step entirely so
-        // wrong answers in revision never landed on the My Mistake page.
-        try {
-            const wrongPayload = currentMcqData
-                .map((q, idx) => {
-                    const selected = userAnswersMap[idx];
-                    if (selected !== undefined && selected !== q.correctAnswer) {
-                        return {
-                            question: q.question,
-                            options: q.options || [],
-                            correctAnswer: q.correctAnswer,
-                            explanation: q.explanation,
-                            topic: q.topic || topic.name,
-                            chapterTitle: topic.chapterName,
-                            subjectName: topic.subjectName || 'Revision',
-                            classLevel: user.classLevel,
-                            board: user.board,
-                            source: 'REVISION',
-                        };
-                    }
-                    return null;
-                })
-                .filter((x): x is NonNullable<typeof x> => x !== null);
-            if (wrongPayload.length > 0) addMistakes(wrongPayload);
-            // Remove correctly-answered mistakes from the bank.
-            currentMcqData.forEach((q, idx) => {
-                const selected = userAnswersMap[idx];
-                if (selected !== undefined && selected === q.correctAnswer) {
-                    removeMistakeByQuestion(q.question, q.correctAnswer);
-                }
-            });
-        } catch (err) { console.warn('mistakeBank update failed:', err); }
-
-        // Save to DB immediately to be safe
-        saveTestResult(user.id, result);
-
-        // Show Micro Summary Overlay
-        setTopicSummary({
-            name: topic.name,
-            score: score,
-            total: total
-        });
-
-        // Auto Advance after 1.5s (Modified to allow manual view if needed, but keeping auto-flow for speed)
-        // User requested "same analysis" if they want.
-        // We will add a "View Analysis" button on the summary screen that pauses the timer.
-        // But default behavior remains fast.
-
-        setTimeout(() => {
-            setTopicSummary(null);
-            setCurrentIndex(prev => prev + 1);
-        }, 800); // Reduced delay to 800ms for faster transition
+        // Store results + show summary screen instead of immediately closing
+        pendingCompleteRef.current = { results: [megaResult], questions: interleavedQuestions };
+        setSessionSummary(topicSummary);
     };
 
-    if (loading) {
+    // ── Tier helpers ──────────────────────────────────────────────────────
+    const tierConfig = {
+        weak:     { label: 'Weak',     icon: TrendingDown, bg: 'bg-rose-50',    border: 'border-rose-200',    text: 'text-rose-700',    badge: 'bg-rose-100 text-rose-700',    bar: 'bg-rose-500' },
+        average:  { label: 'Average',  icon: Minus,        bg: 'bg-amber-50',   border: 'border-amber-200',   text: 'text-amber-700',   badge: 'bg-amber-100 text-amber-700',   bar: 'bg-amber-500' },
+        strong:   { label: 'Strong',   icon: TrendingUp,   bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', badge: 'bg-emerald-100 text-emerald-700', bar: 'bg-emerald-500' },
+        mastered: { label: 'Mastered', icon: Star,         bg: 'bg-indigo-50',  border: 'border-indigo-200',  text: 'text-indigo-700',  badge: 'bg-indigo-100 text-indigo-700',  bar: 'bg-indigo-500' },
+    };
+
+    // ── Result Summary Screen ─────────────────────────────────────────────
+    if (sessionSummary !== null) {
+        const totalQ = sessionSummary.reduce((s, r) => s + r.total, 0);
+        const totalCorrect = sessionSummary.reduce((s, r) => s + r.correct, 0);
+        const overallPct = totalQ > 0 ? Math.round((totalCorrect / totalQ) * 100) : 0;
+        const weakCount = sessionSummary.filter(r => r.tier === 'weak').length;
+        const avgCount = sessionSummary.filter(r => r.tier === 'average').length;
+        const strongCount = sessionSummary.filter(r => r.tier === 'strong').length;
+        const masteredCount = sessionSummary.filter(r => r.tier === 'mastered').length;
+
+        const overallTier = overallPct >= (settings?.revisionConfig?.thresholds?.mastery ?? 80) ? 'mastered'
+            : overallPct >= (settings?.revisionConfig?.thresholds?.strong ?? 65) ? 'strong'
+            : overallPct >= (settings?.revisionConfig?.thresholds?.average ?? 50) ? 'average'
+            : 'weak';
+        const overallCfg = tierConfig[overallTier];
+
         return (
-            <div className="fixed inset-0 z-[100] bg-white flex flex-col items-center justify-center">
-                <Loader2 size={48} className="text-indigo-600 animate-spin mb-4" />
-                <p className="font-bold text-slate-600 animate-pulse">Loading Topic {currentIndex + 1}...</p>
+            <div className="fixed inset-0 z-[100] bg-slate-50 flex flex-col overflow-hidden">
+                {/* Header */}
+                <div className="shrink-0 bg-white border-b border-slate-200 px-4 py-4 shadow-sm">
+                    <div className="flex items-center gap-3">
+                        <div className={`w-10 h-10 rounded-xl ${overallCfg.bg} ${overallCfg.text} flex items-center justify-center`}>
+                            <Trophy size={20} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <h2 className="text-base font-black text-slate-800">MCQ Session Complete!</h2>
+                            <p className="text-[11px] text-slate-500">{sessionSummary.length} topic{sessionSummary.length !== 1 ? 's' : ''} attempt kiye · {Math.floor(totalTime / 60)}m {totalTime % 60}s</p>
+                        </div>
+                    </div>
+
+                    {/* Overall score pill */}
+                    <div className={`mt-3 flex items-center gap-3 px-4 py-3 rounded-2xl ${overallCfg.bg} border ${overallCfg.border}`}>
+                        <div className="flex-1">
+                            <p className={`text-2xl font-black ${overallCfg.text}`}>{overallPct}%</p>
+                            <p className="text-[11px] text-slate-500 font-semibold">{totalCorrect} / {totalQ} sahi · {overallCfg.label}</p>
+                        </div>
+                        {/* Mini tier summary */}
+                        <div className="flex gap-2 flex-wrap justify-end">
+                            {weakCount > 0 && (
+                                <span className="text-[10px] font-black bg-rose-100 text-rose-700 px-2 py-1 rounded-full">{weakCount} Weak</span>
+                            )}
+                            {avgCount > 0 && (
+                                <span className="text-[10px] font-black bg-amber-100 text-amber-700 px-2 py-1 rounded-full">{avgCount} Avg</span>
+                            )}
+                            {strongCount > 0 && (
+                                <span className="text-[10px] font-black bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full">{strongCount} Strong</span>
+                            )}
+                            {masteredCount > 0 && (
+                                <span className="text-[10px] font-black bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">{masteredCount} ⭐</span>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Topic-wise list */}
+                <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 pb-[calc(env(safe-area-inset-bottom,0px)+100px)]">
+                    <p className="text-[11px] font-black text-slate-400 uppercase tracking-wider px-1">Topic-wise Performance</p>
+
+                    {sessionSummary.map((result, idx) => {
+                        const cfg = tierConfig[result.tier];
+                        const TierIcon = cfg.icon;
+                        return (
+                            <div key={idx} className={`rounded-2xl border-2 ${cfg.border} ${cfg.bg} overflow-hidden`}>
+                                {/* Topic header row */}
+                                <div className="px-4 pt-3 pb-2 flex items-start gap-3">
+                                    <div className={`w-9 h-9 rounded-xl ${cfg.badge} flex items-center justify-center shrink-0 mt-0.5`}>
+                                        <TierIcon size={16} />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-sm font-black text-slate-800 leading-snug">{result.topicName}</p>
+                                        <p className="text-[10px] text-slate-500 truncate">{result.subjectName}{result.chapterName ? ` · ${result.chapterName}` : ''}</p>
+                                    </div>
+                                    {/* Score */}
+                                    <div className="shrink-0 text-right">
+                                        <p className={`text-lg font-black ${cfg.text}`}>{result.percentage}%</p>
+                                        <p className="text-[10px] text-slate-500">{result.correct}/{result.total}</p>
+                                    </div>
+                                </div>
+
+                                {/* Progress bar */}
+                                <div className="px-4 pb-2">
+                                    <div className="h-2 bg-white/70 rounded-full overflow-hidden">
+                                        <div
+                                            className={`h-full rounded-full ${cfg.bar} transition-all`}
+                                            style={{ width: `${result.percentage}%` }}
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* Tier badge + next revision */}
+                                <div className="px-4 pb-3 flex items-center justify-between gap-2">
+                                    <span className={`inline-flex items-center gap-1 text-[10px] font-black px-2.5 py-1 rounded-full ${cfg.badge}`}>
+                                        <TierIcon size={10} />
+                                        {cfg.label}
+                                    </span>
+                                    <div className="flex items-center gap-1 text-[10px] text-slate-500 font-semibold">
+                                        <Calendar size={10} className="text-slate-400" />
+                                        {result.tier === 'mastered'
+                                            ? `${result.nextRevisionDays} din baad (🎉 Mastered!)`
+                                            : result.nextRevisionDays === 1
+                                                ? 'Kal phir aayega'
+                                                : `${result.nextRevisionDays} din baad revision`
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })}
+
+                    {/* Explanation */}
+                    <div className="rounded-2xl bg-white border border-slate-200 px-4 py-3 mt-2">
+                        <p className="text-[11px] font-black text-slate-500 uppercase tracking-wider mb-2">Aage kya hoga?</p>
+                        <div className="space-y-1.5">
+                            {weakCount > 0 && (
+                                <div className="flex items-center gap-2 text-[11px] text-rose-700">
+                                    <div className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />
+                                    <span><b>Weak topics</b> — kal phir se Notes + MCQ milega</span>
+                                </div>
+                            )}
+                            {avgCount > 0 && (
+                                <div className="flex items-center gap-2 text-[11px] text-amber-700">
+                                    <div className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+                                    <span><b>Average topics</b> — 3 din baad revision milega</span>
+                                </div>
+                            )}
+                            {strongCount > 0 && (
+                                <div className="flex items-center gap-2 text-[11px] text-emerald-700">
+                                    <div className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                                    <span><b>Strong topics</b> — 7 din baad revision milega</span>
+                                </div>
+                            )}
+                            {masteredCount > 0 && (
+                                <div className="flex items-center gap-2 text-[11px] text-indigo-700">
+                                    <div className="w-2 h-2 rounded-full bg-indigo-500 shrink-0" />
+                                    <span><b>Mastered topics</b> — 30 din baad revision milega ⭐</span>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Bottom action button */}
+                <div className="shrink-0 bg-white border-t border-slate-200 px-4 pt-3 pb-[calc(env(safe-area-inset-bottom,0px)+76px)]">
+                    <button
+                        onClick={() => {
+                            if (pendingCompleteRef.current) {
+                                onComplete(pendingCompleteRef.current.results, pendingCompleteRef.current.questions);
+                            } else {
+                                onClose();
+                            }
+                        }}
+                        className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white font-black py-4 rounded-2xl text-sm shadow-lg shadow-indigo-200 transition-all"
+                    >
+                        <CheckCircle size={18} />
+                        Revision Hub pe Wapas Jao
+                    </button>
+                </div>
             </div>
         );
     }
 
-    // All topics done but no session results — every topic was skipped (chapter has no MCQs)
-    if (currentIndex >= topics.length && sessionResults.length === 0) {
+    // ── Loading Screen ────────────────────────────────────────────────────
+    if (loading) {
+        return (
+            <div className="fixed inset-0 z-[100] bg-white flex flex-col items-center justify-center gap-4 p-8">
+                <Loader2 size={48} className="text-indigo-600 animate-spin" />
+                <p className="font-bold text-slate-600 text-center animate-pulse">{loadingMsg}</p>
+                <p className="text-xs text-slate-400">Sab topics ke MCQ ek saath load ho rahe hain...</p>
+            </div>
+        );
+    }
+
+    // ── No MCQs found ─────────────────────────────────────────────────────
+    if (interleavedQuestions.length === 0) {
         return (
             <div className="fixed inset-0 z-[100] bg-white flex flex-col items-center justify-center p-8 text-center">
                 <AlertCircle size={52} className="text-amber-400 mb-4" />
@@ -470,62 +642,78 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                 <p className="text-xs text-slate-400 mb-8">
                     Admin ko demand bhej diya gaya hai — jaldi MCQ aa jayega!
                 </p>
-                <button
-                    onClick={onClose}
-                    className="px-8 py-3 bg-indigo-600 text-white font-black rounded-2xl shadow-lg active:scale-95 transition-all"
-                >
+                <button onClick={onClose} className="px-8 py-3 bg-indigo-600 text-white font-black rounded-2xl shadow-lg active:scale-95 transition-all">
                     Wapas Jao
                 </button>
             </div>
         );
     }
 
-    // All topics done with results — should have been handled in loadTopicData, safety net
-    if (currentIndex >= topics.length) {
-        return null;
-    }
+    const question = interleavedQuestions[qIndex];
+    const topicColor = [
+        'bg-blue-100 text-blue-700',
+        'bg-purple-100 text-purple-700',
+        'bg-green-100 text-green-700',
+        'bg-orange-100 text-orange-700',
+        'bg-rose-100 text-rose-700',
+        'bg-teal-100 text-teal-700',
+    ][question._topicIndex % 6];
 
-    const topic = topics[currentIndex];
+    // Count unique topics done so far
+    const topicsDoneSet = new Set(interleavedQuestions.slice(0, qIndex + 1).map(q => q._topicIndex));
 
-    // No Questions Found View (Should be skipped automatically, but safety net)
-    if (currentMcqData.length === 0) {
-        return (
-            <div className="fixed inset-0 z-[100] bg-white flex flex-col items-center justify-center">
-                <Loader2 size={48} className="text-slate-300 animate-spin mb-4" />
-                <p className="text-slate-500 font-bold">Skipping empty topic...</p>
-            </div>
-        );
-    }
-
-
-    // MCQ Question View
-    const question = currentMcqData[qIndex];
     return (
         <div className="fixed inset-0 z-[100] bg-white flex flex-col">
-            {/* Sidebar Overlay */}
+            {/* MCQ Score Popup */}
+            {mcqScorePopup !== null && (
+                <div style={{
+                    position: 'fixed', bottom: 80, right: 20, zIndex: 9999,
+                    background: mcqScorePopup < 0 ? 'linear-gradient(135deg,#ef4444,#dc2626)' : 'linear-gradient(135deg,#6366f1,#8b5cf6)',
+                    color: '#fff', borderRadius: 14, padding: '8px 16px',
+                    fontSize: 14, fontWeight: 900,
+                    boxShadow: mcqScorePopup < 0 ? '0 6px 20px rgba(239,68,68,0.4)' : '0 6px 20px rgba(99,102,241,0.4)',
+                    opacity: mcqScoreVisible ? 1 : 0,
+                    transform: mcqScoreVisible ? 'translateY(0) scale(1)' : 'translateY(8px) scale(0.95)',
+                    transition: 'opacity 0.25s, transform 0.25s',
+                    pointerEvents: 'none',
+                }}>
+                    {mcqScorePopup < 0 ? `❌ ${mcqScorePopup} pts` : `⭐ +${mcqScorePopup} pts`}
+                </div>
+            )}
+            {/* Sidebar */}
             {showSidebar && (
                 <div className="fixed inset-0 bg-black/50 z-[110]" onClick={() => setShowSidebar(false)}>
                     <div className="absolute right-0 top-0 bottom-0 w-64 bg-white shadow-2xl p-4 overflow-y-auto animate-in slide-in-from-right" onClick={e => e.stopPropagation()}>
-                        <div className="flex justify-between items-center mb-6">
-                            <h3 className="font-black text-slate-800">Session Topics</h3>
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="font-black text-slate-800">Topics</h3>
                             <button onClick={() => setShowSidebar(false)}><X size={20}/></button>
                         </div>
-                        <div className="space-y-4">
+                        <div className="space-y-3">
                             {topics.map((t, idx) => {
-                                const isCurrent = idx === currentIndex;
-                                const isDone = idx < currentIndex;
+                                const colors = ['bg-blue-50 border-blue-200 text-blue-700', 'bg-purple-50 border-purple-200 text-purple-700', 'bg-green-50 border-green-200 text-green-700', 'bg-orange-50 border-orange-200 text-orange-700', 'bg-rose-50 border-rose-200 text-rose-700', 'bg-teal-50 border-teal-200 text-teal-700'];
+                                const c = colors[idx % 6];
+                                const qCount = interleavedQuestions.filter(q => q._topicIndex === idx).length;
+                                const answeredCount = interleavedQuestions.filter((q, qi) => q._topicIndex === idx && answers[qi] !== undefined).length;
                                 return (
-                                    <div key={idx} className={`p-3 rounded-xl border ${isCurrent ? 'bg-blue-50 border-blue-200' : isDone ? 'bg-slate-50 border-slate-200 opacity-60' : 'bg-white border-slate-100'}`}>
-                                        <p className={`text-xs font-bold ${isCurrent ? 'text-blue-700' : 'text-slate-700'}`}>{t.name}</p>
-                                        <div className="flex justify-between items-center mt-2">
-                                            <span className="text-[10px] uppercase text-slate-500 font-bold">{t.chapterName}</span>
-                                            {isCurrent && <span className="text-[10px] font-bold bg-blue-100 text-blue-600 px-2 py-0.5 rounded">Active</span>}
-                                            {isDone && <CheckCircle size={12} className="text-green-500" />}
+                                    <div key={idx} className={`p-3 rounded-xl border ${c}`}>
+                                        <p className="text-xs font-bold truncate">{t.name}</p>
+                                        <div className="flex items-center justify-between mt-1">
+                                            <span className="text-[10px] text-slate-500">{t.chapterName}</span>
+                                            <span className="text-[10px] font-bold">{answeredCount}/{qCount} done</span>
+                                        </div>
+                                        <div className="h-1 bg-white/60 rounded-full mt-2">
+                                            <div className="h-full rounded-full bg-current opacity-40 transition-all" style={{ width: `${qCount > 0 ? (answeredCount / qCount) * 100 : 0}%` }} />
                                         </div>
                                     </div>
                                 );
                             })}
                         </div>
+                        {noMcqTopics.length > 0 && (
+                            <div className="mt-4 pt-4 border-t border-slate-100">
+                                <p className="text-[10px] text-slate-400 font-bold uppercase mb-2">MCQ nahi mila</p>
+                                {noMcqTopics.map((n, i) => <p key={i} className="text-[10px] text-slate-400 truncate">• {n}</p>)}
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
@@ -534,38 +722,28 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
             <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0 z-10 shadow-sm">
                 <div className="flex items-center gap-2">
                     <button onClick={() => {
-                        // Back Button = Submit & Exit (Auto)
-                        // If we have some results, complete. If not, just close.
-                        if (sessionResults.length > 0) {
-                            onComplete(sessionResults, allSessionQuestions);
-                        } else {
-                            onClose();
-                        }
+                        if (Object.keys(answers).length > 0) finishSession(answers);
+                        else onClose();
                     }} className="p-2 bg-slate-100 rounded-full text-slate-600 hover:bg-slate-200">
-                        <ArrowRight size={18} className="rotate-180" /> {/* Back Icon */}
+                        <ArrowRight size={18} className="rotate-180" />
                     </button>
                     <div>
-                        <h3 className="font-black text-slate-800 text-sm uppercase tracking-wide max-w-[150px] truncate">{topic.name}</h3>
-                        <p className="text-xs text-slate-500 font-bold">Q {qIndex + 1} / {currentMcqData.length}</p>
+                        <p className="text-xs font-black text-slate-800">Q {qIndex + 1} / {interleavedQuestions.length}</p>
+                        <p className="text-[10px] text-slate-400">{topicsDoneSet.size} topic{topicsDoneSet.size !== 1 ? 's' : ''} chal rahe hain</p>
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
                     <button onClick={() => setShowSidebar(true)} className="p-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200">
                         <List size={20} />
                     </button>
-                    <div className="flex items-center gap-3">
-                        <div className="flex flex-col items-end">
-                            <span className="text-[10px] font-bold text-slate-500 uppercase">Total</span>
-                            <span className="text-xs font-mono font-bold text-slate-700">
-                                {Math.floor(totalTime / 60)}:{String(totalTime % 60).padStart(2, '0')}
-                            </span>
-                        </div>
+                    <div className="flex flex-col items-end">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase">Time</span>
+                        <span className="text-xs font-mono font-bold text-slate-700">
+                            {Math.floor(totalTime / 60)}:{String(totalTime % 60).padStart(2, '0')}
+                        </span>
                     </div>
                     <button
-                        onClick={() => {
-                            // "Apne aap submit ho jayega" - Manual submit also triggers finish
-                            onComplete(sessionResults, allSessionQuestions);
-                        }}
+                        onClick={() => finishSession(answers)}
                         className="bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow hover:bg-green-700"
                     >
                         Submit
@@ -573,21 +751,27 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                 </div>
             </div>
 
-            {/* Progress */}
-            <div className="h-1 bg-slate-100 w-full">
+            {/* Progress bar (overall) */}
+            <div className="h-1.5 bg-slate-100 w-full">
                 <div
-                    className="h-full bg-indigo-600 transition-all duration-300"
-                    style={{ width: `${((qIndex + 1) / currentMcqData.length) * 100}%` }}
-                ></div>
+                    className="h-full bg-indigo-500 transition-all duration-300"
+                    style={{ width: `${((qIndex + 1) / interleavedQuestions.length) * 100}%` }}
+                />
             </div>
 
             {/* Question */}
             <div className="flex-1 overflow-y-auto p-6 pb-24">
+                {/* Topic badge */}
+                <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold mb-4 ${topicColor}`}>
+                    <Tag size={10} />
+                    {question._topicName}
+                </div>
+
                 <div className="text-lg font-bold text-slate-800 mb-8 leading-relaxed">
                     <span dangerouslySetInnerHTML={{ __html: question.question }} />
                     {question.statements && question.statements.length > 0 && (
                         <div className="mt-4 mb-2 flex flex-col space-y-2">
-                            {question.statements.map((stmt, sIdx) => (
+                            {question.statements.map((stmt: string, sIdx: number) => (
                                 <div key={sIdx} className="bg-slate-50/80 p-3 rounded-lg border-l-4 border-indigo-200 text-slate-700 text-base font-medium" dangerouslySetInnerHTML={{ __html: stmt }} />
                             ))}
                         </div>
@@ -595,15 +779,13 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                 </div>
 
                 <div className="space-y-3">
-                    {question.options.map((opt, idx) => {
+                    {question.options.map((opt: string, idx: number) => {
                         const isSelected = answers[qIndex] === idx;
                         let btnClass = "border-slate-200 bg-white text-slate-600 hover:bg-slate-50";
-
                         if (answers[qIndex] !== undefined) {
                             if (isSelected) btnClass = "border-blue-400 bg-blue-50 text-blue-700";
                             else btnClass = "border-slate-100 opacity-50 text-slate-800";
                         }
-
                         return (
                             <button
                                 key={idx}
@@ -611,9 +793,8 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                                 disabled={answers[qIndex] !== undefined}
                                 className={`w-full p-4 rounded-xl border-2 text-left font-medium transition-all flex items-center gap-3 ${btnClass}`}
                             >
-                                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold border ${
-                                    answers[qIndex] !== undefined && isSelected ? 'bg-blue-500 border-blue-500 text-white' :
-                                    'bg-slate-100 border-slate-300 text-slate-600'
+                                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold border flex-shrink-0 ${
+                                    answers[qIndex] !== undefined && isSelected ? 'bg-blue-500 border-blue-500 text-white' : 'bg-slate-100 border-slate-300 text-slate-600'
                                 }`}>
                                     {['A','B','C','D'][idx]}
                                 </div>

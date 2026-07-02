@@ -288,7 +288,7 @@ export const ALL_FEATURES: Feature[] = [
     {
         id: 'REVISION_MCQ_MANAGER',
         label: 'Class MCQ Manager',
-        group: 'REVISION',
+        group: 'CONTENT',
         adminVisible: true,
         adminTab: 'REVISION_MCQ_MANAGER',
         icon: 'BookOpenCheck',
@@ -695,7 +695,7 @@ export const ALL_FEATURES: Feature[] = [
     {
         id: 'ADMIN_EFFECTS',
         label: 'Animations',
-        group: 'NSTA_CONTROL',
+        group: 'GAME',
         surfaceLevel: 3,
         adminVisible: true,
         adminTab: 'CONFIG_EFFECTS',
@@ -817,7 +817,7 @@ export const ALL_FEATURES: Feature[] = [
     {
         id: 'ADMIN_NSTA_CONTROL',
         label: 'NSTA Control',
-        group: 'NSTA_CONTROL',
+        group: 'GAME',
         surfaceLevel: 3,
         adminVisible: true,
         adminTab: 'NSTA_CONTROL',
