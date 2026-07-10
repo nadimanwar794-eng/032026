@@ -5,7 +5,8 @@ import { AdminWhiteBoard } from './AdminWhiteBoard';
 import { rotateScreen, isDesktopModeOn, setDesktopMode } from '../utils/displayPrefs';
 import { saveSuggestion, auth, findDuplicateSuggestionByPoint, incrementSuggestionReportCount, updateSuggestionLeaderboard } from '../firebase';
 import { speakText, stopSpeech } from '../utils/textToSpeech';
-import { splitIntoTopics, NotesTopic as Topic } from '../utils/notesSplitter';
+import { splitIntoTopics, splitNoteSections, NotesTopic as Topic } from '../utils/notesSplitter';
+import { isFreeStarLocked } from '../utils/levelSystem';
 import { READING_FONTS, TOP_10_READING_FONTS, ensureReadingFontLoaded, getReadingFontById, ReadingFont } from '../utils/notesFonts';
 import { ReadingStylePopover } from './ReadingStylePopover';
 import { ReadingScoreSession, ReadingScoreState, ReadingScoreConfig } from '../utils/readingScoreEngine';
@@ -202,11 +203,50 @@ interface Props {
   sourceMeta?: { lessonTitle?: string; pageNo?: string; subject?: string; classLevel?: string; };
   /** Called when admin taps the Edit button in the slim bar — opens content editor for this note. Admin/SubAdmin only. */
   onAdminEdit?: () => void;
+  /** Current user level (1–15). Used to enforce star-lock for Free users at L1–L4.
+   *  Falls back to readingScoreConfig.userLevel when omitted; defaults to 5 (unlocked) if neither is provided. */
+  userLevel?: number;
 }
 
 
-export const ChunkedNotesReader: React.FC<Props> = ({ content, className, language = 'hi-IN', topBarLabel, autoStart, onComplete, onReadingStart, hideTopBar, initialIndex, onPositionChange, noteKey, isStarred, onStarToggle, searchQuery, getStarCount, textColorOverride, preferChunkMode, onDesktopModeChange, hideDesktopToggle, suppressStickyControls, htmlContent, isUltraUser, ultraHtmlRemaining, userCredits = 0, htmlUnlockCost = 5, onSpendCredits, onHtmlOpen, onUpgradeClick, isBasicUser = false, basicHtmlRemaining = 0, onHtmlViewChange, onMoreOptions, triggerControlsRef, hideInline3dot, hideFix, onBack, onSaveOffline, isSavedOffline, readingScoreConfig, isAdmin, useImportantMark2, isMarked2, onMark2Toggle, isAdminImportant, sourceMeta, onAdminEdit }) => {
-  const topics = useMemo(() => splitIntoTopics(content), [content]);
+export const ChunkedNotesReader: React.FC<Props> = ({ content, className, language = 'hi-IN', topBarLabel, autoStart, onComplete, onReadingStart, hideTopBar, initialIndex, onPositionChange, noteKey, isStarred, onStarToggle, searchQuery, getStarCount, textColorOverride, preferChunkMode, onDesktopModeChange, hideDesktopToggle, suppressStickyControls, htmlContent, isUltraUser, ultraHtmlRemaining, userCredits = 0, htmlUnlockCost = 5, onSpendCredits, onHtmlOpen, onUpgradeClick, isBasicUser = false, basicHtmlRemaining = 0, onHtmlViewChange, onMoreOptions, triggerControlsRef, hideInline3dot, hideFix, onBack, onSaveOffline, isSavedOffline, readingScoreConfig, isAdmin, useImportantMark2, isMarked2, onMark2Toggle, isAdminImportant, sourceMeta, onAdminEdit, userLevel }) => {
+  // ── "Suno" 3-section chunk notes (📖 Book Text / 📝 Smart Notes / 💡 आसान समझ) ──
+  // When the pasted content repeats these three labelled sections per topic,
+  // split them out so the reader can show three separate pages (Book Text,
+  // Smart Notes, Explanation) instead of mixing everything into one list.
+  const noteSections = useMemo(() => splitNoteSections(content), [content]);
+
+  // ── Plan-based tab access ────────────────────────────────────────────────────
+  // Free  → only Book Text
+  // Basic → Book Text + Smart Notes
+  // Ultra → all three (Book Text + Smart Notes + आसान समझ)
+  const _canAccessSmart   = isUltraUser || isBasicUser || isAdmin;
+  const _canAccessExplain = isUltraUser || isAdmin;
+
+  const NOTE_PAGES = useMemo(() => {
+    if (!noteSections) return [] as { key: 'book' | 'smart' | 'explain'; label: string; badge?: string; badgeColor?: string; locked: boolean; text: string }[];
+    return [
+      { key: 'book'    as const, label: '📖 Book Text',    badge: undefined,    badgeColor: undefined, locked: false,               text: noteSections.bookText    },
+      { key: 'smart'   as const, label: '📝 Smart Notes',  badge: '⭐ Basic',   badgeColor: 'amber',   locked: !_canAccessSmart,    text: noteSections.smartNotes  },
+      { key: 'explain' as const, label: '💡 आसान समझ',    badge: '👑 Ultra',   badgeColor: 'purple',  locked: !_canAccessExplain,  text: noteSections.explanation },
+    ].filter(p => p.text.trim());
+  }, [noteSections, _canAccessSmart, _canAccessExplain]);
+
+  const [notePage, setNotePage] = useState<'book' | 'smart' | 'explain'>('book');
+
+  // If the current page is locked or has no content, fall back to first unlocked page.
+  useEffect(() => {
+    if (NOTE_PAGES.length === 0) return;
+    const current = NOTE_PAGES.find(p => p.key === notePage);
+    if (!current || current.locked) setNotePage(NOTE_PAGES[0].key);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [NOTE_PAGES]);
+
+  const activeNoteContent = NOTE_PAGES.length > 0
+    ? (NOTE_PAGES.find(p => p.key === notePage && !p.locked) || NOTE_PAGES[0]).text
+    : content;
+
+  const topics = useMemo(() => splitIntoTopics(activeNoteContent), [activeNoteContent]);
 
   // ── Strips [span_N](start_span) / [span_N](end_span) TTS markers ──
   const stripSpanMarkers = (s: string) =>
@@ -693,6 +733,13 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
   const isTopicImportant = useCallback((text: string) =>
     (isStarred && isStarred(text)) || (isMarked2 && isMarked2(text)) || (isAdminImportant && isAdminImportant(text)),
     [isStarred, isMarked2, isAdminImportant]);
+
+  // Star lock: Free-tier users are locked at Level 1–4; unlocks at Level 5.
+  // Basic/Ultra/Admin users always have star access.
+  // Fallback order: explicit userLevel prop → readingScoreConfig.userLevel → 5 (safe/unlocked).
+  const _effectiveUserLevel = userLevel ?? readingScoreConfig?.userLevel ?? 5;
+  const freeStarLocked = !isUltraUser && !isBasicUser && !isAdmin
+    && isFreeStarLocked(_effectiveUserLevel);
   const lastScrollY = useRef(0);
   const [toolbarHidden, setToolbarHidden] = useState(false);
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -965,6 +1012,19 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
     stopSpeech();
   }, []);
 
+  // Switching between the Book Text / Smart Notes / आसान समझ pages swaps out
+  // the whole topic list — stop any in-progress reading so it doesn't keep
+  // reading lines from the page the student just left.
+  const notePageChangedOnce = useRef(false);
+  useEffect(() => {
+    if (!notePageChangedOnce.current) {
+      notePageChangedOnce.current = true;
+      return;
+    }
+    stopAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notePage]);
+
   // Stop on unmount — skip if background play mode is active
   useEffect(() => {
     return () => {
@@ -1038,7 +1098,7 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
     const t = setTimeout(() => { ttsIsAutoRef.current = true; startFromIndex(0); }, 200);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoStart, content]);
+  }, [autoStart, content, notePage]);
 
   // When a `searchQuery` is provided (Home search → click result), locate the
   // first topic that contains the phrase, scroll to it, highlight it, and
@@ -1049,7 +1109,7 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
     if (!q) return;
     if (activeTopicList.length === 0) return;
     // Avoid re-firing for the same query on incidental re-renders.
-    const sig = `${q}::${activeTopicList.length}`;
+    const sig = `${q}::${notePage}::${activeTopicList.length}`;
     if (searchHandledRef.current === sig) return;
     searchHandledRef.current = sig;
 
@@ -1062,7 +1122,7 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
     }, 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchQuery, content]);
+  }, [searchQuery, content, notePage]);
 
   if (!isHtmlContent && activeTopicList.length === 0) {
     return (
@@ -1222,18 +1282,24 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                 <ChevronRight size={15} className="rotate-180" />
               </button>
             )}
-            {/* Counter / READING ACTIVE label */}
+            {/* Counter / READING ACTIVE label / Lesson name */}
             <div className="flex-1 min-w-0 flex items-center gap-1.5 overflow-hidden">
-              <span className="shrink-0 text-[11px] font-black tabular-nums text-slate-600 select-none">
-                {isReading && activeIdx !== null
-                  ? `${activeIdx + 1}/${activeTopicList.length}`
-                  : activeTopicList.length > 0
-                    ? `1/${activeTopicList.length}`
-                    : ''}
-              </span>
-              {isReading && (
-                <span className="shrink-0 text-[8px] font-black uppercase tracking-[0.14em] text-indigo-400 select-none">
-                  READING ACTIVE
+              {isReading ? (
+                <>
+                  <span className="shrink-0 text-[11px] font-black tabular-nums text-slate-600 select-none">
+                    {activeIdx !== null ? `${activeIdx + 1}/${activeTopicList.length}` : `1/${activeTopicList.length}`}
+                  </span>
+                  <span className="shrink-0 text-[8px] font-black uppercase tracking-[0.14em] text-indigo-400 select-none">
+                    READING ACTIVE
+                  </span>
+                </>
+              ) : topBarLabel ? (
+                <span className="truncate text-[12px] font-black text-slate-700 select-none">
+                  {topBarLabel}
+                </span>
+              ) : (
+                <span className="shrink-0 text-[11px] font-black tabular-nums text-slate-600 select-none">
+                  {activeTopicList.length > 0 ? `1/${activeTopicList.length}` : ''}
                 </span>
               )}
               {/* Live session score */}
@@ -1944,6 +2010,58 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
         );
       })()}
 
+      {/* 📖📝💡 Note page tabs — Book Text / Smart Notes / आसान समझ each get
+          their own page, read the same tap-to-listen way as any other chunk
+          notes. Only shown when the pasted content actually has all three
+          labelled sections. */}
+      {NOTE_PAGES.length > 1 && (
+        <div className="flex gap-1 px-0.5 pt-2 pb-1 mb-2">
+          {NOTE_PAGES.map(p => {
+            const isActivePage = notePage === p.key;
+            const isLocked = p.locked;
+            // Badge colours — dimmed when locked
+            const badgeClasses = isLocked
+              ? 'bg-slate-200 text-slate-400'
+              : p.badgeColor === 'purple'
+              ? (isActivePage ? 'bg-purple-200 text-purple-900' : 'bg-purple-100 text-purple-700')
+              : p.badgeColor === 'amber'
+              ? (isActivePage ? 'bg-amber-200 text-amber-900' : 'bg-amber-100 text-amber-700')
+              : '';
+            return (
+              <button
+                key={p.key}
+                type="button"
+                onClick={() => {
+                  if (isLocked) {
+                    if (onUpgradeClick) onUpgradeClick();
+                  } else {
+                    setNotePage(p.key);
+                  }
+                }}
+                className={`flex-1 flex flex-col items-center justify-center gap-0.5 text-[11px] font-black px-1 py-2 rounded-xl border transition-all active:scale-95 ${
+                  isLocked
+                    ? 'bg-slate-100 text-slate-400 border-slate-200 opacity-75'
+                    : isActivePage
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                    : 'bg-slate-50 text-slate-500 border-slate-200'
+                }`}
+                title={isLocked ? `${p.badge} plan chahiye — upgrade karo` : undefined}
+              >
+                <span className="flex items-center gap-0.5">
+                  {isLocked && <span className="text-[10px]">🔒</span>}
+                  {p.label}
+                </span>
+                {p.badge && (
+                  <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full leading-none ${badgeClasses}`}>
+                    {p.badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* Topic list — tap any line to start TTS from that line */}
       <div className="space-y-1.5">
         {activeTopicList.map((topic, idx) => {
@@ -2063,25 +2181,43 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                   then tap the star. ~28px hit area for easy tapping. */}
               {/* Regular star button — hidden when admin is in Mark 2 mode */}
               {onStarToggle && isActive && !(isAdmin && useImportantMark2) && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    try { if (navigator.vibrate) navigator.vibrate(40); } catch {}
-                    onStarToggle(topic.text);
-                  }}
-                  onPointerDown={(e) => { e.stopPropagation(); }}
-                  style={{ width: '28px', height: '28px', padding: 0 }}
-                  className={`absolute right-1.5 top-1/2 -translate-y-1/2 rounded-full inline-flex items-center justify-center transition-all shadow-sm border-2 z-10 ${
-                    starred
-                      ? 'text-amber-600 bg-amber-100 border-amber-400 hover:bg-amber-200'
-                      : 'text-amber-500 bg-white border-amber-300 hover:bg-amber-50'
-                  }`}
-                  aria-label={starred ? 'Remove star' : 'Star this note'}
-                  title={starred ? 'Tap to un-star' : 'Tap to add to Important Notes'}
-                >
-                  <Star size={15} className={starred ? 'fill-amber-500' : ''} />
-                </button>
+                freeStarLocked ? (
+                  /* Free L1–L4: show locked star — tapping shows upgrade hint */
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onUpgradeClick) onUpgradeClick();
+                    }}
+                    onPointerDown={(e) => { e.stopPropagation(); }}
+                    style={{ width: '28px', height: '28px', padding: 0 }}
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-full inline-flex items-center justify-center transition-all shadow-sm border-2 z-10 bg-slate-100 border-slate-300 text-slate-400"
+                    aria-label="Star locked — reach Level 5 to unlock"
+                    title="⭐ Level 5 par unlock hoga | Basic/Ultra se bhi available"
+                  >
+                    🔒
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      try { if (navigator.vibrate) navigator.vibrate(40); } catch {}
+                      onStarToggle(topic.text);
+                    }}
+                    onPointerDown={(e) => { e.stopPropagation(); }}
+                    style={{ width: '28px', height: '28px', padding: 0 }}
+                    className={`absolute right-1.5 top-1/2 -translate-y-1/2 rounded-full inline-flex items-center justify-center transition-all shadow-sm border-2 z-10 ${
+                      starred
+                        ? 'text-amber-600 bg-amber-100 border-amber-400 hover:bg-amber-200'
+                        : 'text-amber-500 bg-white border-amber-300 hover:bg-amber-50'
+                    }`}
+                    aria-label={starred ? 'Remove star' : 'Star this note'}
+                    title={starred ? 'Tap to un-star' : 'Tap to add to Important Notes'}
+                  >
+                    <Star size={15} className={starred ? 'fill-amber-500' : ''} />
+                  </button>
+                )
               )}
               {/* Important Mark 2 button — only visible to admins when Mark 2 mode is ON */}
               {isAdmin && useImportantMark2 && onMark2Toggle && (

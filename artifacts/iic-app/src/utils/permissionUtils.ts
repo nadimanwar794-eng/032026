@@ -1,5 +1,6 @@
 import { SystemSettings, User } from '../types';
 import { ALL_FEATURES } from './featureRegistry';
+import { getLevelFromScore } from './levelSystem';
 
 export type UserTier = 'FREE' | 'BASIC' | 'ULTRA';
 
@@ -41,6 +42,161 @@ export const getUserTier = (user: User | null): UserTier => {
 
     // Default to BASIC for any other premium status
     return 'BASIC';
+};
+
+/**
+ * HTML se locked data-tier blocks hata deta hai — readable/chunked mode ke liye.
+ * CSS gating sirf styled mode mein kaam karta hai; plain-text path ke liye yeh zaroor hai.
+ * - FREE  → data-tier="basic" aur data-tier="ultra" dono remove
+ * - BASIC → data-tier="ultra" remove
+ * - ULTRA → kuch nahi remove
+ */
+export const filterHtmlByTier = (html: string, tier: UserTier): string => {
+    if (tier === 'ULTRA') return html; // sab dikhao
+    try {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        const tiersToRemove: string[] = tier === 'FREE' ? ['basic', 'ultra'] : ['ultra'];
+        tiersToRemove.forEach(t => {
+            doc.querySelectorAll(`[data-tier="${t}"]`).forEach(el => el.remove());
+        });
+        return doc.body.innerHTML;
+    } catch {
+        // DOMParser unavailable (SSR/test) — fallback: strip data-tier blocks via regex
+        let result = html;
+        const tiersToRemove: string[] = tier === 'FREE' ? ['basic', 'ultra'] : ['ultra'];
+        tiersToRemove.forEach(t => {
+            result = result.replace(
+                new RegExp(`<[^>]+data-tier="${t}"[^>]*>[\\s\\S]*?<\\/[^>]+>`, 'gi'),
+                ''
+            );
+        });
+        return result;
+    }
+};
+
+/**
+ * Auto-detects emoji section markers in HTML notes content and wraps each
+ * section in an appropriate `data-tier` div so the existing CSS + JS gating works.
+ *
+ * Marker → tier:
+ *   📖 Book Text / 📌 TOC  → FREE  (no wrapper — visible to all)
+ *   📝 Smart Notes         → data-tier="basic"
+ *   💡 Explanation         → data-tier="ultra"
+ *   ⚠️ / ⚠ Exam tips      → data-tier="ultra"
+ *
+ * Skipped when the HTML already contains data-tier attributes (admin-tagged),
+ * or when no tier markers are present (fast-path).
+ */
+export const injectSectionTierTags = (html: string): string => {
+    if (!html || /data-tier=/.test(html)) return html;
+    // Fast-path: no tier markers at all → nothing to do
+    if (!/📝|💡|⚠️|⚠/.test(html)) return html;
+
+    const TIER_MAP: Array<{ markers: string[]; tier: 'basic' | 'ultra' }> = [
+        { markers: ['📝'], tier: 'basic' },
+        { markers: ['💡', '⚠️', '⚠'], tier: 'ultra' },
+    ];
+    const FREE_MARKERS = ['📖', '📌'];
+
+    const getTier = (text: string): 'basic' | 'ultra' | 'free' | null => {
+        for (const { markers, tier } of TIER_MAP) {
+            if (markers.some(m => text.includes(m))) return tier;
+        }
+        if (FREE_MARKERS.some(m => text.includes(m))) return 'free';
+        return null;
+    };
+
+    /** Walk down single-block-child wrappers until we reach a container that
+     *  has at least one tier-marked heading as a DIRECT child, or we can't go
+     *  deeper. This handles the common case of content wrapped in one or more
+     *  outer <div>/<section> elements. */
+    const findContainer = (root: Element): Element => {
+        let el = root;
+        for (;;) {
+            const directHeadingWithMarker = Array.from(el.children).some(
+                c => /^h[1-6]$/i.test(c.tagName) && /📝|💡|⚠️|⚠/.test(c.textContent || '')
+            );
+            if (directHeadingWithMarker) return el;
+            // Dive into a single block-level wrapper child
+            if (el.children.length === 1 && /^(div|section|article|main)$/i.test(el.children[0].tagName)) {
+                el = el.children[0];
+            } else {
+                break;
+            }
+        }
+        return el; // best-effort fallback
+    };
+
+    try {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        const container = findContainer(doc.body);
+
+        // Snapshot before any mutation so moves don't corrupt iteration
+        const children = Array.from(container.children);
+
+        let currentWrapper: Element | null = null;
+
+        children.forEach(el => {
+            const isHeading = /^h[1-6]$/i.test(el.tagName);
+
+            if (isHeading) {
+                const text = el.textContent || '';
+                const tier = getTier(text);
+
+                if (tier === 'basic' || tier === 'ultra') {
+                    // Start a new gated section wrapper
+                    currentWrapper = doc.createElement('div');
+                    currentWrapper.setAttribute('data-tier', tier);
+                    container.insertBefore(currentWrapper, el);
+                    currentWrapper.appendChild(el);
+                } else if (tier === 'free') {
+                    // Explicit free-section heading — close any gated wrapper
+                    currentWrapper = null;
+                    // el stays in container (no move)
+                } else {
+                    // Unmarked sub-heading → keep in current gated wrapper if open
+                    if (currentWrapper) currentWrapper.appendChild(el);
+                }
+            } else {
+                if (currentWrapper) currentWrapper.appendChild(el);
+            }
+        });
+
+        return doc.body.innerHTML;
+    } catch {
+        return html; // DOMParser unavailable (SSR/test env) — return unmodified
+    }
+};
+
+/**
+ * Tier-based notes content visibility for Class 6-12:
+ * - First lesson of each subject → sab dikhega (ALL free)
+ * - Level 8+ → Smart Notes permanently free (BASIC tier)
+ * - Level 10+ → Explanation bhi permanently free (ULTRA tier)
+ * - Baaki subscription tier se control hoga
+ */
+export const getEffectiveNotesTier = (
+    user: User | null,
+    isFirstLesson: boolean,
+): UserTier => {
+    // First lesson → sab free (ULTRA = max)
+    if (isFirstLesson) return 'ULTRA';
+
+    const level = getLevelFromScore(user?.totalScore || 0);
+    const subTier = getUserTier(user);
+
+    // Level 10+ → Explanation bhi permanently free
+    if (level >= 10) return 'ULTRA';
+
+    // Level 8+ → Smart Notes permanently free, Explanation subscription se
+    if (level >= 8) {
+        return subTier === 'ULTRA' ? 'ULTRA' : 'BASIC';
+    }
+
+    // Level < 8 → sirf subscription tier
+    return subTier;
 };
 
 /**

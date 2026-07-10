@@ -599,6 +599,42 @@ export const ALL_FEATURES: Feature[] = [
         color: 'amber'
     },
     {
+        id: 'COACHING_CENTRES',
+        label: 'Coaching Centres',
+        group: 'CORE',
+        surfaceLevel: 3,
+        adminVisible: true,
+        adminTab: 'COACHING_CENTRES',
+        requiresSuperAdmin: true,
+        icon: 'Building2',
+        color: 'violet',
+        description: 'Coaching centres create karo, admin assign karo, aur subscriptions manage karo.'
+    },
+    {
+        id: 'COACHING_MANAGER',
+        label: '🏫 Coaching Manager',
+        group: 'CONTENT',
+        surfaceLevel: 2,
+        adminVisible: false, // Only accessible to Coaching Admins via CoachingAdminPanel
+        adminTab: 'COACHING_MANAGER',
+        requiredPermission: 'MANAGE_CONTENT',
+        icon: 'GraduationCap',
+        color: 'emerald',
+        description: 'Students, fee collection, test results — poora school jaisa system coaching ke liye.'
+    },
+    {
+        id: 'COACHING_HOMEWORK',
+        label: 'Coaching Homework',
+        group: 'CONTENT',
+        surfaceLevel: 3,
+        adminVisible: false, // Only accessible to Coaching Admins via CoachingAdminPanel
+        adminTab: 'COACHING_HOMEWORK',
+        requiredPermission: 'MANAGE_CONTENT',
+        icon: 'School',
+        color: 'indigo',
+        description: 'Coaching-wise date-based homework cards manage karein — students ke home screen pe dikhenge.'
+    },
+    {
         id: 'ADMIN_UNIVERSAL_PLAYLIST',
         label: 'Universal Playlist',
         group: 'CONTENT',

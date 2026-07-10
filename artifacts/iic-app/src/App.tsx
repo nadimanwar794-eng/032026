@@ -27,12 +27,15 @@ const AdminDashboard = lazy(() => import('./components/AdminDashboard').then(m =
 import { StudentDashboard } from './components/StudentDashboard';
 const SchoolEcosystem = lazy(() => import('./components/school/SchoolEcosystem').then(m => ({ default: m.SchoolEcosystem })));
 import { getSchoolUserProfile } from './school-firebase';
+const CoachingEcosystem = lazy(() => import('./components/coaching/CoachingEcosystem').then(m => ({ default: m.CoachingEcosystem })));
+import { getCoachingUserProfile } from './coaching-firebase';
 import { AudioStudio } from './components/AudioStudio';
 import { PremiumModal } from './components/PremiumModal';
 import { LoadingOverlay } from './components/LoadingOverlay';
 import { RulesPage } from './components/RulesPage';
 import { IICPage } from './components/IICPage';
 const WeeklyTestView = lazy(() => import('./components/WeeklyTestView').then(m => ({ default: m.WeeklyTestView })));
+const UniversalChat = lazy(() => import('./components/UniversalChat').then(m => ({ default: m.UniversalChat })));
 const MarksheetCard = lazy(() => import('./components/MarksheetCard').then(m => ({ default: m.MarksheetCard })));
 import { CreditConfirmationModal } from './components/CreditConfirmationModal';
 import { CustomAlert, CustomConfirm } from './components/CustomDialogs';
@@ -44,12 +47,14 @@ import { logErrorToFirebase, setErrorLoggerUser } from './utils/errorLogger';
 import { initPerfMode } from './utils/performanceMode';
 import { CreditToast } from './components/CreditToast';
 import { generateDailyChallengeQuestions } from './utils/challengeGenerator';
-import { BrainCircuit, Globe, LogOut, LayoutDashboard, BookOpen, Headphones, HelpCircle, Newspaper, KeyRound, Lock, X, ShieldCheck, FileText, UserPlus, EyeOff, WifiOff, Cloud, ArrowLeft, ExternalLink } from 'lucide-react';
+import { BrainCircuit, Globe, LogOut, LayoutDashboard, BookOpen, Headphones, HelpCircle, Newspaper, KeyRound, Lock, X, ShieldCheck, FileText, UserPlus, EyeOff, WifiOff, Cloud, ArrowLeft, ExternalLink } from 'lucide-react'; // eslint-disable-line @typescript-eslint/no-unused-vars
 import { SUPPORT_EMAIL, APP_VERSION } from './constants';
 import { StudentTab, PendingReward, MCQResult, SubscriptionHistoryEntry } from './types';
 
 const App: React.FC = () => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+  const [appMcqCommunityDraft, setAppMcqCommunityDraft] = useState<{question: string; options: [string,string,string,string]; correctAnswer: number; explanation: string} | null>(null);
 
   const [isAppLoading, setIsAppLoading] = useState(() => sessionStorage.getItem('nst_has_loaded') !== 'true');
 
@@ -1483,6 +1488,15 @@ const App: React.FC = () => {
       }
     } catch (_) { /* not a school user, continue normal flow */ }
 
+    // Check if this user is a Coaching Ecosystem user
+    try {
+      const coachingProfile = await getCoachingUserProfile(user.id);
+      if (coachingProfile) {
+        setState(prev => ({ ...prev, user, view: 'COACHING_ECOSYSTEM' as any }));
+        return;
+      }
+    } catch (_) { /* not a coaching user, continue normal flow */ }
+
     // Check if onboarding is needed
     if ((user.role === 'STUDENT' || user.role === 'TEACHER') && !user.profileCompleted) {
         setState(prev => ({
@@ -2531,12 +2545,8 @@ const App: React.FC = () => {
       // 1. Content -> Chapters
       if (prev.view === 'LESSON') return { ...prev, view: 'CHAPTERS', lessonContent: null };
 
-      // 2. Chapters -> Dashboard (for Students) OR Subjects (Admin)
+      // 2. Chapters -> Subjects (one level back for everyone)
       if (prev.view === 'CHAPTERS') {
-          // If Student, go DIRECTLY to Dashboard. Don't unwind to subjects/boards.
-          if (prev.user?.role === 'STUDENT' || prev.originalAdmin) {
-              return { ...prev, view: 'STUDENT_DASHBOARD', selectedChapter: null, selectedSubject: null };
-          }
           return { ...prev, view: 'SUBJECTS', selectedChapter: null };
       }
 
@@ -2560,6 +2570,48 @@ const App: React.FC = () => {
       return { ...prev, view: 'STUDENT_DASHBOARD' as any };
     });
   };
+
+  // --- HARDWARE / BROWSER BACK BUTTON (App-level views) ---
+  // StudentDashboard manages its own popstate trap internally (with its own
+  // pushState + re-trap pattern). This handler mirrors that pattern for every
+  // view OUTSIDE StudentDashboard (BOARDS, CLASSES, STREAMS, SUBJECTS, CHAPTERS,
+  // LESSON) so the device/browser back button calls goBack() instead of exiting.
+  //
+  // KEY DESIGN:
+  //  - Registered ONCE on mount ([] deps). Uses refs so the handler always reads
+  //    current state without stale closures. This avoids Chrome's race condition
+  //    where an async-effect-based trap (useEffect[view]) hasn't pushed yet before
+  //    the user's second back press arrives.
+  //  - Re-traps IMMEDIATELY inside the handler (same tick), guaranteeing a slot
+  //    exists for the next press before React paints the next frame.
+  //  - When view IS 'STUDENT_DASHBOARD', the handler bails out — StudentDashboard's
+  //    own listener (registered on SD mount) takes full control. Both listeners
+  //    co-exist safely: App handler returns early, SD handler acts normally.
+
+  const _goBackRef = React.useRef(goBack);
+  _goBackRef.current = goBack; // refresh every render — no stale closure
+
+  const _viewRef = React.useRef(state.view);
+  _viewRef.current = state.view; // always-fresh view without triggering effects
+
+  useEffect(() => {
+    // Push the initial trap so the very first back press is captured.
+    try { window.history.pushState({ __appNavTrap: true }, ''); } catch {}
+
+    const onPopState = () => {
+      // STUDENT_DASHBOARD: SD's own handler takes over — don't interfere.
+      if (_viewRef.current === 'STUDENT_DASHBOARD') return;
+
+      // Re-trap FIRST — before any navigation logic — so Chrome Android registers
+      // a new history entry immediately and never sees canGoBack() = false.
+      try { window.history.pushState({ __appNavTrap: true }, ''); } catch {}
+
+      _goBackRef.current();
+    };
+
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []); // mount-once — refs keep everything fresh
 
   // --- OFFLINE INDICATOR (non-blocking) ---
   // Earlier the entire app was locked behind a full-screen "Internet Not Connected"
@@ -2862,6 +2914,20 @@ const App: React.FC = () => {
                     </Suspense>
                   </ErrorBoundary>
                 )}
+
+                {(state.view as any) === 'COACHING_ECOSYSTEM' && state.user && (
+                  <ErrorBoundary fallbackLabel="Coaching Ecosystem" resetKey="coaching">
+                    <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><div className="w-10 h-10 border-4 border-violet-500 border-t-transparent rounded-full animate-spin" /></div>}>
+                      <CoachingEcosystem
+                        uid={state.user.id}
+                        email={state.user.email || ''}
+                        displayName={state.user.name || ''}
+                        isSuperAdmin={state.user.role === 'ADMIN' || state.user.role === 'SUB_ADMIN'}
+                        onBack={() => setState(prev => ({ ...prev, view: 'STUDENT_DASHBOARD' as any }))}
+                      />
+                    </Suspense>
+                  </ErrorBoundary>
+                )}
                 
                 {/* ACTIVE WEEKLY TEST OVERRIDE */}
                 {activeWeeklyTest ? (
@@ -2912,6 +2978,7 @@ const App: React.FC = () => {
                                   }
                               }}
                               onOpenSchool={() => setState(prev => ({...prev, view: 'SCHOOL_ECOSYSTEM' as any}))}
+                              onOpenCoaching={() => setState(prev => ({...prev, view: 'COACHING_ECOSYSTEM' as any}))}
                           />
                         </ErrorBoundary>
                     )
@@ -2967,6 +3034,7 @@ const App: React.FC = () => {
                         const _handleNextPdf = (_isPdfContent && _nextChapter) ? () => onChapterClick(_nextChapter, _pdfContentType) : undefined;
                         const _handleNextVideo = (_isVideoContent && _nextChapter) ? () => onChapterClick(_nextChapter, state.lessonContent!.type as any) : undefined;
                         const _handleNext = _handleNextVideo || _handleNextPdf;
+                        const _isFirstChapter = state.selectedClass !== 'COMPETITION' && _curIdx === 0;
                         return (
                           <LessonView
                               content={state.lessonContent}
@@ -2984,8 +3052,10 @@ const App: React.FC = () => {
                               onImmersiveChange={setIsLessonImmersive}
                               onNext={_handleNext}
                               nextTitle={_nextChapter?.title}
+                              isFirstChapter={_isFirstChapter}
                               onAdminBoard={(state.user?.role === 'ADMIN' || state.user?.role === 'SUB_ADMIN') ? () => setState(prev => ({...prev, view: 'ADMIN'})) : undefined}
-                              onAdminEdit={(state.user?.role === 'ADMIN' || state.user?.role === 'SUB_ADMIN') ? () => {
+                              onSendToMcqCommunity={(draft) => setAppMcqCommunityDraft(draft)}
+               onAdminEdit={(state.user?.role === 'ADMIN' || state.user?.role === 'SUB_ADMIN') ? () => {
                                 try {
                                   const ch = state.selectedChapter;
                                   const sub = state.selectedSubject;
@@ -3005,7 +3075,24 @@ const App: React.FC = () => {
             </>
             </ErrorBoundary>
         )}
-      </main>
+      
+      {/* MCQ Community popup — triggered from LessonView */}
+      {appMcqCommunityDraft && state.user && (
+        <div className="fixed inset-0 z-[400]" onClick={() => setAppMcqCommunityDraft(null)}>
+          <div className="w-full h-full" onClick={(e) => e.stopPropagation()}>
+            <Suspense fallback={null}>
+              <UniversalChat
+                user={state.user}
+                onClose={() => setAppMcqCommunityDraft(null)}
+                isAdmin={false}
+                defaultTab="MCQ"
+                initialMcqDraft={appMcqCommunityDraft}
+              />
+            </Suspense>
+          </div>
+        </div>
+      )}
+</main>
       
       {/* PERSISTENT FOOTER - Hide in Student Dashboard as it has its own Bottom Nav */}
       {!isFullScreen && state.view !== 'STUDENT_DASHBOARD' && state.settings.showFooter !== false && !isLessonImmersive && (

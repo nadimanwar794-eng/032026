@@ -2,7 +2,24 @@
 import React, { useState, useEffect } from "react";
 import { getStudents, saveExam, getExams, deleteExam, generateId } from "../../school-firebase";
 import type { SchoolStudent, ExamEntry } from "../../school-types";
-import { Plus, Trash2, Save, ChevronLeft, BookOpen, Download } from "lucide-react";
+import { Plus, Trash2, Save, ChevronLeft, BookOpen, Download, BarChart2 } from "lucide-react";
+
+function getTotalGrade(pct: number) {
+  if (pct >= 91) return "A+";
+  if (pct >= 81) return "A";
+  if (pct >= 71) return "B+";
+  if (pct >= 61) return "B";
+  if (pct >= 51) return "C+";
+  if (pct >= 41) return "C";
+  if (pct >= 33) return "D";
+  return "F";
+}
+function getTotalGradeColor(pct: number) {
+  if (pct >= 81) return "text-green-600";
+  if (pct >= 61) return "text-blue-600";
+  if (pct >= 41) return "text-yellow-600";
+  return "text-red-600";
+}
 
 interface Props {
   schoolId: string;
@@ -20,7 +37,7 @@ export const MarksManager: React.FC<Props> = ({
 }) => {
   const [students, setStudents] = useState<SchoolStudent[]>([]);
   const [exams, setExams] = useState<ExamEntry[]>([]);
-  const [view, setView] = useState<"list" | "new" | "entry">("list");
+  const [view, setView] = useState<"list" | "new" | "entry" | "totals">("list");
   const [selectedExam, setSelectedExam] = useState<ExamEntry | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -216,14 +233,19 @@ export const MarksManager: React.FC<Props> = ({
           className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700"><ChevronLeft className="w-5 h-5" /></button>
         <div className="flex-1">
           <h2 className="font-bold text-slate-800 dark:text-white">
-            {view === "list" ? `${className} — Marks` : view === "new" ? "New Exam Entry" : `Edit: ${selectedExam?.examName}`}
+            {view === "list" ? `${className} — Marks` : view === "new" ? "New Exam Entry" : view === "totals" ? `${className} — Total Score` : `Edit: ${selectedExam?.examName}`}
           </h2>
           <p className="text-xs text-slate-500">{subjectName}</p>
         </div>
         {view === "list" && (
-          <button onClick={startNewExam} className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium">
-            <Plus className="w-4 h-4" /> New Exam
-          </button>
+          <div className="flex gap-2">
+            <button onClick={() => setView("totals")} className="flex items-center gap-1 px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium">
+              <BarChart2 className="w-4 h-4" /> Total Score
+            </button>
+            <button onClick={startNewExam} className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium">
+              <Plus className="w-4 h-4" /> New Exam
+            </button>
+          </div>
         )}
       </div>
 
@@ -274,6 +296,55 @@ export const MarksManager: React.FC<Props> = ({
 
       {view === "new" && renderEntryForm(null, true)}
       {view === "entry" && selectedExam && renderEntryForm(selectedExam, false)}
+
+      {view === "totals" && (
+        <div className="p-4 space-y-3 max-w-2xl mx-auto">
+          {students.length === 0 ? (
+            <div className="text-center py-16 text-slate-400">
+              <BarChart2 className="w-12 h-12 mx-auto mb-2 opacity-30" />
+              <p className="font-medium">Koi student nahi mila</p>
+            </div>
+          ) : (
+            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm overflow-hidden">
+              <div className="px-4 py-2 bg-slate-50 dark:bg-slate-700 text-xs text-slate-500 font-semibold border-b dark:border-slate-600 grid grid-cols-12">
+                <span className="col-span-1">#</span>
+                <span className="col-span-5">Name</span>
+                <span className="col-span-3 text-center">Marks</span>
+                <span className="col-span-2 text-center">%</span>
+                <span className="col-span-1 text-center">Grade</span>
+              </div>
+              {students.map((s, idx) => {
+                const studentExams = exams.filter(e => e.studentMarks?.[s.id]);
+                const totalObt = studentExams.reduce((sum, e) => {
+                  const sm = e.studentMarks[s.id];
+                  return sum + (sm?.absent ? 0 : sm?.marks || 0);
+                }, 0);
+                const totalMax = studentExams.reduce((sum, e) => sum + e.maxMarks, 0);
+                const pct = totalMax > 0 ? Math.round((totalObt / totalMax) * 100) : null;
+                const gr = pct !== null ? getTotalGrade(pct) : "—";
+                return (
+                  <div key={s.id} className={`grid grid-cols-12 items-center px-4 py-3 border-b dark:border-slate-700 last:border-0 ${idx % 2 === 0 ? "" : "bg-slate-50 dark:bg-slate-700/30"}`}>
+                    <span className="col-span-1 text-xs text-slate-400">{s.rollNo}</span>
+                    <span className="col-span-5 text-sm text-slate-800 dark:text-white truncate pr-2">{s.name}</span>
+                    <span className="col-span-3 text-center text-sm font-bold text-slate-700 dark:text-slate-200">
+                      {totalMax > 0 ? `${totalObt}/${totalMax}` : "—"}
+                    </span>
+                    <span className={`col-span-2 text-center text-sm font-black ${pct !== null ? getTotalGradeColor(pct) : "text-slate-400"}`}>
+                      {pct !== null ? `${pct}%` : "—"}
+                    </span>
+                    <span className={`col-span-1 text-center text-xs font-black ${pct !== null ? getTotalGradeColor(pct) : "text-slate-400"}`}>
+                      {gr}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {exams.length === 0 && (
+            <p className="text-center text-xs text-slate-400 mt-2">Koi exam record nahi hai abhi</p>
+          )}
+        </div>
+      )}
     </div>
   );
 };

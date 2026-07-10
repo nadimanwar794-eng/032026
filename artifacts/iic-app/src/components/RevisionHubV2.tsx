@@ -44,6 +44,7 @@ interface Props {
   onNavigateContent?: (type: 'PDF' | 'MCQ', chapterId: string, topicName?: string, subjectName?: string) => void;
   onUpdateUser?: (u: User) => void;
   hideHeader?: boolean;
+  onMcqAnswer?: (isCorrect: boolean) => boolean;
 }
 
 type ActiveTab = 'daily' | 'results';
@@ -125,7 +126,7 @@ function groupBySubjectChapter(items: WeakBucket[]): SubjectGroup[] {
 // Component
 // ─────────────────────────────────────────────────────────────
 
-export const RevisionHubV2: React.FC<Props> = ({ user, settings, onBack, onOpenChapter, onOpenMcq, onTabChange, onNavigateContent, onUpdateUser, hideHeader = false }) => {
+export const RevisionHubV2: React.FC<Props> = ({ user, settings, onBack, onOpenChapter, onOpenMcq, onTabChange, onNavigateContent, onUpdateUser, hideHeader = false, onMcqAnswer }) => {
   const revisionConfig = settings?.revisionConfig;
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('daily');
@@ -320,6 +321,8 @@ export const RevisionHubV2: React.FC<Props> = ({ user, settings, onBack, onOpenC
   };
 
   const handlePracticeRate = (got: boolean) => {
+    // Award XP for school revision hub MCQ answer; respect gate (returns false if daily limit hit)
+    if (onMcqAnswer) { if (!onMcqAnswer(got)) return; }
     const q = practiceQs[practiceIdx];
     setPracticeScores(prev => {
       const cur = prev[q.bucketKey] || { got: 0, total: 0 };

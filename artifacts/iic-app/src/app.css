@@ -3200,3 +3200,69 @@ model-viewer {
 /* ── Notes Focus Mode — hides bottom nav and floating logo button ── */
 body[data-iic-notes-focus] [data-iic-bottom-nav] { display: none !important; }
 body[data-iic-notes-focus] [data-iic-float-logo] { display: none !important; }
+
+/* ── Tier-based Notes Content (Class 6-12 only) ── */
+/* data-tier="basic"  → Basic + Ultra users dekh sakte hain */
+/* data-tier="ultra"  → Sirf Ultra users dekh sakte hain     */
+
+/* FREE user: basic aur ultra dono lock */
+[data-user-tier="FREE"] [data-tier="basic"],
+[data-user-tier="FREE"] [data-tier="ultra"] {
+  position: relative;
+  filter: blur(4px);
+  pointer-events: none;
+  user-select: none;
+}
+[data-user-tier="FREE"] [data-tier="basic"]::after,
+[data-user-tier="FREE"] [data-tier="ultra"]::after {
+  content: "🔒 Basic plan mein unlock hoga";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 800;
+  color: #4f46e5;
+  background: rgba(238, 242, 255, 0.7);
+  border-radius: 8px;
+  filter: none;
+  pointer-events: auto;
+  user-select: none;
+}
+[data-user-tier="FREE"] [data-tier="ultra"]::after {
+  content: "🔒 Ultra plan mein unlock hoga";
+  color: #7c3aed;
+  background: rgba(245, 243, 255, 0.75);
+}
+
+/* BASIC user: sirf ultra lock */
+[data-user-tier="BASIC"] [data-tier="ultra"] {
+  position: relative;
+  filter: blur(4px);
+  pointer-events: none;
+  user-select: none;
+}
+[data-user-tier="BASIC"] [data-tier="ultra"]::after {
+  content: "🔒 Ultra plan mein unlock hoga";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 800;
+  color: #7c3aed;
+  background: rgba(245, 243, 255, 0.75);
+  border-radius: 8px;
+  filter: none;
+  pointer-events: auto;
+  user-select: none;
+}
+
+/* ULTRA user: sab kuch visible */
+[data-user-tier="ULTRA"] [data-tier="basic"],
+[data-user-tier="ULTRA"] [data-tier="ultra"] {
+  filter: none;
+  pointer-events: auto;
+}

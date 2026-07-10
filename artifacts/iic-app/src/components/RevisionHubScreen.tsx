@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
   ArrowLeft, BookOpen, RotateCcw, Clock, BarChart2, ChevronRight,
-  CheckCircle, XCircle, Zap, Calendar, BrainCircuit, Trophy,
+  CheckCircle, XCircle, Zap, Calendar, BrainCircuit, Trophy, Plus,
 } from 'lucide-react';
 import type { User, StudentTab, SystemSettings } from '../types';
 import { RevisionHubV2 } from './RevisionHubV2';
@@ -32,6 +32,7 @@ interface Props {
   onNavigateContent?: (type: 'PDF' | 'MCQ', chapterId: string, topicName?: string, subjectName?: string) => void;
   onUpdateUser?: (user: User) => void;
   onMcqAnswer?: (isCorrect: boolean) => boolean;
+  onSendToMcqCommunity?: (draft: { question: string; options: [string,string,string,string]; correctAnswer: number; explanation: string }) => void;
 }
 
 const TABS: { id: HubTab; label: string; icon: React.ReactNode }[] = [
@@ -74,7 +75,7 @@ const TIER_STYLES: Record<string, { bg: string; text: string; label: string }> =
 };
 
 export const RevisionHubScreen: React.FC<Props> = ({
-  user, settings, onBack, onTabChange, onNavigateContent, onUpdateUser, onMcqAnswer,
+  user, settings, onBack, onTabChange, onNavigateContent, onUpdateUser, onMcqAnswer, onSendToMcqCommunity,
 }) => {
   const theme = useAppTheme();
   const primary = theme.primary || '#6366f1';
@@ -109,7 +110,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
           { id: 'geography', name: 'Geography' },
           { id: 'polity',    name: 'Political Science' },
           { id: 'economics', name: 'Economics' },
-          ...((settings as any)?.customLucentSubjects || []).filter((s: any) => s && s.id && s.name),
+          ...((settings as any)?.customLucentSubjects || []).filter((s: any) => s && s.id && s.name && !s.bookId),
         ]
       : getSubjectsList(mcqSelectedClass, user?.stream || null, user?.board || 'CBSE')
     : [];
@@ -130,10 +131,12 @@ export const RevisionHubScreen: React.FC<Props> = ({
     if (!sessionDone || !sessionMcqs.length) return [];
     const map: Record<string, { topic: string; correct: number; total: number }> = {};
     sessionMcqs.forEach((q: any, i: number) => {
+      // Only count questions that were actually attempted (answered)
+      if (sessionAnswers[i] === null || sessionAnswers[i] === undefined) return;
       const t = (q.topic || 'General').trim();
       if (!map[t]) map[t] = { topic: t, correct: 0, total: 0 };
       map[t].total += 1;
-      if (sessionAnswers[i] !== null && sessionAnswers[i] === q.correctAnswer) {
+      if (sessionAnswers[i] === q.correctAnswer) {
         map[t].correct += 1;
       }
     });
@@ -381,9 +384,27 @@ export const RevisionHubScreen: React.FC<Props> = ({
 
             {/* Question */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
-              <p className="font-bold text-slate-800 text-sm leading-relaxed"
-                dangerouslySetInnerHTML={{ __html: (currentQ.question || '').replace(/<br\/?>/g, '\n') }}
-              />
+              <div className="flex items-start gap-2">
+                <p className="font-bold text-slate-800 text-sm leading-relaxed flex-1"
+                  dangerouslySetInnerHTML={{ __html: (currentQ.question || '').replace(/<br\/?>/g, '\n') }}
+                />
+                {onSendToMcqCommunity && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      const opts = (currentQ.options || []).length === 4
+                        ? currentQ.options as [string,string,string,string]
+                        : ([...(currentQ.options || []), '', '', '', ''].slice(0, 4) as [string,string,string,string]);
+                      onSendToMcqCommunity({ question: currentQ.question, options: opts, correctAnswer: currentQ.correctAnswer ?? 0, explanation: currentQ.explanation || '' });
+                    }}
+                    className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center active:scale-90 transition-all bg-indigo-100 text-indigo-600"
+                    title="MCQ Community mein bhejo"
+                  >
+                    <Plus size={13} strokeWidth={2.5} />
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Options — blue highlight only, no green/red until submit */}
@@ -512,13 +533,14 @@ export const RevisionHubScreen: React.FC<Props> = ({
               <div className="space-y-2">
                 {sessionMcqs.map((q: any, qi: number) => {
                   const userAns = sessionAnswers[qi];
-                  const isCorrect = userAns !== null && userAns !== undefined && userAns === q.correctAnswer;
-                  const isSkipped = userAns === null || userAns === undefined;
+                  // Only show questions that were actually attempted
+                  if (userAns === null || userAns === undefined) return null;
+                  const isCorrect = userAns === q.correctAnswer;
                   return (
-                    <div key={qi} className={`rounded-2xl border overflow-hidden ${isCorrect ? 'border-emerald-200 bg-emerald-50' : isSkipped ? 'border-slate-200 bg-slate-50' : 'border-rose-200 bg-rose-50'}`}>
+                    <div key={qi} className={`rounded-2xl border overflow-hidden ${isCorrect ? 'border-emerald-200 bg-emerald-50' : 'border-rose-200 bg-rose-50'}`}>
                       <div className="flex items-start gap-3 px-4 py-3">
-                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 font-black text-sm ${isCorrect ? 'bg-emerald-100 text-emerald-700' : isSkipped ? 'bg-slate-200 text-slate-500' : 'bg-rose-100 text-rose-700'}`}>
-                          {isCorrect ? '✅' : isSkipped ? '—' : '❌'}
+                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 font-black text-sm ${isCorrect ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
+                          {isCorrect ? '✅' : '❌'}
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-[10px] font-black text-slate-400 mb-0.5">Q{qi + 1} · {q.topic || 'General'}</p>
@@ -526,13 +548,10 @@ export const RevisionHubScreen: React.FC<Props> = ({
                             dangerouslySetInnerHTML={{ __html: (q.question || '').replace(/<br\/?>/g, ' ') }}
                           />
                           <div className="mt-1.5 space-y-0.5">
-                            {!isCorrect && !isSkipped && (
+                            {!isCorrect && (
                               <p className="text-[10px] text-rose-600 font-bold">
-                                ❌ Tumhara: {String.fromCharCode(65 + userAns!)}. {q.options?.[userAns!] || ''}
+                                ❌ Tumhara: {String.fromCharCode(65 + userAns)}. {q.options?.[userAns] || ''}
                               </p>
-                            )}
-                            {isSkipped && (
-                              <p className="text-[10px] text-slate-400 font-bold">⚠ Yeh sawaal skip hua</p>
                             )}
                             <p className="text-[10px] text-emerald-700 font-bold">
                               ✅ Sahi: {String.fromCharCode(65 + q.correctAnswer)}. {q.options?.[q.correctAnswer] || ''}
@@ -801,6 +820,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
             onNavigateContent={onNavigateContent}
             onUpdateUser={onUpdateUser}
             hideHeader={true}
+            onMcqAnswer={onMcqAnswer}
           />
         )}
 

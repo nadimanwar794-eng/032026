@@ -104,16 +104,17 @@ function parseSimpleFormatBlock(block: string, topic: string): Partial<MCQItem> 
     const lines = block.split('\n').map(l => l.trim()).filter(l => l);
     if (lines.length < 3) return null;
 
-    // First line: optional Q number + question text
-    // e.g. "Q1. वे सभी प्रक्रम..." or just the question text
-    const questionLineMatch = lines[0].match(/^(?:Q\s*\d+[\.\)]\s*)?([\s\S]+)/i);
+    // First line: Q: / Q1. / Q1) / plain question text
+    const questionLineMatch = lines[0].match(/^(?:\*?\s*)?(?:Q\s*\d*\s*[:.)\s]|प्रश्न\s*\d*\s*[:.])\s*([\s\S]+)/i)
+        || lines[0].match(/^(?:Q\s*\d+[\.\)]\s*)?([\s\S]+)/i);
     if (!questionLineMatch) return null;
 
     const questionText = questionLineMatch[1].trim();
     if (!questionText) return null;
 
     // Collect option lines
-    const options: string[] = [];
+    const optionMap: Record<number, string> = {};
+    const starCorrects: number[] = []; // from *A) style
     let answerLine = '';
     let explanationLines: string[] = [];
     let collectingExplanation = false;
@@ -121,23 +122,28 @@ function parseSimpleFormatBlock(block: string, topic: string): Partial<MCQItem> 
     for (let i = 1; i < lines.length; i++) {
         const line = lines[i];
 
-        // Option lines: A) ... or A. ...
-        const optionMatch = line.match(/^([A-D])[\)\.]\s*(.+)/i);
+        // Option lines: *A) / *A: / A) / A. / A:
+        const optionMatch = line.match(/^(\*?)\s*([A-D])[:.)\s]\s*(.+)/i);
         if (optionMatch && !collectingExplanation) {
-            options.push(optionMatch[2].trim());
+            const isCorrect = optionMatch[1] === '*';
+            const idx = optionMatch[2].toUpperCase().charCodeAt(0) - 65;
+            if (idx >= 0 && idx < 4) {
+                optionMap[idx] = optionMatch[3].trim();
+                if (isCorrect) starCorrects.push(idx);
+            }
             continue;
         }
 
-        // Answer line: "Answer: C) text" OR normalised "✅ Correct Answer: C) text"
-        if (/^Answer\s*:/i.test(line) || /^✅\s*Correct\s+Answer\s*:/i.test(line)) {
-            answerLine = line.replace(/^(?:✅\s*)?(?:Correct\s+)?Answer\s*:\s*/i, '').trim();
+        // Answer line: Ans: / Answer: / ✅ Correct Answer: / सही उत्तर:
+        if (/^(?:Ans|Answer|सही\s*उत्तर)\s*:/i.test(line) || /^✅\s*Correct\s+Answer\s*:/i.test(line)) {
+            answerLine = line.replace(/^(?:✅\s*)?(?:Correct\s+)?(?:Answer|Ans|सही\s*उत्तर)\s*:\s*/i, '').trim();
             continue;
         }
 
-        // Explanation line
-        if (/^Explanation\s*:/i.test(line)) {
+        // Explanation line: Explanation: / Exp: / व्याख्या:
+        if (/^(?:Explanation|Exp|व्याख्या)\s*:/i.test(line)) {
             collectingExplanation = true;
-            const expText = line.replace(/^Explanation\s*:\s*/i, '').trim();
+            const expText = line.replace(/^(?:Explanation|Exp|व्याख्या)\s*:\s*/i, '').trim();
             if (expText) explanationLines.push(expText);
             continue;
         }
@@ -147,27 +153,34 @@ function parseSimpleFormatBlock(block: string, topic: string): Partial<MCQItem> 
         }
     }
 
-    // Need at least 2 options and an answer
-    if (options.length < 2 || !answerLine) return null;
+    const options = [optionMap[0]||'', optionMap[1]||'', optionMap[2]||'', optionMap[3]||''].filter((_, i) => optionMap[i] !== undefined);
+    // Need at least 2 options
+    if (Object.keys(optionMap).length < 2) return null;
 
-    // Parse answer: "C) Option text" or just "C"
-    const answerLetterMatch = answerLine.match(/^([A-D])[\)\.]/i);
+    // Determine correct answer: star style takes priority, else Ans: line
     let correctAnswer: number | undefined;
-    if (answerLetterMatch) {
-        correctAnswer = ['A', 'B', 'C', 'D'].indexOf(answerLetterMatch[1].toUpperCase());
-    } else {
-        // Try matching text against options
-        const clean = answerLine.trim();
-        const idx = options.findIndex(o => clean.includes(o) || o.includes(clean));
-        if (idx !== -1) correctAnswer = idx;
+    if (starCorrects.length > 0) {
+        correctAnswer = starCorrects[0];
+    } else if (answerLine) {
+        const answerLetterMatch = answerLine.match(/^([A-D])[\)\.:\s]/i);
+        if (answerLetterMatch) {
+            correctAnswer = ['A', 'B', 'C', 'D'].indexOf(answerLetterMatch[1].toUpperCase());
+        } else {
+            const clean = answerLine.trim();
+            const allOpts = Object.values(optionMap);
+            const idx = allOpts.findIndex(o => clean.includes(o) || o.includes(clean));
+            if (idx !== -1) correctAnswer = idx;
+        }
     }
 
     if (correctAnswer === undefined || correctAnswer < 0) return null;
 
+    const allOptions = Object.values(optionMap);
+
     const q: Partial<MCQItem> = {
         topic,
         question: questionText.replace(/\n/g, '<br/>'),
-        options,
+        options: allOptions,
         correctAnswer,
     };
 

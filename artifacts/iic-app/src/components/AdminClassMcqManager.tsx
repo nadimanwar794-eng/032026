@@ -1,6 +1,6 @@
 // @ts-nocheck
 import React, { useState, useEffect } from 'react';
-import { Save, Trash2, ChevronRight, ArrowLeft, Plus, BookOpen, Edit2, X, ArrowRight, Copy } from 'lucide-react';
+import { Save, Trash2, ChevronRight, ArrowLeft, Plus, BookOpen, Edit2, X, ArrowRight, Copy, Library } from 'lucide-react';
 import { parseMCQText } from '../utils/mcqParser';
 import { saveTopicNotes } from '../utils/revisionTrackerV2';
 import { saveMcqLesson, deleteMcqLesson, subscribeMcqLessons } from '../firebase';
@@ -34,6 +34,12 @@ function normalizeMcqPaste(raw: string): string {
       .replace(/\*\*$/, '').replace(/\s*\((?:Easy|Medium|Hard|आसान|मध्यम|कठिन)[^)]*\)\s*$/i, '').replace(/^\[.*?\]\s*/g, '').trim();
     return `\n**Question ${n}**\n❓ Question: ${combined}`;
   });
+  // Bare (non-bold) "प्रश्न 18:" / "Question 18:" markers — common when the AI
+  // only bolds the label, not the number, or skips bold entirely. Without this,
+  // numbered statement lines ("1. ...", "2. ...") that follow get mistaken for
+  // new question boundaries by the fallback heuristic below, chopping the
+  // statement-based question apart and dropping its statements.
+  txt = txt.replace(/(?:^|\n)[ \t]*(?:\*\*\s*)?(?:प्रश्न|Question)\s*(\d+)\s*[:.\-]\s*/gi, (_m, n) => `\n**Question ${n}**\n❓ Question: `);
   txt = txt.replace(/\*\*प्रश्न\s*[:：]?\*\*/gi, '__PRASHNA__');
   txt = txt.replace(/\*\*Question\s*[:：]?\*\*/gi, '__PRASHNA__');
   txt = txt.replace(/\*\*\s*(?:सही\s*उत्तर|Ans(?:wer)?)\s*[:：]\s*([^*]+?)\s*\*\*/gi,
@@ -82,6 +88,7 @@ export const AdminClassMcqManager: React.FC<Props> = ({ settings, onSave }) => {
 
   // Add lesson form state
   const [lessonTitle, setLessonTitle] = useState('');
+  const [bookName, setBookName]       = useState('');
   const [pasteText, setPasteText]     = useState('');
   const [saving, setSaving]           = useState(false);
   const [alert, setAlert]             = useState('');
@@ -184,6 +191,7 @@ export const AdminClassMcqManager: React.FC<Props> = ({ settings, onSave }) => {
         classLevel: selectedClass,
         subject: selectedSubject,
         board: boardFilter || null,
+        bookName: bookName.trim() || null,
         lessonTitle: lessonTitle.trim(),
         mcqs: editingLesson ? [...(editingLesson.mcqs || []), ...parsed] : parsed,
         mcqCount: (editingLesson ? (editingLesson.mcqs || []).length : 0) + parsed.length,
@@ -198,7 +206,7 @@ export const AdminClassMcqManager: React.FC<Props> = ({ settings, onSave }) => {
       const noteMsg = notesToSave.length ? ` + ${notesToSave.length} note(s)` : '';
       showAlert(`✅ ${parsed.length} MCQ save ho gaye! Lesson: "${lessonTitle.trim()}"${noteMsg}`);
       setPasteText('');
-      if (!editingLesson) { setLessonTitle(''); }
+      if (!editingLesson) { setLessonTitle(''); setBookName(''); }
       setScreen('LESSON_LIST');
       setEditingLesson(null);
     } catch (err: any) {
@@ -265,7 +273,7 @@ export const AdminClassMcqManager: React.FC<Props> = ({ settings, onSave }) => {
   };
 
   const goBack = () => {
-    if (screen === 'ADD_LESSON')  { setScreen('LESSON_LIST'); setLessonTitle(''); setPasteText(''); setEditingLesson(null); return; }
+    if (screen === 'ADD_LESSON')  { setScreen('LESSON_LIST'); setLessonTitle(''); setBookName(''); setPasteText(''); setEditingLesson(null); return; }
     if (screen === 'LESSON_LIST') { setScreen('SUBJECT'); setSelectedSubject(null); return; }
     if (screen === 'SUBJECT')     { setScreen('CLASS'); setSelectedClass(null); return; }
   };
@@ -348,7 +356,7 @@ export const AdminClassMcqManager: React.FC<Props> = ({ settings, onSave }) => {
           <ArrowLeft size={14} /> Back
         </button>
         <span className="text-xs text-slate-400 flex-1">Class {selectedClass} → {selectedSubject}</span>
-        <button onClick={() => { setEditingLesson(null); setLessonTitle(''); setPasteText(''); setScreen('ADD_LESSON'); }}
+        <button onClick={() => { setEditingLesson(null); setLessonTitle(''); setBookName(''); setPasteText(''); setScreen('ADD_LESSON'); }}
           className="flex items-center gap-1.5 bg-indigo-600 text-white text-xs font-bold px-3 py-1.5 rounded-xl active:scale-95 transition-all"
         >
           <Plus size={13} /> New Lesson
@@ -365,21 +373,53 @@ export const AdminClassMcqManager: React.FC<Props> = ({ settings, onSave }) => {
           <p className="text-slate-600 font-bold">Koi lesson nahi abhi</p>
           <p className="text-slate-400 text-sm mt-1">+ New Lesson button se pehla lesson add karein</p>
         </div>
-      ) : (
-        <div className="space-y-3">
-          {filteredLessons.map((lesson: any) => (
-            <LessonCard
-              key={lesson.id}
-              lesson={lesson}
-              onEdit={() => { setEditingLesson(lesson); setLessonTitle(lesson.lessonTitle); setPasteText(''); setScreen('ADD_LESSON'); }}
-              onDelete={() => handleDeleteLesson(lesson)}
-              onDeleteMcq={(idx) => handleDeleteSingleMcq(lesson, idx)}
-              onMove={() => openMoveCopy(lesson, 'move')}
-              onCopy={() => openMoveCopy(lesson, 'copy')}
-            />
-          ))}
-        </div>
-      )}
+      ) : (() => {
+        // Group lessons by bookName
+        const bookGroups: { bookName: string | null; lessons: any[] }[] = [];
+        const seen = new Map<string, number>();
+        for (const lesson of filteredLessons) {
+          const key = lesson.bookName || '';
+          if (seen.has(key)) {
+            bookGroups[seen.get(key)!].lessons.push(lesson);
+          } else {
+            seen.set(key, bookGroups.length);
+            bookGroups.push({ bookName: lesson.bookName || null, lessons: [lesson] });
+          }
+        }
+        const hasBooks = bookGroups.some(g => g.bookName);
+        return (
+          <div className="space-y-4">
+            {bookGroups.map((group, gi) => (
+              <div key={gi}>
+                {hasBooks && (
+                  <div className="flex items-center gap-2 mb-2">
+                    <Library size={13} className="text-emerald-600 shrink-0" />
+                    <span className="text-[11px] font-black text-emerald-700 uppercase tracking-wide">
+                      {group.bookName || '📂 No Book'}
+                    </span>
+                    <span className="text-[9px] bg-emerald-100 text-emerald-700 font-bold px-1.5 py-0.5 rounded-full">
+                      {group.lessons.length} lesson{group.lessons.length !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                )}
+                <div className="space-y-3">
+                  {group.lessons.map((lesson: any) => (
+                    <LessonCard
+                      key={lesson.id}
+                      lesson={lesson}
+                      onEdit={() => { setEditingLesson(lesson); setLessonTitle(lesson.lessonTitle); setBookName(lesson.bookName || ''); setPasteText(''); setScreen('ADD_LESSON'); }}
+                      onDelete={() => handleDeleteLesson(lesson)}
+                      onDeleteMcq={(idx) => handleDeleteSingleMcq(lesson, idx)}
+                      onMove={() => openMoveCopy(lesson, 'move')}
+                      onCopy={() => openMoveCopy(lesson, 'copy')}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
 
       {/* ── Move / Copy Modal ───────────────────────────────────────────── */}
       {moveCopyModal && (
@@ -514,6 +554,20 @@ export const AdminClassMcqManager: React.FC<Props> = ({ settings, onSave }) => {
         <div className="p-2.5 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold">{alert}</div>
       )}
 
+      {/* Book Name */}
+      <div>
+        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1 flex items-center gap-1">
+          <Library size={11} className="text-emerald-600" /> Book / Textbook Name <span className="text-slate-400 font-normal normal-case">(optional)</span>
+        </label>
+        <input
+          type="text"
+          value={bookName}
+          onChange={e => setBookName(e.target.value)}
+          placeholder="e.g. NCERT Physics Part 1, RD Sharma, HC Verma..."
+          className="w-full p-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:border-emerald-400"
+        />
+      </div>
+
       {/* Lesson Title */}
       <div>
         <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">
@@ -603,6 +657,12 @@ function LessonCard({ lesson, onEdit, onDelete, onDeleteMcq, onMove, onCopy }: {
           <BookOpen size={18} className="text-indigo-600" />
         </div>
         <div className="flex-1 min-w-0">
+          {lesson.bookName && (
+            <div className="flex items-center gap-1 mb-0.5">
+              <Library size={9} className="text-emerald-600 shrink-0" />
+              <span className="text-[9px] font-bold text-emerald-700 truncate">{lesson.bookName}</span>
+            </div>
+          )}
           <p className="font-black text-slate-800 text-sm truncate">{lesson.lessonTitle}</p>
           <div className="flex flex-wrap gap-1 mt-1">
             <span className="text-[9px] font-bold bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-full">

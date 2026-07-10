@@ -156,6 +156,7 @@ import {
   Square,
   GraduationCap,
   Newspaper,
+  Plus,
   PlusCircle,
   Search,
   Users,
@@ -177,6 +178,8 @@ import {
   Lightbulb,
   Pencil,
   Presentation,
+  Tv,
+  Loader2,
 } from "lucide-react";
 import { speakText, stopSpeech, stripHtml } from "../utils/textToSpeech";
 import { getMistakeBankSync, getMistakeBank, addMistakes, removeMistakeByQuestion, MistakeEntry } from "../utils/mistakeBank";
@@ -188,6 +191,7 @@ import { SubjectSelection } from "./SubjectSelection";
 import { BannerCarousel } from "./BannerCarousel";
 import { MiniPlayer } from "./MiniPlayer"; // Imported for Audio Flow
 import { MistakePracticeView } from "./MistakePracticeView"; // My Mistake home page practice
+import { CoachingHomeworkSection } from "./CoachingHomeworkView"; // Coaching Homework Cards
 import { HistoryPage } from "./HistoryPage";
 import TeacherStore from "./TeacherStore";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -240,7 +244,8 @@ import jsPDF from "jspdf";
 // @ts-ignore
 import html2canvas from "html2canvas";
 import { SchoolHomeCard } from './school/SchoolHomeCard';
-import { getSchool as getSchoolById, getSchoolUserProfile } from '../school-firebase';
+import { getSchool as getSchoolById, getSchoolUserProfile, getAllSchools, removeSchoolUserByUid } from '../school-firebase';
+import { getActiveCoachings, getCoachingUserProfile } from '../coaching-firebase';
 
 /**
  * Lightweight swipe-to-dismiss wrapper for "Continue Reading" cards.
@@ -375,6 +380,7 @@ interface Props {
   onRecoverData?: () => void;
   onUpdateSettings?: (s: SystemSettings) => void;
   onOpenSchool?: () => void;
+  onOpenCoaching?: () => void;
 }
 
 const DashboardSectionWrapper = ({
@@ -523,6 +529,7 @@ export const StudentDashboard: React.FC<Props> = ({
   onRecoverData,
   onUpdateSettings,
   onOpenSchool,
+  onOpenCoaching,
 }) => {
   const analysisLogs = (() => { try { return JSON.parse(localStorage.getItem("nst_universal_analysis_logs") || "[]"); } catch { return []; } })();
   const isGameEnabled = settings?.isGameEnabled !== false;
@@ -1795,6 +1802,16 @@ export const StudentDashboard: React.FC<Props> = ({
     "SCHOOL",
   );
   const [userSchool, setUserSchool] = useState<any>(null);
+  const [allSchools, setAllSchools] = useState<any[]>([]);
+  const [showSchoolPicker, setShowSchoolPicker] = useState(false);
+  const [showCoachingPicker, setShowCoachingPicker] = useState(false);
+  const [rtdbCoachingList, setRtdbCoachingList] = useState<{ id: string; name: string; emoji?: string }[]>([]);
+  const [coachingPickerLoading, setCoachingPickerLoading] = useState(false);
+  const [isCoachingAdmin, setIsCoachingAdmin] = useState(false);
+  const [schoolPickerLoading, setSchoolPickerLoading] = useState(false);
+  const [schoolCodeInput, setSchoolCodeInput] = useState('');
+  const [schoolCodeError, setSchoolCodeError] = useState('');
+  const [schoolCodeTargetId, setSchoolCodeTargetId] = useState<string | null>(null);
   const [currentAudioTrack, setCurrentAudioTrack] = useState<{
     url: string;
     title: string;
@@ -1825,6 +1842,14 @@ export const StudentDashboard: React.FC<Props> = ({
       }
     }).catch(() => {});
   }, [user.id, (user as any).schoolId]);
+
+  // Check if user is a coaching admin
+  useEffect(() => {
+    if (!user.id) return;
+    getCoachingUserProfile(user.id).then(profile => {
+      setIsCoachingAdmin(!!(profile?.role === 'COACHING_ADMIN' || profile?.role === 'COACHING_SUB_ADMIN'));
+    }).catch(() => {});
+  }, [user.id]);
 
   const [isLoadingContent, setIsLoadingContent] = useState(false);
   const [isDataReady, setIsDataReady] = useState(false);
@@ -2364,6 +2389,7 @@ export const StudentDashboard: React.FC<Props> = ({
   });
   const [isLandscapeUiHidden, setIsLandscapeUiHidden] = useState(false);
   const [isInternalImmersive, setIsInternalImmersive] = useState(false);
+  const [coachingNotesReaderOpen, setCoachingNotesReaderOpen] = useState(false);
   useEffect(() => {
     setIsInternalImmersive(contentViewStep === 'PLAYER');
   }, [contentViewStep]);
@@ -2686,7 +2712,7 @@ export const StudentDashboard: React.FC<Props> = ({
   // student returns to exactly where they were when they tap that tab again.
   // Eg: creating an MCQ on Home → tap Profile → tap Home → MCQ creator restores.
   // Reading a homework note → tap GK → tap Homework → same note reopens.
-  type LogicalTab = 'HOME' | 'HOMEWORK' | 'REVISION_V2' | 'GK' | 'VIDEO' | 'PROFILE' | 'APP_STORE' | 'HISTORY';
+  type LogicalTab = 'HOME' | 'HOMEWORK' | 'REVISION_V2' | 'GK' | 'VIDEO' | 'PROFILE' | 'APP_STORE' | 'HISTORY' | 'PROGRESS';
   const [currentLogicalTab, setCurrentLogicalTab] = useState<LogicalTab>('HOME');
 
   // ── MY MISTAKE COUNT (lightweight: synced via storage event + 30s poll) ──
@@ -2879,7 +2905,7 @@ export const StudentDashboard: React.FC<Props> = ({
   // 'reveal' = direct-answer "show answer" flow; 'interactive' = build-answer quiz flow.
   const [lucentMcqMode, setLucentMcqMode] = useState<Record<string, 'reveal' | 'interactive'>>({});
   // Flashcard launcher (Lucent + Homework MCQs share this single overlay)
-  const [flashcardMcqs, setFlashcardMcqs] = useState<{ items: any[]; title: string; subtitle: string; subject?: string; sourceKey?: string } | null>(null);
+  const [flashcardMcqs, setFlashcardMcqs] = useState<{ items: any[]; title: string; subtitle: string; subject?: string; sourceKey?: string; startInProjectorMode?: boolean } | null>(null);
   const [hwMcqMode, setHwMcqMode] = useState<Record<string, 'interactive' | 'reveal'>>({});
   const [hwMcqCurrentIdx, setHwMcqCurrentIdx] = useState<Record<string, number>>({});
   const [hwShowAnalysis, setHwShowAnalysis] = useState<string | null>(null);
@@ -3599,6 +3625,12 @@ export const StudentDashboard: React.FC<Props> = ({
     // Check content lock — requires valid redeem code
     if (_lucentIsLocked(entry)) {
       showAlert('🔒 This lesson is locked! Get a Redeem Code from your Admin and enter it in Profile → Redeem tab.', 'INFO');
+      return;
+    }
+    // Sample lesson — permanently free for everyone, no daily limit
+    if (entry.isSampleLesson) {
+      setLucentNoteViewer(entry);
+      setLucentPageIndex(pageIdx);
       return;
     }
     const tier: 'FREE' | 'BASIC' | 'ULTRA' = _isUltraUser ? 'ULTRA' : _isBasicUser ? 'BASIC' : 'FREE';
@@ -4956,6 +4988,7 @@ export const StudentDashboard: React.FC<Props> = ({
     showLessonModal,
     showSidebar,
     showInbox,
+    showRevisionHubScreen,
     // content-tree state
     initialParentSubject,
     homeworkSubjectView,
@@ -4992,6 +5025,7 @@ export const StudentDashboard: React.FC<Props> = ({
     showLessonModal,
     showSidebar,
     showInbox,
+    showRevisionHubScreen,
     initialParentSubject,
     homeworkSubjectView,
     class612SubjectView: !!class612SubjectView,
@@ -5019,9 +5053,45 @@ export const StudentDashboard: React.FC<Props> = ({
       }
       const s = navStateRef.current;
 
+      // ── CONDITIONAL RE-TRAP ────────────────────────────────────────────────
+      // Re-trap (push a dummy history entry) so Chrome Android never sees
+      // canGoBack() = false mid-handler — UNLESS we are already at the absolute
+      // root (HOME tab, no overlays, empty tab-history). At the root we want the
+      // hardware back press to exit the app, so we deliberately skip the re-trap
+      // and let the OS handle it naturally.
+      const isAtRoot =
+        s.activeTab === 'HOME' &&
+        navTabHistory.current.length === 0 &&
+        !s.lucentNoteViewer &&
+        !s.lucentPageListViewer &&
+        !s.hwActiveHwId &&
+        !s.showHomeworkHistory &&
+        !s.showChat &&
+        !s.showNotifPage &&
+        !s.showStarredPage &&
+        !s.showCompMcqHub &&
+        !s.showMistakePractice &&
+        !s.showRulesPage &&
+        !s.showAllNotesCatalog &&
+        !s.showTopicDirectory &&
+        !s.showCompareView &&
+        !s.showMcqSearchView &&
+        !s.showHomeSearch &&
+        !s.showUserGuide &&
+        !s.showSupportModal &&
+        !s.showLessonModal &&
+        !s.showSidebar &&
+        !s.showInbox &&
+        !s.showRevisionHubScreen;
+
+      if (!isAtRoot) {
+        reTrap();
+      }
+      // ───────────────────────────────────────────────────────────────────────
+
       // 1. Close full-screen overlays one at a time (topmost first).
-      //    Each back press closes exactly one overlay, then re-traps so the
-      //    next press closes the next layer. This gives the 9→8→7…→1 feel.
+      //    Each back press closes exactly one overlay. The re-trap already
+      //    happened above, so no reTrap() calls needed inside the branches.
       // Lucent viewer: step back page-by-page; only close when on first page
       if (s.lucentNoteViewer) {
         if (s.lucentPageIndex > 0) {
@@ -5029,12 +5099,12 @@ export const StudentDashboard: React.FC<Props> = ({
         } else {
           setLucentNoteViewer(null);
         }
-        reTrap(); return;
+        return;
       }
-      if (s.lucentPageListViewer){ setLucentPageListViewer(null);     reTrap(); return; }
+      if (s.lucentPageListViewer){ setLucentPageListViewer(null);     return; }
       // Competition/HOME context: close category view (book list) after page list closes.
       // (COURSES tab handles lucentCategoryView in its own block below, so skip here.)
-      if (s.lucentCategoryView && s.activeTab !== 'COURSES') { setLucentCategoryView(false); reTrap(); return; }
+      if (s.lucentCategoryView && s.activeTab !== 'COURSES') { setLucentCategoryView(false); return; }
       // Homework/competition viewer: step back item-by-item; close when on first item
       if (s.hwActiveHwId) {
         const filtered = hwFilteredRef.current;
@@ -5044,26 +5114,26 @@ export const StudentDashboard: React.FC<Props> = ({
         } else {
           setHwActiveHwId(null);
         }
-        reTrap(); return;
+        return;
       }
-      if (s.showHomeworkHistory) { setShowHomeworkHistory(false);     reTrap(); return; }
-      if (s.showChat)            { setShowChat(false);                reTrap(); return; }
-      if (s.showNotifPage)       { setShowNotifPage(false);           reTrap(); return; }
-      if (s.showStarredPage)     { setShowStarredPage(false);         reTrap(); return; }
-      if ((s as any).showRevisionHubScreen) { setShowRevisionHubScreen(false); reTrap(); return; }
-      if (s.showCompMcqHub)      { setShowCompMcqHub(false);         reTrap(); return; }
-      if (s.showMistakePractice) { setShowMistakePractice(false);    reTrap(); return; }
-      if (s.showRulesPage)       { setShowRulesPage(false);           reTrap(); return; }
-      if (s.showAllNotesCatalog) { setShowAllNotesCatalog(null as any); reTrap(); return; }
-      if (s.showTopicDirectory)  { setShowTopicDirectory(false);      reTrap(); return; }
-      if (s.showCompareView)     { setShowCompareView(false);         reTrap(); return; }
-      if (s.showMcqSearchView)   { setShowMcqSearchView(false);       reTrap(); return; }
-      if (s.showHomeSearch)      { setShowHomeSearch(false);          reTrap(); return; }
-      if (s.showUserGuide)       { setShowUserGuide(false);           reTrap(); return; }
-      if (s.showSupportModal)    { setShowSupportModal(false);        reTrap(); return; }
-      if (s.showSidebar)         { setShowSidebar(false);             reTrap(); return; }
-      if (s.showInbox)           { setShowInbox(false);               reTrap(); return; }
-      if (s.showLessonModal)     { setShowLessonModal(false);         reTrap(); return; }
+      if (s.showHomeworkHistory) { setShowHomeworkHistory(false);     return; }
+      if (s.showChat)            { setShowChat(false);                return; }
+      if (s.showNotifPage)       { setShowNotifPage(false);           return; }
+      if (s.showStarredPage)     { setShowStarredPage(false);         return; }
+      if (s.showRevisionHubScreen) { setShowRevisionHubScreen(false); return; }
+      if (s.showCompMcqHub)      { setShowCompMcqHub(false);         return; }
+      if (s.showMistakePractice) { setShowMistakePractice(false);    return; }
+      if (s.showRulesPage)       { setShowRulesPage(false);           return; }
+      if (s.showAllNotesCatalog) { setShowAllNotesCatalog(null as any); return; }
+      if (s.showTopicDirectory)  { setShowTopicDirectory(false);      return; }
+      if (s.showCompareView)     { setShowCompareView(false);         return; }
+      if (s.showMcqSearchView)   { setShowMcqSearchView(false);       return; }
+      if (s.showHomeSearch)      { setShowHomeSearch(false);          return; }
+      if (s.showUserGuide)       { setShowUserGuide(false);           return; }
+      if (s.showSupportModal)    { setShowSupportModal(false);        return; }
+      if (s.showSidebar)         { setShowSidebar(false);             return; }
+      if (s.showInbox)           { setShowInbox(false);               return; }
+      if (s.showLessonModal)     { setShowLessonModal(false);         return; }
 
       // 2. PDF / VIDEO / AUDIO / MCQ tabs (content player tabs)
       if (
@@ -5085,7 +5155,6 @@ export const StudentDashboard: React.FC<Props> = ({
           setLucentCategoryView(false);
           setHomeworkSubjectView(null);
         }
-        reTrap();
         return;
       }
 
@@ -5123,7 +5192,6 @@ export const StudentDashboard: React.FC<Props> = ({
             onTabChange("HOME");
           }
         }
-        reTrap();
         return;
       }
 
@@ -5142,14 +5210,12 @@ export const StudentDashboard: React.FC<Props> = ({
         } else {
           onTabChange("HOME");
         }
-        reTrap();
         return;
       }
 
-      // 5. Already at HOME root — drain any leftover stale history entries,
-      //    then re-trap so the app does NOT exit on back.
+      // 5. Already at HOME root — drain any leftover stale history entries.
+      //    The reTrap() at the top already ensures the app does NOT exit on back.
       navTabHistory.current = [];
-      reTrap();
     };
 
     window.addEventListener("popstate", onPopState);
@@ -5405,7 +5471,8 @@ export const StudentDashboard: React.FC<Props> = ({
     }
   };
 
-  const _customLucentSubjects: { id: string; name: string }[] = ((settings as any)?.customLucentSubjects || []).filter((s: any) => s && s.id && s.name);
+  const _customLucentSubjects: { id: string; name: string }[] = ((settings as any)?.customLucentSubjects || []).filter((s: any) => s && s.id && s.name && !(s as any).bookId);
+  const _hiddenLucentSubjectIds = new Set(((settings as any)?.hiddenLucentSubjectIds || []) as string[]);
   const LUCENT_CATEGORIES: Subject[] = [
     { id: 'biology', name: 'जीव विज्ञान (Biology)', icon: 'bio', color: 'bg-white text-slate-700' },
     { id: 'chemistry', name: 'रसायन शास्त्र (Chemistry)', icon: 'flask', color: 'bg-white text-slate-700' },
@@ -5414,8 +5481,10 @@ export const StudentDashboard: React.FC<Props> = ({
     { id: 'geography', name: 'भूगोल (Geography)', icon: 'geo', color: 'bg-white text-slate-700' },
     { id: 'polity', name: 'राजनीति विज्ञान (Polity)', icon: 'gov', color: 'bg-white text-slate-700' },
     { id: 'history', name: 'इतिहास (History)', icon: 'history', color: 'bg-white text-slate-700' },
-    ..._customLucentSubjects.map(s => ({ id: s.id, name: s.name, icon: 'book', color: 'bg-white text-slate-700' })),
-  ];
+    { id: 'current_affairs', name: '📰 करेंट अफेयर्स (Current Affairs)', icon: 'news', color: 'bg-white text-slate-700' },
+  ].filter(c => !_hiddenLucentSubjectIds.has(c.id)).concat(
+    _customLucentSubjects.map(s => ({ id: s.id, name: s.name, icon: 'book', color: 'bg-white text-slate-700' }))
+  );
 
   const renderContentSection = (
     type: "VIDEO" | "PDF" | "MCQ" | "AUDIO" | "GENERIC",
@@ -5537,6 +5606,7 @@ export const StudentDashboard: React.FC<Props> = ({
                           <p className="text-[11px] text-red-500 font-black mt-0.5">🔒 Locked — Unlock with Redeem Code</p>
                         ) : (
                           <p className={`text-[11px] font-bold mt-0.5 flex flex-wrap gap-1.5 items-center ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                            {entry.isSampleLesson && <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-emerald-100 text-emerald-700">🆓 FREE</span>}
                             {entry.mcqOnly ? <span className="text-emerald-600 font-black">🎯 MCQ Only</span> : <span>{entry.pages.length} page{entry.pages.length !== 1 ? 's' : ''}</span>}
                             {topicNames.length > 0 && <span>• {topicNames.length} topic{topicNames.length > 1 ? 's' : ''}</span>}
                             {hasMcqs && <span className="px-1.5 py-0.5 rounded text-[9px] font-black" style={{ background: `${tierTheme.primary}18`, color: tierTheme.primary }}>MCQ</span>}
@@ -5738,12 +5808,16 @@ export const StudentDashboard: React.FC<Props> = ({
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className={`text-sm font-black ${theme.textDeep} truncate`}>{entry.lessonTitle}</p>
-                      <p className="text-[11px] text-slate-500 font-bold mt-0.5">
+                      <p className="text-[11px] text-slate-500 font-bold mt-0.5 flex flex-wrap gap-1.5 items-center">
                         {_isEntryLocked
                           ? <span className="text-red-500 font-black">🔒 Locked — Unlock with Redeem Code</span>
-                          : entry.mcqOnly
-                            ? <span className="text-emerald-600 font-black">🎯 MCQ Only — tap to attempt</span>
-                            : <>{entry.pages.length} page{entry.pages.length === 1 ? '' : 's'}{topicNames.length > 0 ? ` • ${topicNames.length} topic${topicNames.length > 1 ? 's' : ''}` : ''}{entry.pages.some(p => p.mcqs && p.mcqs.length > 0) ? ' • MCQs' : ''}</>
+                          : <>
+                            {entry.isSampleLesson && <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-emerald-100 text-emerald-700">🆓 FREE</span>}
+                            {entry.mcqOnly
+                              ? <span className="text-emerald-600 font-black">🎯 MCQ Only — tap to attempt</span>
+                              : <>{entry.pages.length} page{entry.pages.length === 1 ? '' : 's'}{topicNames.length > 0 ? ` • ${topicNames.length} topic${topicNames.length > 1 ? 's' : ''}` : ''}{entry.pages.some(p => p.mcqs && p.mcqs.length > 0) ? ' • MCQs' : ''}</>
+                            }
+                          </>
                         }
                       </p>
                     </div>
@@ -6071,6 +6145,16 @@ export const StudentDashboard: React.FC<Props> = ({
                       <Presentation size={16} />
                     </button>
                   )}
+                  {/* Projector Mode button — MCQ tab only */}
+                  {effectiveMode === 'mcq' && (activeHw?.parsedMcqs?.length ?? 0) > 0 && (
+                    <button
+                      onClick={() => setFlashcardMcqs({ items: activeHw.parsedMcqs as any[], title: activeHw.title || 'MCQs', subtitle: `${activeHw.parsedMcqs!.length} Questions`, subject: (activeHw as any).targetSubject || (activeHw as any).subject || '' })}
+                      className="w-8 h-8 flex items-center justify-center rounded-xl bg-amber-500/30 border border-amber-400/50 text-amber-300 active:scale-90 transition-all shrink-0"
+                      title="📽️ Projector Mode"
+                    >
+                      <Tv size={14} />
+                    </button>
+                  )}
                   {/* More button — non-write modes */}
                   {effectiveMode !== 'choose' && (
                     <button
@@ -6332,6 +6416,7 @@ export const StudentDashboard: React.FC<Props> = ({
                         ultraHtmlRemaining={_isUltraUser ? ultraHtmlRemaining : undefined}
                         isBasicUser={_isBasicUser}
                         basicHtmlRemaining={basicHtmlRemaining}
+                        userLevel={_userLevel}
                         userCredits={user.credits || 0}
                         htmlUnlockCost={settings?.htmlUnlockCost ?? 5}
                         onHtmlOpen={_trackHtmlOpen}
@@ -6919,7 +7004,14 @@ export const StudentDashboard: React.FC<Props> = ({
                               <p className="text-sm font-bold text-slate-800 leading-snug flex-1">
                                 <span className="text-indigo-600 font-black">Q{ci + 1}.</span> {mcq.question}
                               </p>
-                              <McqSpeakButtons question={mcq.question} options={mcq.options} correctAnswer={mcq.correctAnswer} className="shrink-0" mode="all" />
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <McqSpeakButtons question={mcq.question} options={mcq.options} correctAnswer={mcq.correctAnswer} className="shrink-0" mode="all" />
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); const opts = (mcq.options||[]).length===4 ? mcq.options as [string,string,string,string] : ([...(mcq.options||[]),'','','',''].slice(0,4) as [string,string,string,string]); setMcqCommunityDraft({question:mcq.question,options:opts,correctAnswer:mcq.correctAnswer,explanation:(mcq as any).explanation||''}); setShowMcqCommunityPopup(true); }}
+                                  className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center active:scale-90 transition-all bg-indigo-100 text-indigo-600"
+                                  title="MCQ Community mein bhejo"
+                                ><Plus size={13} strokeWidth={2.5} /></button>
+                              </div>
                             </div>
                             <div className="space-y-2">
                               {mcq.options.map((opt, oi) => {
@@ -8219,6 +8311,8 @@ export const StudentDashboard: React.FC<Props> = ({
               const _masterAll3D = settings?.homeAllCards3D ?? false;
               const _cmp3D   = _masterAll3D || (settings?.homeCompetitionCard3D ?? false);
               const _card3D  = _masterAll3D || (settings?.homeClass612Card3D ?? false);
+              const _scBdr   = settings?.homeSchoolCardBorder  || tierTheme.primary;
+              const _sc3D    = _masterAll3D || (settings?.homeSchoolCard3D ?? false);
 
               const ClassBtn = ({ c }: { c: string }) => {
                 const subjectCount = getSubjectsList(c, _stream, _board).length;
@@ -8310,41 +8404,24 @@ export const StudentDashboard: React.FC<Props> = ({
                         school={userSchool}
                         onOpen={() => { hapticStrong(); onOpenSchool?.(); }}
                         onChangeSchool={() => { hapticMedium(); onOpenSchool?.(); }}
-                        card3D={settings?.tierOverrides?.card3D ?? false}
+                        themeAccent={_scBdr}
+                        card3D={_sc3D}
                       />
                     </div>
                   )}
 
-                  {/* ── REVISION HUB CARD ── */}
-                  {(() => {
-                    const _rhBdr = settings?.homeRevisionHubCardBorder || _cmpBdr || tierTheme.primary || '#6366f1';
-                    const _rhBg  = settings?.homeRevisionHubCardBg    || tierTheme.profileCardBg || '#ffffff';
-                    const _rh3D  = _masterAll3D || (settings?.homeRevisionHubCard3D ?? true);
-                    return (
-                  <button
-                    onClick={() => { hapticMedium(); setShowRevisionHubScreen(true); }}
-                    className="w-full rounded-2xl overflow-hidden active:scale-[0.99] transition-all mb-1"
-                    style={_rh3D ? { background: _rhBg, border: `2px solid ${_rhBdr}`, boxShadow: `0 1px 0 rgba(255,255,255,0.85) inset, 0 4px 0 ${_rhBdr}bb, 0 7px 18px ${_rhBdr}28`, transform: 'translateY(-1px)' } : { background: _rhBg, border: `2px solid ${_rhBdr}`, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}
-                  >
-                    <div className="flex items-center gap-3 px-4 py-3.5">
-                      <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shrink-0" style={{ background: `${_rhBdr}18` }}>
-                        🧠
-                      </div>
-                      <div className="flex-1 text-left">
-                        <p className="text-[10px] font-black uppercase tracking-wider mb-0.5" style={{ color: _rhBdr }}>Revision Hub</p>
-                        <div className="text-slate-800 font-black text-sm leading-tight">Smart Learning</div>
-                        <div className="text-slate-500 text-[10px] font-medium mt-0.5 leading-tight">MCQ · Revision · History · Performance</div>
-                      </div>
-                      <div className="flex flex-col items-center gap-0.5">
-                        <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-wide" style={{ background: `${_rhBdr}18`, color: _rhBdr }}>New</span>
-                        <ChevronRight size={16} className="mt-0.5" style={{ color: _rhBdr }} />
-                      </div>
-                    </div>
-                  </button>
-                    );
-                  })()}
+                  {/* ── COACHING HOMEWORK CARDS — only when user has joined a coaching ── */}
+                  {!!(user as any).coachingId && (
+                  <CoachingHomeworkSection tierTheme={tierTheme} isDarkMode={isDarkMode}
+                    card3D={_masterAll3D || (settings?.homeCoachingHomeworkCard3D ?? false)}
+                    settings={settings}
+                    user={user}
+                    onSendToMcqCommunity={(draft) => { setMcqCommunityDraft(draft); setShowMcqCommunityPopup(true); }}
+                    onNotesReaderOpen={() => setCoachingNotesReaderOpen(true)}
+                    onNotesReaderClose={() => setCoachingNotesReaderOpen(false)} />
+                  )}
 
-                  {/* ── QUICK ACTION CARDS 3×2 ── */}
+                  {/* ── QUICK ACTION CARDS ── */}
                   <div>
                     <div className="flex items-center gap-2 mb-3">
                       <span className="flex-1 h-px bg-slate-100" />
@@ -8355,19 +8432,23 @@ export const StudentDashboard: React.FC<Props> = ({
                       const _qaBg  = settings?.homeQuickAccessCardBg     || tierTheme.profileCardBg;
                       const _qaBdr = settings?.homeQuickAccessCardBorder  || tierTheme.primary;
                       const _qa3D  = _masterAll3D || (settings?.homeQuickAccessCard3D ?? false);
+                      const qaItems: { label: string; sub: string; icon: string; onClick: () => void }[] = [
+                        { label: 'Video',       sub: 'Watch lectures',       icon: '▶️',  onClick: () => { setShowChat(false); setShowRevisionHubScreen(false); setShowProgressDashboard(false); setShowStarredPage(false); setShowCompareView(false); onTabChange("UNIVERSAL_VIDEO" as any); setCurrentLogicalTab('VIDEO'); } },
+                        { label: 'Progress',    sub: 'Stats & XP',           icon: '📊',  onClick: () => { setShowStarredPage(false); setShowChat(false); setShowRevisionHubScreen(false); setShowCompareView(false); setShowProgressDashboard(true); currentLogicalTabRef.current = 'PROGRESS'; setCurrentLogicalTab('PROGRESS'); } },
+                        { label: 'Important',   sub: 'Starred notes',        icon: '⭐',  onClick: () => { setShowCompareView(false); setShowChat(false); setShowRevisionHubScreen(false); setShowStarredPage(true); } },
+                        { label: 'Reading',     sub: 'Continue where left',  icon: '📖',  onClick: () => onTabChange('READING_PAGE' as any) },
+                        { label: 'Flashcards',  sub: 'Session history',      icon: '🃏',  onClick: () => onTabChange('FLASHCARDS_PAGE' as any) },
+                        { label: 'Offline',     sub: 'Saved content',        icon: '💾',  onClick: () => onTabChange('OFFLINE_PAGE' as any) },
+                        { label: 'Login',       sub: 'Session log',          icon: '👤',  onClick: () => onTabChange('LOGIN_HISTORY_PAGE' as any) },
+                        { label: 'Credits',     sub: 'Earn & spend log',     icon: '💰',  onClick: () => onTabChange('CREDITS_PAGE' as any) },
+                        { label: 'My Mistakes', sub: `${mistakeCount} galtiyan`, icon: '❌', onClick: () => onTabChange('MY_MISTAKES_PAGE' as any) },
+                      ];
                       return (
                     <div className="grid grid-cols-3 gap-2">
-                      {([
-                        { label: 'Reading',     sub: 'Continue where left', page: 'READING_PAGE',       icon: '📖' },
-                        { label: 'Flashcards',  sub: 'Session history',     page: 'FLASHCARDS_PAGE',    icon: '🃏' },
-                        { label: 'Offline',     sub: 'Saved content',       page: 'OFFLINE_PAGE',       icon: '💾' },
-                        { label: 'Login',       sub: 'Session log',         page: 'LOGIN_HISTORY_PAGE', icon: '👤' },
-                        { label: 'Credits',     sub: 'Earn & spend log',    page: 'CREDITS_PAGE',       icon: '💰' },
-                        { label: 'My Mistakes', sub: `${mistakeCount} galtiyan`, page: 'MY_MISTAKES_PAGE', icon: '❌' },
-                      ] as {label:string;sub:string;page:string;icon:string}[]).map(item => (
+                      {qaItems.map(item => (
                         <button
-                          key={item.page}
-                          onClick={() => { hapticStrong(); onTabChange(item.page as any); }}
+                          key={item.label}
+                          onClick={() => { hapticStrong(); item.onClick(); }}
                           className="flex flex-col items-start gap-2 p-3 rounded-2xl active:scale-95 transition-all"
                           style={_qa3D ? { background: _qaBg, border: `2px solid ${_qaBdr}`, boxShadow: `0 1px 0 rgba(255,255,255,0.85) inset, 0 4px 0 ${_qaBdr}bb, 0 7px 18px ${_qaBdr}28`, transform: 'translateY(-1px)' } : { background: _qaBg, border: `2px solid ${_qaBdr}`, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}
                         >
@@ -9927,6 +10008,314 @@ export const StudentDashboard: React.FC<Props> = ({
                     );
                   })}
                 </div>
+              </div>
+            );
+          })()}
+
+          {/* ── MY AFFILIATIONS — School & Coaching ── */}
+          {(() => {
+            const _userSchoolId   = (user as any).schoolId as string | undefined;
+            const _userCoachingId = (user as any).coachingId as string | undefined;
+            const _userCoachingNm = (user as any).coachingName as string | undefined;
+
+            const _joinSchool = async (school: any) => {
+              const updated = { ...user, schoolId: school.id } as any;
+              handleUserUpdate(updated);
+              setUserSchool(school);
+              try { await saveUserToLive(updated); } catch {}
+              setShowSchoolPicker(false);
+              setSchoolCodeInput('');
+              setSchoolCodeError('');
+              setSchoolCodeTargetId(null);
+            };
+
+            const _removeSchool = async () => {
+              const updated = { ...user, schoolId: null } as any;
+              handleUserUpdate(updated);
+              setUserSchool(null);
+              try { await saveUserToLive(updated); } catch {}
+              // Also clear the school_users record so the fallback lookup
+              // in the useEffect doesn't restore the old school after removal.
+              try { await removeSchoolUserByUid(user.id); } catch {}
+            };
+
+            const _joinCoaching = async (c: { id: string; name: string }) => {
+              const updated = { ...user, coachingId: c.id, coachingName: c.name } as any;
+              handleUserUpdate(updated);
+              try { await saveUserToLive(updated); } catch {}
+              setShowCoachingPicker(false);
+            };
+
+            const _removeCoaching = async () => {
+              const updated = { ...user, coachingId: null, coachingName: null } as any;
+              handleUserUpdate(updated);
+              try { await saveUserToLive(updated); } catch {}
+            };
+
+            const _openSchoolPicker = async () => {
+              setSchoolPickerLoading(true);
+              setShowSchoolPicker(true);
+              setSchoolCodeInput('');
+              setSchoolCodeError('');
+              setSchoolCodeTargetId(null);
+              try { const s = await getAllSchools(); setAllSchools(s.filter((x: any) => x.active)); } catch {}
+              setSchoolPickerLoading(false);
+            };
+
+            const _openCoachingPicker = async () => {
+              setCoachingPickerLoading(true);
+              setShowCoachingPicker(true);
+              try {
+                const list = await getActiveCoachings();
+                setRtdbCoachingList(list);
+              } catch { setRtdbCoachingList([]); }
+              setCoachingPickerLoading(false);
+            };
+
+            return (
+              <div className="px-3 mb-3">
+                <div className="rounded-2xl overflow-hidden" style={{ background: _pCard, border: _pBdrSoft }}>
+
+                  {/* Card header */}
+                  <div className="px-4 pt-3.5 pb-2 flex items-center gap-2" style={{ borderBottom: _pSep }}>
+                    <span className="text-base">🏷️</span>
+                    <p className={`text-xs font-black uppercase tracking-widest ${_pTxt}`}>Affiliations</p>
+                  </div>
+
+                  {/* ── SCHOOL ROW ── */}
+                  <div className="px-4 py-3 flex items-center gap-2.5" style={{ borderBottom: _pSep }}>
+                    <span className="text-lg shrink-0">🏫</span>
+                    <div className="flex-1 min-w-0">
+                      <span className="text-[11px] font-bold" style={{ color: _pTxtMutedColor }}>School: </span>
+                      <span className={`text-[13px] font-black ${_userSchoolId && userSchool ? _pTxt : _pTxtMuted}`}>
+                        {_userSchoolId && userSchool ? userSchool.name : _userSchoolId ? '…' : 'Not Joined'}
+                      </span>
+                    </div>
+                    {_userSchoolId ? (
+                      <div className="flex gap-1.5 shrink-0">
+                        <button onClick={_openSchoolPicker}
+                          className="text-[11px] font-black px-2.5 py-1 rounded-lg active:scale-95 transition"
+                          style={{ background: `${tierTheme.primary}18`, color: tierTheme.primary }}>
+                          Change
+                        </button>
+                        <button onClick={_removeSchool}
+                          className="text-[11px] font-black px-2.5 py-1 rounded-lg active:scale-95 transition"
+                          style={{ background: 'rgba(239,68,68,0.10)', color: '#ef4444' }}>
+                          Remove
+                        </button>
+                      </div>
+                    ) : (
+                      <button onClick={_openSchoolPicker}
+                        className="text-[11px] font-black px-3 py-1 rounded-lg active:scale-95 transition shrink-0"
+                        style={{ background: `${tierTheme.primary}15`, color: tierTheme.primary, border: `1px solid ${tierTheme.primary}30` }}>
+                        Join →
+                      </button>
+                    )}
+                  </div>
+
+                  {/* ── COACHING ROW ── */}
+                  <div className="px-4 py-3 flex items-center gap-2.5">
+                    <span className="text-lg shrink-0">📚</span>
+                    <div className="flex-1 min-w-0">
+                      <span className="text-[11px] font-bold" style={{ color: _pTxtMutedColor }}>Coaching: </span>
+                      <span className={`text-[13px] font-black ${_userCoachingId ? _pTxt : _pTxtMuted}`}>
+                        {_userCoachingNm || 'Not Joined'}
+                      </span>
+                    </div>
+                    {isCoachingAdmin ? (
+                      <button onClick={() => onOpenCoaching?.()}
+                        className="text-[11px] font-black px-2.5 py-1 rounded-lg active:scale-95 transition shrink-0"
+                        style={{ background: 'rgba(139,92,246,0.18)', color: '#8b5cf6', border: '1px solid rgba(139,92,246,0.35)' }}>
+                        Manage →
+                      </button>
+                    ) : _userCoachingId ? (
+                      <div className="flex gap-1.5 shrink-0">
+                        <button onClick={_openCoachingPicker}
+                          className="text-[11px] font-black px-2.5 py-1 rounded-lg active:scale-95 transition"
+                          style={{ background: 'rgba(139,92,246,0.12)', color: '#8b5cf6' }}>
+                          Change
+                        </button>
+                        <button onClick={_removeCoaching}
+                          className="text-[11px] font-black px-2.5 py-1 rounded-lg active:scale-95 transition"
+                          style={{ background: 'rgba(239,68,68,0.10)', color: '#ef4444' }}>
+                          Remove
+                        </button>
+                      </div>
+                    ) : (
+                      <button onClick={_openCoachingPicker}
+                        className="text-[11px] font-black px-3 py-1 rounded-lg active:scale-95 transition shrink-0"
+                        style={{ background: 'rgba(139,92,246,0.10)', color: '#8b5cf6', border: '1px solid rgba(139,92,246,0.25)' }}>
+                        Join →
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* ── SCHOOL PICKER MODAL ── */}
+                {showSchoolPicker && (
+                  <div className="fixed inset-0 z-[500] flex flex-col" style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}>
+                    <div className="flex-1" onClick={() => { setShowSchoolPicker(false); setSchoolCodeTargetId(null); setSchoolCodeInput(''); setSchoolCodeError(''); }} />
+                    <div className="rounded-t-3xl overflow-hidden flex flex-col" style={{ background: _pCard, maxHeight: '72vh' }}>
+                      {/* Header */}
+                      <div className="px-5 py-4 flex items-center gap-3 shrink-0" style={{ borderBottom: _pSep }}>
+                        <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: `${tierTheme.primary}18` }}>
+                          <span className="text-lg">🏫</span>
+                        </div>
+                        <div className="flex-1">
+                          <p className={`text-sm font-black ${_pTxt}`}>School Chunein</p>
+                          <p className="text-[10px]" style={{ color: _pTxtMutedColor }}>Apni school select karo</p>
+                        </div>
+                        <button onClick={() => { setShowSchoolPicker(false); setSchoolCodeTargetId(null); setSchoolCodeInput(''); setSchoolCodeError(''); }} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: `${_pTxtMutedColor}18` }}>
+                          <X size={16} style={{ color: _pTxtMutedColor }} />
+                        </button>
+                      </div>
+                      {/* School list */}
+                      <div className="overflow-y-auto flex-1 p-3 space-y-2">
+                        {schoolPickerLoading ? (
+                          <div className="py-8 text-center">
+                            <div className="w-8 h-8 rounded-full border-2 border-t-transparent animate-spin mx-auto mb-2" style={{ borderColor: tierTheme.primary, borderTopColor: 'transparent' }} />
+                            <p className="text-[11px]" style={{ color: _pTxtMutedColor }}>Schools load ho rahi hain…</p>
+                          </div>
+                        ) : allSchools.length === 0 ? (
+                          <p className="py-8 text-center text-sm" style={{ color: _pTxtMutedColor }}>Koi school available nahi hai</p>
+                        ) : (
+                          allSchools.map((school: any) => {
+                            const isLocked = school.lockCodeActive;
+                            const isCurrentSchool = school.id === _userSchoolId;
+                            const isTarget = schoolCodeTargetId === school.id;
+                            return (
+                              <div key={school.id} className="rounded-2xl overflow-hidden" style={{ background: isCurrentSchool ? `${tierTheme.primary}10` : `${_pTxtMutedColor}08`, border: isCurrentSchool ? `1.5px solid ${tierTheme.primary}50` : `1px solid ${_pTxtMutedColor}18` }}>
+                                <button
+                                  onClick={() => {
+                                    if (isCurrentSchool) return;
+                                    if (isLocked) {
+                                      setSchoolCodeTargetId(isTarget ? null : school.id);
+                                      setSchoolCodeInput('');
+                                      setSchoolCodeError('');
+                                    } else {
+                                      _joinSchool(school);
+                                    }
+                                  }}
+                                  className="w-full px-4 py-3 flex items-center gap-3 text-left active:opacity-80 transition">
+                                  {school.logoUrl ? (
+                                    <img src={school.logoUrl} alt="" className="w-10 h-10 rounded-xl object-cover shrink-0" />
+                                  ) : (
+                                    <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 text-xl" style={{ background: `${tierTheme.primary}12` }}>🏫</div>
+                                  )}
+                                  <div className="flex-1 min-w-0">
+                                    <p className={`text-sm font-bold truncate ${_pTxt}`}>{school.name}</p>
+                                    {school.address && <p className="text-[10px] truncate" style={{ color: _pTxtMutedColor }}>{school.address}</p>}
+                                  </div>
+                                  {isLocked && <Lock size={14} style={{ color: '#f59e0b' }} className="shrink-0" />}
+                                  {isCurrentSchool && <CheckCircle size={15} style={{ color: tierTheme.primary }} className="shrink-0" />}
+                                </button>
+                                {/* Code input for locked school */}
+                                {isTarget && isLocked && (
+                                  <div className="px-4 pb-3">
+                                    <div className="flex gap-2">
+                                      <input
+                                        type="text"
+                                        value={schoolCodeInput}
+                                        onChange={e => { setSchoolCodeInput(e.target.value.toUpperCase()); setSchoolCodeError(''); }}
+                                        placeholder="Access code dalein"
+                                        className="flex-1 rounded-xl px-3 py-2 text-sm font-bold outline-none"
+                                        style={{ background: `${_pTxtMutedColor}12`, border: schoolCodeError ? '1.5px solid #ef4444' : `1px solid ${_pTxtMutedColor}25`, color: _pTxtColor }}
+                                        autoFocus
+                                      />
+                                      <button
+                                        onClick={() => {
+                                          if (!schoolCodeInput.trim()) { setSchoolCodeError('Code dalein'); return; }
+                                          if (schoolCodeInput.trim().toUpperCase() !== (school.lockCode || '').toUpperCase()) {
+                                            setSchoolCodeError('Galat code hai');
+                                            return;
+                                          }
+                                          _joinSchool(school);
+                                        }}
+                                        className="px-4 py-2 rounded-xl text-sm font-black text-white active:scale-95 transition"
+                                        style={{ background: tierTheme.primary }}>
+                                        OK
+                                      </button>
+                                    </div>
+                                    {schoolCodeError && <p className="text-[10px] mt-1 text-red-500 font-bold">{schoolCodeError}</p>}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                      {/* None option */}
+                      {_userSchoolId && (
+                        <div className="p-3 pt-0 shrink-0">
+                          <button
+                            onClick={async () => { await _removeSchool(); setShowSchoolPicker(false); }}
+                            className="w-full py-3 rounded-2xl text-sm font-black active:scale-95 transition"
+                            style={{ background: 'rgba(239,68,68,0.10)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.20)' }}>
+                            School hatao (None)
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── COACHING PICKER MODAL ── */}
+                {showCoachingPicker && (
+                  <div className="fixed inset-0 z-[500] flex flex-col" style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}>
+                    <div className="flex-1" onClick={() => setShowCoachingPicker(false)} />
+                    <div className="rounded-t-3xl overflow-hidden flex flex-col" style={{ background: _pCard, maxHeight: '72vh' }}>
+                      {/* Header */}
+                      <div className="px-5 py-4 flex items-center gap-3 shrink-0" style={{ borderBottom: _pSep }}>
+                        <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'rgba(139,92,246,0.12)' }}>
+                          <span className="text-lg">📚</span>
+                        </div>
+                        <div className="flex-1">
+                          <p className={`text-sm font-black ${_pTxt}`}>Coaching Chunein</p>
+                          <p className="text-[10px]" style={{ color: _pTxtMutedColor }}>Apni coaching institute select karo</p>
+                        </div>
+                        <button onClick={() => setShowCoachingPicker(false)} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: `${_pTxtMutedColor}18` }}>
+                          <X size={16} style={{ color: _pTxtMutedColor }} />
+                        </button>
+                      </div>
+                      {/* Coaching list */}
+                      <div className="overflow-y-auto flex-1 p-3 space-y-2">
+                        {coachingPickerLoading ? (
+                          <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin" style={{ color: '#8b5cf6' }} /></div>
+                        ) : rtdbCoachingList.length === 0 ? (
+                          <p className="py-8 text-center text-sm" style={{ color: _pTxtMutedColor }}>Admin ne abhi koi coaching nahi add ki</p>
+                        ) : (
+                          rtdbCoachingList.map(c => {
+                            const isSelected = c.id === _userCoachingId;
+                            return (
+                              <button
+                                key={c.id}
+                                onClick={() => _joinCoaching(c)}
+                                className="w-full px-4 py-3.5 rounded-2xl flex items-center gap-3 text-left active:scale-98 transition"
+                                style={{ background: isSelected ? 'rgba(139,92,246,0.12)' : `${_pTxtMutedColor}08`, border: isSelected ? '1.5px solid rgba(139,92,246,0.45)' : `1px solid ${_pTxtMutedColor}18` }}>
+                                <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 text-xl" style={{ background: 'rgba(139,92,246,0.10)' }}>{c.emoji || '📚'}</div>
+                                <div className="flex-1 min-w-0">
+                                  <p className={`text-sm font-bold truncate ${_pTxt}`}>{c.name}</p>
+                                </div>
+                                {isSelected && <CheckCircle size={15} style={{ color: '#8b5cf6' }} className="shrink-0" />}
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+                      {/* None option */}
+                      {_userCoachingId && (
+                        <div className="p-3 pt-0 shrink-0">
+                          <button
+                            onClick={async () => { await _removeCoaching(); setShowCoachingPicker(false); }}
+                            className="w-full py-3 rounded-2xl text-sm font-black active:scale-95 transition"
+                            style={{ background: 'rgba(239,68,68,0.10)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.20)' }}>
+                            Coaching hatao (None)
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })()}
@@ -13471,7 +13860,22 @@ export const StudentDashboard: React.FC<Props> = ({
 
                         {/* Question Card */}
                         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-                          <p className="text-base font-bold text-slate-800 leading-relaxed mb-5 whitespace-pre-wrap">{current.question}</p>
+                          <div className="flex items-start gap-2 mb-5">
+                            <p className="text-base font-bold text-slate-800 leading-relaxed whitespace-pre-wrap flex-1">{current.question}</p>
+                            <button
+                              onClick={() => {
+                                const opts = current.options.length === 4
+                                  ? current.options as [string,string,string,string]
+                                  : ([...current.options, '', '', '', ''].slice(0, 4) as [string,string,string,string]);
+                                setMcqCommunityDraft({ question: current.question, options: opts, correctAnswer: current.correctAnswer, explanation: '' });
+                                setShowMcqCommunityPopup(true);
+                              }}
+                              className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center active:scale-90 transition-all bg-violet-100 text-violet-600"
+                              title="MCQ Community mein bhejo"
+                            >
+                              <Plus size={14} strokeWidth={2.5} />
+                            </button>
+                          </div>
                           <div className="space-y-2.5">
                             {current.options.map((opt, oi) => {
                               const isSelected = compMcqSelected === oi;
@@ -13509,7 +13913,6 @@ export const StudentDashboard: React.FC<Props> = ({
 
                           {/* Feedback */}
                           {compMcqSelected !== null && (
-                            <>
                             <div className={`mt-4 p-3 rounded-xl text-sm font-bold ${
                               compMcqSelected === current.correctAnswer
                                 ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
@@ -13519,20 +13922,6 @@ export const StudentDashboard: React.FC<Props> = ({
                                 ? '✅ Correct answer!'
                                 : `❌ Wrong. Correct answer: Option ${String.fromCharCode(65 + current.correctAnswer)}`}
                             </div>
-                            {/* Share this MCQ to community chat */}
-                            <button
-                              onClick={() => {
-                                const opts = current.options.length === 4
-                                  ? current.options as [string,string,string,string]
-                                  : ([...current.options, '', '', '', ''].slice(0, 4) as [string,string,string,string]);
-                                setMcqCommunityDraft({ question: current.question, options: opts, correctAnswer: current.correctAnswer, explanation: '' });
-                                setShowMcqCommunityPopup(true);
-                              }}
-                              className="mt-2 w-full py-2.5 rounded-xl bg-violet-50 border border-violet-200 text-violet-700 font-bold text-xs flex items-center justify-center gap-2 active:scale-95 transition-all hover:bg-violet-100"
-                            >
-                              <Send size={14} /> Share to Community Chat
-                            </button>
-                            </>
                           )}
                         </div>
 
@@ -14655,7 +15044,7 @@ export const StudentDashboard: React.FC<Props> = ({
       {/* UNIVERSAL CHAT (Global + Support) */}
       {showChat && (
         <div
-          className="fixed inset-0 z-[200]"
+          className="fixed inset-0 z-[400]"
           onClick={() => setShowChat(false)}
         >
           <div className="w-full h-full" onClick={(e) => e.stopPropagation()}>
@@ -14948,6 +15337,7 @@ export const StudentDashboard: React.FC<Props> = ({
                           ultraHtmlRemaining={_isUltraUser ? ultraHtmlRemaining : undefined}
                           isBasicUser={_isBasicUser}
                           basicHtmlRemaining={basicHtmlRemaining}
+                          userLevel={_userLevel}
                           userCredits={user.credits || 0}
                           htmlUnlockCost={settings?.htmlUnlockCost ?? 5}
                           onHtmlOpen={_trackHtmlOpen}
@@ -15008,7 +15398,7 @@ export const StudentDashboard: React.FC<Props> = ({
       {/* MCQ COMMUNITY POPUP — opens from "+" button on any MCQ card */}
       {showMcqCommunityPopup && mcqCommunityDraft && (
         <div
-          className="fixed inset-0 z-[210]"
+          className="fixed inset-0 z-[400]"
           onClick={() => { setShowMcqCommunityPopup(false); setMcqCommunityDraft(null); }}
         >
           <div className="w-full h-full" onClick={(e) => e.stopPropagation()}>
@@ -15350,7 +15740,7 @@ export const StudentDashboard: React.FC<Props> = ({
       {/* FIXED BOTTOM NAVIGATION */}
       <nav
         data-iic-bottom-nav=""
-        className={`fixed bottom-0 left-0 right-0 w-full mx-auto backdrop-blur-md z-[300] pb-safe ${activeExternalApp || isDocFullscreen || (contentViewStep === "PLAYER" && selectedChapter && activeTab !== 'STORE' && activeTab !== 'PROFILE') || isLandscapeUiHidden || isInternalImmersive || !!hwActiveHwId || !!lucentNoteViewer ? "hidden" : ""}`}
+        className={`fixed bottom-0 left-0 right-0 w-full mx-auto backdrop-blur-md z-[300] pb-safe ${activeExternalApp || isDocFullscreen || (contentViewStep === "PLAYER" && selectedChapter && activeTab !== 'STORE' && activeTab !== 'PROFILE') || isLandscapeUiHidden || isInternalImmersive || !!hwActiveHwId || !!lucentNoteViewer || coachingNotesReaderOpen ? "hidden" : ""}`}
         style={{
           background: tierTheme.navBg,
           borderTop: `1px solid ${(tierTheme as any).navBorderColor || tierTheme.primary + '22'}`,
@@ -15463,6 +15853,7 @@ export const StudentDashboard: React.FC<Props> = ({
                 case 'PROFILE':  return { ...empty, activeTab: 'PROFILE' };
                 case 'APP_STORE':return { ...empty, activeTab: 'APP_STORE' };
                 case 'HISTORY':  return { ...empty, activeTab: 'HISTORY' };
+                case 'PROGRESS': return { ...empty, activeTab: 'HOME' };
                 default:         return empty;
               }
             };
@@ -15485,6 +15876,7 @@ export const StudentDashboard: React.FC<Props> = ({
               PROFILE:   ['PROFILE'],
               APP_STORE: ['APP_STORE'],
               HISTORY:   ['HISTORY'],
+              PROGRESS:  ['HOME'],
             };
 
             const NAV_TAB_INFO: Record<string, {emoji: string; desc: string}> = {
@@ -15495,6 +15887,7 @@ export const StudentDashboard: React.FC<Props> = ({
               APP_STORE:          { emoji: '📱', desc: 'Admin recommended apps' },
               PROFILE:            { emoji: '👤', desc: 'Profile, credits and settings' },
               REVISION_V2:        { emoji: '🔁', desc: 'Spaced revision and weak topics' },
+              PROGRESS:           { emoji: '📊', desc: 'Daily stats, XP, streak aur Revision Hub progress' },
               COMPRE:             { emoji: '📖', desc: 'Full book comparison tool' },
               GK:                 { emoji: '🌍', desc: 'Daily GK and current affairs' },
               VIDEO:              { emoji: '🎬', desc: 'Educational videos' },
@@ -15518,6 +15911,8 @@ export const StudentDashboard: React.FC<Props> = ({
               setShowCompareView(false);
               // Close Revision Hub Screen if open — otherwise it covers all other tabs.
               setShowRevisionHubScreen(false);
+              // Close Progress Dashboard overlay if open — prevents it bleeding into other tabs.
+              setShowProgressDashboard(false);
               // Close the Important Notes overlay if it's open — otherwise the
               // overlay (z-[200]) keeps covering the dashboard even after the
               // user taps Home / Homework / Profile / Revision in bottom nav.
@@ -15573,55 +15968,36 @@ export const StudentDashboard: React.FC<Props> = ({
                 onClick: () => switchToLogicalTab("HOME"),
               },
 
-              // Universal Video — shortcut in bottom nav
+              // Revision Hub — quick access to smart learning
               {
-                id: "VIDEO" as LogicalTab,
-                label: "Video",
-                Icon: Youtube,
+                id: "REVISION_HUB" as any,
+                label: "Revision",
+                Icon: BrainCircuit,
                 filledOnActive: true,
-                isActive: !showStarredPage && !showChat && currentLogicalTab === "VIDEO",
+                isActive: showRevisionHubScreen,
                 onClick: () => {
                   setShowChat(false);
-                  try { stopProfileStarRead(); } catch (_) {}
                   setShowStarredPage(false);
-                  switchToLogicalTab("VIDEO");
+                  hapticMedium();
+                  setShowRevisionHubScreen(true);
                 },
               },
 
-              // ── CASCADING SLOT SYSTEM ──────────────────────────────────────
-              // Each item occupies its slot only if enabled.
-              // When an item is disabled, the next item slides into that position.
-              //
-              //  Slot order:  GK (permanent) → RevHub → Video/Profile
-              //
-              //  GK is now PERMANENT in Slot A (replaces old Revision-Hub-first slot
-              //  per user request). Revision Hub now lives in Slot B and remains
-              //  admin-toggleable. Important Notes page is reachable from inside GK.
-
-              // Slot A — Community Support (GK moved to sidebar; accessible via menu)
-              ...((settings?.hiddenBottomNavButtons || []).includes('COMMUNITY')
-                ? []
-                : [{ id: "COMMUNITY_SUPPORT" as any, label: "Chat", Icon: MessageSquare,
-                     filledOnActive: true,
-                     isActive: showChat,
-                     onClick: () => {
-                       setShowCompareView(false);
-                       try { stopProfileStarRead(); } catch (_) {}
-                       setShowStarredPage(false);
-                       setShowChat(true);
-                     } }]),
-
-              // Slot B' — Important Notes (Star)
-              ...(!settings?.starredPageHidden && !(settings?.hiddenBottomNavButtons || []).includes('IMPORTANT')
-                ? [{ id: "IMPORTANT" as const, label: "Important", Icon: Star,
-                     filledOnActive: true,
-                     isActive: showStarredPage,
-                     onClick: () => {
-                       setShowCompareView(false);
-                       setShowChat(false);
-                       setShowStarredPage(true);
-                     } }]
-                : []),
+              // Community Support
+              {
+                id: "COMMUNITY_SUPPORT" as any,
+                label: "Community",
+                Icon: MessageSquare,
+                filledOnActive: true,
+                isActive: showChat,
+                onClick: () => {
+                  setShowCompareView(false);
+                  setShowRevisionHubScreen(false);
+                  try { stopProfileStarRead(); } catch (_) {}
+                  setShowStarredPage(false);
+                  setShowChat(true);
+                },
+              },
 
               // Slot C — Apps store (admin-toggleable)
               ...(!settings?.appStorePageHidden && !(settings?.hiddenBottomNavButtons || []).includes('APP_STORE')
@@ -15643,7 +16019,7 @@ export const StudentDashboard: React.FC<Props> = ({
                 label: "Profile",
                 Icon: UserIcon,
                 filledOnActive: false,
-                isActive: !showStarredPage && !showRevisionHubScreen && currentLogicalTab === "PROFILE",
+                isActive: !showStarredPage && !showRevisionHubScreen && !showProgressDashboard && currentLogicalTab === "PROFILE",
                 onClick: () => switchToLogicalTab("PROFILE"),
               },
             ];
@@ -17462,6 +17838,21 @@ export const StudentDashboard: React.FC<Props> = ({
                           </button>
                         </>
                       )}
+                      {/* Projector Mode button — MCQ tab only */}
+                      {lucentActiveTab === 'MCQS' && (() => {
+                        const _pKey = `${entry.id}_${safeIndex}`;
+                        const _adminMcqs = (currentPage?.mcqs || []) as MCQItem[];
+                        const _mcqs = _adminMcqs.length > 0 ? _adminMcqs : (lucentMcqsByPage[_pKey] || []);
+                        return _mcqs.length > 0 ? (
+                          <button
+                            onClick={() => setFlashcardMcqs({ items: _mcqs as any[], title: entry.lessonTitle || 'MCQs', subtitle: `Page ${currentPage?.pageNo || safeIndex + 1} · ${_mcqs.length} Questions`, subject: entry.subject || '', startInProjectorMode: true })}
+                            className="w-8 h-8 flex items-center justify-center rounded-xl bg-amber-500/30 border border-amber-400/50 text-amber-300 active:scale-90 transition-all shrink-0"
+                            title="📽️ Projector Mode"
+                          >
+                            <Tv size={14} />
+                          </button>
+                        ) : null;
+                      })()}
                       {lucentActiveTab !== 'PDF' && (
                         <button
                           onClick={() => lucentNoteViewer && setContentPickerPopup({ type: 'LUCENT', entry: lucentNoteViewer, pageIdx: lucentPageIndex })}
@@ -17534,10 +17925,11 @@ export const StudentDashboard: React.FC<Props> = ({
                     onMoreOptions={() => setContentPickerPopup({ type: 'LUCENT', entry, pageIdx: safeIndex })}
                     onSaveOffline={() => handleLucentSaveOffline(false)}
                     isSavedOffline={lucentSaved}
-                    isUltraUser={_isUltraUser}
-                    ultraHtmlRemaining={_isUltraUser ? ultraHtmlRemaining : undefined}
+                    isUltraUser={_isUltraUser || !!(lucentNoteViewer as any)?.isSampleLesson}
+                    ultraHtmlRemaining={(_isUltraUser || !!(lucentNoteViewer as any)?.isSampleLesson) ? ultraHtmlRemaining : undefined}
                     isBasicUser={_isBasicUser}
                     basicHtmlRemaining={basicHtmlRemaining}
+                    userLevel={_userLevel}
                     userCredits={user.credits || 0}
                     htmlUnlockCost={settings?.htmlUnlockCost ?? 5}
                     onHtmlOpen={_trackHtmlOpen}
@@ -17989,7 +18381,14 @@ RULES:
                                 <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 shrink-0">Q {qi + 1}</span>
                                 {q.topic && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 truncate">{q.topic}</span>}
                               </div>
-                              <p className="text-sm font-black text-slate-800 leading-snug mb-2">{q.question}</p>
+                              <div className="flex items-start gap-2 mb-2">
+                                <p className="text-sm font-black text-slate-800 leading-snug flex-1">{q.question}</p>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); const opts = (q.options||[]).length===4 ? q.options as [string,string,string,string] : ([...(q.options||[]),'','','',''].slice(0,4) as [string,string,string,string]); setMcqCommunityDraft({question:q.question,options:opts,correctAnswer:q.correctAnswer,explanation:(q as any).explanation||''}); setShowMcqCommunityPopup(true); }}
+                                  className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center active:scale-90 transition-all bg-indigo-100 text-indigo-600"
+                                  title="MCQ Community mein bhejo"
+                                ><Plus size={13} strokeWidth={2.5} /></button>
+                              </div>
                               {q.statements && q.statements.length > 0 && (
                                 <div className="mb-3 pl-3 border-l-2 border-purple-200 space-y-1">
                                   {q.statements.map((stmt, si) => (
@@ -18218,12 +18617,19 @@ RULES:
                             </div>
                             <div className="flex items-start justify-between gap-2 mb-2">
                               <p className="text-sm font-black text-slate-800 leading-snug flex-1">{cq.question}</p>
-                              <McqSpeakButtons
-                                question={cq.question}
-                                options={cq.options || []}
-                                correctAnswer={cq.correctAnswer}
-                                className="shrink-0"
-                              />
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <McqSpeakButtons
+                                  question={cq.question}
+                                  options={cq.options || []}
+                                  correctAnswer={cq.correctAnswer}
+                                  className="shrink-0"
+                                />
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); const opts = (cq.options||[]).length===4 ? cq.options as [string,string,string,string] : ([...(cq.options||[]),'','','',''].slice(0,4) as [string,string,string,string]); setMcqCommunityDraft({question:cq.question,options:opts,correctAnswer:cq.correctAnswer,explanation:(cq as any).explanation||''}); setShowMcqCommunityPopup(true); }}
+                                  className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center active:scale-90 transition-all bg-indigo-100 text-indigo-600"
+                                  title="MCQ Community mein bhejo"
+                                ><Plus size={13} strokeWidth={2.5} /></button>
+                              </div>
                             </div>
                             {cq.statements && cq.statements.length > 0 && (
                               <div className="mb-3 pl-3 border-l-2 border-indigo-200 space-y-1">
@@ -18479,6 +18885,7 @@ RULES:
           }}
           onUpdateUser={handleUserUpdate}
           onMcqAnswer={trackDailyMcqAnswer}
+          onSendToMcqCommunity={(draft) => { setMcqCommunityDraft(draft); setShowMcqCommunityPopup(true); }}
         />
       )}
 
@@ -19161,6 +19568,7 @@ RULES:
           onUpdateUser={handleUserUpdate}
           sourceMeta={{ lessonTitle: flashcardMcqs.title, subject: flashcardMcqs.subject }}
           sourceKey={flashcardMcqs.sourceKey}
+          startInProjectorMode={flashcardMcqs.startInProjectorMode}
         />
       )}
 
@@ -22433,7 +22841,11 @@ RULES:
 
       {/* ═══════════ MY PROGRESS DASHBOARD ═══════════ */}
       {showProgressDashboard && (
-        <StudentProgressDashboard user={user} onBack={() => setShowProgressDashboard(false)} />
+        <StudentProgressDashboard user={user} onBack={() => {
+          setShowProgressDashboard(false);
+          currentLogicalTabRef.current = 'HOME';
+          setCurrentLogicalTab('HOME');
+        }} />
       )}
 
       {/* ═══════════ LOGIN HISTORY OVERLAY ═══════════ */}

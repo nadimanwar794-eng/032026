@@ -579,6 +579,10 @@ export interface LucentNoteEntry {
   /** When true, this entry contains ONLY MCQs — no page-wise notes.
    *  Students tap the title and are taken directly to MCQ view (no popup, no page list). */
   mcqOnly?: boolean;
+  /** When true, this lesson is permanently free for ALL users — Book Text, Smart Notes,
+   *  और आसान समझ (Explanation) sab unlock hote hain, daily reading limit nahi lagti.
+   *  Har subject mein ek "sample" lesson ke liye use karo. */
+  isSampleLesson?: boolean;
 }
 
 export interface AppNotification {

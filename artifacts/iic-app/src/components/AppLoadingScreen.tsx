@@ -288,32 +288,51 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
         </div>
 
         {/* Progress section */}
-        <div className="w-full flex flex-col items-center mt-4">
-          <div className="flex flex-col items-center justify-center mb-2">
-            <div className={`text-4xl font-black font-mono tracking-tighter drop-shadow-md ${t.text}`}>
-              {progress}%
+        <div className="w-full flex flex-col items-center mt-8">
+          {/* Progress bar with shimmer animation */}
+          <div className={`w-full h-[5px] ${t.trackBg} rounded-full overflow-hidden mb-3 shadow-inner`} style={{ position: 'relative' }}>
+            <div
+              className={`h-full bg-gradient-to-r ${t.bar} rounded-full`}
+              style={{ width: `${progress}%`, transition: 'width 0.25s cubic-bezier(0.4,0,0.2,1)', position: 'relative', overflow: 'hidden' }}
+            >
+              {/* shimmer sweep */}
+              <span
+                style={{
+                  position: 'absolute', inset: 0,
+                  background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.45) 50%, transparent 100%)',
+                  animation: 'shimmer 1.4s infinite',
+                  backgroundSize: '200% 100%',
+                }}
+              />
             </div>
           </div>
-          <div className={`w-full h-2 ${t.trackBg} rounded-full overflow-hidden mb-2 shadow-inner`}>
-            <div
-              className={`h-full bg-gradient-to-r ${t.bar} rounded-full transition-all duration-100 ease-linear shadow-sm`}
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-          <div className="flex items-center justify-center gap-2 mt-1">
+
+          {/* % + developer line together, small and clean */}
+          <div className="flex items-center justify-center gap-2">
+            <span className={`text-[11px] font-semibold font-mono ${t.badge} opacity-70`}>
+              {progress}%
+            </span>
             {showFooter && (
               <>
-                <p className={`text-[11px] font-bold ${t.badge} tracking-wide`}>
+                <span className={`${t.badge} opacity-40 text-[10px]`}>·</span>
+                <span className={`text-[11px] font-medium ${t.badge} opacity-60 tracking-wide`}>
                   Developed by {developerName}
-                </p>
-                <span className={t.badge}>|</span>
+                </span>
+                <span className={`${t.badge} opacity-30 text-[10px]`}>|</span>
               </>
             )}
-            <p className={`text-[11px] ${t.badge} font-mono font-bold tracking-widest`}>
+            <span className={`text-[11px] ${t.badge} font-mono opacity-50 tracking-widest`}>
               v{APP_VERSION}
-            </p>
+            </span>
           </div>
         </div>
+
+        <style>{`
+          @keyframes shimmer {
+            0%   { transform: translateX(-100%); }
+            100% { transform: translateX(200%); }
+          }
+        `}</style>
       </div>
     </div>
   );

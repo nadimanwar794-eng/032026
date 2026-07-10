@@ -27,6 +27,9 @@ import { AdminPowerManager } from './AdminPowerManager';
 import { EventManager } from './admin/EventManager';
 import AdminHelp from './AdminHelp';
 import { AdminTrendingNotes } from './AdminTrendingNotes';
+import { AdminCoachingHomework } from './AdminCoachingHomework';
+import { CoachingManager } from './CoachingManager';
+import { CoachingSuperAdminPanel } from './coaching/CoachingSuperAdminPanel';
 import { FeatureGroupList } from './admin/FeatureGroupList';
 import { ErrorNoticeBoard } from './admin/ErrorNoticeBoard';
 import { ALL_FEATURES } from '../utils/featureRegistry';
@@ -137,7 +140,10 @@ type AdminTab =
   | 'ERROR_LOGS' // Error Notice Board
   | 'CONTENT_HISTORY' // Content addition history log
   | 'FEEDBACK' // App Feedback from users
-  | 'REVISION_MCQ_MANAGER'; // Revision Hub MCQ Manager
+  | 'REVISION_MCQ_MANAGER' // Revision Hub MCQ Manager
+  | 'COACHING_HOMEWORK' // Coaching Homework Manager
+  | 'COACHING_MANAGER' // 🏫 Full Coaching School System
+  | 'COACHING_CENTRES'; // 🏫 Create/Assign/Subscription — Super Admin
 
 interface ContentConfig {
     freeLink?: string;
@@ -325,6 +331,71 @@ const BadgePosEditor: React.FC<{
     </div>
   );
 };
+
+// ─── Revision Subject Adder — extracted to keep hooks unconditional ────────────
+function RevisionSubjectAdder({ localSettings, setLocalSettings }: { localSettings: any; setLocalSettings: any }) {
+    const levelOpts = ['all','6','7','8','9','10','11','12','COMPETITION'];
+    const streamOpts = ['all','Science','Commerce','Arts'];
+    const [rsName,    setRsName]    = React.useState('');
+    const [rsIcon,    setRsIcon]    = React.useState('📘');
+    const [rsLevels,  setRsLevels]  = React.useState<string[]>(['all']);
+    const [rsStreams, setRsStreams] = React.useState<string[]>(['all']);
+    const toggleL = (v: string) => setRsLevels(p =>
+        v === 'all' ? ['all'] : [...p.filter((x: string) => x !== 'all' && x !== v), v]);
+    const toggleS = (v: string) => setRsStreams(p =>
+        v === 'all' ? ['all'] : [...p.filter((x: string) => x !== 'all' && x !== v), v]);
+    return (
+        <div className="space-y-2 border-t border-indigo-100 pt-3">
+            <div className="flex gap-2">
+                <input value={rsIcon} onChange={e => setRsIcon(e.target.value)}
+                    className="w-10 border border-indigo-200 rounded-lg px-1 py-1.5 text-center text-lg outline-none" />
+                <input value={rsName} onChange={e => setRsName(e.target.value)}
+                    placeholder="Subject name (e.g. Hindi, Sanskrit)"
+                    className="flex-1 border border-indigo-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-indigo-400" />
+            </div>
+            <div>
+                <p className="text-[9px] font-black text-indigo-600 uppercase mb-1">Classes</p>
+                <div className="flex flex-wrap gap-1">
+                    {levelOpts.map(v => (
+                        <button key={v} type="button" onClick={() => toggleL(v)}
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold border ${rsLevels.includes(v) ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-indigo-600 border-indigo-200'}`}>
+                            {v === 'all' ? 'All' : `Cls ${v}`}
+                        </button>
+                    ))}
+                </div>
+            </div>
+            <div>
+                <p className="text-[9px] font-black text-indigo-600 uppercase mb-1">Streams (11-12)</p>
+                <div className="flex flex-wrap gap-1">
+                    {streamOpts.map(v => (
+                        <button key={v} type="button" onClick={() => toggleS(v)}
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold border ${rsStreams.includes(v) ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-indigo-600 border-indigo-200'}`}>
+                            {v === 'all' ? 'All Streams' : v}
+                        </button>
+                    ))}
+                </div>
+            </div>
+            <button
+                type="button"
+                disabled={!rsName.trim()}
+                onClick={() => {
+                    if (!rsName.trim()) return;
+                    const id = 'rsub_' + rsName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 20) + '_' + Date.now().toString(36);
+                    const next = [...(localSettings.revisionSubjects || []), {
+                        id, name: rsName.trim(), icon: rsIcon,
+                        classLevels: rsLevels, streams: rsStreams,
+                    }];
+                    setLocalSettings({ ...localSettings, revisionSubjects: next });
+                    setRsName(''); setRsIcon('📘'); setRsLevels(['all']); setRsStreams(['all']);
+                }}
+                className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-black text-xs rounded-lg"
+            >
+                + Subject Add Karo
+            </button>
+            <p className="text-[10px] text-slate-500">💡 Save Settings dabane ke baad sab students ke Revision Hub me dikhega.</p>
+        </div>
+    );
+}
 
 export const AdminDashboard: React.FC<Props> = (props) => {
   return <AdminDashboardInner {...props} />;
@@ -645,6 +716,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
     { id: 'geography', name: 'भूगोल (Geography)' },
     { id: 'polity', name: 'राजनीति विज्ञान (Polity)' },
     { id: 'history', name: 'इतिहास (History)' },
+    { id: 'current_affairs', name: '📰 करेंट अफेयर्स (Current Affairs)' },
   ];
   // NOTE: customBooksList / LUCENT_SUBJECT_OPTIONS / PAGE_WISE_SUBJECT_IDS are
   // derived from `localSettings` and therefore declared *after* the
@@ -699,6 +771,8 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   const [expandedLucent, setExpandedLucent] = useState<Record<string, boolean>>({});
   const [showAddSubjectUI, setShowAddSubjectUI] = useState(false);
   const [newSubjectInput, setNewSubjectInput] = useState('');
+  const [showAddBookUI, setShowAddBookUI] = useState(false);
+  const [newBookInput, setNewBookInput] = useState('');
   const [expandedLucentPage, setExpandedLucentPage] = useState<Record<string, boolean>>({});
 
   // Normalize common Hindi / shorthand MCQ paste formats so they parse with parseMCQText().
@@ -740,6 +814,14 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
         .trim();
       return `\n**Question ${n}**\n❓ Question: ${qClean}`;
     });
+
+    // ── Step 4b: Bare (non-bold) "प्रश्न 18:" / "Question 18:" markers ────────
+    // Common when the AI only bolds the label, not the number, or skips bold
+    // entirely. Without this, numbered statement lines ("1. ...", "2. ...")
+    // that follow get mistaken for new question boundaries by the fallback
+    // heuristic below, chopping the statement-based question apart and
+    // dropping its statements.
+    txt = txt.replace(/(?:^|\n)[ \t]*(?:\*\*\s*)?(?:प्रश्न|Question)\s*(\d+)\s*[:.\-]\s*/gi, (_m, n) => `\n**Question ${n}**\n❓ Question: `);
 
     // ── Step 5: **प्रश्न:** / **Question:** (no number) → counter-based marker ─
     txt = txt.replace(/\*\*प्रश्न\s*[:：]?\*\*/gi, '__PRASHNA__');
@@ -906,16 +988,22 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   const customBooksList = (localSettings.customBooks || []).filter(b => b && b.id && b.name);
   // Custom subjects saved by admin (stored in localSettings.customLucentSubjects)
   const customLucentSubjectsList: { id: string; name: string }[] = (localSettings.customLucentSubjects || []).filter((s: any) => s && s.id && s.name);
+  // Built-in Lucent subjects the admin has removed/hidden (Trash2 button below). Kept as a
+  // hide-list rather than mutating LUCENT_SUBJECT_OPTIONS_BASE so old lucentNotes entries
+  // already tagged with a hidden subject id still resolve their name correctly.
+  const hiddenLucentSubjectIds: Set<string> = new Set((localSettings.hiddenLucentSubjectIds || []) as string[]);
+  // Custom book names saved by admin for Lucent notes (stored in localSettings.customLucentBooks)
+  const customLucentBooksList: string[] = (localSettings.customLucentBooks || []).filter((b: any) => typeof b === 'string' && b.trim());
   // Lucent GK subject dropdown — only academic subjects (Biology, Chemistry, etc.)
   // Custom page-wise books (Speedy, Sar Sangrah, custom) must NOT appear here.
   const LUCENT_SUBJECT_OPTIONS: { id: string; name: string }[] = [
-    ...LUCENT_SUBJECT_OPTIONS_BASE,
+    ...LUCENT_SUBJECT_OPTIONS_BASE.filter(s => !hiddenLucentSubjectIds.has(s.id)),
     ...customLucentSubjectsList,
   ];
   // Dynamic subject options — changes based on which classLevel admin selected.
   // For COMPETITION: competition subjects (built-in + custom). For class 6-12: all subjects of that class.
   const activeLucentSubjectOptions: { id: string; name: string }[] = (() => {
-    if (newLucent.classLevel === 'COMPETITION') return [...LUCENT_SUBJECT_OPTIONS_BASE, ...customLucentSubjectsList];
+    if (newLucent.classLevel === 'COMPETITION') return [...LUCENT_SUBJECT_OPTIONS_BASE.filter(s => !hiddenLucentSubjectIds.has(s.id)), ...customLucentSubjectsList.filter(s => !(s as any).bookId)];
     try {
       const seen = new Set<string>();
       const results: { id: string; name: string }[] = [];
@@ -6276,6 +6364,88 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                               </p>
                           </div>
 
+                          {/* ── Revision Hub Subject Manager ───────────────────────────────────── */}
+                          <div className="bg-gradient-to-br from-indigo-50 to-blue-50 border border-indigo-200 rounded-xl p-3">
+                              <div className="flex items-center justify-between mb-1">
+                                  <label className="text-xs font-bold uppercase text-indigo-700">📖 Revision Hub Subjects</label>
+                                  <span className="text-[10px] font-bold text-indigo-700 bg-white px-2 py-0.5 rounded-full border border-indigo-200">
+                                      {(localSettings.revisionSubjects || []).length} custom
+                                  </span>
+                              </div>
+                              <p className="text-[10px] text-indigo-700 mb-3">
+                                  Default subjects hide karo ya naye add karo — sab students ke Revision Hub me reflect hoga.
+                              </p>
+
+                              {/* Hide/show default subjects */}
+                              <p className="text-[10px] font-black text-indigo-700 uppercase mb-1.5">Default Subjects (uncheck = hide)</p>
+                              <div className="flex flex-wrap gap-1.5 mb-3">
+                                  {(Object.entries({
+                                      physics: 'Physics', chemistry: 'Chemistry', biology: 'Biology', math: 'Mathematics',
+                                      history: 'History', geography: 'Geography', polity: 'Political Science', economics: 'Economics',
+                                      business: 'Business Studies', accounts: 'Accountancy', lucent: 'Lucent',
+                                      speedyScience: 'Speedy Science', speedySocialScience: 'Speedy SS',
+                                      sarSangrah: 'Sar Sangrah', mcq: 'MCQ Practice', science: 'Science', sst: 'Social Science'
+                                  }) as [string, string][]).map(([id, name]) => {
+                                      const hidden = (localSettings.hiddenDefaultSubjects || []).includes(id);
+                                      return (
+                                          <button
+                                              key={id}
+                                              type="button"
+                                              onClick={() => {
+                                                  const cur: string[] = localSettings.hiddenDefaultSubjects || [];
+                                                  const next = hidden ? cur.filter((x: string) => x !== id) : [...cur, id];
+                                                  setLocalSettings({ ...localSettings, hiddenDefaultSubjects: next });
+                                              }}
+                                              className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-all ${hidden ? 'bg-slate-100 text-slate-400 border-slate-200 line-through' : 'bg-white text-indigo-700 border-indigo-300'}`}
+                                          >
+                                              {name}
+                                          </button>
+                                      );
+                                  })}
+                              </div>
+
+                              {/* Existing custom revision subjects */}
+                              {(localSettings.revisionSubjects || []).length > 0 && (
+                                  <div className="mb-3 space-y-1.5">
+                                      <p className="text-[10px] font-black text-indigo-700 uppercase mb-1">Custom Subjects</p>
+                                      {(localSettings.revisionSubjects || []).map((sub: any, idx: number) => (
+                                          <div key={sub.id || idx} className="flex items-center gap-2 bg-white border border-indigo-100 rounded-lg p-2">
+                                              <span className="text-base shrink-0">{sub.icon || '📘'}</span>
+                                              <div className="flex-1 min-w-0">
+                                                  <input
+                                                      type="text"
+                                                      value={sub.name}
+                                                      onChange={e => {
+                                                          const next = [...(localSettings.revisionSubjects || [])];
+                                                          next[idx] = { ...next[idx], name: e.target.value };
+                                                          setLocalSettings({ ...localSettings, revisionSubjects: next });
+                                                      }}
+                                                      className="w-full text-sm font-bold text-slate-700 bg-transparent border-0 outline-none"
+                                                  />
+                                                  <p className="text-[9px] text-slate-400">
+                                                      {sub.classLevels?.join(', ') || 'All Classes'} · {sub.streams?.join(', ') || 'All Streams'}
+                                                  </p>
+                                              </div>
+                                              <button
+                                                  type="button"
+                                                  onClick={() => {
+                                                      if (!confirm(`"${sub.name}" hatao?`)) return;
+                                                      const next = (localSettings.revisionSubjects || []).filter((_: any, i: number) => i !== idx);
+                                                      setLocalSettings({ ...localSettings, revisionSubjects: next });
+                                                  }}
+                                                  className="p-1 text-red-500 hover:bg-red-50 rounded shrink-0"
+                                              >
+                                                  <Trash2 size={14} />
+                                              </button>
+                                          </div>
+                                      ))}
+                                  </div>
+                              )}
+
+                              {/* Add new custom revision subject — hooks-safe child component */}
+                              <RevisionSubjectAdder localSettings={localSettings} setLocalSettings={setLocalSettings} />
+                          </div>
+
                           {/* NEW: Loading-screen short-name font-size slider (24-120px) */}
                           <div className="bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-200 rounded-xl p-3">
                               <div className="flex items-center justify-between mb-2">
@@ -8556,6 +8726,13 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                               setNewLucent({...newLucent, classLevel: cl, subject: firstSubj});
                                           }} className="w-full p-2 border border-indigo-200 rounded text-sm outline-none focus:border-indigo-500 bg-white font-bold">
                                               <option value="COMPETITION">🏆 Competition Mode</option>
+                                              <option value="6">📗 Class 6</option>
+                                              <option value="7">📘 Class 7</option>
+                                              <option value="8">📙 Class 8</option>
+                                              <option value="9">📕 Class 9</option>
+                                              <option value="10">🏅 Class 10</option>
+                                              <option value="11">🔬 Class 11</option>
+                                              <option value="12">🎓 Class 12</option>
                                           </select>
                                       </div>
                                       <div>
@@ -8572,10 +8749,34 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           >
                                               {showAddSubjectUI ? '✕ Band karo' : '＋ Add Subject'}
                                           </button>
-                                          {/* Custom subjects list with remove buttons */}
-                                          {customLucentSubjectsList.length > 0 && (
+                                          {/* Built-in Lucent subjects (History, Geography, etc.) — deletable/hideable */}
+                                          {newLucent.classLevel === 'COMPETITION' && (
                                               <div className="mt-1.5 space-y-1">
-                                                  {customLucentSubjectsList.map(s => (
+                                                  {LUCENT_SUBJECT_OPTIONS_BASE.filter(s => !hiddenLucentSubjectIds.has(s.id)).map(s => (
+                                                      <div key={s.id} className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded px-2 py-1">
+                                                          <span className="flex-1 text-xs font-bold text-slate-700 truncate">{s.name}</span>
+                                                          <button
+                                                              type="button"
+                                                              onClick={() => {
+                                                                  if (!confirm(`"${s.name}" ko Lucent subjects se hata dein? (Purane notes waise hi rahenge, sirf naya notes add karte waqt yeh option nahi dikhega)`)) return;
+                                                                  const next = Array.from(new Set([...(localSettings.hiddenLucentSubjectIds || []), s.id]));
+                                                                  setLocalSettings({ ...localSettings, hiddenLucentSubjectIds: next });
+                                                                  if (newLucent.subject === s.id) {
+                                                                      const fallback = LUCENT_SUBJECT_OPTIONS_BASE.find(x => x.id !== s.id && !hiddenLucentSubjectIds.has(x.id));
+                                                                      setNewLucent({ ...newLucent, subject: fallback?.id || customLucentSubjectsList[0]?.id || 'biology' });
+                                                                  }
+                                                              }}
+                                                              className="p-0.5 text-rose-500 hover:text-rose-700 shrink-0"
+                                                              title="Remove subject"
+                                                          ><Trash2 size={12} /></button>
+                                                      </div>
+                                                  ))}
+                                              </div>
+                                          )}
+                                          {/* Custom subjects list with remove buttons */}
+                                          {customLucentSubjectsList.filter(s => !(s as any).bookId).length > 0 && (
+                                              <div className="mt-1.5 space-y-1">
+                                                  {customLucentSubjectsList.filter(s => !(s as any).bookId).map(s => (
                                                       <div key={s.id} className="flex items-center gap-1 bg-indigo-50 border border-indigo-200 rounded px-2 py-1">
                                                           <span className="flex-1 text-xs font-bold text-indigo-800 truncate">{s.name}</span>
                                                           <button
@@ -8656,20 +8857,54 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                   </div>
                                   <div>
                                       <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">📚 Kis Book ka Content Hai?</label>
-                                      <input
-                                          type="text"
-                                          list="admin-book-name-list"
-                                          value={newLucent.bookName}
-                                          onChange={e => setNewLucent({...newLucent, bookName: e.target.value})}
-                                          className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500"
-                                          placeholder="Book chuniye ya khud likhiye..."
-                                      />
+                                      <div className="flex gap-1.5">
+                                          <input
+                                              type="text"
+                                              list="admin-book-name-list"
+                                              value={newLucent.bookName}
+                                              onChange={e => setNewLucent({...newLucent, bookName: e.target.value})}
+                                              className="flex-1 p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500"
+                                              placeholder="Book chuniye ya khud likhiye..."
+                                          />
+                                          <button
+                                              type="button"
+                                              onClick={() => {
+                                                  const name = newLucent.bookName.trim();
+                                                  if (!name) return;
+                                                  if (customLucentBooksList.includes(name)) return;
+                                                  setLocalSettings({ ...localSettings, customLucentBooks: [...customLucentBooksList, name] });
+                                              }}
+                                              title="Is book ko save karo future use ke liye"
+                                              className="px-2.5 py-1.5 bg-indigo-600 text-white rounded text-[11px] font-black hover:bg-indigo-700 active:scale-95 whitespace-nowrap"
+                                          >＋ Save</button>
+                                      </div>
                                       <datalist id="admin-book-name-list">
                                           <option value="Lucent" />
                                           <option value="Speedy Science" />
                                           <option value="Speedy Social Science" />
                                           <option value="Sar Sangrah" />
+                                          {customLucentBooksList.map(b => <option key={b} value={b} />)}
                                       </datalist>
+                                      {/* Saved custom books chips */}
+                                      {customLucentBooksList.length > 0 && (
+                                          <div className="flex flex-wrap gap-1 mt-1.5">
+                                              {customLucentBooksList.map(b => (
+                                                  <div key={b} className="flex items-center gap-1 bg-indigo-50 border border-indigo-200 rounded-full pl-2 pr-1 py-0.5">
+                                                      <button
+                                                          type="button"
+                                                          onClick={() => setNewLucent({...newLucent, bookName: b})}
+                                                          className="text-[11px] font-bold text-indigo-800 hover:text-indigo-600"
+                                                      >{b}</button>
+                                                      <button
+                                                          type="button"
+                                                          onClick={() => setLocalSettings({ ...localSettings, customLucentBooks: customLucentBooksList.filter(x => x !== b) })}
+                                                          className="text-[10px] text-red-400 hover:text-red-600 font-black px-0.5"
+                                                          title="Remove"
+                                                      >✕</button>
+                                                  </div>
+                                              ))}
+                                          </div>
+                                      )}
                                       <p className="text-[10px] text-indigo-600 font-bold mt-1">
                                           ⚠️ Yahan jo naam likhoge, student app mein usi naam ka alag book card banega.
                                           Khaali chhodne par "Lucent" card mein jayega.
@@ -9893,6 +10128,21 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                           {(entry as any).locked ? '🔒 Locked — Redeem Code Required' : '🔓 Unlocked — Free Access'}
                                                       </button>
                                                       <span className="text-[9px] text-slate-400">Lock karne ke baad "🎫 Code" se redeem code generate karein</span>
+                                                  </div>
+                                                  {/* Sample Lesson toggle — permanently free for all users */}
+                                                  <div className="flex items-center gap-2">
+                                                      <button
+                                                          type="button"
+                                                          onClick={() => {
+                                                              const updated = [...(localSettings.lucentNotes || [])];
+                                                              updated[i] = { ...updated[i], isSampleLesson: !(entry as any).isSampleLesson };
+                                                              setLocalSettings({ ...localSettings, lucentNotes: updated });
+                                                          }}
+                                                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black border transition-all ${(entry as any).isSampleLesson ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}`}
+                                                      >
+                                                          {(entry as any).isSampleLesson ? '🆓 Sample Lesson — Sab Free' : '🔘 Sample Lesson OFF'}
+                                                      </button>
+                                                      <span className="text-[9px] text-slate-400">Har subject ka 1 lesson permanently free karo — Book+Notes+Explanation sab unlock</span>
                                                   </div>
                                                   <div className="space-y-2">
                                                       <div className="flex items-center justify-between">
@@ -12272,6 +12522,12 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                       // Pre-fill bookName with custom book name (deferred to avoid render loop)
                                       setTimeout(() => setNewLucent(prev => prev.bookName ? prev : ({...prev, bookName: _cBookName})), 0);
                                   }
+                                  // Subjects here are scoped to THIS book only — never fall back to Lucent's
+                                  // global subject ids (fixes custom books wrongly inheriting Lucent's subjects).
+                                  const _bookScopedIds = new Set(customLucentSubjectsList.filter(s => (s as any).bookId === newBookNote.targetSubject).map(s => s.id));
+                                  if (!_bookScopedIds.has(newLucent.subject) && newLucent.subject !== 'general') {
+                                      setTimeout(() => setNewLucent(prev => (_bookScopedIds.has(prev.subject) || prev.subject === 'general') ? prev : ({...prev, subject: 'general'})), 0);
+                                  }
                                   return (
                                       <div className="border-t border-indigo-100 pt-4 space-y-3">
                                           <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 text-xs text-indigo-800">
@@ -12289,61 +12545,101 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                   </select>
                                               </div>
                                               <div>
-                                                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Subject</label>
-                                                  <select value={newLucent.subject} onChange={e => setNewLucent({...newLucent, subject: e.target.value})} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500 bg-white">
-                                                      {activeLucentSubjectOptions.map(opt => <option key={opt.id} value={opt.id}>{opt.name}</option>)}
-                                                  </select>
-                                                  <button
-                                                      type="button"
-                                                      onClick={() => setShowAddSubjectUI(v => !v)}
-                                                      className="mt-1 text-[10px] font-black text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
-                                                  >
-                                                      {showAddSubjectUI ? '✕ Band karo' : '＋ Add Subject'}
-                                                  </button>
-                                                  {showAddSubjectUI && (
-                                                      <div className="mt-1 flex gap-1">
-                                                          <input
-                                                              type="text"
-                                                              value={newSubjectInput}
-                                                              onChange={e => setNewSubjectInput(e.target.value)}
-                                                              onKeyDown={e => {
-                                                                  if (e.key === 'Enter') {
-                                                                      e.preventDefault();
-                                                                      const raw = newSubjectInput.trim();
-                                                                      if (!raw) return;
-                                                                      let baseId = ('subj_' + raw.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')).slice(0, 32) || 'subj_' + Date.now();
-                                                                      const existingIds = new Set([...LUCENT_SUBJECT_OPTIONS_BASE.map(s => s.id), ...customLucentSubjectsList.map(s => s.id)]);
-                                                                      let id = baseId; let n = 2;
-                                                                      while (existingIds.has(id)) { id = `${baseId}_${n++}`; }
-                                                                      const next = [...(localSettings.customLucentSubjects || []), { id, name: raw }];
-                                                                      setLocalSettings({ ...localSettings, customLucentSubjects: next });
-                                                                      setNewLucent({ ...newLucent, subject: id });
-                                                                      setNewSubjectInput('');
-                                                                      setShowAddSubjectUI(false);
-                                                                  }
-                                                              }}
-                                                              placeholder="e.g. भूगोल (Geography)"
-                                                              className="flex-1 p-1.5 border border-indigo-300 rounded text-xs outline-none focus:border-indigo-500"
-                                                          />
-                                                          <button
-                                                              type="button"
-                                                              onClick={() => {
-                                                                  const raw = newSubjectInput.trim();
-                                                                  if (!raw) return;
-                                                                  let baseId = ('subj_' + raw.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')).slice(0, 32) || 'subj_' + Date.now();
-                                                                  const existingIds = new Set([...LUCENT_SUBJECT_OPTIONS_BASE.map(s => s.id), ...customLucentSubjectsList.map(s => s.id)]);
-                                                                  let id = baseId; let n = 2;
-                                                                  while (existingIds.has(id)) { id = `${baseId}_${n++}`; }
-                                                                  const next = [...(localSettings.customLucentSubjects || []), { id, name: raw }];
-                                                                  setLocalSettings({ ...localSettings, customLucentSubjects: next });
-                                                                  setNewLucent({ ...newLucent, subject: id });
-                                                                  setNewSubjectInput('');
-                                                                  setShowAddSubjectUI(false);
-                                                              }}
-                                                              className="bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs px-2 py-1 rounded active:scale-95"
-                                                          >✓</button>
-                                                      </div>
-                                                  )}
+                                                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Subject (is book ka apna)</label>
+                                                  {(() => {
+                                                      const bookId = newBookNote.targetSubject;
+                                                      const bookScopedSubjects = customLucentSubjectsList.filter(s => (s as any).bookId === bookId);
+                                                      const opts = bookScopedSubjects.length > 0 ? bookScopedSubjects : [{ id: 'general', name: '📖 General' }];
+                                                      return (
+                                                          <>
+                                                              <select value={newLucent.subject} onChange={e => setNewLucent({...newLucent, subject: e.target.value})} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500 bg-white">
+                                                                  {opts.map(opt => <option key={opt.id} value={opt.id}>{opt.name}</option>)}
+                                                              </select>
+                                                              {bookScopedSubjects.length > 0 && (
+                                                                  <div className="mt-1.5 space-y-1">
+                                                                      {bookScopedSubjects.map(s => (
+                                                                          <div key={s.id} className="flex items-center gap-1 bg-indigo-50 border border-indigo-200 rounded px-2 py-1">
+                                                                              <span className="flex-1 text-xs font-bold text-indigo-800 truncate">{s.name}</span>
+                                                                              <button
+                                                                                  type="button"
+                                                                                  onClick={() => {
+                                                                                      if (!confirm(`"${s.name}" subject hata dein?`)) return;
+                                                                                      const next = (localSettings.customLucentSubjects || []).filter((x: any) => x.id !== s.id);
+                                                                                      setLocalSettings({ ...localSettings, customLucentSubjects: next });
+                                                                                      if (newLucent.subject === s.id) setNewLucent({ ...newLucent, subject: 'general' });
+                                                                                  }}
+                                                                                  className="p-0.5 text-rose-500 hover:text-rose-700 shrink-0"
+                                                                                  title="Remove subject"
+                                                                              ><Trash2 size={12} /></button>
+                                                                          </div>
+                                                                      ))}
+                                                                  </div>
+                                                              )}
+                                                              <button
+                                                                  type="button"
+                                                                  onClick={() => setShowAddSubjectUI(v => !v)}
+                                                                  className="mt-1 text-[10px] font-black text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
+                                                              >
+                                                                  {showAddSubjectUI ? '✕ Band karo' : '＋ Add Subject (is book ke liye)'}
+                                                              </button>
+                                                              {showAddSubjectUI && (
+                                                                  <div className="mt-1 flex gap-1">
+                                                                      <input
+                                                                          type="text"
+                                                                          value={newSubjectInput}
+                                                                          onChange={e => setNewSubjectInput(e.target.value)}
+                                                                          onKeyDown={e => {
+                                                                              if (e.key === 'Enter') {
+                                                                                  e.preventDefault();
+                                                                                  const raw = newSubjectInput.trim();
+                                                                                  if (!raw) return;
+                                                                                  let baseId = ('subj_' + raw.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')).slice(0, 32) || 'subj_' + Date.now();
+                                                                                  const existingIds = new Set([...LUCENT_SUBJECT_OPTIONS_BASE.map(s => s.id), ...customLucentSubjectsList.map(s => s.id)]);
+                                                                                  let id = baseId; let n = 2;
+                                                                                  while (existingIds.has(id)) { id = `${baseId}_${n++}`; }
+                                                                                  const next = [...(localSettings.customLucentSubjects || []), { id, name: raw, bookId }];
+                                                                                  setLocalSettings({ ...localSettings, customLucentSubjects: next });
+                                                                                  setNewLucent({ ...newLucent, subject: id });
+                                                                                  setNewSubjectInput('');
+                                                                                  setShowAddSubjectUI(false);
+                                                                              }
+                                                                          }}
+                                                                          placeholder="e.g. Cell Biology"
+                                                                          className="flex-1 p-1.5 border border-indigo-300 rounded text-xs outline-none focus:border-indigo-500"
+                                                                      />
+                                                                      <button
+                                                                          type="button"
+                                                                          onClick={() => {
+                                                                              const raw = newSubjectInput.trim();
+                                                                              if (!raw) return;
+                                                                              let baseId = ('subj_' + raw.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')).slice(0, 32) || 'subj_' + Date.now();
+                                                                              const existingIds = new Set([...LUCENT_SUBJECT_OPTIONS_BASE.map(s => s.id), ...customLucentSubjectsList.map(s => s.id)]);
+                                                                              let id = baseId; let n = 2;
+                                                                              while (existingIds.has(id)) { id = `${baseId}_${n++}`; }
+                                                                              const next = [...(localSettings.customLucentSubjects || []), { id, name: raw, bookId }];
+                                                                              setLocalSettings({ ...localSettings, customLucentSubjects: next });
+                                                                              setNewLucent({ ...newLucent, subject: id });
+                                                                              setNewSubjectInput('');
+                                                                              setShowAddSubjectUI(false);
+                                                                          }}
+                                                                          className="bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs px-2 py-1 rounded active:scale-95"
+                                                                      >✓</button>
+                                                                  </div>
+                                                              )}
+                                                          </>
+                                                      );
+                                                  })()}
+                                              </div>
+                                          </div>
+                                          <div>
+                                              <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">🌐 Board (kis board ke students ko dikhe)</label>
+                                              <div className="flex gap-1.5">
+                                                  {[{id:'', label:'Sab Boards'},{id:'NCERT_EN',label:'NCERT EN'},{id:'NCERT_HI',label:'NCERT HI'},{id:'BSEB',label:'BSEB'}].map(b => (
+                                                      <button key={b.id} type="button" onClick={() => setNewLucent({...newLucent, board: b.id as any})}
+                                                          className={`flex-1 py-1.5 px-2 rounded-lg border-2 text-[10px] font-black transition-all ${newLucent.board === b.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-indigo-700 border-indigo-200 hover:border-indigo-400'}`}>
+                                                          {b.label}
+                                                      </button>
+                                                  ))}
                                               </div>
                                           </div>
                                           <p className="text-[10px] text-teal-700 font-bold">📗 Book: <span className="font-black">{_cBookName}</span> (auto-set)</p>
@@ -12413,7 +12709,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                               const validPages = newLucent.pages.filter(p => p.pageNo.trim() && (p.chunkNotes?.trim() || p.htmlNotes?.trim()));
                                               if (validPages.length === 0) return alert('Kam se kam ek page ke notes likhein.');
                                               const cbn = customBooksList.find(b => b.id === newBookNote.targetSubject)?.name || '';
-                                              const entry: LucentNoteEntry = { id: Date.now().toString(), subject: newLucent.subject, bookName: cbn || undefined, classLevel: newLucent.classLevel, lessonTitle: newLucent.lessonTitle.trim(), pages: validPages, mcqOnly: newLucent.mcqOnly || undefined, createdAt: new Date().toISOString() };
+                                              const entry: LucentNoteEntry = { id: Date.now().toString(), subject: newLucent.subject, bookName: cbn || undefined, classLevel: newLucent.classLevel, board: newLucent.board || undefined, lessonTitle: newLucent.lessonTitle.trim(), pages: validPages, mcqOnly: newLucent.mcqOnly || undefined, createdAt: new Date().toISOString() };
                                               const updated = [...(localSettings.lucentNotes || []), entry];
                                               const target3 = LUCENT_CLASS_TARGETS.find(t => t.id === newLucent.classLevel)?.label || newLucent.classLevel;
                                               setNewLucent({ subject: newLucent.subject, bookName: '', classLevel: newLucent.classLevel, board: newLucent.board, lessonTitle: '', mcqOnly: false, pages: [{ id: Date.now().toString(), pageNo: '1', content: '', chunkNotes: '', htmlNotes: '' }] });
@@ -12508,20 +12804,54 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                       </div>
                                       <div>
                                           <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">📚 Kis Book ka Content Hai?</label>
-                                          <input
-                                              type="text"
-                                              list="admin-book-name-list-2"
-                                              value={newLucent.bookName}
-                                              onChange={e => setNewLucent({...newLucent, bookName: e.target.value})}
-                                              className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500"
-                                              placeholder="Book chuniye ya khud likhiye..."
-                                          />
+                                          <div className="flex gap-1.5">
+                                              <input
+                                                  type="text"
+                                                  list="admin-book-name-list-2"
+                                                  value={newLucent.bookName}
+                                                  onChange={e => setNewLucent({...newLucent, bookName: e.target.value})}
+                                                  className="flex-1 p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500"
+                                                  placeholder="Book chuniye ya khud likhiye..."
+                                              />
+                                              <button
+                                                  type="button"
+                                                  onClick={() => {
+                                                      const name = newLucent.bookName.trim();
+                                                      if (!name) return;
+                                                      if (customLucentBooksList.includes(name)) return;
+                                                      setLocalSettings({ ...localSettings, customLucentBooks: [...customLucentBooksList, name] });
+                                                  }}
+                                                  title="Is book ko save karo future use ke liye"
+                                                  className="px-2.5 py-1.5 bg-indigo-600 text-white rounded text-[11px] font-black hover:bg-indigo-700 active:scale-95 whitespace-nowrap"
+                                              >＋ Save</button>
+                                          </div>
                                           <datalist id="admin-book-name-list-2">
                                               <option value="Lucent" />
                                               <option value="Speedy Science" />
                                               <option value="Speedy Social Science" />
                                               <option value="Sar Sangrah" />
+                                              {customLucentBooksList.map(b => <option key={b} value={b} />)}
                                           </datalist>
+                                          {/* Saved custom books chips */}
+                                          {customLucentBooksList.length > 0 && (
+                                              <div className="flex flex-wrap gap-1 mt-1.5">
+                                                  {customLucentBooksList.map(b => (
+                                                      <div key={b} className="flex items-center gap-1 bg-indigo-50 border border-indigo-200 rounded-full pl-2 pr-1 py-0.5">
+                                                          <button
+                                                              type="button"
+                                                              onClick={() => setNewLucent({...newLucent, bookName: b})}
+                                                              className="text-[11px] font-bold text-indigo-800 hover:text-indigo-600"
+                                                          >{b}</button>
+                                                          <button
+                                                              type="button"
+                                                              onClick={() => setLocalSettings({ ...localSettings, customLucentBooks: customLucentBooksList.filter(x => x !== b) })}
+                                                              className="text-[10px] text-red-400 hover:text-red-600 font-black px-0.5"
+                                                              title="Remove"
+                                                          >✕</button>
+                                                      </div>
+                                                  ))}
+                                              </div>
+                                          )}
                                           <p className="text-[10px] text-indigo-600 font-bold mt-1">
                                               ⚠️ Yahan jo naam likhoge, student app mein usi naam ka alag book card banega.
                                               Khaali chhodne par "Lucent" card mein jayega.
@@ -18090,6 +18420,30 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                   </div>
               </div>
           </div>
+      )}
+
+      {/* 🏫 COACHING CENTRES — Create / Assign Admin / Subscription */}
+      {activeTab === 'COACHING_CENTRES' && (
+        <CoachingSuperAdminPanel
+          adminUid={user?.id || ''}
+          onBack={() => setActiveTab('DASHBOARD')}
+        />
+      )}
+
+      {/* 🏫 COACHING SCHOOL MANAGER */}
+      {activeTab === 'COACHING_MANAGER' && (
+        <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 animate-in slide-in-from-right">
+          <CoachingManager
+            onBack={() => setActiveTab('DASHBOARD')}
+          />
+        </div>
+      )}
+
+      {/* COACHING HOMEWORK MANAGER */}
+      {activeTab === 'COACHING_HOMEWORK' && (
+        <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 animate-in slide-in-from-right">
+          <AdminCoachingHomework onBack={() => setActiveTab('DASHBOARD')} />
+        </div>
       )}
 
       {/* ══════════════════════════════════════════════════════

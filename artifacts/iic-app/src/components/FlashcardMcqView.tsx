@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { ArrowLeft, ChevronRight, RotateCw, Volume2, Square, Shuffle, Lightbulb, Edit2, X, MoreVertical, RefreshCw, BookOpen } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { ArrowLeft, ChevronRight, ChevronLeft, RotateCw, Volume2, Square, Shuffle, Lightbulb, Edit2, X, MoreVertical, RefreshCw, BookOpen, Tv, CheckCircle, Maximize2, Minimize2 } from 'lucide-react';
 import type { MCQItem } from '../types';
 import type { User, SystemSettings } from '../types';
 import { speakText, stopSpeech } from '../utils/textToSpeech';
@@ -25,6 +26,8 @@ interface Props {
   /** Firebase key for the source entry — used to link MCQ correction suggestions back to the right entry.
    *  Format: "lucent_ENTRYID_pPAGEINDEX" or "hw_ENTRYID" */
   sourceKey?: string;
+  /** If true, component opens directly in Projector Mode (TV button shortcut) */
+  startInProjectorMode?: boolean;
 }
 
 const CREDIT_COST = 5;
@@ -52,7 +55,7 @@ const addTodayCount = (userId: string, n: number) => {
 };
 
 export const FlashcardMcqView: React.FC<Props> = ({
-  questions, title, subtitle, subject, onBack, user, settings, onUpdateUser, sourceMeta, sourceKey
+  questions, title, subtitle, subject, onBack, user, settings, onUpdateUser, sourceMeta, sourceKey, startInProjectorMode
 }) => {
   const isMountedRef = useRef(true);
   const [pickedIndices, setPickedIndices] = useState<number[]>([]);
@@ -68,6 +71,17 @@ export const FlashcardMcqView: React.FC<Props> = ({
   const [suggestionNote, setSuggestionNote] = useState('');
   const [suggestionSaved, setSuggestionSaved] = useState(false);
   const [showTopMenu, setShowTopMenu] = useState(false);
+  // ── Projector Mode ──
+  const [isProjectorMode, setIsProjectorMode] = useState(() => startInProjectorMode ?? false);
+  const [projectorQIndex, setProjectorQIndex] = useState(0);
+  const [projectorReveal, setProjectorReveal] = useState(false);
+  const [projectorSelected, setProjectorSelected] = useState<number | null>(null);
+  const [projectorRotated, setProjectorRotated] = useState(false);
+  const [projectorFocused, setProjectorFocused] = useState(false);
+  // ── Projector score tracking ──
+  const [projectorCorrect, setProjectorCorrect] = useState(0);
+  const [projectorWrong, setProjectorWrong] = useState(0);
+  const [projectorAnswered, setProjectorAnswered] = useState<Set<number>>(new Set());
   // Hard-card review queue (stores positions from main session)
   const [hardQueue, setHardQueue] = useState<number[]>([]);
   const hardQueueRef = useRef<number[]>([]);
@@ -363,6 +377,7 @@ export const FlashcardMcqView: React.FC<Props> = ({
   const isLast = pos >= total - 1;
 
   return (
+    <>
     <div className="fixed inset-0 z-[200] flex flex-col h-[100dvh]" style={tierBgStyle}>
       {/* MCQ Score Popup */}
       {mcqScorePopup !== null && (
@@ -422,6 +437,16 @@ export const FlashcardMcqView: React.FC<Props> = ({
         >
           <Lightbulb size={16} />
         </button>
+        {/* 📽️ Projector Mode — directly in top bar */}
+        {questions.length > 0 && (
+          <button
+            onClick={() => { setProjectorQIndex(0); setProjectorReveal(false); setProjectorRotated(false); setIsProjectorMode(true); }}
+            className="shrink-0 p-2 rounded-full bg-white/10 hover:bg-amber-500 text-amber-300 hover:text-white active:scale-95 transition"
+            title="Projector Mode"
+          >
+            <Tv size={16} />
+          </button>
+        )}
         {/* 3-dot menu */}
         <div className="relative shrink-0">
           <button
@@ -462,6 +487,16 @@ export const FlashcardMcqView: React.FC<Props> = ({
                   >
                     <BookOpen size={15} className="text-red-500 shrink-0" />
                     {hardReviewMode ? 'Normal mode mein jao' : `Hard Cards (${hardQueueRef.current.length}) dekho`}
+                  </button>
+                )}
+                {/* Projector Mode */}
+                {questions.length > 0 && (
+                  <button
+                    onClick={() => { setShowTopMenu(false); setProjectorQIndex(0); setProjectorReveal(false); setIsProjectorMode(true); }}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold transition-colors text-amber-700 hover:bg-amber-50"
+                  >
+                    <Tv size={15} className="text-amber-500 shrink-0" />
+                    📽️ Projector Mode
                   </button>
                 )}
               </div>
@@ -782,5 +817,201 @@ export const FlashcardMcqView: React.FC<Props> = ({
         </div>
       </div>
     </div>
+
+      {/* ── Projector Mode Overlay ── */}
+      {isProjectorMode && questions.length > 0 && (() => {
+        const pq = questions[projectorQIndex] ?? null;
+        if (!pq) return null;
+        const total = questions.length;
+        const optionLetters = ['A','B','C','D','E'];
+
+        // CSS-rotation trick: rotate the fixed overlay 90° to force landscape layout
+        // without relying on screen.orientation.lock (requires fullscreen + permissions)
+        const overlayStyle: React.CSSProperties = projectorRotated
+          ? {
+              position: 'fixed',
+              top: '50%',
+              left: '50%',
+              width: '100vh',
+              height: '100vw',
+              transform: 'translate(-50%, -50%) rotate(90deg)',
+              transformOrigin: 'center center',
+              zIndex: 99999,
+              background: '#ffffff',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+            }
+          : {
+              position: 'fixed',
+              inset: 0,
+              zIndex: 99999,
+              background: '#ffffff',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+            };
+
+        return createPortal(
+          <div style={overlayStyle}>
+            {/* Header — hidden in focus mode */}
+            {!projectorFocused && (
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 16px', borderBottom:'3px solid #e2e8f0', background:'#1e293b', flexShrink:0 }}>
+                <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                  <Tv size={22} color="#fbbf24" />
+                  <span style={{ color:'#fbbf24', fontWeight:900, fontSize:15, letterSpacing:2 }}>PROJECTOR MODE</span>
+                </div>
+                <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                  <span style={{ color:'#94a3b8', fontWeight:700, fontSize:13 }}>{projectorQIndex + 1}/{total}</span>
+                  {/* Score pill */}
+                  {(projectorCorrect > 0 || projectorWrong > 0) && (
+                    <span style={{ background:'#0f172a', borderRadius:20, padding:'3px 8px', fontSize:12, fontWeight:800, display:'flex', alignItems:'center', gap:5 }}>
+                      <span style={{ color:'#4ade80' }}>✓{projectorCorrect}</span>
+                      <span style={{ color:'#94a3b8' }}>·</span>
+                      <span style={{ color:'#f87171' }}>✗{projectorWrong}</span>
+                    </span>
+                  )}
+                  {/* Focus Mode — icon only, ghost */}
+                  <button
+                    onClick={() => setProjectorFocused(true)}
+                    title="Focus Mode"
+                    style={{ background:'transparent', color:'#a3e635', border:'none', borderRadius:8, padding:'6px', cursor:'pointer', display:'flex', alignItems:'center' }}>
+                    <Maximize2 size={18} />
+                  </button>
+                  {/* Rotate button */}
+                  <button
+                    onClick={() => setProjectorRotated(v => !v)}
+                    title={projectorRotated ? 'Portrait' : 'Landscape'}
+                    style={{ background: projectorRotated ? '#6366f1' : '#334155', color:'#fff', border:'none', borderRadius:8, padding:'6px 10px', fontSize:12, fontWeight:700, cursor:'pointer', display:'flex', alignItems:'center', gap:5 }}>
+                    <RotateCw size={14} />
+                    {projectorRotated ? 'Portrait' : 'Landscape'}
+                  </button>
+                  {/* Close — icon only */}
+                  <button onClick={() => { setIsProjectorMode(false); setProjectorRotated(false); setProjectorFocused(false); }}
+                    title="Band Karo"
+                    style={{ background:'#ef4444', color:'#fff', border:'none', borderRadius:8, padding:'6px 8px', fontSize:14, fontWeight:900, cursor:'pointer', display:'flex', alignItems:'center' }}>
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
+            )}
+            {/* Focus mode exit button — floating top-right */}
+            {projectorFocused && (
+              <button
+                onClick={() => setProjectorFocused(false)}
+                style={{ position:'absolute', top:12, right:12, zIndex:10, background:'rgba(15,23,42,0.85)', color:'#a3e635', border:'2px solid #4ade80', borderRadius:10, padding:'8px 16px', fontSize:14, fontWeight:900, cursor:'pointer', display:'flex', alignItems:'center', gap:6, backdropFilter:'blur(4px)' }}>
+                <Minimize2 size={15} />
+                Focus Band Karo
+              </button>
+            )}
+            {/* Scrollable content — flex:1 + overflowY:auto keeps bottom bar always visible */}
+            <div style={{ flex:1, overflowY:'auto', padding: projectorFocused ? '24px 24px 24px' : '18px 24px 12px', display:'flex', flexDirection:'column', gap:14, minHeight:0 }}>
+              {/* Question */}
+              <div style={{ background:'#f8fafc', border:'3px solid #cbd5e1', borderRadius:14, padding:'16px 20px', flexShrink:0 }}>
+                <div style={{ display:'flex', alignItems:'flex-start', gap:12 }}>
+                  <span style={{ background:'#3b82f6', color:'#fff', borderRadius:999, width:36, height:36, display:'flex', alignItems:'center', justifyContent:'center', fontSize:16, fontWeight:900, flexShrink:0 }}>{projectorQIndex + 1}</span>
+                  <div style={{ fontSize:20, fontWeight:700, color:'#0f172a', lineHeight:1.5 }}>{pq.question}</div>
+                </div>
+              </div>
+              {/* Options */}
+              <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                {(pq.options || []).map((opt, oi) => {
+                  const isCorrect = oi === pq.correctAnswer;
+                  const isSelected = projectorSelected === oi;
+                  const answered = projectorSelected !== null;
+
+                  let bg = '#f8fafc';
+                  let border = '3px solid #e2e8f0';
+                  let textColor = '#1e293b';
+                  let dotBg = '#3b82f6';
+                  let icon: React.ReactNode = null;
+
+                  if (answered) {
+                    if (isSelected && isCorrect) { bg = '#dcfce7'; border = '3px solid #22c55e'; textColor = '#15803d'; dotBg = '#22c55e'; icon = <CheckCircle size={22} color="#22c55e" />; }
+                    else if (isSelected && !isCorrect) { bg = '#fef2f2'; border = '3px solid #ef4444'; textColor = '#991b1b'; dotBg = '#ef4444'; icon = <span style={{ fontSize:20, fontWeight:900, color:'#ef4444' }}>✗</span>; }
+                    else if (isCorrect) { bg = '#dcfce7'; border = '3px solid #22c55e'; textColor = '#15803d'; dotBg = '#22c55e'; icon = <CheckCircle size={22} color="#22c55e" />; }
+                  }
+
+                  return (
+                    <div key={oi}
+                      onClick={() => {
+                        if (!answered && !projectorAnswered.has(projectorQIndex)) {
+                          setProjectorSelected(oi);
+                          const newAnswered = new Set(projectorAnswered);
+                          newAnswered.add(projectorQIndex);
+                          setProjectorAnswered(newAnswered);
+                          if (oi === pq.correctAnswer) {
+                            setProjectorCorrect(c => c + 1);
+                            if (user?.id && !isAdmin) {
+                              const pts = tryEarnScore(user.id, 1, userTier, userTier !== 'FREE', 0, 'FLASHCARD_MCQ_CORRECT');
+                              if (pts > 0) showMcqScore(pts);
+                            }
+                          } else {
+                            setProjectorWrong(w => w + 1);
+                          }
+                        }
+                      }}
+                      style={{
+                        display:'flex', alignItems:'center', gap:12,
+                        background: bg, border, borderRadius:12, padding:'11px 16px',
+                        cursor: answered ? 'default' : 'pointer',
+                        transition:'background 0.2s, border 0.2s'
+                      }}>
+                      <span style={{ background: dotBg, color:'#fff', borderRadius:999, width:34, height:34, display:'flex', alignItems:'center', justifyContent:'center', fontSize:16, fontWeight:900, flexShrink:0 }}>{optionLetters[oi]}</span>
+                      <div style={{ fontSize:18, fontWeight:600, color: textColor, lineHeight:1.35, flex:1 }}>{opt}</div>
+                      {icon}
+                    </div>
+                  );
+                })}
+              </div>
+              {/* Explanation after answering */}
+              {projectorSelected !== null && pq.explanation && (
+                <div style={{ background:'#fefce8', border:'2px solid #fde047', borderRadius:12, padding:'14px 18px', fontSize:16, color:'#713f12', lineHeight:1.5, flexShrink:0 }}>
+                  💡 <strong>Explanation:</strong> {pq.explanation}
+                </div>
+              )}
+            </div>
+            {/* Bottom bar — hidden in focus mode */}
+            {!projectorFocused && (
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 20px', borderTop:'3px solid #e2e8f0', background:'#f8fafc', flexShrink:0, gap:10 }}>
+                <button onClick={() => { setProjectorQIndex(i => Math.max(0,i-1)); setProjectorReveal(false); setProjectorSelected(null); }}
+                  disabled={projectorQIndex === 0}
+                  style={{ background: projectorQIndex===0 ? '#e2e8f0' : '#3b82f6', color: projectorQIndex===0 ? '#94a3b8' : '#fff', border:'none', borderRadius:10, padding:'10px 22px', fontSize:16, fontWeight:900, cursor: projectorQIndex===0 ? 'not-allowed' : 'pointer', display:'flex', alignItems:'center', gap:6 }}>
+                  <ChevronLeft size={20} /> Pichla
+                </button>
+                <button onClick={() => { setProjectorQIndex(i => Math.min(total-1,i+1)); setProjectorReveal(false); setProjectorSelected(null); }}
+                  disabled={projectorQIndex === total-1}
+                  style={{ background: projectorQIndex===total-1 ? '#e2e8f0' : '#3b82f6', color: projectorQIndex===total-1 ? '#94a3b8' : '#fff', border:'none', borderRadius:10, padding:'10px 22px', fontSize:16, fontWeight:900, cursor: projectorQIndex===total-1 ? 'not-allowed' : 'pointer', display:'flex', alignItems:'center', gap:6 }}>
+                  Agla <ChevronRight size={20} />
+                </button>
+              </div>
+            )}
+            {/* Focus mode: floating nav + cancel — shown only in focus mode */}
+            {projectorFocused && (
+              <div style={{ position:'absolute', bottom:16, left:'50%', transform:'translateX(-50%)', display:'flex', alignItems:'center', gap:12, zIndex:20 }}>
+                <button
+                  onClick={() => { setProjectorQIndex(i => Math.max(0,i-1)); setProjectorReveal(false); setProjectorSelected(null); }}
+                  disabled={projectorQIndex === 0}
+                  style={{ background: projectorQIndex===0 ? 'rgba(30,41,59,0.4)' : 'rgba(30,41,59,0.85)', color: projectorQIndex===0 ? 'rgba(255,255,255,0.3)' : '#fff', border:'none', borderRadius:10, padding:'10px 20px', fontSize:15, fontWeight:900, cursor: projectorQIndex===0 ? 'not-allowed' : 'pointer', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', gap:6 }}>
+                  <ChevronLeft size={18} /> Pichla
+                </button>
+                <button
+                  onClick={() => setProjectorFocused(false)}
+                  style={{ background:'rgba(239,68,68,0.9)', color:'#fff', border:'2px solid #fca5a5', borderRadius:10, padding:'10px 20px', fontSize:15, fontWeight:900, cursor:'pointer', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', gap:6 }}>
+                  <Minimize2 size={16} /> Focus Band Karo
+                </button>
+                <button
+                  onClick={() => { setProjectorQIndex(i => Math.min(total-1,i+1)); setProjectorReveal(false); setProjectorSelected(null); }}
+                  disabled={projectorQIndex === total-1}
+                  style={{ background: projectorQIndex===total-1 ? 'rgba(30,41,59,0.4)' : 'rgba(30,41,59,0.85)', color: projectorQIndex===total-1 ? 'rgba(255,255,255,0.3)' : '#fff', border:'none', borderRadius:10, padding:'10px 20px', fontSize:15, fontWeight:900, cursor: projectorQIndex===total-1 ? 'not-allowed' : 'pointer', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', gap:6 }}>
+                  Agla <ChevronRight size={18} />
+                </button>
+              </div>
+            )}
+          </div>,
+          document.body
+        );
+      })()}
+    </>
   );
 };

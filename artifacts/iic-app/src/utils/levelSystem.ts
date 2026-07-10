@@ -158,51 +158,47 @@ export interface LevelDailyLimits {
 }
 
 // ── Helper to build one level row ────────────────────────────────────────────
-// MCQ:       base Free=50, Basic=70, Ultra=100; +30 per level (all tiers)
-// DL:        base Free=2,  Basic=5,  Ultra=10;  Free+2, Basic+3, Ultra+5 per level
-// PDF:       Free: L1-L4=0 (blocked), L5=1, L6=2, L7=3, L8=4, L9=5, L10=6, L11=7, L12=8, L13=9, L14=10, L15=11
-//            Basic L1=1; L1-L5: +1/level, L6-L8: +2/level, L9-L11: +3/level, L12-L15: +4/5/6/7
-//            Ultra L1=3; L1-L5: +2/level, L6-L8: +3/level, L9-L11: +4/level, L12-L15: +5/6/7/8
-// Video:     base Free=0,  Basic=2,  Ultra=5;   Free+1(from L2), Basic+2, Ultra+2 per level
-// Notes:     base Free=10, Basic=10, Ultra=10;  Free+2, Basic+4, Ultra+6 per level; L9+ = UNLIMITED
-// TTS:       Same as Notes
-// Write:     base Free=0 (credit-only: 5 CR/view), Basic=5, Ultra=10; Basic+1, Ultra+1 per level from L4
-// Concept:   base Free=5,  Basic=5,  Ultra=5;   Free+2, Basic+4, Ultra+6 per level (Free also open now)
-// Retention: Same formula as Write (Free=0 N/A, Basic/Ultra scaled — Premium only)
-// Flashcard: base Free=10, Basic=15, Ultra=20;  +10 per level (all tiers)
-// bonusLoginCredits: 0,5,10,15,20,30,40,50,65,80,100
+// MCQ:       Fixed per-level counts (Free base × 1.2 Basic, × 1.5 Ultra)
+// DL:        Free = level×2/day; Basic = UNLIMITED; Ultra = UNLIMITED
+// PDF:       Free = 1/day (flat); Basic = 10/day; Ultra = UNLIMITED
+// Video:     Free = 1/day (flat); Basic = 5/day;  Ultra = UNLIMITED
+// Notes/TTS: Free = 1/day (flat); Basic = 5/day;  Ultra = UNLIMITED
+// Write(Fix):Free = 5/day (flat); Basic = 10/day; Ultra = 20/day
+// Concept:   Free = 5/day (flat); Basic = 5/day;  Ultra = 5/day (unchanged)
+// Retention: Free = 0 (N/A);     Basic = 10/day; Ultra = 20/day
+// Flashcard (Community MCQ): Free=10; Basic=15; Ultra=20 (flat)
+// Star lock: Free L1–L4 locked; Free L5+ unlocked; Basic/Ultra always unlocked
+// bonusLoginCredits: 0,5,10,15,20,30,40,50,65,80,100,...
 
 const _BONUS_LOGIN = [0, 5, 10, 15, 20, 30, 40, 50, 65, 80, 100, 120, 150, 185, 220];
 const _CREDIT_WRITE_MAX = [100, 100, 100, 100, 100, 110, 120, 130, 140, 145, 150, 155, 160, 165, 170];
 
-// MCQ increments per level: L1→L2=+10, L2→L3=+10... L5→L6=+20, L6→L7=+20, L7→L8=+20,
-// L8→L9=+30, L9→L10=+30, L10→L11=+40, L11→L12=+40, L12→L13=+50, L13→L14=+60, L14→L15=+70
-const _MCQ_INCR_CUMUL = [0, 10, 20, 30, 40, 60, 80, 100, 130, 160, 200, 240, 290, 350, 420];
+// ── MCQ question counts per level (0-indexed, L1=index 0 … L15=index 14) ────
+// Free base values from subscription matrix; Basic = Free×1.2; Ultra = Free×1.5
+//         L1   L2   L3   L4   L5   L6   L7   L8   L9  L10  L11  L12  L13  L14  L15
+const _MCQ_FREE  = [ 50,  80, 100, 120, 150, 180, 200, 220, 250, 280, 300, 350, 400, 450, 500];
+const _MCQ_BASIC = [ 60,  96, 120, 144, 180, 216, 240, 264, 300, 336, 360, 420, 480, 540, 600];
+const _MCQ_ULTRA = [ 75, 120, 150, 180, 225, 270, 300, 330, 375, 420, 450, 525, 600, 675, 750];
 
-// PDF daily limits — per level (0-indexed n = level-1):
-// L1  L2  L3  L4  L5  L6  L7  L8  L9  L10 L11 L12 L13 L14 L15
-const _PDF_FREE  = [0,  0,  0,  0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11];
-const _PDF_BASIC = [1,  2,  3,  4,  5,  7,  9, 11, 14, 17, 20, 24, 29, 35, 42];
-const _PDF_ULTRA = [3,  5,  7,  9, 11, 14, 17, 20, 24, 28, 32, 37, 43, 50, 58];
+// ── Star lock: Free users cannot bookmark at L1–L4; unlocks at L5 ────────────
+/** Returns true when a Free-tier user at this level has the star/bookmark feature locked. */
+export const isFreeStarLocked = (level: number): boolean => level < 5;
 
 const buildTable = (): Record<number, LevelDailyLimits> => {
   const tbl: Record<number, LevelDailyLimits> = {};
   for (let i = 1; i <= MAX_LEVEL; i++) {
-    const n = i - 1; // 0-indexed increment
-    const unlimitedNotes = i >= 9;
-    const writeBasic = Math.max(5, 5 + Math.max(0, n - 3));
-    const writeUltra = Math.max(10, 10 + Math.max(0, n - 3));
+    const n = i - 1; // 0-indexed
     tbl[i] = {
-      mcq:       { free: 50 + _MCQ_INCR_CUMUL[n], basic: 70 + _MCQ_INCR_CUMUL[n], ultra: 100 + _MCQ_INCR_CUMUL[n] },
-      dl:        { free: 2   + n * 2,  basic: 5   + n * 3,  ultra: 10  + n * 5  },
-      pdf:       { free: _PDF_FREE[n], basic: _PDF_BASIC[n], ultra: _PDF_ULTRA[n] },
-      video:     { free: Math.max(0, n), basic: 2 + n * 2, ultra: 5 + n * 2 },
-      notes:     unlimitedNotes ? { free: UNLIMITED, basic: UNLIMITED, ultra: UNLIMITED } : { free: 10 + n * 2, basic: 10 + n * 4, ultra: 10 + n * 6 },
-      tts:       unlimitedNotes ? { free: UNLIMITED, basic: UNLIMITED, ultra: UNLIMITED } : { free: 10 + n * 2, basic: 10 + n * 4, ultra: 10 + n * 6 },
-      write:     { free: 0, basic: writeBasic, ultra: writeUltra },
-      concept:   { free: 5 + n * 2, basic: 5 + n * 4, ultra: 5 + n * 6 },
-      retention: { free: 0, basic: writeBasic, ultra: writeUltra },
-      flashcard: { free: 10 + n * 10, basic: 15 + n * 10, ultra: 20 + n * 10 },
+      mcq:       { free: _MCQ_FREE[n],  basic: _MCQ_BASIC[n],  ultra: _MCQ_ULTRA[n] },
+      dl:        { free: i * 2,         basic: UNLIMITED,       ultra: UNLIMITED      },
+      pdf:       { free: 1,             basic: 10,              ultra: UNLIMITED      },
+      video:     { free: 1,             basic: 5,               ultra: UNLIMITED      },
+      notes:     { free: 1,             basic: 5,               ultra: UNLIMITED      },
+      tts:       { free: 1,             basic: 5,               ultra: UNLIMITED      },
+      write:     { free: 5,             basic: 10,              ultra: 20             },
+      concept:   { free: 5,             basic: 5,               ultra: 5              },
+      retention: { free: 0,             basic: 10,              ultra: 20             },
+      flashcard: { free: 10,            basic: 15,              ultra: 20             },
       creditWriteMax:    _CREDIT_WRITE_MAX[n],
       bonusLoginCredits: _BONUS_LOGIN[n],
     };

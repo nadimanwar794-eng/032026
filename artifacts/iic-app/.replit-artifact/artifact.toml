@@ -1,13 +1,9 @@
 kind = "web"
 previewPath = "/"
-title = "IIC - NSTA App"
+title = "IIC – Ideal Inspiration Classes"
 version = "1.0.0"
 id = "artifacts/iic-app"
 router = "path"
-
-[[integratedSkills]]
-name = "react-vite"
-version = "1.0.0"
 
 [[services]]
 name = "web"
@@ -19,8 +15,8 @@ run = "pnpm --filter @workspace/iic-app run dev"
 
 [services.production]
 build = [ "pnpm", "--filter", "@workspace/iic-app", "run", "build" ]
-publicDir = "artifacts/iic-app/dist/public"
 serve = "static"
+publicDir = "artifacts/iic-app/dist/public"
 
 [[services.production.rewrites]]
 from = "/*"

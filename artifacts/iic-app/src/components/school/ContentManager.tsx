@@ -20,6 +20,12 @@ function normalizeMcqPaste(raw: string): string {
     const combined = (String(q).trim() + " " + String(rest).trim()).trim();
     return `\n**Question ${n}**\n❓ Question: ${combined}`;
   });
+  // Bare (non-bold) "प्रश्न 18:" / "Question 18:" markers — common when the AI
+  // only bolds the label, not the number, or skips bold entirely. Without this,
+  // numbered statement lines ("1. ...", "2. ...") that follow get mistaken for
+  // new question boundaries by the fallback heuristic below, chopping the
+  // statement-based question apart and dropping its statements.
+  txt = txt.replace(/(?:^|\n)[ \t]*(?:\*\*\s*)?(?:प्रश्न|Question)\s*(\d+)\s*[:.\-]\s*/gi, (_m, n) => `\n**Question ${n}**\n❓ Question: `);
   txt = txt.replace(/\*\*(?:प्रश्न|Question)\s*[:：]?\*\*/gi, "__PRASHNA__");
   txt = txt.replace(/\*\*/g, "");
   let qNum = 0;
@@ -145,14 +151,24 @@ const MCQBuilder: React.FC<{
         <div className="space-y-3">
           {/* Format hint */}
           <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-3">
-            <p className="text-xs font-black text-amber-700 dark:text-amber-300 mb-1.5">📋 Supported Formats:</p>
-            <div className="space-y-1 text-[11px] text-amber-600 dark:text-amber-400 font-mono">
-              <p>Q1. Question text?</p>
-              <p>A) Option 1 &nbsp; B) Option 2</p>
-              <p>C) Option 3 &nbsp; D) Option 4</p>
-              <p className="text-green-700 dark:text-green-400">Ans: B) Option 2</p>
+            <p className="text-xs font-black text-amber-700 dark:text-amber-300 mb-1.5">📋 Dono Format Supported:</p>
+            <div className="grid grid-cols-2 gap-2 text-[10px] font-mono">
+              <div className="text-amber-600 dark:text-amber-400 space-y-0.5">
+                <p className="font-black text-amber-700 dark:text-amber-300">Style 1 (exam):</p>
+                <p>Q1. Question text?</p>
+                <p>A) Option 1</p>
+                <p className="text-green-700 dark:text-green-400">*B) Sahi jawab ← star</p>
+                <p>Ans: B) Option 2</p>
+              </div>
+              <div className="text-amber-600 dark:text-amber-400 space-y-0.5">
+                <p className="font-black text-amber-700 dark:text-amber-300">Style 2 (star):</p>
+                <p>Q: Question text?</p>
+                <p>A: Option 1</p>
+                <p className="text-green-700 dark:text-green-400">*B: Sahi jawab ← star</p>
+                <p>Exp: Explanation</p>
+              </div>
             </div>
-            <p className="text-[10px] text-amber-500 mt-1.5">Hindi format (प्रश्न 1: / सही उत्तर:) bhi supported hai</p>
+            <p className="text-[10px] text-amber-500 mt-1.5">💡 Dono style kaam karte hain • Blank line se alag karo • Hindi (प्रश्न/सही उत्तर) bhi ok</p>
           </div>
 
           {/* Paste area */}

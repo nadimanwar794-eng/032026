@@ -83,7 +83,7 @@ export const PdfViewer: React.FC<Props> = ({
     try { return Math.max(0, parseInt(localStorage.getItem(TOTAL_KEY(key)) || '0', 10)); } catch { return 0; }
   });
   const [iframeSrc, setIframeSrc] = useState(() => buildSrc(url, currentPage));
-  const [rotated, setRotated] = useState(true);
+  const [rotated, setRotated] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1.0);
   const [nightMode, setNightMode] = useState<NightMode>('normal');
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -197,10 +197,14 @@ export const PdfViewer: React.FC<Props> = ({
     return () => document.removeEventListener('fullscreenchange', h);
   }, []);
 
-  // Exit fullscreen when PDF viewer is closed/unmounted
+  // Exit fullscreen + unlock orientation when PDF viewer is closed/unmounted
   useEffect(() => {
     return () => {
       try { if (document.fullscreenElement) document.exitFullscreen(); } catch (_) {}
+      try {
+        const so: any = (screen as any).orientation;
+        if (so && typeof so.unlock === 'function') so.unlock();
+      } catch (_) {}
     };
   }, []);
 
@@ -240,11 +244,38 @@ export const PdfViewer: React.FC<Props> = ({
   const zoomOut = () => setZoomLevel(z => Math.max(0.5, parseFloat((z - 0.25).toFixed(2))));
   const zoomReset = () => setZoomLevel(1.0);
 
-  // Toggle rotate: CSS-only rotation of the PDF iframe — never rotates the whole app
-  const toggleRotate = useCallback(() => {
+  // Toggle rotate: CSS rotation + device orientation lock so the whole phone rotates
+  const toggleRotate = useCallback(async () => {
     const next = !rotated;
     setRotated(next);
     showToast(next ? 'Landscape mode' : 'Portrait mode');
+
+    try {
+      const so: any = (screen as any).orientation;
+      if (!so || typeof so.lock !== 'function') return;
+
+      if (next) {
+        // Going landscape — try without fullscreen first (works in PWA / Android Chrome)
+        let locked = false;
+        for (const target of ['landscape-primary', 'landscape'] as const) {
+          try { await so.lock(target); locked = true; break; } catch { /* try next */ }
+        }
+        if (!locked) {
+          // Fallback: enter fullscreen briefly so lock API is allowed
+          try {
+            const el: any = document.documentElement;
+            if (el.requestFullscreen) await el.requestFullscreen();
+            else if (el.webkitRequestFullscreen) await el.webkitRequestFullscreen();
+            for (const target of ['landscape-primary', 'landscape'] as const) {
+              try { await so.lock(target); break; } catch { /* try next */ }
+            }
+          } catch { /* orientation lock not supported — CSS rotation still works */ }
+        }
+      } else {
+        // Going back to portrait — unlock so the OS takes over again
+        so.unlock();
+      }
+    } catch { /* device/browser doesn't support orientation lock — CSS fallback is enough */ }
   }, [rotated, showToast]);
 
   // When rotated: iframe wrapper is normal (no individual rotation needed)
@@ -257,13 +288,15 @@ export const PdfViewer: React.FC<Props> = ({
   };
 
   // Rotate the entire viewer container like a video player going landscape.
-  // The container is fixed inset-0 so it covers full screen.
-  // When rotated: swap w/h and rotate 90deg so it fills the screen landscape.
+  // Must override right/bottom from the className's inset-0 so they don't
+  // constrain the swapped width/height when rotated.
   const containerStyle: React.CSSProperties = rotated
     ? {
         position: 'fixed',
         top: '50%',
         left: '50%',
+        right: 'auto',
+        bottom: 'auto',
         width: '100vh',
         height: '100vw',
         transform: 'translate(-50%, -50%) rotate(90deg)',

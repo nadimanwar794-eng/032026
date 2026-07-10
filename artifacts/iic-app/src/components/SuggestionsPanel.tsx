@@ -199,7 +199,8 @@ export function SuggestionsPanel({ user, isAdmin, onClose }: Props) {
         style={{
           background: 'linear-gradient(160deg, #0f0c29 0%, #1a1440 50%, #0d1b2a 100%)',
           border: '1px solid rgba(245,158,11,0.25)',
-          maxHeight: '90dvh',
+          height: '78dvh',
+          maxHeight: '78dvh',
         }}
         onClick={e => e.stopPropagation()}
       >

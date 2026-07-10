@@ -164,14 +164,35 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
         upvotingRef.current.add(msgId);
         const vPath = `chat/mcq_upvotes/${msgId}/${user.id}`;
         const wasLiked = myUpvotes.has(msgId);
+        // Optimistic update — show count change immediately
+        setMyUpvotes(prev => {
+            const next = new Set(prev);
+            if (wasLiked) next.delete(msgId); else next.add(msgId);
+            return next;
+        });
+        setMcqUpvotes(prev => ({
+            ...prev,
+            [msgId]: Math.max(0, (prev[msgId] || 0) + (wasLiked ? -1 : 1)),
+        }));
         try {
             if (wasLiked) {
                 await remove(ref(rtdb, vPath));
             } else {
                 await set(ref(rtdb, vPath), true);
             }
-        } catch (e) { console.error('Upvote failed', e); }
-        finally {
+        } catch (e) {
+            console.error('Upvote failed', e);
+            // Revert optimistic update on failure
+            setMyUpvotes(prev => {
+                const next = new Set(prev);
+                if (wasLiked) next.add(msgId); else next.delete(msgId);
+                return next;
+            });
+            setMcqUpvotes(prev => ({
+                ...prev,
+                [msgId]: Math.max(0, (prev[msgId] || 0) + (wasLiked ? 1 : -1)),
+            }));
+        } finally {
             setTimeout(() => upvotingRef.current.delete(msgId), 800);
         }
     };
@@ -183,14 +204,42 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
         reactingRef.current.add(key);
         const vPath = `chat/msg_reactions/${msgId}/${user.id}`;
         const current = myMsgReaction[msgId];
+        // Optimistic update — show count change immediately
+        const toggling = current === type; // clicking same button = toggle off
+        setMyMsgReaction(prev => {
+            const next = { ...prev };
+            if (toggling) delete next[msgId]; else next[msgId] = type;
+            return next;
+        });
+        if (type === 'like') {
+            setMsgLikes(prev => ({ ...prev, [msgId]: Math.max(0, (prev[msgId] || 0) + (toggling ? -1 : 1)) }));
+            if (current === 'dislike') setMsgDislikes(prev => ({ ...prev, [msgId]: Math.max(0, (prev[msgId] || 0) - 1) }));
+        } else {
+            setMsgDislikes(prev => ({ ...prev, [msgId]: Math.max(0, (prev[msgId] || 0) + (toggling ? -1 : 1)) }));
+            if (current === 'like') setMsgLikes(prev => ({ ...prev, [msgId]: Math.max(0, (prev[msgId] || 0) - 1) }));
+        }
         try {
-            if (current === type) {
+            if (toggling) {
                 await remove(ref(rtdb, vPath));
             } else {
                 await set(ref(rtdb, vPath), type);
             }
-        } catch (e) { console.error('React failed', e); }
-        finally { setTimeout(() => reactingRef.current.delete(key), 800); }
+        } catch (e) {
+            console.error('React failed', e);
+            // Revert optimistic update on failure
+            setMyMsgReaction(prev => {
+                const next = { ...prev };
+                if (current) next[msgId] = current; else delete next[msgId];
+                return next;
+            });
+            if (type === 'like') {
+                setMsgLikes(prev => ({ ...prev, [msgId]: Math.max(0, (prev[msgId] || 0) + (toggling ? 1 : -1)) }));
+                if (current === 'dislike') setMsgDislikes(prev => ({ ...prev, [msgId]: Math.max(0, (prev[msgId] || 0) + 1) }));
+            } else {
+                setMsgDislikes(prev => ({ ...prev, [msgId]: Math.max(0, (prev[msgId] || 0) + (toggling ? 1 : -1)) }));
+                if (current === 'like') setMsgLikes(prev => ({ ...prev, [msgId]: Math.max(0, (prev[msgId] || 0) + 1) }));
+            }
+        } finally { setTimeout(() => reactingRef.current.delete(key), 800); }
     };
 
     useEffect(() => {
@@ -322,6 +371,8 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
             setMcqDraft(EMPTY_MCQ);
             setShowMcqBuilder(false);
             setIsAdminOnly(false);
+            // Close the popup so user stays where they were
+            onClose();
         } catch (e: any) { alert('Send failed: ' + e.message); }
     };
 
@@ -459,56 +510,7 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                     </div>
                 ) : (
                     <>
-                        {/* MCQ LEADERBOARD — shown only in MCQ tab */}
-                        {activeTab === 'MCQ' && !roomId && (() => {
-                            const mcqMessages = messages.filter(m => m.type === 'MCQ');
-                            if (mcqMessages.length === 0) return null;
-                            const byUserDay: Record<string, { userId: string; userName: string; date: string; dateTs: number; count: number; responses: number; likes: number }> = {};
-                            mcqMessages.forEach(m => {
-                                const ts = new Date(m.timestamp);
-                                const dateLabel = ts.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-                                const dayTs = new Date(ts.getFullYear(), ts.getMonth(), ts.getDate()).getTime();
-                                const key = `${m.userId}_${dateLabel}`;
-                                if (!byUserDay[key]) byUserDay[key] = { userId: m.userId, userName: m.userName, date: dateLabel, dateTs: dayTs, count: 0, responses: 0, likes: 0 };
-                                byUserDay[key].count++;
-                                byUserDay[key].responses += Object.keys(mcqVotes[m.id] || {}).length;
-                                byUserDay[key].likes += (mcqUpvotes[m.id] || 0);
-                            });
-                            const rows = Object.values(byUserDay).sort((a, b) => b.dateTs - a.dateTs || b.count - a.count || b.likes - a.likes).slice(0, 10);
-                            const medals = ['🥇','🥈','🥉'];
-                            return (
-                                <div className="mx-3 mt-3 mb-0 rounded-2xl overflow-hidden" style={{ border: `1px solid ${subColorBorder}`, background: subColorLight }}>
-                                    <button className="w-full flex items-center justify-between px-3 py-2" onClick={() => setShowMcqLeaderboard(v => !v)}>
-                                        <div className="flex items-center gap-2">
-                                            <Award size={14} style={{ color: subColor }} />
-                                            <span className="text-[11px] font-black uppercase tracking-wider" style={{ color: subColor }}>MCQ Leaderboard</span>
-                                        </div>
-                                        {showMcqLeaderboard ? <ChevronUp size={14} style={{ color: subColor }} /> : <ChevronDown size={14} style={{ color: subColor }} />}
-                                    </button>
-                                    {showMcqLeaderboard && (
-                                        <div className="px-3 pb-3 space-y-1.5">
-                                            <div className="grid grid-cols-5 text-[8px] font-black uppercase tracking-wider px-1 pb-1" style={{ color: subColor, borderBottom: `1px solid ${subColorBorder}` }}>
-                                                <span className="col-span-2">Name</span>
-                                                <span className="text-center">Day</span>
-                                                <span className="text-center">MCQs</span>
-                                                <span className="text-center">👍</span>
-                                            </div>
-                                            {rows.map((row, i) => (
-                                                <div key={`${row.userId}_${row.date}`} className={`grid grid-cols-5 items-center text-[10px] rounded-xl px-2 py-1.5 ${i === 0 ? 'bg-amber-50 border border-amber-200' : i === 1 ? 'bg-slate-50 border border-slate-200' : i === 2 ? 'bg-orange-50 border border-orange-200' : 'bg-white'}`} style={i >= 3 ? { border: `1px solid ${subColorBorder}` } : {}}>
-                                                    <div className="col-span-2 flex items-center gap-1 min-w-0">
-                                                        <span className="text-sm leading-none">{medals[i] || '🔹'}</span>
-                                                        <span className="font-black text-slate-800 truncate">{row.userName.split(' ')[0]}</span>
-                                                    </div>
-                                                    <span className="text-center font-bold text-slate-500">{row.date}</span>
-                                                    <span className="text-center font-black" style={{ color: subColor }}>{row.count}</span>
-                                                    <span className="text-center font-bold text-amber-600">{row.likes > 0 ? row.likes : '—'}</span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })()}
+                        {/* MCQ LEADERBOARD — hidden from community MCQ tab */}
 
                         {/* TOP CONTRIBUTORS BANNER — shown only in Global tab */}
                         {activeTab === 'GLOBAL' && !roomId && (() => {
@@ -780,8 +782,8 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                             <div ref={dummyRef} />
                         </div>
 
-                        {/* MCQ quick action bar — only in MCQ tab */}
-                        {activeTab === 'MCQ' && (
+                        {/* MCQ quick action bar — only in MCQ tab, hide for admin (they have their own footer) */}
+                        {activeTab === 'MCQ' && !isAdminOrSub && (
                         <div className="px-3 pt-2 pb-1 border-t border-slate-100 shrink-0" style={{ background: appTheme.profileCardBg || '#ffffff' }}>
                             {!isAdminOrSub && (
                                 <div className={`mb-1.5 flex items-center justify-between text-[10px] font-bold px-0.5 ${mcqDailyCount >= 10 ? 'text-red-500' : ''}`} style={mcqDailyCount < 10 ? { color: subColor } : {}}>
@@ -963,7 +965,7 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                         )}
                         {/* MCQ tab footer — Admin: send MCQ + bulk delete */}
                         {activeTab === 'MCQ' && isAdminOrSub && (
-                        <div className="p-3 pb-6 bg-white border-t border-slate-100 shrink-0 sticky bottom-16 sm:bottom-0 space-y-2">
+                        <div className="p-3 bg-white border-t border-slate-100 shrink-0 sticky bottom-0 space-y-2">
                             <button
                                 onClick={() => setShowMcqBuilder(true)}
                                 className="w-full flex items-center justify-center gap-2 border px-4 py-2.5 rounded-xl text-xs font-black active:scale-95 transition-all"

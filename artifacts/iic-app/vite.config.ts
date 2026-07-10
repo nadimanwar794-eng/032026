@@ -1,25 +1,18 @@
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
-import tailwindcss from "@tailwindcss/vite";
-import path from "path";
-import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
-import { VitePWA } from "vite-plugin-pwa";
+import path from 'path';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
+import { defineConfig } from 'vite';
+import { VitePWA } from 'vite-plugin-pwa';
 
-const isBuild = process.env.NODE_ENV === "production" || process.argv.includes("build");
+import runtimeErrorOverlay from '@replit/vite-plugin-runtime-error-modal';
 
+// PORT is only required in the Replit dev/preview environment.
+// For production builds (e.g. Vercel) it is not needed.
 const rawPort = process.env.PORT;
-const port = rawPort ? Number(rawPort) : 5173;
+const port = rawPort ? Number(rawPort) : 3000;
 
-const basePath = process.env.BASE_PATH || "/";
-
-if (!isBuild) {
-  if (!rawPort) {
-    throw new Error("PORT environment variable is required but was not provided.");
-  }
-  if (Number.isNaN(port) || port <= 0) {
-    throw new Error(`Invalid PORT value: "${rawPort}"`);
-  }
-}
+// BASE_PATH defaults to '/' when not set (standard Vercel root deployment).
+const basePath = process.env.BASE_PATH ?? '/';
 
 export default defineConfig({
   base: basePath,
@@ -28,24 +21,24 @@ export default defineConfig({
     tailwindcss(),
     runtimeErrorOverlay(),
     VitePWA({
-      registerType: "autoUpdate",
+      registerType: 'autoUpdate',
       devOptions: { enabled: true },
       workbox: {
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
-        globIgnores: ["**/*.map"],
+        globIgnores: ['**/*.map'],
         skipWaiting: true,
         clientsClaim: true,
       },
     }),
-    ...(process.env.NODE_ENV !== "production" &&
+    ...(process.env.NODE_ENV !== 'production' &&
     process.env.REPL_ID !== undefined
       ? [
-          await import("@replit/vite-plugin-cartographer").then((m) =>
+          await import('@replit/vite-plugin-cartographer').then((m) =>
             m.cartographer({
-              root: path.resolve(import.meta.dirname, ".."),
+              root: path.resolve(import.meta.dirname, '..'),
             }),
           ),
-          await import("@replit/vite-plugin-dev-banner").then((m) =>
+          await import('@replit/vite-plugin-dev-banner').then((m) =>
             m.devBanner(),
           ),
         ]
@@ -53,20 +46,25 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      "@": path.resolve(import.meta.dirname, "src"),
-      "@assets": path.resolve(import.meta.dirname, "..", "..", "attached_assets"),
+      '@': path.resolve(import.meta.dirname, 'src'),
+      '@assets': path.resolve(
+        import.meta.dirname,
+        '..',
+        '..',
+        'attached_assets',
+      ),
     },
-    dedupe: ["react", "react-dom"],
+    dedupe: ['react', 'react-dom'],
   },
   root: path.resolve(import.meta.dirname),
   build: {
-    outDir: path.resolve(import.meta.dirname, "dist/public"),
+    outDir: path.resolve(import.meta.dirname, 'dist/public'),
     emptyOutDir: true,
   },
   server: {
     port,
     strictPort: true,
-    host: "0.0.0.0",
+    host: '0.0.0.0',
     allowedHosts: true,
     fs: {
       strict: false,
@@ -74,7 +72,7 @@ export default defineConfig({
   },
   preview: {
     port,
-    host: "0.0.0.0",
+    host: '0.0.0.0',
     allowedHosts: true,
   },
 });
