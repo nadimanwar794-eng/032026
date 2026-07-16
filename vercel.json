@@ -1,6 +1,6 @@
 {
-  "outputDirectory": "artifacts/iic-app/dist/public",
-  "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
-  ]
+  "buildCommand": "pnpm run typecheck:libs && pnpm --filter @workspace/iic-study-app run typecheck && pnpm --filter @workspace/iic-study-app run build",
+  "outputDirectory": "artifacts/iic-study-app/dist/public",
+  "installCommand": "pnpm install",
+  "framework": null
 }

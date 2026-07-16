@@ -1,55 +1,41 @@
-# IIC — Ideal Inspiration Classes
+# IIC Study App
 
-Multi-platform education app (web + mobile) for students and coaching centres. Includes a learning platform with lessons, MCQs, AI chat, and a full coaching management ecosystem.
+A student exam-prep platform (school boards + competitive/government exams) with subject-wise notes, MCQ practice, revision tracking, subscriptions, and an admin content dashboard.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/iic-app run dev` — run the web app (port varies, check workflow)
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/iic-study-app run dev` — run the web app (main artifact)
+- `pnpm --filter @workspace/iic-study-app run typecheck` — typecheck the app
+- `pnpm --filter @workspace/api-server run dev` — run the API server (currently unused by the app, see below)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
-- Required env: `DATABASE_URL` — Postgres connection string (for api-server / db packages)
-- Firebase config is embedded in `artifacts/iic-app/src/firebase.ts` (no separate env needed for web app)
 
 ## Stack
 
 - pnpm workspaces, Node.js 24, TypeScript 5.9
-- Web: React 19 + Vite + Tailwind CSS + Radix UI + Wouter
-- Mobile: React Native + Expo 54
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Auth + Realtime: Firebase (Firestore + RTDB + Auth)
-- Validation: Zod, drizzle-zod
-- Build: esbuild
+- Main app: React 18 + Vite (`artifacts/iic-study-app`), Tailwind v4, Framer Motion, `wouter`
+- Backend/data: **Firebase** (Firestore, Realtime Database, Auth) — config is hardcoded in `artifacts/iic-study-app/src/firebase.ts`, not via env vars (this mirrors how the app was originally built)
+- PWA via `vite-plugin-pwa`
+- Routing is state-based (a `view`/tab field drives rendering), not URL-based — there is no client-side router for app navigation
 
 ## Where things live
 
-- `artifacts/iic-app/src/` — main web app source
-  - `App.tsx` — root component; view routing (SCHOOL_ECOSYSTEM, COACHING_ECOSYSTEM, STUDENT_DASHBOARD, ADMIN_DASHBOARD, etc.)
-  - `firebase.ts` / `school-firebase.ts` / `coaching-firebase.ts` — Firebase helpers
-  - `school-types.ts` / `coaching-types.ts` — domain types
-  - `components/school/` — School Ecosystem (Firestore-backed, multi-tenant)
-  - `components/coaching/` — Coaching Ecosystem (Firestore-backed, multi-tenant)
-  - `components/AdminDashboard.tsx` — IIC platform admin panel
-  - `components/StudentDashboard.tsx` — main student-facing dashboard
-- `lib/db/` — Drizzle schema + migrations (PostgreSQL)
-- `lib/api-spec/` — OpenAPI spec; run codegen to regenerate hooks/schemas
-- `artifacts/iic-app-mobile/` — Expo mobile app
+- `artifacts/iic-study-app/src/components/StudentDashboard.tsx` — main student experience (huge file, most student-facing flows live here)
+- `artifacts/iic-study-app/src/components/AdminDashboard.tsx` — admin content/user management
+- `artifacts/iic-study-app/src/components/RevisionHubScreen.tsx` / `RevisionHubV2.tsx` — Revision Hub (MCQ practice + spaced-repetition revision + performance tabs)
+- `artifacts/iic-study-app/src/constants.ts` — `getSubjectsList()`, the static subject catalog used across notes/admin/challenge flows
+- `artifacts/iic-study-app/src/firebase.ts` — Firebase config + data access helpers
 
 ## Architecture decisions
 
-- **Dual database strategy**: Firestore for metadata (schools, coachings, users, lessons) and RTDB for high-frequency realtime data (homework entries, manager records). This keeps Firestore costs low while RTDB handles rapid updates.
-- **Multi-tenant by coachingId/schoolId scoping**: All RTDB paths are prefixed with the entity ID (`coaching_homework/{coachingId}/`, `coaching_manager/{coachingId}/`). Never use global paths for coaching/school data.
-- **UI-layer access control + Firebase Rules**: Subscription and lock checks gate RTDB listener registration in CoachingAdminPanel. Firebase Security Rules must be the authoritative enforcement layer (see follow-up task #2).
-- **Lazy-loaded heavy components**: AdminDashboard, SchoolEcosystem, CoachingEcosystem, WeeklyTestView are all lazy-loaded to keep initial bundle small.
-- **`// @ts-nocheck` convention**: Large legacy components use this to avoid blocking builds; new components should prefer typed code.
+- The app is **frontend-only against Firebase** — the scaffolded `artifacts/api-server` and its DB/OpenAPI codegen pipeline are pre-existing workspace boilerplate, not used by this app. Don't wire new features to `api-server` unless explicitly asked to migrate off Firebase.
+- Revision Hub's MCQ subject list (`RevisionHubScreen.tsx`) is derived dynamically from real `mcq_lessons` data in Firebase (subjects only appear once content exists) — this intentionally does NOT use `constants.ts`'s static `getSubjectsList()`, unlike the rest of the app (notes browsing, admin dashboard, challenge generator), which still uses the static catalog by design.
 
 ## Product
 
-- **Student learning platform**: Board/class/subject selection, AI-generated lessons, MCQs, weekly tests, subscription tiers (₹49/week to ₹2499 lifetime)
-- **School Ecosystem**: Multi-tenant school management — super admin creates schools, assigns teachers/admins, manages lessons with reading/writing/PDF/MCQ modes; students join via school code
-- **Coaching Ecosystem**: Multi-tenant coaching management — super admin creates coaching centres at ₹500/month subscription; coaching admin manages batches, students, fees, tests, and homework entries from one panel
-- **Admin Dashboard**: IIC platform admin panel for content management, user management, coaching homework, and access to both ecosystems
+- Students pick a class/board/stream, browse subject notes and video lectures, practice MCQs, and track revision via spaced repetition and performance analytics.
+- Subscription tiers gate premium notes/videos; a credit system charges for certain actions (starting MCQ sessions, opening lessons).
+- Admins manage content (notes, MCQs, videos), users, subscriptions, and app settings from a separate Admin Dashboard.
 
 ## User preferences
 
@@ -57,12 +43,9 @@ _Populate as you build — explicit user instructions worth remembering across s
 
 ## Gotchas
 
-- The web app runs via the `artifacts/iic-app: web` workflow (Vite), NOT the `IIC App` workflow (which is stale)
-- RTDB coaching paths: `coaching_manager/{coachingId}/` for manager data, `coaching_homework/{coachingId}/` for homework. Old global path `coaching_homework/` is used by legacy StudentDashboard code — do not delete it
-- Firebase Firestore permissions error on initial load is expected for unauthenticated users (school/coaching snapshots fail gracefully)
-- `pnpm install` must be run before any workflow will start (node_modules missing = all workflows fail)
+- Firestore permission-denied errors in the browser console when not logged in / in anonymous mode are expected — the app still renders the auth screen correctly.
+- `artifacts/api-server` and `artifacts/mockup-sandbox` workflows don't need to run for this app to work; only `artifacts/iic-study-app: web` matters.
 
 ## Pointers
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
-- Coaching Ecosystem entry: `state.view === 'COACHING_ECOSYSTEM'` in `App.tsx` → `CoachingEcosystem` → `CoachingSuperAdminPanel` (for ADMIN/SUB_ADMIN) or `CoachingAdminPanel` (for COACHING_ADMIN/COACHING_SUB_ADMIN)
