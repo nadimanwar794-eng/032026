@@ -2,8 +2,8 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { User, ViewState, SystemSettings, Subject, Chapter, MCQItem, RecoveryRequest, ActivityLogEntry, LeaderboardEntry, RecycleBinItem, Stream, Board, ClassLevel, GiftCode, SubscriptionPlan, CreditPackage, SpinReward, SpinGameType, HtmlModule, PremiumNoteSlot, ContentInfoConfig, ContentInfoItem, SubscriptionHistoryEntry, UniversalAnalysisLog, ContentType, LessonContent, DeepDiveEntry, AdditionalNoteEntry, TeacherStorePlan, TeacherCode, HomeworkItem, LucentNoteEntry, LucentPageNote, AppNotification, BroadcastRedeemCode, LoginBonusRandomGiftOption } from '../types';
-import { List, GraduationCap, LayoutDashboard, Users, Search, Trash2, Save, X, Eye, EyeOff, Shield, Megaphone, CheckCircle, ListChecks, Database, FileText, Monitor, Sparkles, Banknote, BrainCircuit, AlertOctagon, ArrowLeft, ArrowRight, Key, Bell, ShieldCheck, Lock, Globe, Layers, Zap, PenTool, RefreshCw, RotateCcw, Plus, LogOut, Download, Upload, CreditCard, Ticket, Video, Image as ImageIcon, Type, Link, FileJson, Activity, AlertTriangle, Gift, Book, Mail, Edit3, MessageSquare, ShoppingBag, Cloud, Rocket, Code2, Layers as LayersIcon, Wifi, WifiOff, Copy, Crown, Gamepad2, Calendar, BookOpen, Image, HelpCircle, Youtube, Play, Star, Trophy, Palette, Settings, Headphones, Layout, Bot, LayoutDashboard as DashboardIcon, Loader2, Gauge, LayoutGrid, ArrowUpCircle, KeyRound, Award, Send, GitCompare, Lightbulb, ThumbsUp, ThumbsDown, Building2 } from 'lucide-react';
-import { getSubjectsList, DEFAULT_SUBJECTS, DEFAULT_APP_FEATURES, ALL_APP_FEATURES, STUDENT_APP_FEATURES, DEFAULT_CONTENT_INFO_CONFIG, ADMIN_PERMISSIONS, APP_VERSION, STATIC_SYLLABUS, LEVEL_UNLOCKABLE_FEATURES, LUCENT_SUBJECT_OPTIONS_BASE, getClassSubjectOptions } from '../constants';
+import { List, GraduationCap, LayoutDashboard, Users, Search, Trash2, Save, X, Eye, EyeOff, Shield, Megaphone, CheckCircle, ListChecks, Database, FileText, Monitor, Sparkles, Banknote, BrainCircuit, AlertOctagon, ArrowLeft, ArrowRight, Key, Bell, ShieldCheck, Lock, Globe, Layers, Zap, PenTool, RefreshCw, RotateCcw, Plus, LogOut, Download, Upload, CreditCard, Ticket, Video, Image as ImageIcon, Type, Link, FileJson, Activity, AlertTriangle, Gift, Book, Mail, Edit3, MessageSquare, ShoppingBag, Cloud, Rocket, Code2, Layers as LayersIcon, Wifi, WifiOff, Copy, Crown, Gamepad2, Calendar, BookOpen, Image, HelpCircle, Youtube, Play, Star, Trophy, Palette, Settings, Headphones, Layout, Bot, LayoutDashboard as DashboardIcon, Loader2, Gauge, LayoutGrid, ArrowUpCircle, KeyRound, Award, Send, GitCompare, Lightbulb, ThumbsUp, ThumbsDown, Building2, TrendingUp } from 'lucide-react';
+import { getSubjectsList, DEFAULT_SUBJECTS, DEFAULT_APP_FEATURES, ALL_APP_FEATURES, STUDENT_APP_FEATURES, DEFAULT_CONTENT_INFO_CONFIG, ADMIN_PERMISSIONS, APP_VERSION, STATIC_SYLLABUS, LEVEL_UNLOCKABLE_FEATURES, LUCENT_SUBJECT_OPTIONS_BASE, getClassSubjectOptions, SUPPORT_PHONE } from '../constants';
 import { AdminClassMcqManager } from './AdminClassMcqManager';
 import { fetchChapters, fetchLessonContent } from '../services/groq';
 import { runAutoPilot, runCommandMode } from '../services/autoPilot';
@@ -12,7 +12,7 @@ import { saveTopicNotes } from '../utils/revisionTrackerV2';
 import { TOP_BAR_EFFECTS, EFFECT_CATEGORIES, TopBarEffectsLayer } from '../utils/topBarEffects';
 import { generateSecureRandomString, generateSecureRandomId } from '../utils/cryptoUtils';
 import { saveChapterData, bulkSaveLinks, checkFirebaseConnection, saveSystemSettings, subscribeToUsers, rtdb, saveUserToLive, db, getChapterData, saveCustomSyllabus, deleteCustomSyllabus, subscribeToUniversalAnalysis, saveAiInteraction, saveSecureKeys, getSecureKeys, subscribeToApiUsage, subscribeToDrafts, resetAllContent, recoverContentFromCache, checkRecoveryStatus, backupAllContentToFirebase, restoreContentFromFirebaseBackup, rebuildContentIndex, deleteHomeworkEntry, deleteLucentEntry, subscribeToDemands, updateDemandStatus, subscribeGlobalChat, subscribeSupportChat, deleteGlobalMessage, deleteSupportMessage, subscribeAllSupportThreads, sendGlobalMessage, sendSupportMessage, subscribeToCompareAnalytics, deleteCompareAnalyticsByQuery, addCompreBookNote, deleteCompreBookNote, getCompreBookNotes, updateCompreBookNote, getAppFeedbacks, exportBackupAsJson, importBackupFromJson, subscribeSuggestions, adminReplySuggestion, deleteSuggestion, reactToSuggestion, resolvesuggestion, applyNoteCorrection, applyMcqCorrection, applyMcqFullEdit, saveMcqLesson, deleteMcqLesson } from '../firebase'; // IMPORT FIREBASE
-import { ref, set, onValue, update, push, get } from "firebase/database";
+import { ref, set, onValue, update, push, get, query as rtdbQueryAdmin, orderByChild as obcAdmin, limitToLast as ltlAdmin } from "firebase/database";
 import { doc, deleteDoc, setDoc, getDocs, collection, writeBatch, deleteField } from "firebase/firestore";
 import { storage } from '../utils/storage';
 import { SimpleRichTextEditor } from './SimpleRichTextEditor';
@@ -33,6 +33,8 @@ import { CoachingSuperAdminPanel } from './coaching/CoachingSuperAdminPanel';
 import { ErrorBoundary } from './ErrorBoundary';
 import { FeatureGroupList } from './admin/FeatureGroupList';
 import { ErrorNoticeBoard } from './admin/ErrorNoticeBoard';
+import { AdminToast, adminToast } from './AdminToast';
+import { logAdminAction } from '../utils/adminAudit';
 import { ALL_FEATURES } from '../utils/featureRegistry';
 import { HOME_SECTION_REGISTRY } from '../utils/homeSections';
 import { SPLASH_FONTS, getSplashFontById, ensureGoogleFontLoaded } from '../utils/splashFonts';
@@ -536,6 +538,32 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   };
 
   // CONTENT HISTORY LOADER
+  // Subscribe to error_logs for admin home notification + critical modal
+  useEffect(() => {
+    const logsRef = rtdbQueryAdmin(ref(rtdb, 'error_logs'), obcAdmin('timestamp'), ltlAdmin(500));
+    const unsub = onValue(logsRef, snap => {
+      if (!snap.exists()) { setActiveErrorCount(0); setNewErrorCount(0); setCriticalErrorSummary(null); return; }
+      const items: any[] = [];
+      snap.forEach((child: any) => { items.push({ ...child.val(), id: child.key }); });
+      const active = items.filter((e: any) => !e.dismissed);
+      setActiveErrorCount(active.length);
+      const stored = parseInt(localStorage.getItem('admin_last_seen_error_ts') || '0', 10);
+      const newOnes = active.filter((e: any) => (e.timestamp || 0) > stored);
+      setNewErrorCount(newOnes.length);
+      // Build critical summary for modal (critical/high severity new errors)
+      const critNewOnes = newOnes.filter((e: any) => e.severity === 'critical' || e.severity === 'high');
+      if (critNewOnes.length > 0) {
+        const affectedUsers = new Set(critNewOnes.filter((e:any) => e.userId).map((e:any) => e.userId)).size;
+        const lastTs = Math.max(...critNewOnes.map((e:any) => e.timestamp || 0));
+        const topMsg = critNewOnes[critNewOnes.length - 1]?.message || '';
+        setCriticalErrorSummary({ count: critNewOnes.length, users: affectedUsers, lastTs, topMsg });
+      } else {
+        setCriticalErrorSummary(null);
+      }
+    }, () => {});
+    return unsub;
+  }, []);
+
   useEffect(() => {
       if (activeTab === 'CONTENT_HISTORY') {
           const histRef = ref(rtdb, 'nst_content_history');
@@ -582,7 +610,14 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   const [users, setUsers] = useState<User[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isFirebaseConnected, setIsFirebaseConnected] = useState(false);
-  
+  const [activeErrorCount, setActiveErrorCount] = useState(0);
+  const [criticalErrorSummary, setCriticalErrorSummary] = useState<{count:number,users:number,lastTs:number,topMsg:string} | null>(null);
+  const [lastSeenErrorTs, setLastSeenErrorTs] = useState<number>(() => {
+    try { return parseInt(localStorage.getItem('admin_last_seen_error_ts') || '0', 10); } catch { return 0; }
+  });
+  const [newErrorCount, setNewErrorCount] = useState(0);
+  const [errorModalDismissed, setErrorModalDismissed] = useState(false);
+
   // NOTIFICATION STATE
   const [alertConfig, setAlertConfig] = useState<{isOpen: boolean, message: string}>({isOpen: false, message: ''});
   const prevUsersRef = useRef<User[]>([]);
@@ -646,6 +681,19 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
           return diff < 5 * 60 * 1000;
       } catch(e) { return false; }
   }).length;
+
+  // ── Study Activity Stats ──
+  const now_ts = Date.now();
+  const activeToday = users.filter(u => {
+      if (!u.lastActiveTime) return false;
+      try { return now_ts - new Date(u.lastActiveTime).getTime() < 24 * 60 * 60 * 1000; } catch { return false; }
+  }).length;
+  const activeThisWeek = users.filter(u => {
+      if (!u.lastActiveTime) return false;
+      try { return now_ts - new Date(u.lastActiveTime).getTime() < 7 * 24 * 60 * 60 * 1000; } catch { return false; }
+  }).length;
+  const studyingUsers = users.filter(u => u.streak && u.streak > 0).length;
+  const premiumUsers = users.filter(u => u.isPremium || u.subscriptionTier === 'PREMIUM' || u.subscriptionTier === 'LIFETIME').length;
 
   // --- IMAGE CROPPER STATE ---
   const [cropImageSrc, setCropImageSrc] = useState<string | null>(null);
@@ -2276,9 +2324,10 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
               // Fallback: save settings (for non-Firebase deletions like MCQ batches)
               await saveSystemSettings(newSettings);
           }
-          setAlertConfig({ isOpen: true, message: `🗑️ "${label}" permanently deleted!` });
+          adminToast.success(`🗑️ "${label}" delete ho gaya!`);
+          logAdminAction('CONTENT_DELETE', `Deleted: ${label}`, currentUser, { targetId: deletedId || '' });
       } catch (e: any) {
-          setAlertConfig({ isOpen: true, message: `❌ Delete failed — try again. (${e?.message || 'Network error'})` });
+          adminToast.error(`❌ Delete failed — dubara try karo. (${e?.message || 'Network error'})`);
       }
   };
   // ─────────────────────────────────────────────────────────────────────────
@@ -2320,11 +2369,11 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                     .then(() => console.log("✅ Keys secured in Global Recovery Path"))
                     .catch(e => console.error("Key Backup Error:", e));
 
-                  setAlertConfig({isOpen: true, message: "✅ Settings Saved to Cloud Successfully!"});
+                  adminToast.success("✅ Settings cloud pe save ho gaye!");
+                  logAdminAction('SETTINGS_UPDATE', 'System settings updated', currentUser);
               } catch (cloudError: any) {
                   console.error("Cloud Save Error:", cloudError);
-                  // Since Firebase JS SDK offline mode might buffer writes, we let it try anyway.
-                  setAlertConfig({isOpen: true, message: "⚠️ Cloud Save Requested. If offline, it will sync when connected. Error: " + cloudError.message});
+                  adminToast.warn("⚠️ Offline — sync hoga jab connection aayega.");
               }
 
               logActivity("SETTINGS_UPDATE", "Updated system settings");
@@ -2467,9 +2516,9 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
           // Remove from IndexedDB trash
           await storage.removeItem(item.trashKey);
           setIndexedDbTrash(prev => prev.filter(t => t.trashKey !== item.trashKey));
-          alert(`✅ "${item.name || item.id}" wapas Firebase pe aa gaya!`);
+          adminToast.success(`✅ "${item.name || item.id}" wapas Firebase pe aa gaya!`);
       } catch (e: any) {
-          alert('❌ Restore failed: ' + e?.message);
+          adminToast.error('❌ Restore failed: ' + e?.message);
       }
   };
 
@@ -2497,6 +2546,8 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
           }
 
           logActivity("USER_DELETE", `Moved user ${userId} to Recycle Bin`);
+          logAdminAction('USER_DELETE', `User moved to Recycle Bin`, currentUser, { targetId: userId });
+          adminToast.success(`🗑️ User Recycle Bin mein move ho gaya`);
       }
   };
 
@@ -4051,6 +4102,65 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   return (
     <div className="pb-20 bg-slate-50 min-h-screen">
       
+      {/* ══ CRITICAL ERROR ALERT MODAL ══ */}
+      {activeTab === 'DASHBOARD' && criticalErrorSummary && !errorModalDismissed && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-sm bg-white rounded-3xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-4">
+            {/* Red header */}
+            <div className="bg-gradient-to-r from-red-600 to-rose-600 p-4 text-white">
+              <div className="flex items-center gap-2 mb-1">
+                <AlertTriangle size={18} className="animate-pulse" />
+                <span className="font-black text-sm uppercase tracking-wider">🚨 Critical Error Alert</span>
+              </div>
+              <p className="text-[10px] text-red-200">Jaise hi app khola, new critical errors mile</p>
+            </div>
+            {/* Stats */}
+            <div className="grid grid-cols-3 divide-x divide-slate-100 border-b border-slate-100">
+              {[
+                { icon: '⚠️', count: criticalErrorSummary.count, label: 'New Errors' },
+                { icon: '👥', count: criticalErrorSummary.users, label: 'Users Hit' },
+                { icon: '🕒', count: criticalErrorSummary.lastTs > 0 ? (() => { const d = Date.now() - criticalErrorSummary.lastTs; return d < 60000 ? `${Math.floor(d/1000)}s` : d < 3600000 ? `${Math.floor(d/60000)}m` : `${Math.floor(d/3600000)}h`; })() + ' ago' : '—', label: 'Last Error' },
+              ].map(s => (
+                <div key={s.label} className="p-3 text-center">
+                  <p className="text-lg leading-none">{s.icon}</p>
+                  <p className="text-sm font-black text-slate-800 mt-0.5">{s.count}</p>
+                  <p className="text-[9px] text-slate-400 font-bold uppercase">{s.label}</p>
+                </div>
+              ))}
+            </div>
+            {/* Top error */}
+            {criticalErrorSummary.topMsg && (
+              <div className="px-4 py-2.5 bg-red-50 border-b border-red-100">
+                <p className="text-[9px] font-black text-red-400 uppercase mb-0.5">Latest Error</p>
+                <p className="text-xs font-bold text-red-800 line-clamp-2">{criticalErrorSummary.topMsg}</p>
+              </div>
+            )}
+            {/* Action buttons */}
+            <div className="p-4 flex gap-2.5">
+              <button
+                onClick={() => {
+                  const now = Date.now();
+                  localStorage.setItem('admin_last_seen_error_ts', now.toString());
+                  setLastSeenErrorTs(now); setNewErrorCount(0);
+                  setErrorModalDismissed(true); setActiveTab('ERROR_LOGS');
+                }}
+                className="flex-1 bg-red-600 text-white font-black text-xs py-2.5 rounded-2xl hover:bg-red-700 transition-colors flex items-center justify-center gap-1.5">
+                <AlertTriangle size={13} /> View Errors
+              </button>
+              <button
+                onClick={() => {
+                  const now = Date.now();
+                  localStorage.setItem('admin_last_seen_error_ts', now.toString());
+                  setLastSeenErrorTs(now); setNewErrorCount(0); setErrorModalDismissed(true);
+                }}
+                className="flex-1 bg-slate-100 text-slate-600 font-black text-xs py-2.5 rounded-2xl hover:bg-slate-200 transition-colors">
+                Ignore for Now
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 1. DASHBOARD HOME */}
       {activeTab === 'DASHBOARD' && (
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 mb-6 animate-in fade-in">
@@ -4088,6 +4198,38 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                           </span>
                       )}
                   </div>
+
+                  {/* ERROR NOTIFICATION BANNER */}
+                  {activeErrorCount > 0 && (
+                    <button
+                      onClick={() => {
+                        const now = Date.now();
+                        localStorage.setItem('admin_last_seen_error_ts', now.toString());
+                        setLastSeenErrorTs(now);
+                        setNewErrorCount(0);
+                        setActiveTab('ERROR_LOGS');
+                      }}
+                      className="w-full flex items-center gap-3 bg-red-50 border border-red-200 rounded-2xl px-4 py-2.5 hover:bg-red-100 transition-colors group animate-in fade-in"
+                    >
+                      <div className="relative shrink-0">
+                        <AlertTriangle size={16} className="text-red-500" />
+                        {newErrorCount > 0 && (
+                          <span className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 bg-red-500 rounded-full border border-white animate-pulse" />
+                        )}
+                      </div>
+                      <div className="flex-1 text-left min-w-0">
+                        <p className="text-xs font-black text-red-700 leading-tight">
+                          {newErrorCount > 0
+                            ? `${newErrorCount} naye error${newErrorCount > 1 ? 's' : ''} aaye hain!`
+                            : `${activeErrorCount} active error${activeErrorCount > 1 ? 's' : ''} hain`}
+                        </p>
+                        <p className="text-[9px] text-red-400 mt-0.5">Tap karke Error Notice Board dekho</p>
+                      </div>
+                      <span className="text-[9px] font-black text-red-500 bg-white border border-red-200 px-2 py-1 rounded-lg group-hover:border-red-400 transition-colors shrink-0">
+                        View →
+                      </span>
+                    </button>
+                  )}
 
                   {/* TOOLBAR: utility actions (left) + system links (right), visually separated */}
                   <div className="w-full flex flex-col lg:flex-row lg:items-stretch gap-2.5 lg:gap-3 justify-center">
@@ -4164,6 +4306,73 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                           )}
                       </div>
                   </div>
+              </div>
+
+              {/* ── STUDY ACTIVITY ANALYTICS ── */}
+              <div className="mb-5 mt-1">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5 flex items-center gap-1.5">
+                  <Activity size={11} /> Study Activity
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {/* Online Now */}
+                  <div className="bg-green-50 border border-green-100 rounded-2xl p-3 flex flex-col gap-1">
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                      <span className="text-[10px] font-bold text-green-600 uppercase tracking-wide">Live</span>
+                    </div>
+                    <p className="text-2xl font-black text-green-700 leading-none">{onlineCount}</p>
+                    <p className="text-[10px] text-green-500 font-semibold">Abhi study kar rahe</p>
+                  </div>
+
+                  {/* Active Today */}
+                  <div className="bg-blue-50 border border-blue-100 rounded-2xl p-3 flex flex-col gap-1">
+                    <div className="flex items-center gap-1.5">
+                      <BookOpen size={11} className="text-blue-500" />
+                      <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wide">Aaj</span>
+                    </div>
+                    <p className="text-2xl font-black text-blue-700 leading-none">{activeToday}</p>
+                    <p className="text-[10px] text-blue-400 font-semibold">24h mein active</p>
+                  </div>
+
+                  {/* Active This Week */}
+                  <div className="bg-violet-50 border border-violet-100 rounded-2xl p-3 flex flex-col gap-1">
+                    <div className="flex items-center gap-1.5">
+                      <TrendingUp size={11} className="text-violet-500" />
+                      <span className="text-[10px] font-bold text-violet-600 uppercase tracking-wide">Week</span>
+                    </div>
+                    <p className="text-2xl font-black text-violet-700 leading-none">{activeThisWeek}</p>
+                    <p className="text-[10px] text-violet-400 font-semibold">7 din mein active</p>
+                  </div>
+
+                  {/* Streak users */}
+                  <div className="bg-orange-50 border border-orange-100 rounded-2xl p-3 flex flex-col gap-1">
+                    <div className="flex items-center gap-1.5">
+                      <Zap size={11} className="text-orange-500" />
+                      <span className="text-[10px] font-bold text-orange-600 uppercase tracking-wide">Streak</span>
+                    </div>
+                    <p className="text-2xl font-black text-orange-700 leading-none">{studyingUsers}</p>
+                    <p className="text-[10px] text-orange-400 font-semibold">Regular padhai wale</p>
+                  </div>
+                </div>
+
+                {/* Summary row */}
+                <div className="mt-2 flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                  <div className="flex items-center gap-1.5">
+                    <Users size={12} className="text-slate-500" />
+                    <span className="text-[11px] font-black text-slate-700">Total: {users.length}</span>
+                  </div>
+                  <div className="w-px h-3 bg-slate-300" />
+                  <div className="flex items-center gap-1.5">
+                    <Crown size={12} className="text-amber-500" />
+                    <span className="text-[11px] font-bold text-slate-600">Premium: {premiumUsers}</span>
+                  </div>
+                  <div className="w-px h-3 bg-slate-300" />
+                  <div className="flex-1 text-right">
+                    <span className="text-[10px] text-slate-400 font-semibold">
+                      {users.length > 0 ? Math.round((activeToday / users.length) * 100) : 0}% aaj active
+                    </span>
+                  </div>
+                </div>
               </div>
 
               <FeatureGroupList
@@ -8712,6 +8921,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
 
 
       {activeTab === 'HOMEWORK_MANAGER' && (
+          <ErrorBoundary fallbackLabel="Homework Manager" compact>
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 animate-in slide-in-from-right space-y-6">
               <div className="flex items-center gap-4 mb-6 border-b pb-4">
                   <button onClick={() => setActiveTab('DASHBOARD')} className="bg-slate-100 p-2 rounded-full hover:bg-slate-200"><ArrowLeft size={20} /></button>
@@ -10599,6 +10809,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                   )}
               </div>
           </div>
+          </ErrorBoundary>
       )}
 
       {activeTab === 'DAILY_GK_MANAGER' && (
@@ -11849,6 +12060,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
 
       {/* 5. UTILITY TABS */}
       {activeTab === 'DEMAND' && (
+          <ErrorBoundary fallbackLabel="Demand Manager" compact>
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 animate-in slide-in-from-bottom-4">
               {/* Header */}
               <div className="flex items-center justify-between mb-5">
@@ -11977,6 +12189,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                       })}
               </div>
           </div>
+          </ErrorBoundary>
       )}
 
       {/* ══════════════════════════════════════════════
@@ -11984,7 +12197,9 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
           Lucent GK + Sar Sangrah + Speedy Science +
           Speedy Social Sci + Custom Books
       ══════════════════════════════════════════════ */}
-      {activeTab === 'BOOK_NOTES_MANAGER' && (() => {
+      {activeTab === 'BOOK_NOTES_MANAGER' && (
+          <ErrorBoundary fallbackLabel="Book Notes Manager" compact>
+          {(() => {
           const BOOK_TYPES = [
               { id: 'lucent',              label: '📘 Lucent GK',         sub: 'Multi-page entries (Competition)',  active: 'bg-indigo-600 text-white border-indigo-600',   idle: 'bg-white text-indigo-700 border-indigo-200 hover:border-indigo-400' },
               { id: 'sarSangrah',          label: '📒 Sar Sangrah',       sub: 'Page-wise notes + MCQ',            active: 'bg-amber-600 text-white border-amber-600',     idle: 'bg-white text-amber-700 border-amber-200 hover:border-amber-400' },
@@ -14093,11 +14308,15 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
               </div>
           );
       })()}
+          </ErrorBoundary>
+      )}
 
       {/* ══════════════════════════════════════════════
           CLASS 6-12 NOTES MANAGER
       ══════════════════════════════════════════════ */}
-      {activeTab === 'CLASS_NOTES_MANAGER' && (() => {
+      {activeTab === 'CLASS_NOTES_MANAGER' && (
+          <ErrorBoundary fallbackLabel="Class Notes Manager" compact>
+          {(() => {
           const CLASS_ONLY_TARGETS = LUCENT_CLASS_TARGETS.filter(t => t.id !== 'COMPETITION');
           const cn612Level = (newLucent.classLevel === 'COMPETITION' ? '6' : newLucent.classLevel) as '6'|'7'|'8'|'9'|'10'|'11'|'12';
           const cn612SubjectOptions: { id: string; name: string }[] = (() => {
@@ -14473,6 +14692,8 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
               </div>
           );
       })()}
+          </ErrorBoundary>
+      )}
 
       {/* TRENDING IMPORTANT NOTES — live ranked view */}
       {activeTab === 'TRENDING_NOTES_MANAGER' && (
@@ -14491,7 +14712,9 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
       )}
 
       {/* GLOBAL CHAT HUB — full inline admin chat */}
-      {activeTab === 'GLOBAL_CHAT' && (() => {
+      {activeTab === 'GLOBAL_CHAT' && (
+          <ErrorBoundary fallbackLabel="Global Chat" compact>
+          {(() => {
           const AdminMsgBubble = ({ msg, onDelete, chatType }: { msg: any; onDelete: () => void; chatType: 'global' | 'dm' }) => {
               const isAdmin = msg.role === 'ADMIN' || msg.role === 'SUB_ADMIN';
               const isBroadcast = msg.type === 'ADMIN_BROADCAST';
@@ -15077,8 +15300,11 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
               </div>
           );
       })()}
+          </ErrorBoundary>
+      )}
       
       {activeTab === 'ACCESS' && (
+          <ErrorBoundary fallbackLabel="Login Requests" compact>
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 animate-in slide-in-from-bottom-4">
               <div className="flex items-center gap-4 mb-6"><button onClick={() => setActiveTab('DASHBOARD')} className="bg-slate-100 p-2 rounded-full hover:bg-slate-200"><ArrowLeft size={20} /></button><h3 className="text-xl font-black text-slate-800">Login Requests</h3></div>
               <div className="space-y-3">
@@ -15091,10 +15317,12 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                   ))}
               </div>
           </div>
+          </ErrorBoundary>
       )}
 
       {/* --- NOTIFY USERS TAB (Targeted Notifications) --- */}
       {activeTab === 'NOTIFY_USERS' && (
+          <ErrorBoundary fallbackLabel="Notifications" compact>
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 animate-in slide-in-from-right">
               <div className="flex items-center gap-4 mb-6 border-b pb-4">
                   <button onClick={() => setActiveTab('DASHBOARD')} className="bg-slate-100 p-2 rounded-full hover:bg-slate-200"><ArrowLeft size={20} /></button>
@@ -15289,10 +15517,12 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                 );
               })()}
           </div>
+          </ErrorBoundary>
       )}
 
       {/* --- SUB-ADMINS TAB --- */}
       {activeTab === 'SUB_ADMINS' && (
+          <ErrorBoundary fallbackLabel="Sub-Admins" compact>
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 animate-in slide-in-from-right">
               <div className="flex items-center gap-4 mb-6">
                   <button onClick={() => setActiveTab('DASHBOARD')} className="bg-slate-100 p-2 rounded-full hover:bg-slate-200"><ArrowLeft size={20} /></button>
@@ -15368,9 +15598,11 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                   )}
               </div>
           </div>
+          </ErrorBoundary>
       )}
 
       {activeTab === 'DATABASE' && (
+          <ErrorBoundary fallbackLabel="Database Viewer" compact>
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 animate-in slide-in-from-bottom-4">
               <div className="flex items-center gap-4 mb-6"><button onClick={() => setActiveTab('DASHBOARD')} className="bg-slate-100 p-2 rounded-full hover:bg-slate-200"><ArrowLeft size={20} /></button><h3 className="text-xl font-black text-slate-800">Database Viewer</h3></div>
 
@@ -15887,6 +16119,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                   <button onClick={() => { localStorage.setItem(dbKey, dbContent); alert("Database Updated Forcefully!"); }} className="mt-4 bg-red-600 text-white px-6 py-3 rounded-lg font-bold w-full hover:bg-red-700">⚠️ SAVE CHANGES (DANGEROUS)</button>
               </div>
           </div>
+          </ErrorBoundary>
       )}
 
       {/* --- GIFT CODES TAB --- */}
@@ -16736,6 +16969,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
 
       {/* --- USERS TAB (Enhanced) --- */}
       {activeTab === 'USERS' && (
+          <ErrorBoundary fallbackLabel="User Management" compact>
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 animate-in slide-in-from-bottom-4">
               <div className="flex items-center gap-4 mb-6"><button onClick={() => setActiveTab('DASHBOARD')} className="bg-slate-100 p-2 rounded-full hover:bg-slate-200"><ArrowLeft size={20} /></button><h3 className="text-xl font-black text-slate-800">User Management</h3></div>
               <div className="relative mb-6">
@@ -16772,6 +17006,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                   </table>
               </div>
           </div>
+          </ErrorBoundary>
       )}
 
       {/* --- USER HISTORY MODAL --- */}
@@ -18027,7 +18262,9 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
 
       {/* --- ERROR NOTICE BOARD --- */}
       {activeTab === 'ERROR_LOGS' && (
-          <ErrorNoticeBoard onBack={() => setActiveTab('DASHBOARD')} />
+          <ErrorBoundary fallbackLabel="Error Notice Board" compact>
+            <ErrorNoticeBoard onBack={() => setActiveTab('DASHBOARD')} />
+          </ErrorBoundary>
       )}
 
       {/* --- ADMIN HELP GUIDE --- */}
@@ -18676,6 +18913,8 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
 
         </div>
       )}
+      {/* ── Admin Toast notifications ── */}
+      <AdminToast />
     </div>
   );
 };

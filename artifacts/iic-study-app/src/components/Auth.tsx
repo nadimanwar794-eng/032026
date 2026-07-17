@@ -349,67 +349,81 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
         const pass = formData.password.trim();
 
         try {
-            // STEP 1: QUERY FIRESTORE
+            await setPersistence(auth, browserLocalPersistence);
+
+            // ── STEP 1: Establish Firebase session (needed for Firestore security rules) ──
+            // On a fresh device there is no session. Without a session, Firestore blocks
+            // all reads (permission-denied). Strategy:
+            //   • Email input  → try signInWithEmailAndPassword (establishes real session)
+            //   • Mobile/ID    → signInAnonymously first so Firestore reads are allowed,
+            //                    then verify password against our DB record.
+            if (!auth.currentUser && input.includes('@')) {
+                try {
+                    await signInWithEmailAndPassword(auth, input, pass);
+                } catch (e: any) {
+                    // Wrong password — no need to query DB, exit immediately.
+                    if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential') {
+                        setError("Galat password. Dobara try karo.");
+                        return;
+                    }
+                    // Google-only / not registered via email → session not established.
+                    // We'll still query DB in case mobile/email is stored there.
+                }
+            } else if (!auth.currentUser) {
+                // Mobile/ID input on a fresh device — get a temporary anonymous session
+                // so Firestore security rules allow us to query the users collection.
+                try { await signInAnonymously(auth); } catch { /* ignore — query may still work */ }
+            }
+
+            // ── STEP 2: Query our DB ──
             let appUser: any = recoveryMode === 'profile'
                 ? await getUserByNameAndClass(formData.name.trim(), formData.classLevel.trim())
                 : await getUserByMobileOrId(input);
 
-            // STEP 2: VERIFY CREDENTIALS LOCALLY IF USER EXISTS
+            // ── STEP 3: Verify & log in ──
             if (appUser) {
-                // Verify Password against our DB
-                if (appUser.password !== pass && pass !== settings?.adminCode) {
-                    setError("Invalid Password.");
+                if (appUser.isArchived) { setError('Account Deleted.'); return; }
+
+                const isGoogleUser = appUser.provider === 'google' || (!appUser.password && appUser.email);
+                const passwordMatch = appUser.password && (appUser.password === pass || pass === settings?.adminCode);
+
+                if (passwordMatch) {
+                    let freshUser = await getUserData(appUser.id);
+                    if (freshUser) appUser = { ...appUser, ...freshUser };
+                    logActivity("LOGIN", "Student Logged In (Custom DB Auth)", appUser);
+                    triggerWelcome(appUser);
+                    // Background Firebase sync — best-effort only
+                    if (appUser.email) {
+                        signInWithEmailAndPassword(auth, appUser.email, pass).catch(() => {});
+                    }
                     return;
                 }
 
-                if (appUser.isArchived) { setError('Account Deleted.'); return; }
-
-                // SUCCESS: Fetch fresh bulky data before logging them in instantly
-                let freshUser = await getUserData(appUser.id);
-                if (freshUser) {
-                     appUser = { ...appUser, ...freshUser };
-                }
-                logActivity("LOGIN", "Student Logged In (Custom DB Auth)", appUser);
-                triggerWelcome(appUser);
-
-                // FIREBASE SYNC (Run in background so UI is fast)
-                try {
-                    await setPersistence(auth, browserLocalPersistence);
-                    if (appUser.email) {
-                        await signInWithEmailAndPassword(auth, appUser.email, pass).catch(async (e) => {
-                            // If Firebase Email Auth fails (e.g. wiped by Google Link),
-                            // fallback to Anonymous Auth just to keep Firebase SDK happy.
-                            console.warn("Background Firebase Auth fallback triggered.");
-                            await signInAnonymously(auth);
-                        });
-                    } else {
-                        await signInAnonymously(auth);
-                    }
-                } catch (e) {
-                    console.error("Background auth sync failed, but user is logged in locally.", e);
+                if (isGoogleUser) {
+                    // Google-auth users have no stored password.
+                    // Direct them to use Google Sign-In.
+                    setError("Yeh account Google se bana hai. Neeche 'Continue with Google' button se login karo.");
+                    return;
                 }
 
+                setError("Galat password. Sahi password enter karo.");
                 return;
             }
 
-            // STEP 3: FALLBACK TO FIREBASE DIRECTLY (If they are somehow in Firebase but not our DB)
-            if (input.includes('@')) {
-                await setPersistence(auth, browserLocalPersistence);
-                const userCredential = await signInWithEmailAndPassword(auth, input, pass);
-                const firebaseUser = userCredential.user;
+            // ── STEP 4: User not found in DB ──
 
-                // Check if this user already exists in our DB (e.g. ADMIN whose
-                // Firestore document was temporarily unreachable). Never downgrade role.
+            // If Firebase email auth succeeded in Step 1, user exists in Firebase
+            // but not in our DB — create/restore their profile.
+            if (auth.currentUser && input.includes('@')) {
+                const firebaseUser = auth.currentUser;
                 let existingProfile: any = null;
                 try { existingProfile = await getUserData(firebaseUser.uid); } catch {}
                 if (!existingProfile && firebaseUser.email) {
                     try { existingProfile = await getUserByEmail(firebaseUser.email); } catch {}
                 }
                 if (existingProfile) {
-                    // User exists — just update auth fields, preserve everything else
                     appUser = { ...existingProfile, id: firebaseUser.uid, lastLoginDate: new Date().toISOString(), provider: 'email' };
                 } else {
-                    // Genuinely new user — create with default STUDENT role
                     appUser = {
                         id: firebaseUser.uid,
                         displayId: generateUserId(),
@@ -433,19 +447,25 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
                 await saveUserToLive(appUser);
                 logActivity("LOGIN", "Student Logged In (Firebase)", appUser);
                 triggerWelcome(appUser);
-            } else {
-                // They entered a mobile/ID that doesn't exist in our DB
-                setError("User not found. Please verify your Mobile/ID or try using your Email to login.");
+                return;
             }
 
+            // No session + no user found.
+            if (!auth.currentUser) {
+                setError("Account nahi mila. Mobile number, Email ya Account ID dobara check karo — ya 'Continue with Google' se try karo.");
+                return;
+            }
+
+            setError("User nahi mila. Mobile/ID dobara check karo ya Email se try karo.");
+
         } catch (err: any) {
-            console.error("Login Error:", err);
+            console.error("Recovery Login Error:", err);
             if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
-                setError("Invalid Email/ID or Password.");
+                setError("Galat Email/ID ya Password.");
             } else if (err.code === 'auth/invalid-email') {
-                setError("Invalid Email format.");
+                setError("Galat Email format.");
             } else {
-                setError(err.message || "Login Failed. Try again.");
+                setError(err.message || "Login failed. Dobara try karo.");
             }
         }
 
@@ -830,27 +850,19 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
                      Log in
                  </button>
 
-                 {/* Recovery text links — no button styling, plain text */}
-                 <div className="pt-2 flex flex-col items-center gap-2">
-                   <p className={`text-[11px] font-semibold uppercase tracking-wider ${isVideoMode ? 'text-slate-400' : 'text-slate-400'}`}>Account recover karo</p>
-                   <div className="flex items-center gap-4">
-                     <button
-                       type="button"
-                       onClick={() => { setFormData(f => ({ ...f, id: '', password: '' })); setView('RECOVERY'); }}
-                       className={`text-sm font-semibold underline underline-offset-2 transition-colors ${isVideoMode ? 'text-slate-300 hover:text-white' : 'text-slate-500 hover:text-slate-800'}`}
-                     >
-                       📱 Mobile number se
-                     </button>
-                     <span className={`text-xs ${isVideoMode ? 'text-slate-500' : 'text-slate-300'}`}>|</span>
-                     <button
-                       type="button"
-                       onClick={() => { setFormData(f => ({ ...f, id: '', password: '' })); setView('RECOVERY'); }}
-                       className={`text-sm font-semibold underline underline-offset-2 transition-colors ${isVideoMode ? 'text-slate-300 hover:text-white' : 'text-slate-500 hover:text-slate-800'}`}
-                     >
-                       📧 Email se
-                     </button>
-                   </div>
-                 </div>
+                 {/* Single recovery button */}
+                 <button
+                   type="button"
+                   onClick={() => { setFormData(f => ({ ...f, id: '', password: '' })); setView('RECOVERY'); }}
+                   className={`w-full py-3.5 rounded-[2rem] flex items-center justify-center gap-2 font-bold text-sm transition-all active:scale-95 border ${
+                     isVideoMode
+                       ? 'border-orange-400/40 text-orange-300 hover:bg-orange-400/10'
+                       : 'border-orange-200 text-orange-600 hover:bg-orange-50'
+                   }`}
+                 >
+                   <KeyRound size={16} />
+                   Account Recover Karo
+                 </button>
             </div>
         )}
 
@@ -893,36 +905,95 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
 
               {view === 'RECOVERY' && (
                   <>
-                     {/* ── ID / Mobile / Email mode ── */}
-                     <div className="space-y-1.5">
-                       <label className="text-xs font-bold text-slate-600 uppercase">Mobile / Email / Account ID</label>
-                       <input name="id" type="text" placeholder="Mobile Number / Email / UID" value={formData.id} onChange={handleChange} className="w-full px-4 py-3 border border-slate-200 rounded-xl font-bold bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
-                     </div>
+                    {/* Info banner */}
+                    <div className="bg-orange-50 border border-orange-100 rounded-2xl p-4 mb-2 flex gap-3 items-start">
+                      <div className="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center shrink-0 mt-0.5">
+                        <KeyRound size={15} className="text-orange-600" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-black text-orange-800 mb-0.5">Apna account dhundo</p>
+                        <p className="text-[11px] text-orange-600 leading-relaxed">
+                          Mobile number, Email ya Account ID — koi bhi ek daalo aur password likho. App apne aap account dhundhkar login kar dega.
+                        </p>
+                      </div>
+                    </div>
 
-                     <div className="space-y-1.5">
-                         <label className="text-xs font-bold text-slate-600 uppercase">Password</label>
-                         <div className="relative">
-                             <input name="password" type={showPassword ? "text" : "password"} placeholder="Enter Password" value={formData.password} onChange={handleChange} className="w-full px-4 py-3 border border-slate-200 rounded-xl font-bold pr-10" />
-                             <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-600">
-                                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                             </button>
-                         </div>
-                     </div>
-                     <button type="submit" className="w-full bg-blue-600 text-white font-bold py-3.5 rounded-xl mt-4 shadow-lg hover:bg-blue-700">Login</button>
+                    {/* Identifier input with type pills */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">
+                        Mobile / Email / Account ID
+                      </label>
+                      <div className="relative">
+                        <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400">
+                          {formData.id.includes('@')
+                            ? <Mail size={17} />
+                            : /^\d+$/.test(formData.id) && formData.id.length > 5
+                              ? <Phone size={17} />
+                              : <UserIcon size={17} />}
+                        </div>
+                        <input
+                          name="id"
+                          type="text"
+                          placeholder="Mobile / Email / UID"
+                          value={formData.id}
+                          onChange={handleChange}
+                          className="w-full pl-10 pr-4 py-3.5 border-2 border-slate-200 rounded-2xl font-bold bg-slate-50 focus:bg-white focus:border-orange-400 focus:ring-0 outline-none transition-all text-slate-800"
+                          autoCapitalize="none"
+                          autoCorrect="off"
+                        />
+                      </div>
+                      <p className="text-[10px] text-slate-400 pl-1">
+                        {formData.id.includes('@') ? '📧 Email detect kiya' : /^\d+$/.test(formData.id) && formData.id.length > 5 ? '📱 Mobile number detect kiya' : formData.id.length > 3 ? '🆔 Account ID detect kiya' : 'Mobile, Email ya UID — koi bhi chalega'}
+                      </p>
+                    </div>
 
-                     <div className="text-center mt-6">
-                         <div className="relative">
-                             <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200"></div></div>
-                             <div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-slate-500 font-bold">Or</span></div>
-                         </div>
+                    {/* Password */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Password</label>
+                      <div className="relative">
+                        <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400">
+                          <Lock size={17} />
+                        </div>
+                        <input
+                          name="password"
+                          type={showPassword ? 'text' : 'password'}
+                          placeholder="Apna password dalein"
+                          value={formData.password}
+                          onChange={handleChange}
+                          className="w-full pl-10 pr-12 py-3.5 border-2 border-slate-200 rounded-2xl font-bold bg-slate-50 focus:bg-white focus:border-orange-400 focus:ring-0 outline-none transition-all text-slate-800"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                        >
+                          {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                        </button>
+                      </div>
+                    </div>
 
-                         <button type="button" onClick={handleGoogleAuth} className="w-full mt-4 relative overflow-hidden bg-gradient-to-r from-[#4285F4] via-[#34A853] to-[#EA4335] p-[2px] rounded-2xl shadow-lg active:scale-95 transition-all hover:shadow-xl hover:scale-[1.01]">
-                             <div className="flex items-center justify-center gap-3 bg-white rounded-[14px] py-3 px-4">
-                                 <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
-                                 <span className="font-black text-slate-800 text-sm tracking-wide">Continue with Google</span>
-                             </div>
-                         </button>
-                     </div>
+                    {/* Submit */}
+                    <button
+                      type="submit"
+                      className="w-full bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white font-black py-4 rounded-2xl mt-2 shadow-lg shadow-orange-200 active:scale-95 transition-all flex items-center justify-center gap-2"
+                    >
+                      <ShieldCheck size={19} />
+                      Account Dhundho &amp; Login Karo
+                    </button>
+
+                    {/* Divider + Google */}
+                    <div className="text-center mt-4">
+                      <div className="relative">
+                        <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200"></div></div>
+                        <div className="relative flex justify-center text-xs uppercase"><span className={`px-2 text-slate-400 font-bold ${isVideoMode ? 'bg-[rgba(10,12,28,0.82)]' : 'bg-white'}`}>Ya Google se</span></div>
+                      </div>
+                      <button type="button" onClick={handleGoogleAuth} className="w-full mt-4 relative overflow-hidden bg-gradient-to-r from-[#4285F4] via-[#34A853] to-[#EA4335] p-[2px] rounded-2xl shadow-lg active:scale-95 transition-all hover:shadow-xl hover:scale-[1.01]">
+                        <div className="flex items-center justify-center gap-3 bg-white rounded-[14px] py-3 px-4">
+                          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
+                          <span className="font-black text-slate-800 text-sm tracking-wide">Continue with Google</span>
+                        </div>
+                      </button>
+                    </div>
                   </>
               )}
               

@@ -1,7 +1,9 @@
 // @ts-nocheck
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { User, MCQItem, MCQResult, TopicItem, SystemSettings } from '../types';
-import { X, CheckCircle, ArrowRight, Loader2, BrainCircuit, AlertCircle, List, Tag, Trophy, TrendingDown, Minus, TrendingUp, Star, Calendar, ChevronRight } from 'lucide-react';
+import { X, CheckCircle, ArrowRight, Loader2, BrainCircuit, AlertCircle, List, Tag, Trophy, TrendingDown, Minus, TrendingUp, Star, Calendar, ChevronRight, Tv, RotateCw, Maximize2, Minimize2 } from 'lucide-react';
+import { rotateScreen } from '../utils/displayPrefs';
 import { getChapterData, saveUserToLive, saveTestResult, saveDemand } from '../firebase';
 import { storage } from '../utils/storage';
 import { generateAnalysisJson } from '../utils/analysisUtils';
@@ -70,6 +72,16 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
     };
 
     const [mcqStreak, setMcqStreak] = useState(0);
+
+    // ── Projector Mode ─────────────────────────────────────────────────────────
+    const [isProjectorMode, setIsProjectorMode] = useState(false);
+    const [projectorQIdx, setProjectorQIdx] = useState(0);
+    const [projectorSelected, setProjectorSelected] = useState<number | null>(null);
+    const [projectorAnswered, setProjectorAnswered] = useState<Set<number>>(new Set());
+    const [projectorCorrect, setProjectorCorrect] = useState(0);
+    const [projectorWrong, setProjectorWrong] = useState(0);
+    const [projectorRotated, setProjectorRotated] = useState(false);
+    const [projectorFocused, setProjectorFocused] = useState(false);
 
     // Timer
     useEffect(() => {
@@ -743,6 +755,13 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                         </span>
                     </div>
                     <button
+                        onClick={() => { setProjectorQIdx(0); setProjectorSelected(null); setProjectorAnswered(new Set()); setProjectorCorrect(0); setProjectorWrong(0); setProjectorRotated(false); setProjectorFocused(false); setIsProjectorMode(true); }}
+                        className="w-8 h-8 flex items-center justify-center rounded-xl bg-amber-100 border border-amber-300 text-amber-600 active:scale-90 transition-all shrink-0"
+                        title="Projector Mode"
+                    >
+                        <Tv size={15} />
+                    </button>
+                    <button
                         onClick={() => finishSession(answers)}
                         className="bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow hover:bg-green-700"
                     >
@@ -804,6 +823,120 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                     })}
                 </div>
             </div>
+
+            {/* ── Projector Mode Overlay ── */}
+            {isProjectorMode && interleavedQuestions.length > 0 && createPortal((() => {
+                const pq = interleavedQuestions[projectorQIdx];
+                if (!pq) return null;
+                const total = interleavedQuestions.length;
+                const optionLetters = ['A','B','C','D','E'];
+                const overlayStyle: React.CSSProperties = {
+                    position: 'fixed', inset: 0, zIndex: 99999,
+                    background: '#ffffff', display: 'flex', flexDirection: 'column', overflow: 'hidden',
+                };
+                const closeProjector = async () => {
+                    setIsProjectorMode(false); setProjectorRotated(false); setProjectorFocused(false);
+                    try { await (screen as any).orientation?.lock?.('portrait'); } catch {}
+                };
+                return (
+                    <div style={overlayStyle}>
+                        {!projectorFocused && (
+                            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 16px', borderBottom:'3px solid #e2e8f0', background:'#1e293b', flexShrink:0 }}>
+                                <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                                    <Tv size={22} color="#fbbf24" />
+                                    <span style={{ color:'#fbbf24', fontWeight:900, fontSize:15, letterSpacing:2 }}>PROJECTOR MODE</span>
+                                </div>
+                                <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                                    <span style={{ color:'#94a3b8', fontWeight:700, fontSize:13 }}>{projectorQIdx + 1}/{total}</span>
+                                    {(projectorCorrect > 0 || projectorWrong > 0) && (
+                                        <span style={{ background:'#0f172a', borderRadius:20, padding:'3px 8px', fontSize:12, fontWeight:800, display:'flex', alignItems:'center', gap:5 }}>
+                                            <span style={{ color:'#4ade80' }}>✓{projectorCorrect}</span>
+                                            <span style={{ color:'#94a3b8' }}>·</span>
+                                            <span style={{ color:'#f87171' }}>✗{projectorWrong}</span>
+                                        </span>
+                                    )}
+                                    <button onClick={() => setProjectorFocused(true)} title="Focus Mode" style={{ background:'transparent', color:'#a3e635', border:'none', borderRadius:8, padding:'6px', cursor:'pointer', display:'flex', alignItems:'center' }}>
+                                        <Maximize2 size={18} />
+                                    </button>
+                                    <button
+                                        onClick={async () => {
+                                            const result = await rotateScreen();
+                                            if (result !== null) { setProjectorRotated(result === 'landscape'); }
+                                            else { alert('📱 Phone ko physically rotate karein — landscape ke liye sideways, portrait ke liye seedha.'); }
+                                        }}
+                                        title={projectorRotated ? 'Portrait mode' : 'Landscape mode'}
+                                        style={{ background: projectorRotated ? '#6366f1' : '#334155', color:'#fff', border:'none', borderRadius:8, padding:'6px 10px', fontSize:12, fontWeight:700, cursor:'pointer', display:'flex', alignItems:'center', gap:5 }}>
+                                        <RotateCw size={14} />
+                                        {projectorRotated ? 'Portrait' : 'Landscape'}
+                                    </button>
+                                    <button onClick={closeProjector} title="Band Karo" style={{ background:'#ef4444', color:'#fff', border:'none', borderRadius:8, padding:'6px 8px', fontSize:14, fontWeight:900, cursor:'pointer', display:'flex', alignItems:'center' }}>
+                                        <X size={16} />
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                        {projectorFocused && (
+                            <button onClick={() => setProjectorFocused(false)} style={{ position:'absolute', top:10, right:10, zIndex:10, background:'rgba(0,0,0,0.4)', color:'#fff', border:'none', borderRadius:8, padding:'6px', cursor:'pointer', display:'flex', alignItems:'center' }}>
+                                <Minimize2 size={16} />
+                            </button>
+                        )}
+                        <div style={{ flex:1, overflowY:'auto', padding: projectorFocused ? '24px' : '18px 24px 12px', display:'flex', flexDirection:'column', gap:14, minHeight:0 }}>
+                            <div style={{ display:'flex', alignItems:'flex-start', gap:12 }}>
+                                <span style={{ background:'#3b82f6', color:'#fff', borderRadius:999, width:36, height:36, display:'flex', alignItems:'center', justifyContent:'center', fontSize:16, fontWeight:900, flexShrink:0 }}>{projectorQIdx + 1}</span>
+                                <p style={{ fontSize:20, fontWeight:800, color:'#1e293b', lineHeight:1.45, flex:1 }} dangerouslySetInnerHTML={{ __html: pq.question }} />
+                            </div>
+                            <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+                                {pq.options.map((opt: string, oi: number) => {
+                                    const isCorrect = pq.correctAnswer === oi;
+                                    const isSelected = projectorSelected === oi;
+                                    const answered = projectorSelected !== null;
+                                    let bg = '#f8fafc'; let border = '#e2e8f0'; let color = '#1e293b';
+                                    if (answered) {
+                                        if (isCorrect) { bg='#f0fdf4'; border='#4ade80'; color='#166534'; }
+                                        else if (isSelected) { bg='#fef2f2'; border='#f87171'; color='#991b1b'; }
+                                    } else if (isSelected) { bg='#eff6ff'; border='#3b82f6'; }
+                                    return (
+                                        <button key={oi}
+                                            onClick={() => {
+                                                if (answered || projectorAnswered.has(projectorQIdx)) return;
+                                                setProjectorSelected(oi);
+                                                const newA = new Set(projectorAnswered); newA.add(projectorQIdx); setProjectorAnswered(newA);
+                                                if (isCorrect) setProjectorCorrect(c => c + 1); else setProjectorWrong(w => w + 1);
+                                            }}
+                                            style={{ textAlign:'left', padding:'14px 18px', borderRadius:12, border:`2px solid ${border}`, background:bg, color, fontSize:17, fontWeight:700, cursor: answered ? 'default' : 'pointer', display:'flex', alignItems:'center', gap:12, transition:'all 0.15s' }}>
+                                            <span style={{ width:32, height:32, borderRadius:999, background: answered && isCorrect ? '#4ade80' : answered && isSelected ? '#f87171' : '#e2e8f0', color: answered && (isCorrect || isSelected) ? '#fff' : '#475569', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:900, fontSize:14, flexShrink:0 }}>{optionLetters[oi]}</span>
+                                            {opt}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            {pq.explanation && projectorSelected !== null && (
+                                <p style={{ fontSize:14, color:'#64748b', fontStyle:'italic', marginTop:4 }}>{pq.explanation}</p>
+                            )}
+                        </div>
+                        {/* Nav footer */}
+                        {!projectorFocused && (
+                            <div style={{ display:'flex', gap:12, padding:'12px 20px', borderTop:'2px solid #e2e8f0', background:'#f8fafc', flexShrink:0 }}>
+                                <button onClick={() => { setProjectorQIdx(i => Math.max(0, i-1)); setProjectorSelected(null); }} disabled={projectorQIdx === 0}
+                                    style={{ flex:1, padding:'12px', borderRadius:12, border:'2px solid #e2e8f0', background:'#fff', fontWeight:800, fontSize:15, cursor: projectorQIdx === 0 ? 'not-allowed' : 'pointer', opacity: projectorQIdx === 0 ? 0.4 : 1 }}>
+                                    ← Pichla
+                                </button>
+                                {projectorQIdx < total - 1 ? (
+                                    <button onClick={() => { setProjectorQIdx(i => i+1); setProjectorSelected(null); }}
+                                        style={{ flex:1, padding:'12px', borderRadius:12, border:'none', background:'#1e293b', color:'#fff', fontWeight:800, fontSize:15, cursor:'pointer' }}>
+                                        Agla →
+                                    </button>
+                                ) : (
+                                    <button onClick={closeProjector}
+                                        style={{ flex:1, padding:'12px', borderRadius:12, border:'none', background:'#16a34a', color:'#fff', fontWeight:800, fontSize:15, cursor:'pointer' }}>
+                                        ✓ Khatam
+                                    </button>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                );
+            })(), document.body)}
         </div>
     );
 };

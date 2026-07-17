@@ -1,7 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getAnalytics } from "firebase/analytics";
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, setDoc, getDoc, collection, updateDoc, deleteDoc, onSnapshot, getDocs, query, where, limitToLast, orderBy, increment, arrayUnion, limit } from "firebase/firestore";
-import { getDatabase, ref, set, get, onValue, update, remove, query as rtdbQuery, limitToLast as rtdbLimitToLast, orderByChild as rtdbOrderByChild, runTransaction } from "firebase/database";
+import { getDatabase, ref, set, get, onValue, update, remove, query as rtdbQuery, limitToLast as rtdbLimitToLast, orderByChild as rtdbOrderByChild, equalTo as rtdbEqualTo, runTransaction } from "firebase/database";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 import { storage } from "./utils/storage";
 
@@ -936,21 +936,51 @@ export const subscribeToUsers = (callback: (users: any[]) => void) => {
 };
 
 export const subscribeToUser = (userId: string, callback: (user: any) => void) => {
-    // Listen ONLY to Firestore for user profile.
-    // RTDB receives frequent partial updates (like lastActiveTime every 10s) which can overwrite local state
-    // leading to unstable credits/subscriptions if RTDB and Firestore are momentarily out of sync.
+    // Primary: Firestore onSnapshot (requires Firebase Auth session).
+    // Fallback: RTDB onValue (no auth needed) — used when Firestore gives permission-denied
+    // (e.g. RTDB-recovered login on a fresh device with no Firebase Auth session).
 
-    const unsubFirestore = onSnapshot(doc(db, "users", userId), (docSnap) => {
-        if (docSnap.exists()) {
-            callback(docSnap.data());
-        } else {
-            // Document was deleted by admin — signal null so App.tsx can force logout
-            callback(null);
+    let unsubRtdb: (() => void) | null = null;
+
+    const unsubFirestore = onSnapshot(
+        doc(db, "users", userId),
+        (docSnap) => {
+            if (docSnap.exists()) {
+                // Firestore working — cancel any RTDB fallback listener
+                if (unsubRtdb) { unsubRtdb(); unsubRtdb = null; }
+                callback(docSnap.data());
+            } else {
+                // Only treat as deleted when we have an active Firebase Auth session.
+                // Without a session, Firestore returns a non-existent snapshot due to
+                // permission-denied — NOT because the document was truly deleted.
+                if (auth.currentUser) {
+                    callback(null); // genuinely deleted by admin → force logout
+                }
+                // No auth session → permission-denied masquerading as missing doc → ignore
+            }
+        },
+        (error) => {
+            // Firestore permission-denied → fall back to RTDB so user data still loads.
+            // Any other error → log but do NOT log out the user.
+            if (error.code === 'permission-denied') {
+                if (!unsubRtdb) {
+                    unsubRtdb = onValue(ref(rtdb, `users/${userId}`), (snap) => {
+                        if (snap.exists()) {
+                            callback(snap.val());
+                        }
+                        // RTDB also missing → user may be deleted; but we don't force-logout
+                        // without a confirmed Firestore delete to avoid false positives.
+                    });
+                }
+            } else {
+                console.warn('[IIC] subscribeToUser Firestore error:', error.code);
+            }
         }
-    });
+    );
 
     return () => {
         unsubFirestore();
+        if (unsubRtdb) unsubRtdb();
     };
 };
 
@@ -1043,31 +1073,60 @@ export const getUserByLinkedGoogleUid = async (googleUid: string) => {
     } catch (e) { console.error(e); return null; }
 };
 
+// ── RTDB-based user lookup (works without Firebase Auth session) ──
+const getUserFromRTDB = async (field: 'mobile' | 'displayId' | 'email', value: string): Promise<any | null> => {
+    try {
+        const q = rtdbQuery(ref(rtdb, 'users'), rtdbOrderByChild(field), rtdbEqualTo(value));
+        const snap = await get(q);
+        if (!snap.exists()) return null;
+        const entries = Object.values(snap.val() as Record<string, any>);
+        return entries.length > 0 ? entries[0] : null;
+    } catch { return null; }
+};
+
 export const getUserByMobileOrId = async (input: string) => {
     try {
-        // Run parallel queries to speed up lookup
-        const qMobile = query(collection(db, "users"), where("mobile", "==", input));
-        const qDisplayId = query(collection(db, "users"), where("displayId", "==", input));
-        const qEmail = query(collection(db, "users"), where("email", "==", input));
+        // STRATEGY: Try Firestore first (requires auth session); fall back to RTDB
+        // which typically has broader read rules and works on fresh devices.
 
-        const [snapMobile, snapId, snapEmail] = await Promise.all([
-            getDocs(qMobile),
-            getDocs(qDisplayId),
-            getDocs(qEmail)
-        ]);
+        // ── 1. Firestore attempt ──
+        try {
+            const qMobile = query(collection(db, "users"), where("mobile", "==", input));
+            const qDisplayId = query(collection(db, "users"), where("displayId", "==", input));
+            const qEmail = query(collection(db, "users"), where("email", "==", input));
 
-        let coreData = null;
-        if (!snapMobile.empty) coreData = snapMobile.docs[0].data();
-        else if (!snapId.empty) coreData = snapId.docs[0].data();
-        else if (!snapEmail.empty) coreData = snapEmail.docs[0].data();
+            const [snapMobile, snapId, snapEmail] = await Promise.all([
+                getDocs(qMobile),
+                getDocs(qDisplayId),
+                getDocs(qEmail)
+            ]);
 
-        if (coreData && coreData.id) {
-            // Fetch segregated bulky data to ensure history is not lost on re-login
-            const bulkySnap = await getDoc(doc(db, "user_data", coreData.id)).catch(() => null);
-            if (bulkySnap && bulkySnap.exists()) {
-                return { ...coreData, ...bulkySnap.data() };
+            let coreData: any = null;
+            if (!snapMobile.empty) coreData = snapMobile.docs[0].data();
+            else if (!snapId.empty) coreData = snapId.docs[0].data();
+            else if (!snapEmail.empty) coreData = snapEmail.docs[0].data();
+
+            if (coreData && coreData.id) {
+                const bulkySnap = await getDoc(doc(db, "user_data", coreData.id)).catch(() => null);
+                if (bulkySnap && bulkySnap.exists()) {
+                    return { ...coreData, ...bulkySnap.data() };
+                }
+                return coreData;
             }
-            return coreData;
+        } catch (firestoreErr: any) {
+            // Firestore blocked (permission-denied on fresh device) — fall through to RTDB
+            console.warn('[IIC] Firestore lookup blocked, trying RTDB:', firestoreErr?.code);
+        }
+
+        // ── 2. RTDB fallback (no auth needed if RTDB rules allow reads) ──
+        const rtdbUser =
+            await getUserFromRTDB('mobile', input) ||
+            await getUserFromRTDB('displayId', input) ||
+            await getUserFromRTDB('email', input);
+
+        if (rtdbUser && rtdbUser.id) {
+            console.log('[IIC] User found via RTDB fallback');
+            return rtdbUser;
         }
 
         return null;

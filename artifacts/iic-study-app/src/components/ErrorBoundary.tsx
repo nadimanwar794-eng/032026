@@ -158,16 +158,8 @@ export class ErrorBoundary extends Component<Props, State> {
               : `An error occurred in ${label}. The admin has been notified.`}
           </p>
 
-          {this.state.error && !isOffline && (
-            <details className="mb-4 text-left">
-              <summary className="text-[10px] text-slate-400 cursor-pointer mb-1">Error details</summary>
-              <div className="bg-red-50 border border-red-100 p-3 rounded-xl overflow-auto max-h-28">
-                <p className="text-[9px] font-mono text-red-600 break-words leading-relaxed">
-                  {this.state.error.message?.slice(0, 300)}
-                </p>
-              </div>
-            </details>
-          )}
+          {/* Technical error details — intentionally hidden from users.
+              Admin ko Firebase RTDB ke error_logs mein poori detail milti hai. */}
 
           <div className="space-y-2.5">
             {this.state.retryCount < 2 && (

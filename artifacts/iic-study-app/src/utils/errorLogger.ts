@@ -1,5 +1,6 @@
 import { rtdb } from '../firebase';
 import { ref, push, serverTimestamp, get, remove, query, orderByChild, limitToFirst } from 'firebase/database';
+import { APP_VERSION, BUILD_NUMBER } from '../constants';
 
 export type ErrorSeverity = 'low' | 'medium' | 'high' | 'critical';
 
@@ -16,6 +17,13 @@ export interface AppError {
   userName?: string;
   userRole?: string;
   device: string;
+  appVersion?: string;
+  buildNumber?: string;
+  browserName?: string;
+  browserVersion?: string;
+  osName?: string;
+  osVersion?: string;
+  deviceModel?: string;
   timestamp: number;
   ts?: object;
   dismissed?: boolean;
@@ -31,11 +39,75 @@ export function setErrorLoggerUser(id: string | null, name: string | null, role:
   _currentUserRole = role;
 }
 
-function getDevice(): string {
+function getDetailedDeviceInfo(): {
+  device: string;
+  browserName: string;
+  browserVersion: string;
+  osName: string;
+  osVersion: string;
+  deviceModel: string;
+} {
   const ua = navigator.userAgent;
+
+  // Device type
   const isMobile = /Mobi|Android/i.test(ua);
   const isTablet = /iPad|Tablet/i.test(ua);
-  return isTablet ? 'tablet' : isMobile ? 'mobile' : 'desktop';
+  const device = isTablet ? 'tablet' : isMobile ? 'mobile' : 'desktop';
+
+  // Browser
+  let browserName = 'Unknown';
+  let browserVersion = '';
+  if (/SamsungBrowser\/(\d+)/.test(ua)) {
+    browserName = 'Samsung';
+    browserVersion = ua.match(/SamsungBrowser\/(\d+)/)?.[1] || '';
+  } else if (/EdgA?\/(\d+)/.test(ua)) {
+    browserName = 'Edge';
+    browserVersion = ua.match(/EdgA?\/(\d+)/)?.[1] || '';
+  } else if (/OPR\/(\d+)/.test(ua)) {
+    browserName = 'Opera';
+    browserVersion = ua.match(/OPR\/(\d+)/)?.[1] || '';
+  } else if (/Firefox\/(\d+)/.test(ua)) {
+    browserName = 'Firefox';
+    browserVersion = ua.match(/Firefox\/(\d+)/)?.[1] || '';
+  } else if (/Chrome\/(\d+)/.test(ua)) {
+    browserName = 'Chrome';
+    browserVersion = ua.match(/Chrome\/(\d+)/)?.[1] || '';
+  } else if (/Safari\//.test(ua)) {
+    browserName = 'Safari';
+    browserVersion = ua.match(/Version\/(\d+)/)?.[1] || '';
+  }
+
+  // OS
+  let osName = 'Unknown';
+  let osVersion = '';
+  if (/Android ([\d.]+)/.test(ua)) {
+    osName = 'Android';
+    osVersion = ua.match(/Android ([\d.]+)/)?.[1] || '';
+  } else if (/iPhone OS ([\d_]+)/.test(ua)) {
+    osName = 'iOS';
+    osVersion = (ua.match(/iPhone OS ([\d_]+)/)?.[1] || '').replace(/_/g, '.');
+  } else if (/iPad; CPU OS ([\d_]+)/.test(ua)) {
+    osName = 'iPadOS';
+    osVersion = (ua.match(/iPad; CPU OS ([\d_]+)/)?.[1] || '').replace(/_/g, '.');
+  } else if (/Windows NT ([\d.]+)/.test(ua)) {
+    osName = 'Windows';
+    const nt = ua.match(/Windows NT ([\d.]+)/)?.[1] || '';
+    osVersion = ({ '10.0': '10/11', '6.3': '8.1', '6.2': '8', '6.1': '7' } as Record<string, string>)[nt] || nt;
+  } else if (/Mac OS X ([\d_]+)/.test(ua)) {
+    osName = 'macOS';
+    osVersion = (ua.match(/Mac OS X ([\d_]+)/)?.[1] || '').replace(/_/g, '.');
+  } else if (/Linux/.test(ua)) {
+    osName = 'Linux';
+  }
+
+  // Device model (Android)
+  let deviceModel = '';
+  if (osName === 'Android') {
+    const m = ua.match(/Android [\d.]+;\s*([^;)]+?)(?:\s*Build|[;)])/);
+    deviceModel = m?.[1]?.trim() || '';
+  }
+
+  return { device, browserName, browserVersion, osName, osVersion, deviceModel };
 }
 
 function classifyError(message: string): ErrorSeverity {
@@ -118,6 +190,8 @@ export async function logErrorToFirebase(
     const componentMatch = opts.componentStack?.match(/\bat\s+(\w+)/);
     const component = componentMatch?.[1] || undefined;
 
+    const { device, browserName, browserVersion, osName, osVersion, deviceModel } = getDetailedDeviceInfo();
+
     const payload: AppError = {
       message: message.slice(0, 500),
       stack: stack?.slice(0, 1000),
@@ -129,7 +203,14 @@ export async function logErrorToFirebase(
       userId: _currentUserId ?? undefined,
       userName: _currentUserName ?? undefined,
       userRole: _currentUserRole ?? undefined,
-      device: getDevice(),
+      device,
+      appVersion: APP_VERSION,
+      buildNumber: BUILD_NUMBER,
+      browserName: browserName || undefined,
+      browserVersion: browserVersion || undefined,
+      osName: osName || undefined,
+      osVersion: osVersion || undefined,
+      deviceModel: deviceModel || undefined,
       timestamp: Date.now(),
       ts: serverTimestamp() as object,
       dismissed: false,

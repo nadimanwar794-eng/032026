@@ -1,5 +1,6 @@
 // @ts-nocheck
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { ref, onValue, off } from 'firebase/database';
 import { rtdb } from '../firebase';
 import { getCoaching } from '../coaching-firebase';
@@ -418,14 +419,55 @@ function McqCard({ mcq, accent, onSendToMcqCommunity, user }: { mcq: CoachingMcq
   );
 }
 
+function McqFullPage({ mcqs, accent, label, onClose, onSendToMcqCommunity, user }: { mcqs: CoachingMcq[]; accent: string; label: string; onClose: () => void; onSendToMcqCommunity?: (draft: McqCommunityDraft) => void; user?: any }) {
+  return createPortal(
+    <div className="fixed inset-0 flex flex-col" style={{ zIndex: 9999, background: '#f8fafc' }}>
+      <div className="shrink-0 flex items-center gap-3 px-4 py-3 shadow-sm" style={{ background: accent }}>
+        <button onPointerDown={() => { hapticMedium(); onClose(); }} className="p-1.5 rounded-full" style={{ background: 'rgba(255,255,255,0.18)' }}>
+          <ArrowLeft size={18} className="text-white" />
+        </button>
+        <span className="text-white font-black text-base flex-1">🧠 {label}</span>
+        <span className="text-white/70 text-[11px] font-bold">{mcqs.length} MCQ</span>
+      </div>
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3" style={{ paddingBottom: 100 }}>
+        {mcqs.map(m => <McqCard key={m.id} mcq={m} accent={accent} onSendToMcqCommunity={onSendToMcqCommunity} user={user} />)}
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 function CategorySection({ catKey, data, accent, onSendToMcqCommunity, user, onReaderOpenChange, customBooks }: { catKey: CatKey; data: CategoryData; accent: string; onSendToMcqCommunity?: (draft: McqCommunityDraft) => void; user?: any; onReaderOpenChange?: (open: boolean) => void; customBooks?: Record<string, { label: string; icon: string; color: string }> }) {
   const meta = resolveCatMeta(catKey, customBooks);
   const [open, setOpen] = useState(true);
+  const [mcqPageOpen, setMcqPageOpen] = useState(false);
   const notes = data.notes || [];
   const mcqs = data.mcqs || [];
   const pdfs = data.pdfs || [];
   const total = notes.length + mcqs.length + pdfs.length;
   if (total === 0) return null;
+
+  // MCQ category — tap opens full-page overlay
+  if (catKey === 'mcq' && mcqs.length > 0) {
+    return (
+      <div className="mb-3">
+        <button
+          className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl active:scale-[0.99] transition-all"
+          style={{ background: `${meta.color}10`, border: `1.5px solid ${meta.color}30` }}
+          onClick={() => { hapticMedium(); setMcqPageOpen(true); }}
+        >
+          <span className="text-base">{meta.icon}</span>
+          <span className="text-[11px] font-black uppercase tracking-wider flex-1 text-left" style={{ color: meta.color }}>{meta.label}</span>
+          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: `${meta.color}20`, color: meta.color }}>{mcqs.length}</span>
+          <ChevronRight size={14} style={{ color: meta.color }} />
+        </button>
+        {mcqPageOpen && (
+          <McqFullPage mcqs={mcqs} accent={meta.color} label={meta.label} onClose={() => setMcqPageOpen(false)} onSendToMcqCommunity={onSendToMcqCommunity} user={user} />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="mb-3">
       <button

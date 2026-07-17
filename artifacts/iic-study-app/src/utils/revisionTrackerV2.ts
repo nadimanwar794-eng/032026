@@ -43,6 +43,8 @@ export interface TopicBucket {
   lastTier?: 'weak' | 'average' | 'strong' | 'mastered';
   // Raw accuracy (0–1) from the last completed MCQ session.
   lastSessionAccuracy?: number;
+  // Last 3 MCQ sessions history — newest first. Used to show trend in Performance tab.
+  sessionHistory?: { accuracy: number; tier: 'weak' | 'average' | 'strong' | 'mastered'; at: number }[];
 }
 
 export type TrackerMap = Record<string, TopicBucket>;
@@ -321,6 +323,11 @@ export function markMcqDone(key: string, accuracy: number, config?: RevisionConf
 
   b.lastTier = tier;
   b.lastSessionAccuracy = accuracy;
+  // ── Session history: last 3 sessions, newest first ────────────────────
+  b.sessionHistory = [
+    { accuracy, tier, at: Date.now() },
+    ...(b.sessionHistory || []),
+  ].slice(0, 3);
   b.stage = 'NOTES';
   b.cycleCount = (b.cycleCount || 0) + 1;
   // Perfect run → enter the long-spacing maintenance window: notes resurface
@@ -421,6 +428,11 @@ export function applyInitialSchedule(
 
   b.lastTier = tier;
   b.lastSessionAccuracy = accuracy;
+  // ── Session history: last 3 sessions, newest first ────────────────────
+  b.sessionHistory = [
+    { accuracy, tier, at: Date.now() },
+    ...(b.sessionHistory || []),
+  ].slice(0, 3);
   b.stage = 'NOTES';
   // Perfect on first try → long-spacing immediately
   if (accuracy >= 1) {

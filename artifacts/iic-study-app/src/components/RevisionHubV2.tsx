@@ -263,6 +263,11 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
   const handleNotesRead = (b: WeakBucket, noteResult?: NoteSearchResult) => {
     const k = bucketKey(b.subjectId, b.chapterId, b.pageKey, b.topic);
     markNotesReviewed(k, revisionConfig);
+    // ── +5 pts notes padhne ke liye ──────────────────────────────────────
+    if (onUpdateUser) {
+      const updated = { ...user, totalScore: (user.totalScore || 0) + 5 };
+      onUpdateUser(updated);
+    }
     if (noteResult) {
       onOpenChapter?.(b.subjectId, noteResult.chapterId, noteResult.noteTitle || noteResult.chapterTitleFromKey);
     } else {
@@ -406,6 +411,12 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
     const strongMid  = (thr.strong + thr.mastery - 1) / 2 / 100;             // midpoint in strong range
     const acc = score === 'strong' ? strongMid : score === 'average' ? averageMid : weakMid;
     markMcqDone(key, acc, revisionConfig);
+    // ── Pts based on self-rating: weak=+3, average=+5, strong=+10 ────────
+    if (onUpdateUser) {
+      const ratePts = score === 'strong' ? 10 : score === 'average' ? 5 : 3;
+      const updated = { ...user, totalScore: (user.totalScore || 0) + ratePts };
+      onUpdateUser(updated);
+    }
     setSelfRateKey(null);
     setLastRatedTopic(topicName || null);
     reload();
@@ -553,6 +564,12 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
               const k = bucketKey(b.subjectId, b.chapterId, b.pageKey, b.topic);
               markNotesReviewed(k, revisionConfig);
             });
+            // ── +5 pts per topic notes padha ──────────────────────────────
+            if (onUpdateUser && markedBuckets.length > 0) {
+              const notesPts = markedBuckets.length * 5;
+              const updated = { ...user, totalScore: (user.totalScore || 0) + notesPts };
+              onUpdateUser(updated);
+            }
             setShowAllNotesModal(false);
             reload();
           }}
@@ -1149,6 +1166,13 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
           const strong   = trackedBuckets.filter(b => getTier(b) === 'strong');
           const mastered = trackedBuckets.filter(b => getTier(b) === 'mastered');
 
+          const tierMeta = (t: string) => {
+            if (t === 'mastered') return { emoji: '🏆', color: 'text-violet-600', bg: 'bg-violet-100' };
+            if (t === 'strong')   return { emoji: '💪', color: 'text-emerald-600', bg: 'bg-emerald-100' };
+            if (t === 'average')  return { emoji: '🙂', color: 'text-amber-600',   bg: 'bg-amber-100' };
+            return                       { emoji: '😕', color: 'text-rose-600',    bg: 'bg-rose-100' };
+          };
+
           const TopicRow = ({ b, bgColor, textColor, badgeColor, badgeText }: { b: WeakBucket; bgColor: string; textColor: string; badgeColor: string; badgeText: string }) => {
             const displayPct = b.lastSessionAccuracy != null
               ? Math.round(b.lastSessionAccuracy * 100)
@@ -1159,6 +1183,17 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
             const timerColor = dayInfo?.isDue
               ? 'bg-rose-100 text-rose-600 animate-pulse'
               : 'bg-blue-50 text-blue-600';
+
+            const history = (b as any).sessionHistory as { accuracy: number; tier: string; at: number }[] | undefined;
+
+            // Trend arrow: compare latest vs previous session
+            const trendArrow = (() => {
+              if (!history || history.length < 2) return null;
+              const diff = history[0].accuracy - history[1].accuracy;
+              if (diff > 0.05) return { icon: '↑', color: 'text-emerald-500' };
+              if (diff < -0.05) return { icon: '↓', color: 'text-rose-500' };
+              return { icon: '→', color: 'text-slate-400' };
+            })();
 
             return (
               <div className="border-b border-slate-100 last:border-b-0">
@@ -1178,8 +1213,11 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
                   </div>
                 )}
                 <div className="flex items-center gap-3 px-4 py-2.5">
-                  <div className={`w-11 h-11 rounded-2xl ${bgColor} flex flex-col items-center justify-center shrink-0 font-black`}>
+                  <div className={`w-11 h-11 rounded-2xl ${bgColor} flex flex-col items-center justify-center shrink-0 font-black relative`}>
                     <span className={`text-sm leading-tight ${textColor}`}>{displayPct}%</span>
+                    {trendArrow && (
+                      <span className={`absolute -top-1 -right-1 text-[11px] font-black ${trendArrow.color}`}>{trendArrow.icon}</span>
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-bold text-slate-800 truncate">{b.topic}</p>
@@ -1188,6 +1226,25 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
                       <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${badgeColor}`}>{badgeText}</span>
                       <span className="text-[9px] text-slate-400">{b.wrongQuestions.length} galat · {b.total} total</span>
                     </div>
+                    {/* ── Last 3 sessions history ── */}
+                    {history && history.length > 0 && (
+                      <div className="flex items-center gap-1 mt-1.5">
+                        <span className="text-[8px] text-slate-400 mr-0.5">Pichhle test:</span>
+                        {history.map((s, i) => {
+                          const m = tierMeta(s.tier);
+                          const pct = Math.round(s.accuracy * 100);
+                          return (
+                            <span
+                              key={i}
+                              className={`inline-flex items-center gap-0.5 text-[8px] font-black px-1.5 py-0.5 rounded-full ${m.bg} ${m.color}`}
+                              title={new Date(s.at).toLocaleDateString('en-IN')}
+                            >
+                              {m.emoji} {pct}%
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1303,7 +1360,7 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
                     <div className="px-3 pt-3 pb-1">
                       <div style={{ height: 200 }}>
                         <ResponsiveContainer width="100%" height="100%">
-                          <PieChart>
+                          <PieChart style={{ background: 'transparent' }}>
                             <Pie
                               data={emptyPie ? [{ name: 'Empty', value: 1, color: '#e2e8f0', key: 'none' }] : pieData}
                               cx="50%"

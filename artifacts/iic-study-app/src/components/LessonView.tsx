@@ -2254,6 +2254,11 @@ export const LessonView: React.FC<Props> = ({
                        className="shrink-0 p-2 bg-amber-50 hover:bg-amber-100 rounded-xl text-amber-500 border border-amber-200 transition-colors" title="Projector Mode">
                        <Tv size={17} />
                    </button>
+                   {/* Rotate button — real screen rotation */}
+                   <button onClick={handleRotate}
+                       className="shrink-0 p-2 bg-slate-50 hover:bg-slate-100 rounded-xl text-slate-500 border border-slate-200 transition-colors active:scale-90" title="Screen Rotate">
+                       <RotateCcw size={17} />
+                   </button>
                    {/* Admin Edit button — only for admin/subadmin */}
                    {isAdmin && onAdminEdit && (
                        <button onClick={onAdminEdit} className="shrink-0 p-2 bg-orange-50 hover:bg-orange-100 rounded-xl text-orange-600 border border-orange-200 transition-colors" title="Edit / Delete MCQ (Admin)">

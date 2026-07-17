@@ -57,6 +57,7 @@ import {
   APP_VERSION,
   STATIC_SYLLABUS,
   DEFAULT_SUBJECTS,
+  SUPPORT_PHONE,
 } from "../constants";
 import { ALL_FEATURES } from "../utils/featureRegistry";
 import { useAppLang, tApp } from "../utils/appLang";
@@ -1950,13 +1951,7 @@ export const StudentDashboard: React.FC<Props> = ({
   const [showDotsMenu, setShowDotsMenu] = useState(false);
   const [showSuggestionsPanel, setShowSuggestionsPanel] = useState(false);
   const [showScorePanel, setShowScorePanel] = useState(false);
-  const [topBarBtnGlow, setTopBarBtnGlow] = useState(false);
-  React.useEffect(() => {
-    if (activeTab !== 'HOME') return;
-    setTopBarBtnGlow(true);
-    const t = setTimeout(() => setTopBarBtnGlow(false), 1000);
-    return () => clearTimeout(t);
-  }, [activeTab]);
+  const topBarBtnGlow = false; // effect hataya — home pe aate hi glow nahi chahiye
   const [scorePanelTab, setScorePanelTab] = useState<'LEVEL' | 'DAILY' | 'FEATURES' | 'LEADERBOARD'>('LEVEL');
   const [scoreDailyTier, setScoreDailyTier] = useState<'FREE' | 'BASIC' | 'ULTRA' | null>(null);
   const [viewedLevelIdx, setViewedLevelIdx] = useState<number>(0);
@@ -2931,6 +2926,14 @@ export const StudentDashboard: React.FC<Props> = ({
   const [routineRevisionDiscountLessonId, setRoutineRevisionDiscountLessonId] = useState<string | null>(null);
   // Routine gate popup — shown when user tries to open a lesson in a routineApplied subject
   const [routineGate, setRoutineGate] = useState<{ entry: any; pageIdx: number } | null>(null);
+  // Fire window events when RevisionHub opens/closes so App.tsx can defer HomeStatsToast
+  const _prevRevHubRef = React.useRef(false);
+  useEffect(() => {
+    const wasOpen = _prevRevHubRef.current;
+    _prevRevHubRef.current = showRevisionHubScreen;
+    if (!wasOpen && showRevisionHubScreen) window.dispatchEvent(new CustomEvent('iic-revision-hub-opened'));
+    if (wasOpen && !showRevisionHubScreen) window.dispatchEvent(new CustomEvent('iic-revision-hub-closed'));
+  }, [showRevisionHubScreen]);
   // 2-category view toggle for the Important Notes pages: 'list' = original
   // flat list, 'bybook' = grouped by source book / page.
   const [importantNotesView, setImportantNotesView] = useState<'list' | 'bybook'>('list');
@@ -4520,7 +4523,7 @@ export const StudentDashboard: React.FC<Props> = ({
   const [dailyTargetSeconds, setDailyTargetSeconds] = useState(3 * 3600);
   const REWARD_AMOUNT = settings?.dailyReward || 3;
   const adminPhones = settings?.adminPhones || [
-    { id: "default", number: "8227070298", name: "Admin" },
+    { id: "default", number: SUPPORT_PHONE, name: "Admin" },
   ];
   const defaultPhoneId =
     adminPhones.find((p) => p.isDefault)?.id || adminPhones[0]?.id || "default";
@@ -4678,7 +4681,7 @@ export const StudentDashboard: React.FC<Props> = ({
     const phone = adminPhones.find(
       (p) => p.id === (phoneId || selectedPhoneId),
     );
-    return phone ? phone.number : "8227070298";
+    return phone ? phone.number : SUPPORT_PHONE;
   };
 
   useEffect(() => {
@@ -4965,7 +4968,7 @@ export const StudentDashboard: React.FC<Props> = ({
       }
     }
     handleUserUpdate(updatedUser);
-    showAlert(successMsg, "SUCCESS", "Rewards Claimed");
+    addAppNotification("Rewards Claimed 🎁", successMsg, "SUCCESS");
   };
 
   const userRef = React.useRef(user);
@@ -6501,6 +6504,16 @@ export const StudentDashboard: React.FC<Props> = ({
                       title="📽️ Projector Mode"
                     >
                       <Tv size={14} />
+                    </button>
+                  )}
+                  {/* Rotate button — MCQ tab */}
+                  {effectiveMode === 'mcq' && (
+                    <button
+                      onClick={handleRotate}
+                      className={`w-8 h-8 flex items-center justify-center rounded-xl border transition-all active:scale-90 shrink-0 ${isLandscape ? 'bg-emerald-500/30 border-emerald-400/50 text-emerald-300' : 'bg-white/15 border-white/25 text-white'}`}
+                      title="Screen Rotate"
+                    >
+                      <RotateCcw size={14} />
                     </button>
                   )}
                   {/* More button — non-write modes */}
@@ -11426,8 +11439,8 @@ export const StudentDashboard: React.FC<Props> = ({
                       onClick={() => setShowEventDrawer(true)}
                       className="relative inline-flex items-center gap-0.5 px-2 py-1 rounded-full text-[10px] font-black shrink-0 active:scale-90 transition-all"
                       style={hasEndingEvent
-                        ? { background: 'rgba(239,68,68,0.22)', color: '#fca5a5', border: '1px solid rgba(239,68,68,0.55)', boxShadow: '0 0 8px rgba(239,68,68,0.45)' }
-                        : { background: 'rgba(245,158,11,0.25)', color: '#fcd34d', border: '1px solid rgba(245,158,11,0.5)' }}
+                        ? { color: '#fca5a5', border: '1px solid rgba(239,68,68,0.55)', boxShadow: '0 0 8px rgba(239,68,68,0.45)' }
+                        : { color: '#fcd34d', border: '1px solid rgba(245,158,11,0.5)' }}
                       title={hasEndingEvent ? 'An event is ending soon!' : `${activeEvents.length} event(s) active`}
                     >
                       <span className="text-[11px] leading-none">⚡</span>
@@ -11439,7 +11452,7 @@ export const StudentDashboard: React.FC<Props> = ({
                     <button
                       onClick={() => setShowEventDrawer(true)}
                       className="relative inline-flex items-center gap-0.5 px-2 py-1 rounded-full text-[10px] font-black shrink-0 active:scale-90 transition-all"
-                      style={{ background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.4)' }}
+                      style={{ color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.4)' }}
                       title={`Upcoming event: ${upcomingEvents[0].label}`}
                     >
                       <span className="text-[11px] leading-none">📅</span>
@@ -18220,9 +18233,9 @@ export const StudentDashboard: React.FC<Props> = ({
                       {lucentActiveTab === 'PDF' && (
                         <>
                           <button
-                            onClick={() => setLucentPdfRotated(r => !r)}
+                            onClick={async () => { const r = await rotateScreen(); if (r !== null) { setLucentPdfRotated(r === 'landscape'); } else { alert('📱 Phone ko sideways karein — landscape ke liye'); } }}
                             className={`w-8 h-8 flex items-center justify-center rounded-xl border transition-all active:scale-90 shrink-0 ${lucentPdfRotated ? 'bg-emerald-500/30 border-emerald-400/50 text-emerald-300' : 'bg-white/15 border-white/25 text-white'}`}
-                            title="Rotate PDF"
+                            title="Screen Rotate"
                           >
                             <RotateCcw size={14} />
                           </button>
@@ -18264,6 +18277,16 @@ export const StudentDashboard: React.FC<Props> = ({
                           </button>
                         ) : null;
                       })()}
+                      {/* Rotate button — MCQ tab */}
+                      {lucentActiveTab === 'MCQS' && (
+                        <button
+                          onClick={handleRotate}
+                          className={`w-8 h-8 flex items-center justify-center rounded-xl border transition-all active:scale-90 shrink-0 ${isLandscape ? 'bg-emerald-500/30 border-emerald-400/50 text-emerald-300' : 'bg-white/15 border-white/25 text-white'}`}
+                          title="Screen Rotate"
+                        >
+                          <RotateCcw size={14} />
+                        </button>
+                      )}
                       {lucentActiveTab !== 'PDF' && (
                         <button
                           onClick={() => lucentNoteViewer && setContentPickerPopup({ type: 'LUCENT', entry: lucentNoteViewer, pageIdx: lucentPageIndex })}
@@ -18354,7 +18377,7 @@ export const StudentDashboard: React.FC<Props> = ({
                       if (chunkSrc?.trim() && htmlSrc?.trim()) return htmlSrc.trim();
                       return undefined;
                     })()}
-                    content={`Page ${currentPage.pageNo}.\n\n${(() => {
+                    content={`${(() => {
                       const chunkSrc = (currentPage as any).chunkNotes;
                       const htmlSrc = (currentPage as any).htmlNotes;
                       if (chunkSrc?.trim()) return chunkSrc.trim();
@@ -19237,17 +19260,7 @@ RULES:
                         : lucentPdfNight === 'sepia'
                         ? 'sepia(0.8) brightness(0.9) contrast(0.9)'
                         : 'none',
-                      ...(lucentPdfRotated
-                        ? {
-                            position: 'absolute',
-                            top: '50%',
-                            left: '50%',
-                            width: '100vh',
-                            height: '100vw',
-                            transform: 'translate(-50%, -50%) rotate(90deg)',
-                            transformOrigin: 'center center',
-                          }
-                        : { position: 'absolute', inset: 0, width: '100%', height: '100%' }),
+                      position: 'absolute', inset: 0, width: '100%', height: '100%',
                     }}
                   >
                     <iframe

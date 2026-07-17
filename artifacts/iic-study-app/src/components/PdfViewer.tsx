@@ -13,11 +13,12 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   ArrowLeft, Maximize, Minimize, RotateCcw, Moon, Sun,
   ExternalLink, ChevronLeft, ChevronRight, Search, X, BookOpen, Check, MoreVertical,
-  ZoomIn, ZoomOut, LayoutGrid
+  LayoutGrid
 } from 'lucide-react';
 import { tryEarnScore } from '../utils/scoreSystem';
 import { ReadingScoreSession, ReadingScoreState } from '../utils/readingScoreEngine';
 import { ReadingScoreHUD } from './ReadingScoreHUD';
+import { PaginatedPdfViewer, PaginatedPdfHandle } from './PaginatedPdfViewer';
 
 interface Props {
   url: string;
@@ -84,10 +85,10 @@ export const PdfViewer: React.FC<Props> = ({
   });
   const [iframeSrc, setIframeSrc] = useState(() => buildSrc(url, currentPage));
   const [rotated, setRotated] = useState(false);
-  const [zoomLevel, setZoomLevel] = useState(1.0);
   const [nightMode, setNightMode] = useState<NightMode>('normal');
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [headerVisible, setHeaderVisible] = useState(true);
+  // Immersive by default — controls hide on open, tap anywhere to reveal
+  const [headerVisible, setHeaderVisible] = useState(false);
   const [jumpInput, setJumpInput] = useState('');
   const [showJump, setShowJump] = useState(false);
   const [totalInput, setTotalInput] = useState('');
@@ -98,9 +99,11 @@ export const PdfViewer: React.FC<Props> = ({
     try { return new Set(JSON.parse(localStorage.getItem(`nst_pdf_ms_${key}`) || '[]')); } catch { return new Set(); }
   });
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [pdfLoadFailed, setPdfLoadFailed] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const paginatedRef = useRef<PaginatedPdfHandle>(null);
   const headerHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const jumpInputRef = useRef<HTMLInputElement>(null);
 
@@ -144,8 +147,11 @@ export const PdfViewer: React.FC<Props> = ({
     const valid = Math.max(1, totalPages > 0 ? Math.min(p, totalPages) : p);
     setCurrentPage(valid);
     savePage(valid);
-    setIframeSrc(buildSrc(url, valid));
-  }, [url, totalPages, savePage]);
+    // Paginated viewer: scroll to that page
+    paginatedRef.current?.scrollToPage(valid);
+    // Iframe fallback: reload src with #page=N
+    if (pdfLoadFailed) setIframeSrc(buildSrc(url, valid));
+  }, [url, totalPages, savePage, pdfLoadFailed]);
 
   const nextPage = () => goToPage(currentPage + 1);
   const prevPage = () => goToPage(Math.max(1, currentPage - 1));
@@ -217,16 +223,25 @@ export const PdfViewer: React.FC<Props> = ({
     }
   };
 
-  // Auto-hide header after 3s in fullscreen
+  // Auto-fullscreen on mobile when PDF opens
   useEffect(() => {
-    if (!isFullscreen) return;
+    const isMobile = /Mobi|Android/i.test(navigator.userAgent);
+    if (isMobile && containerRef.current && !document.fullscreenElement) {
+      containerRef.current.requestFullscreen().catch(() => {});
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-hide header after 3s whenever visible (immersive mode — fullscreen or not)
+  useEffect(() => {
+    if (!headerVisible) return;
     if (headerHideTimer.current) clearTimeout(headerHideTimer.current);
     headerHideTimer.current = setTimeout(() => setHeaderVisible(false), 3000);
     return () => { if (headerHideTimer.current) clearTimeout(headerHideTimer.current); };
-  }, [isFullscreen, headerVisible]);
+  }, [headerVisible]);
 
   const revealHeader = () => {
-    if (isFullscreen) setHeaderVisible(true);
+    setHeaderVisible(true);
   };
 
   // Night mode filter string for iframe wrapper
@@ -240,10 +255,6 @@ export const PdfViewer: React.FC<Props> = ({
   const cycleNight = () => setNightMode(m => m === 'normal' ? 'night' : m === 'night' ? 'sepia' : 'normal');
 
   // CSS rotation — stable across all browsers
-  const zoomIn = () => setZoomLevel(z => Math.min(3.0, parseFloat((z + 0.25).toFixed(2))));
-  const zoomOut = () => setZoomLevel(z => Math.max(0.5, parseFloat((z - 0.25).toFixed(2))));
-  const zoomReset = () => setZoomLevel(1.0);
-
   // Toggle rotate: CSS rotation + device orientation lock so the whole phone rotates
   const toggleRotate = useCallback(async () => {
     const next = !rotated;
@@ -278,15 +289,6 @@ export const PdfViewer: React.FC<Props> = ({
     } catch { /* device/browser doesn't support orientation lock — CSS fallback is enough */ }
   }, [rotated, showToast]);
 
-  // When rotated: iframe wrapper is normal (no individual rotation needed)
-  const iframeWrapStyle: React.CSSProperties = {
-    position: 'relative',
-    width: `${zoomLevel * 100}%`,
-    minWidth: '100%',
-    height: `${zoomLevel * 100}%`,
-    minHeight: '100%',
-  };
-
   // Rotate the entire viewer container like a video player going landscape.
   // Must override right/bottom from the className's inset-0 so they don't
   // constrain the swapped width/height when rotated.
@@ -310,11 +312,186 @@ export const PdfViewer: React.FC<Props> = ({
   return (
     <div
       ref={containerRef}
-      className="fixed inset-0 z-50 bg-black flex flex-col"
+      className="fixed inset-0 z-50 bg-black"
       style={containerStyle}
       onTouchStart={revealHeader}
-      onMouseMove={revealHeader}
+      onPointerMove={revealHeader}
     >
+      {/* ── PDF fills the full screen, always ── */}
+      {!pdfLoadFailed ? (
+        <PaginatedPdfViewer
+          ref={paginatedRef}
+          url={url}
+          nightFilter={nightFilter}
+          onLoadSuccess={(n) => {
+            if (n > 0 && totalPages !== n) {
+              setTotalPages(n);
+              try { localStorage.setItem(TOTAL_KEY(key), String(n)); } catch {}
+            }
+          }}
+          onPageChange={(page) => {
+            setCurrentPage(page);
+            savePage(page);
+          }}
+          onLoadError={() => setPdfLoadFailed(true)}
+        />
+      ) : (
+        /* ── CORS fallback: classic iframe ── */
+        <div className="absolute inset-0 overflow-auto" style={{ filter: nightFilter }}>
+          <iframe
+            ref={iframeRef}
+            key={iframeSrc}
+            src={iframeSrc}
+            className="w-full h-full border-none"
+            title={title}
+            allowFullScreen
+          />
+        </div>
+      )}
+
+      {/* ── Overlaid Header (slides in/out from top) ── */}
+      <header
+        className={`absolute top-0 left-0 right-0 bg-slate-900/95 backdrop-blur text-white px-3 py-2 flex items-center gap-2 z-20 transition-all duration-300 ${
+          !headerVisible ? 'opacity-0 pointer-events-none -translate-y-full' : 'opacity-100'
+        }`}
+      >
+        {/* Back */}
+        <button onClick={onBack} className="p-2 bg-white/10 rounded-xl active:bg-white/20 transition shrink-0">
+          <ArrowLeft size={18} />
+        </button>
+
+        {/* School mode switch */}
+        {onSchoolModeSwitch && (
+          <button
+            onClick={onSchoolModeSwitch}
+            className="p-2 bg-indigo-500/30 rounded-xl active:bg-indigo-500/50 transition shrink-0"
+            title="Switch Mode"
+          >
+            <LayoutGrid size={16} className="text-indigo-200" />
+          </button>
+        )}
+
+        {/* Title */}
+        <h2 className="flex-1 font-bold text-sm truncate min-w-0">{title}</h2>
+
+        {/* Page counter */}
+        <button
+          onClick={() => { setShowJump(true); setTimeout(() => jumpInputRef.current?.focus(), 80); }}
+          className="flex items-center gap-1 bg-white/10 px-2.5 py-1.5 rounded-xl text-xs font-black active:bg-white/20 transition shrink-0"
+        >
+          <BookOpen size={13} />
+          <span>{currentPage}{totalPages > 0 ? `/${totalPages}` : ''}</span>
+        </button>
+
+        {/* Night mode */}
+        <button
+          onClick={cycleNight}
+          className="p-2 bg-white/10 rounded-xl active:bg-white/20 transition text-base shrink-0"
+          title={`Mode: ${nightMode}`}
+        >
+          {nightLabel[nightMode]}
+        </button>
+
+        {/* Fullscreen */}
+        <button
+          onClick={toggleFullscreen}
+          className={`p-2 rounded-xl active:scale-90 transition shrink-0 ${isFullscreen ? 'bg-indigo-500' : 'bg-white/10'}`}
+          title="Full Screen"
+        >
+          {isFullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
+        </button>
+
+        {/* More menu toggle */}
+        <button
+          onClick={() => setShowMoreMenu(m => !m)}
+          className={`p-2 rounded-xl active:scale-90 transition shrink-0 ${showMoreMenu ? 'bg-indigo-500 text-white' : 'bg-white/10'}`}
+          title="More options"
+        >
+          <MoreVertical size={16} />
+        </button>
+      </header>
+
+      {/* More menu — slides in just below the header */}
+      {showMoreMenu && headerVisible && (
+        <div className="absolute top-[48px] left-0 right-0 bg-slate-800/98 border-t border-white/10 flex items-stretch z-20 animate-in slide-in-from-top-1 duration-150">
+          <button onClick={() => { toggleRotate(); setShowMoreMenu(false); }} className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 px-1 hover:bg-white/10 active:bg-white/20 transition border-r border-white/10 ${rotated ? 'text-indigo-300' : 'text-slate-300'}`}>
+            <RotateCcw size={13} />
+            <span className={`text-[9px] font-black uppercase tracking-wider ${rotated ? 'text-indigo-400' : 'text-slate-400'}`}>{rotated ? 'Portrait' : 'Rotate'}</span>
+          </button>
+          {isAdmin && onAdminBoard && (
+            <button onClick={() => { setShowMoreMenu(false); onAdminBoard(); }} className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 px-1 hover:bg-white/10 active:bg-white/20 transition border-r border-white/10 text-emerald-300">
+              <LayoutGrid size={13} />
+              <span className="text-[9px] font-black uppercase tracking-wider text-emerald-400">Admin</span>
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Progress bar — thin strip above bottom bar when controls visible */}
+      {totalPages > 0 && headerVisible && (
+        <div className="absolute bottom-[52px] left-0 right-0 h-1 bg-slate-700/60 z-20">
+          <div
+            className="h-full bg-gradient-to-r from-indigo-400 to-violet-400 transition-all duration-500"
+            style={{ width: `${progressPct}%` }}
+          />
+        </div>
+      )}
+
+      {/* ── Overlaid Bottom toolbar (slides in/out from bottom) ── */}
+      <div className={`absolute bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur text-white px-3 py-2 flex items-center gap-2 z-20 transition-all duration-300 ${!headerVisible ? 'opacity-0 pointer-events-none translate-y-full' : 'opacity-100'}`}>
+        {/* Prev page */}
+        <button
+          onClick={prevPage}
+          disabled={currentPage <= 1}
+          className="p-2 bg-white/10 rounded-xl disabled:opacity-30 active:scale-90 transition shrink-0"
+        >
+          <ChevronLeft size={18} />
+        </button>
+
+        {/* Center: page + set total */}
+        <div className="flex items-center gap-2 flex-1 justify-center">
+          <button
+            onClick={() => setShowJump(true)}
+            className="flex items-center gap-1.5 bg-white/10 px-3 py-1.5 rounded-xl text-sm font-black active:bg-white/20 transition"
+          >
+            <Search size={13} />
+            Page {currentPage}
+            {totalPages > 0 && <span className="text-slate-400 font-normal"> / {totalPages}</span>}
+          </button>
+          <button
+            onClick={() => setShowTotalInput(true)}
+            className="text-[10px] text-slate-400 font-bold bg-white/5 px-2 py-1 rounded-lg active:bg-white/10 transition"
+            title="Set total pages"
+          >
+            {totalPages > 0 ? `📚 ${progressPct}%` : '📚 Set'}
+          </button>
+        </div>
+
+        {/* Next page */}
+        <button
+          onClick={nextPage}
+          disabled={totalPages > 0 && currentPage >= totalPages}
+          className="p-2 bg-white/10 rounded-xl disabled:opacity-30 active:scale-90 transition shrink-0"
+        >
+          <ChevronRight size={18} />
+        </button>
+
+        {/* Next Chapter button — only when next exists */}
+        {onNext && (
+          <button
+            onClick={onNext}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-black active:scale-95 transition shrink-0"
+            style={{ background: 'rgba(59,130,246,0.30)', border: '1px solid rgba(59,130,246,0.45)', color: '#93c5fd' }}
+            title={nextTitle ? `Next: ${nextTitle}` : 'Next Chapter'}
+          >
+            <span className="max-w-[80px] truncate hidden xs:block">{nextTitle || 'Next'}</span>
+            <ChevronRight size={14} />
+          </button>
+        )}
+      </div>
+
+      {/* ── Modals / overlays ── */}
+
       {/* Toast */}
       {toast && (
         <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[9999] bg-slate-800 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-lg animate-in fade-in">
@@ -394,185 +571,6 @@ export const PdfViewer: React.FC<Props> = ({
             </button>
           </div>
         </div>
-      )}
-
-      {/* Header */}
-      <header
-        className={`flex-shrink-0 bg-slate-900/95 backdrop-blur text-white px-3 py-2 flex items-center gap-2 z-20 transition-all duration-300 ${
-          isFullscreen && !headerVisible ? 'opacity-0 pointer-events-none -translate-y-full' : 'opacity-100'
-        }`}
-      >
-        {/* Back */}
-        <button onClick={onBack} className="p-2 bg-white/10 rounded-xl active:bg-white/20 transition shrink-0">
-          <ArrowLeft size={18} />
-        </button>
-
-        {/* School mode switch */}
-        {onSchoolModeSwitch && (
-          <button
-            onClick={onSchoolModeSwitch}
-            className="p-2 bg-indigo-500/30 rounded-xl active:bg-indigo-500/50 transition shrink-0"
-            title="Switch Mode"
-          >
-            <LayoutGrid size={16} className="text-indigo-200" />
-          </button>
-        )}
-
-        {/* Title */}
-        <h2 className="flex-1 font-bold text-sm truncate min-w-0">{title}</h2>
-
-        {/* Page counter */}
-        <button
-          onClick={() => { setShowJump(true); setTimeout(() => jumpInputRef.current?.focus(), 80); }}
-          className="flex items-center gap-1 bg-white/10 px-2.5 py-1.5 rounded-xl text-xs font-black active:bg-white/20 transition shrink-0"
-        >
-          <BookOpen size={13} />
-          <span>{currentPage}{totalPages > 0 ? `/${totalPages}` : ''}</span>
-        </button>
-
-        {/* Night mode */}
-        <button
-          onClick={cycleNight}
-          className="p-2 bg-white/10 rounded-xl active:bg-white/20 transition text-base shrink-0"
-          title={`Mode: ${nightMode}`}
-        >
-          {nightLabel[nightMode]}
-        </button>
-
-        {/* Fullscreen */}
-        <button
-          onClick={toggleFullscreen}
-          className={`p-2 rounded-xl active:scale-90 transition shrink-0 ${isFullscreen ? 'bg-indigo-500' : 'bg-white/10'}`}
-          title="Full Screen"
-        >
-          {isFullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
-        </button>
-
-        {/* More menu toggle */}
-        <button
-          onClick={() => setShowMoreMenu(m => !m)}
-          className={`p-2 rounded-xl active:scale-90 transition shrink-0 ${showMoreMenu ? 'bg-indigo-500 text-white' : 'bg-white/10'}`}
-          title="More options"
-        >
-          <MoreVertical size={16} />
-        </button>
-      </header>
-
-      {/* Slim controls bar — visible when 3-dot is active, hides on fullscreen */}
-      {showMoreMenu && (
-        <div className="flex-shrink-0 bg-slate-800/98 border-t border-white/10 flex items-stretch z-10 animate-in slide-in-from-top-1 duration-150">
-          <button onClick={zoomOut} disabled={zoomLevel <= 0.5} className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 px-1 hover:bg-white/10 active:bg-white/20 transition disabled:opacity-30 border-r border-white/10">
-            <ZoomOut size={13} className="text-slate-300" />
-            <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Out</span>
-          </button>
-          <button onClick={zoomReset} className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 px-1 hover:bg-white/10 active:bg-white/20 transition border-r border-white/10">
-            <span className="text-xs font-black text-white">{Math.round(zoomLevel * 100)}%</span>
-            <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Zoom</span>
-          </button>
-          <button onClick={zoomIn} disabled={zoomLevel >= 3.0} className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 px-1 hover:bg-white/10 active:bg-white/20 transition disabled:opacity-30 border-r border-white/10">
-            <ZoomIn size={13} className="text-slate-300" />
-            <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">In</span>
-          </button>
-          <button onClick={() => { toggleRotate(); setShowMoreMenu(false); }} className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 px-1 hover:bg-white/10 active:bg-white/20 transition border-r border-white/10 ${rotated ? 'text-indigo-300' : 'text-slate-300'}`}>
-            <RotateCcw size={13} />
-            <span className={`text-[9px] font-black uppercase tracking-wider ${rotated ? 'text-indigo-400' : 'text-slate-400'}`}>{rotated ? 'Portrait' : 'Rotate'}</span>
-          </button>
-          {isAdmin && onAdminBoard && (
-            <button onClick={() => { setShowMoreMenu(false); onAdminBoard(); }} className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 px-1 hover:bg-white/10 active:bg-white/20 transition border-r border-white/10 text-emerald-300">
-              <LayoutGrid size={13} />
-              <span className="text-[9px] font-black uppercase tracking-wider text-emerald-400">Admin</span>
-            </button>
-          )}
-          <a href={url} target="_blank" rel="noopener noreferrer" onClick={() => setShowMoreMenu(false)} className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 px-1 hover:bg-white/10 active:bg-white/20 transition text-indigo-300">
-            <ExternalLink size={13} />
-            <span className="text-[9px] font-black uppercase tracking-wider text-indigo-400">Open</span>
-          </a>
-        </div>
-      )}
-
-      {/* Progress bar */}
-      {totalPages > 0 && (
-        <div className="h-1 bg-slate-700 flex-shrink-0 z-10">
-          <div
-            className="h-full bg-gradient-to-r from-indigo-400 to-violet-400 transition-all duration-500"
-            style={{ width: `${progressPct}%` }}
-          />
-        </div>
-      )}
-
-      {/* iframe container — overflow-auto so zoom can scroll */}
-      <div className="flex-1 relative overflow-auto bg-slate-800">
-        <div style={{ ...iframeWrapStyle, filter: nightFilter }}>
-          <iframe
-            ref={iframeRef}
-            key={iframeSrc}
-            src={iframeSrc}
-            className="w-full h-full border-none"
-            title={title}
-            allowFullScreen
-          />
-        </div>
-      </div>
-
-      {/* Bottom toolbar */}
-      <div className="flex-shrink-0 bg-slate-900/95 backdrop-blur text-white px-3 py-2 flex items-center gap-2 z-20">
-        {/* Prev page */}
-        <button
-          onClick={prevPage}
-          disabled={currentPage <= 1}
-          className="p-2 bg-white/10 rounded-xl disabled:opacity-30 active:scale-90 transition shrink-0"
-        >
-          <ChevronLeft size={18} />
-        </button>
-
-        {/* Center: page + set total */}
-        <div className="flex items-center gap-2 flex-1 justify-center">
-          <button
-            onClick={() => setShowJump(true)}
-            className="flex items-center gap-1.5 bg-white/10 px-3 py-1.5 rounded-xl text-sm font-black active:bg-white/20 transition"
-          >
-            <Search size={13} />
-            Page {currentPage}
-            {totalPages > 0 && <span className="text-slate-400 font-normal"> / {totalPages}</span>}
-          </button>
-          <button
-            onClick={() => setShowTotalInput(true)}
-            className="text-[10px] text-slate-400 font-bold bg-white/5 px-2 py-1 rounded-lg active:bg-white/10 transition"
-            title="Set total pages"
-          >
-            {totalPages > 0 ? `📚 ${progressPct}%` : '📚 Set'}
-          </button>
-        </div>
-
-        {/* Next page */}
-        <button
-          onClick={nextPage}
-          disabled={totalPages > 0 && currentPage >= totalPages}
-          className="p-2 bg-white/10 rounded-xl disabled:opacity-30 active:scale-90 transition shrink-0"
-        >
-          <ChevronRight size={18} />
-        </button>
-
-        {/* Next Chapter button — only when next exists */}
-        {onNext && (
-          <button
-            onClick={onNext}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-black active:scale-95 transition shrink-0"
-            style={{ background: 'rgba(59,130,246,0.30)', border: '1px solid rgba(59,130,246,0.45)', color: '#93c5fd' }}
-            title={nextTitle ? `Next: ${nextTitle}` : 'Next Chapter'}
-          >
-            <span className="max-w-[80px] truncate hidden xs:block">{nextTitle || 'Next'}</span>
-            <ChevronRight size={14} />
-          </button>
-        )}
-      </div>
-
-      {/* Fullscreen tap-to-show hint */}
-      {isFullscreen && !headerVisible && (
-        <div
-          className="absolute top-0 left-0 right-0 h-16 z-10 cursor-pointer"
-          onClick={revealHeader}
-        />
       )}
 
       {/* ── PDF time-based score HUD ── */}

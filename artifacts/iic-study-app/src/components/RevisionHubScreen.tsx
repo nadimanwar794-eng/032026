@@ -154,6 +154,11 @@ export const RevisionHubScreen: React.FC<Props> = ({
   const LESSON_OPEN_COST = 100;
 
   function doStartSession() {
+    // ── Session tracking: App.tsx ko batao session shuru hua ─────────────
+    const _chapterName = mcqSelectedLesson?.lessonTitle || `Class ${mcqSelectedClass} — ${mcqSelectedSubject}`;
+    window.dispatchEvent(new CustomEvent('iic-mcq-session', {
+      detail: { active: true, chapterName: _chapterName, subjectName: mcqSelectedSubject || 'General', activityType: 'MCQ' }
+    }));
     // Group questions by topic, shuffle within each group, then round-robin interleave
     const topicBuckets: Record<string, any[]> = {};
     classMcqs.forEach((q: any) => {
@@ -250,6 +255,10 @@ export const RevisionHubScreen: React.FC<Props> = ({
   function finishSession() {
     setSessionActive(false);
     setSessionDone(true);
+    // ── Session tracking: App.tsx ko batao session khatam hua ────────────
+    window.dispatchEvent(new CustomEvent('iic-mcq-session', {
+      detail: { active: false, activityType: 'MCQ' }
+    }));
 
     const lessonId = mcqSelectedLesson?.id || `${mcqSelectedClass}_${mcqSelectedSubject}`;
     const chapterId = lessonId;
@@ -313,7 +322,13 @@ export const RevisionHubScreen: React.FC<Props> = ({
         performanceTag: totalCorrect / totalAnswered >= 0.8 ? 'EXCELLENT' : totalCorrect / totalAnswered >= 0.5 ? 'GOOD' : 'NEEDS_IMPROVEMENT',
         type: 'REVISION_MCQ',
       };
-      const updatedUser = { ...user, mcqHistory: [...(user.mcqHistory || []), newEntry] };
+      // ── Pts: +2 sahi jawab, +1 galat jawab ──────────────────────────────
+      const ptsEarned = (totalCorrect * 2) + ((totalAnswered - totalCorrect) * 1);
+      const updatedUser = {
+        ...user,
+        mcqHistory: [...(user.mcqHistory || []), newEntry],
+        totalScore: (user.totalScore || 0) + ptsEarned,
+      };
       onUpdateUser(updatedUser);
       try { saveUserToLive(updatedUser); } catch (_) {}
     }

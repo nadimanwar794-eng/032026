@@ -12,6 +12,7 @@ import { saveUserToLive, saveSuggestion } from '../firebase';
 import { fireCreditNotify } from '../utils/creditNotify';
 import { useAppTheme } from '../utils/themeContext';
 import { tryEarnScore } from '../utils/scoreSystem';
+import { rotateScreen } from '../utils/displayPrefs';
 
 interface Props {
   questions: MCQItem[];
@@ -825,32 +826,15 @@ export const FlashcardMcqView: React.FC<Props> = ({
         const total = questions.length;
         const optionLetters = ['A','B','C','D','E'];
 
-        // CSS-rotation trick: rotate the fixed overlay 90° to force landscape layout
-        // without relying on screen.orientation.lock (requires fullscreen + permissions)
-        const overlayStyle: React.CSSProperties = projectorRotated
-          ? {
-              position: 'fixed',
-              top: '50%',
-              left: '50%',
-              width: '100vh',
-              height: '100vw',
-              transform: 'translate(-50%, -50%) rotate(90deg)',
-              transformOrigin: 'center center',
-              zIndex: 99999,
-              background: '#ffffff',
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden',
-            }
-          : {
-              position: 'fixed',
-              inset: 0,
-              zIndex: 99999,
-              background: '#ffffff',
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden',
-            };
+        const overlayStyle: React.CSSProperties = {
+          position: 'fixed',
+          inset: 0,
+          zIndex: 99999,
+          background: '#ffffff',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        };
 
         return createPortal(
           <div style={overlayStyle}>
@@ -880,14 +864,22 @@ export const FlashcardMcqView: React.FC<Props> = ({
                   </button>
                   {/* Rotate button */}
                   <button
-                    onClick={() => setProjectorRotated(v => !v)}
-                    title={projectorRotated ? 'Portrait' : 'Landscape'}
+                    onClick={async () => {
+                      const result = await rotateScreen();
+                      if (result !== null) { setProjectorRotated(result === 'landscape'); }
+                      else { alert('📱 Phone ko physically rotate karein — landscape ke liye sideways, portrait ke liye seedha.'); }
+                    }}
+                    title={projectorRotated ? 'Portrait mode mein jao' : 'Landscape mode mein jao'}
                     style={{ background: projectorRotated ? '#6366f1' : '#334155', color:'#fff', border:'none', borderRadius:8, padding:'6px 10px', fontSize:12, fontWeight:700, cursor:'pointer', display:'flex', alignItems:'center', gap:5 }}>
                     <RotateCw size={14} />
                     {projectorRotated ? 'Portrait' : 'Landscape'}
                   </button>
                   {/* Close — icon only */}
-                  <button onClick={() => { setIsProjectorMode(false); setProjectorRotated(false); setProjectorFocused(false); }}
+                  <button onClick={async () => {
+                    setIsProjectorMode(false); setProjectorRotated(false); setProjectorFocused(false);
+                    // Portrait pe wapas jao jab projector band ho
+                    try { await (screen as any).orientation?.lock?.('portrait'); } catch { /* ignore */ }
+                  }}
                     title="Band Karo"
                     style={{ background:'#ef4444', color:'#fff', border:'none', borderRadius:8, padding:'6px 8px', fontSize:14, fontWeight:900, cursor:'pointer', display:'flex', alignItems:'center' }}>
                     <X size={16} />
@@ -899,9 +891,8 @@ export const FlashcardMcqView: React.FC<Props> = ({
             {projectorFocused && (
               <button
                 onClick={() => setProjectorFocused(false)}
-                style={{ position:'absolute', top:12, right:12, zIndex:10, background:'rgba(15,23,42,0.85)', color:'#a3e635', border:'2px solid #4ade80', borderRadius:10, padding:'8px 16px', fontSize:14, fontWeight:900, cursor:'pointer', display:'flex', alignItems:'center', gap:6, backdropFilter:'blur(4px)' }}>
+                style={{ position:'absolute', top:12, right:12, zIndex:10, background:'rgba(15,23,42,0.85)', color:'#a3e635', border:'2px solid #4ade80', borderRadius:10, padding:'8px', cursor:'pointer', display:'flex', alignItems:'center', backdropFilter:'blur(4px)' }}>
                 <Minimize2 size={15} />
-                Focus Band Karo
               </button>
             )}
             {/* Scrollable content — flex:1 + overflowY:auto keeps bottom bar always visible */}
@@ -997,8 +988,8 @@ export const FlashcardMcqView: React.FC<Props> = ({
                 </button>
                 <button
                   onClick={() => setProjectorFocused(false)}
-                  style={{ background:'rgba(239,68,68,0.9)', color:'#fff', border:'2px solid #fca5a5', borderRadius:10, padding:'10px 20px', fontSize:15, fontWeight:900, cursor:'pointer', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', gap:6 }}>
-                  <Minimize2 size={16} /> Focus Band Karo
+                  style={{ background:'rgba(239,68,68,0.9)', color:'#fff', border:'2px solid #fca5a5', borderRadius:10, padding:'10px 14px', fontSize:15, fontWeight:900, cursor:'pointer', backdropFilter:'blur(6px)', display:'flex', alignItems:'center' }}>
+                  <Minimize2 size={16} />
                 </button>
                 <button
                   onClick={() => { setProjectorQIndex(i => Math.min(total-1,i+1)); setProjectorReveal(false); setProjectorSelected(null); }}

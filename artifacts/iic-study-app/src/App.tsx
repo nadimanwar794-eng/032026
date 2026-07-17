@@ -466,7 +466,7 @@ const App: React.FC = () => {
       setMcqSessionScore(earned);
       setMcqSessionCredits(earnedC);
       setMcqJustEnded(false);
-      setHomeStatsVisible(true);
+      if (revisionHubOpenRef.current) { pendingHomeStatsRef.current = true; } else { setHomeStatsVisible(true); }
     }, 1500);
     return () => { if (mcqFallbackTimerRef.current) clearTimeout(mcqFallbackTimerRef.current); };
   }, [mcqJustEnded]);
@@ -511,6 +511,9 @@ const App: React.FC = () => {
   const awaitingPostMcqDataRef = useRef(false);
   // sessionEndProcessedRef: double-fire guard (sessionStartTimeRef pe depend mat karo)
   const sessionEndProcessedRef = useRef(false);
+  // RevisionHub open hone pe HomeStatsToast defer karo — close hone pe dikhao
+  const revisionHubOpenRef = useRef(false);
+  const pendingHomeStatsRef = useRef(false);
   useEffect(() => { userTotalScoreRef.current = state.user?.totalScore || 0; }, [state.user?.totalScore]);
   useEffect(() => { userCreditsRef.current = state.user?.credits || 0; }, [state.user?.credits]);
 
@@ -525,8 +528,27 @@ const App: React.FC = () => {
     setMcqSessionScore(earned);
     setMcqSessionCredits(earnedC);
     setMcqJustEnded(false);
-    setHomeStatsVisible(true); // Real data ke saath turant dikhao
+    // RevisionHub open hai to home pe jane pe dikhao
+    if (revisionHubOpenRef.current) { pendingHomeStatsRef.current = true; } else { setHomeStatsVisible(true); }
   }, [state.user?.totalScore, state.user?.credits]);
+
+  // RevisionHub open/close track karo — toast defer karo jab tak hub band na ho
+  useEffect(() => {
+    const openHandler = () => { revisionHubOpenRef.current = true; };
+    const closeHandler = () => {
+      revisionHubOpenRef.current = false;
+      if (pendingHomeStatsRef.current) {
+        pendingHomeStatsRef.current = false;
+        setTimeout(() => setHomeStatsVisible(true), 300);
+      }
+    };
+    window.addEventListener('iic-revision-hub-opened', openHandler);
+    window.addEventListener('iic-revision-hub-closed', closeHandler);
+    return () => {
+      window.removeEventListener('iic-revision-hub-opened', openHandler);
+      window.removeEventListener('iic-revision-hub-closed', closeHandler);
+    };
+  }, []);
 
   // HOME tab pe EARN notifications suppress karo (HomeStatsToast mein dikhega)
   useEffect(() => { setHomeTabActive(studentTab === 'HOME'); }, [studentTab]);
@@ -544,12 +566,12 @@ const App: React.FC = () => {
         if (chapterName) setMcqChapterName([chapterName, subjectName].filter(Boolean).join(' · '));
         if (activityType) setMcqActivityType(activityType);
       } else {
-        // Double-fire guard — ek hi baar process karo
+        // Guard 1: koi active session shuru nahi hua (mount-time false fire block)
+        if (sessionStartTimeRef.current === 0) return;
+        // Guard 2: is session ka end already process ho chuka (double-fire block)
         if (sessionEndProcessedRef.current) return;
         sessionEndProcessedRef.current = true;
-        const elapsedSec = sessionStartTimeRef.current
-          ? Math.floor((Date.now() - sessionStartTimeRef.current) / 1000)
-          : 0;
+        const elapsedSec = Math.floor((Date.now() - sessionStartTimeRef.current) / 1000);
         setMcqSessionSeconds(elapsedSec);
         sessionStartTimeRef.current = 0;
         awaitingPostMcqDataRef.current = true;
@@ -1347,9 +1369,16 @@ const App: React.FC = () => {
         // permission-denied — causing blank content pages.
         // We call signInAnonymously here so Firebase Auth is always active when
         // the user is already "logged in" via our custom session.
-        auth.currentUser === null && signInAnonymously(auth).catch(e =>
-            console.warn('[IIC] Background Firebase Auth restore failed:', e)
-        );
+        // NOTE: We never force-logout on failure — nst_current_user is the source of
+        // truth for our custom session. Firebase Auth will restore itself via
+        // onAuthStateChanged (browserLocalPersistence). Logging out here on every
+        // HMR reload or anonymous-auth-disabled project caused spurious logouts.
+        if (auth.currentUser === null) {
+            signInAnonymously(auth).catch(e => {
+                console.warn('[IIC] Background Firebase Auth restore skipped:', e.code || e.message);
+                // Do NOT clear session or reload — the custom session is still valid.
+            });
+        }
 
         // MIGRATION & RECALCULATION ON LOAD
         if (user.role !== 'ADMIN') {
@@ -1663,6 +1692,12 @@ const App: React.FC = () => {
   ];
 
   const handleLogin = async (user: User) => {
+    // ── Login pe session tracking reset — spurious home toast na aaye ────
+    awaitingPostMcqDataRef.current = false;
+    sessionStartTimeRef.current = 0;
+    sessionEndProcessedRef.current = false;
+    setMcqJustEnded(false);
+    setHomeStatsVisible(false);
     if (!state.originalAdmin) {
         localStorage.setItem('nst_current_user', JSON.stringify(user));
     }

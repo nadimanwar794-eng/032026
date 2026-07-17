@@ -24,7 +24,7 @@ function formatTime(secs: number): string {
   return `${s}s`;
 }
 
-const DISPLAY_MS = 4000;
+const DISPLAY_MS = 2000;
 
 const ACTIVITY_LABEL: Record<string, string> = {
   MCQ: '📝 MCQ',

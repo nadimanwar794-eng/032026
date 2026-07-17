@@ -6,6 +6,8 @@ import { FULL_SYLLABUS } from './utils/full_syllabus_data';
 // import { COMPETITION_DATA } from './competition_syllabus';
 
 export const APP_VERSION = "1.0.1";
+export const BUILD_NUMBER = "20260716.01";
+export const SUPPORT_PHONE = "8227070298"; // Admin support number — update here instead of in code
 export const ADMIN_EMAIL = "nadiman0636indo@gmail.com";
 export const SUPPORT_EMAIL = "nadiman0636indo@gmail.com";
 
