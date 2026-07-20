@@ -32,6 +32,32 @@ const ACTIVITY_LABEL: Record<string, string> = {
   Writing: '✍️ Writing Notes',
 };
 
+// Theme-aware CSS variables
+const S = {
+  card: {
+    background: 'var(--nst-color-surface)',
+    border: '1px solid var(--nst-color-border)',
+    boxShadow: 'var(--nst-shadow-lg)',
+  } as React.CSSProperties,
+  divider: {
+    borderColor: 'var(--nst-color-border)',
+  } as React.CSSProperties,
+  label: {
+    color: 'var(--nst-color-muted)',
+  } as React.CSSProperties,
+  text: {
+    color: 'var(--nst-color-text)',
+  } as React.CSSProperties,
+  hint: {
+    borderTop: '1px solid var(--nst-color-border)',
+    color: 'var(--nst-color-muted)',
+  } as React.CSSProperties,
+  bar: {
+    borderTop: '1px solid var(--nst-color-border)',
+    background: 'var(--nst-color-surface)',
+  } as React.CSSProperties,
+};
+
 export const HomeStatsToast: React.FC<HomeStatsToastProps> = ({
   sessionScore,
   creditsEarned,
@@ -53,7 +79,7 @@ export const HomeStatsToast: React.FC<HomeStatsToastProps> = ({
     if (!visible) return;
     const t = setTimeout(() => onDismissRef.current(), DISPLAY_MS);
     return () => clearTimeout(t);
-  }, [visible]); // onDismiss ref se liya — visible change pe hi timer reset ho
+  }, [visible]);
 
   if (!visible) return null;
 
@@ -62,92 +88,95 @@ export const HomeStatsToast: React.FC<HomeStatsToastProps> = ({
       className="fixed top-2 left-3 right-3 z-[9998] animate-in slide-in-from-top-4 fade-in duration-300"
       style={{ pointerEvents: 'auto' }}
     >
-      <div
-        className="rounded-2xl bg-white shadow-xl overflow-hidden border border-slate-100"
-      >
+      <div className="rounded-2xl overflow-hidden" style={S.card}>
+
         {/* Header — chapter name + activity */}
         <div
           className="px-3 py-2 flex items-center gap-2"
-          style={{ background: `linear-gradient(90deg, ${levelInfo.color}20, ${levelInfo.color}08)` }}
+          style={{ background: `linear-gradient(90deg, ${levelInfo.color}28, ${levelInfo.color}0a)` }}
         >
           <span className="text-[11px] font-bold tracking-wide" style={{ color: levelInfo.color }}>
             {actLabel}
           </span>
           {chapterName && (
             <>
-              <span className="text-[11px] text-slate-300">·</span>
-              <span className="text-[11px] font-semibold text-slate-600 truncate flex-1">{chapterName}</span>
+              <span className="text-[11px]" style={S.label}>·</span>
+              <span className="text-[11px] font-semibold truncate flex-1" style={S.text}>{chapterName}</span>
             </>
           )}
         </div>
 
-        {/* Stats row — 4 columns */}
-        <div className="flex items-stretch divide-x divide-slate-100">
+        {/* Stats row — 4 columns separated by theme-aware dividers */}
+        <div className="flex items-stretch">
 
-          {/* Score Mila — fresh session score */}
+          {/* Score Mila */}
           <div
             className="flex-1 flex flex-col items-center justify-center py-3 px-1 gap-0.5"
-            style={{ background: sessionScore > 0 ? `${levelInfo.color}08` : undefined }}
+            style={{ background: sessionScore > 0 ? `${levelInfo.color}0a` : undefined }}
           >
-            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Score Mila</span>
-            <span
-              className="text-[14px] font-black leading-none"
-              style={{ color: sessionScore > 0 ? levelInfo.color : '#94a3b8' }}
-            >
+            <span className="text-[9px] font-bold uppercase tracking-wider" style={S.label}>Score Mila</span>
+            <span className="text-[14px] font-black leading-none"
+              style={{ color: sessionScore > 0 ? levelInfo.color : 'var(--nst-color-muted)' }}>
               {sessionScore > 0
                 ? `+${sessionScore >= 1000 ? `${(sessionScore / 1000).toFixed(1)}k` : sessionScore}`
                 : '—'}
             </span>
-            <span className="text-[9px] text-slate-400">⭐ pts</span>
+            <span className="text-[9px]" style={S.label}>⭐ pts</span>
           </div>
 
-          {/* Earn Credit — sirf is session mein mila */}
+          {/* Divider */}
+          <div style={{ width: 1, ...S.divider, background: 'var(--nst-color-border)' }} />
+
+          {/* Earn Credit */}
           <div className="flex-1 flex flex-col items-center justify-center py-3 px-1 gap-0.5">
-            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Earn Credit</span>
+            <span className="text-[9px] font-bold uppercase tracking-wider" style={S.label}>Earn Credit</span>
             <span className="text-[14px] font-black text-amber-500 leading-none">
               {creditsEarned > 0 ? `+${creditsEarned}` : '—'}
             </span>
-            <span className="text-[9px] text-slate-400">🪙 coins</span>
+            <span className="text-[9px]" style={S.label}>🪙 coins</span>
           </div>
 
-          {/* Bonus — actual bonus pts earned */}
+          {/* Divider */}
+          <div style={{ width: 1, ...S.divider, background: 'var(--nst-color-border)' }} />
+
+          {/* Bonus */}
           <div className="flex-1 flex flex-col items-center justify-center py-3 px-1 gap-0.5">
-            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Bonus</span>
-            <span
-              className="text-[14px] font-black leading-none"
-              style={{ color: bonusPts > 0 ? levelInfo.color : '#94a3b8' }}
-            >
+            <span className="text-[9px] font-bold uppercase tracking-wider" style={S.label}>Bonus</span>
+            <span className="text-[14px] font-black leading-none"
+              style={{ color: bonusPts > 0 ? levelInfo.color : 'var(--nst-color-muted)' }}>
               {bonusPts > 0 ? `+${bonusPts}` : '—'}
             </span>
-            <span className="text-[9px] text-slate-400">⭐ bonus pts</span>
+            <span className="text-[9px]" style={S.label}>⭐ bonus pts</span>
           </div>
+
+          {/* Divider */}
+          <div style={{ width: 1, ...S.divider, background: 'var(--nst-color-border)' }} />
 
           {/* Session Time */}
           <div className="flex-1 flex flex-col items-center justify-center py-3 px-1 gap-0.5">
-            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Time</span>
-            <span className="text-[14px] font-black text-emerald-600 leading-none">
+            <span className="text-[9px] font-bold uppercase tracking-wider" style={S.label}>Time</span>
+            <span className="text-[14px] font-black text-emerald-500 leading-none">
               {sessionSeconds > 0 ? formatTime(sessionSeconds) : '—'}
             </span>
-            <span className="text-[9px] text-slate-400">⏱ session</span>
+            <span className="text-[9px]" style={S.label}>⏱ session</span>
           </div>
 
         </div>
 
         {/* Earn Credit source hint */}
         {creditsEarned > 0 && (
-          <div
-            className="px-3 py-1.5 text-center"
-            style={{ background: `${levelInfo.color}06` }}
-          >
-            <span className="text-[10px] text-slate-500">
-              🪙 <span className="font-bold text-amber-600">+{creditsEarned} coins</span>{' '}
-              {activityType === 'MCQ' ? 'MCQ se' : activityType === 'Writing' ? 'Writing se' : 'Reading se'} earn hue · Balance: <span className="font-bold">{credits}</span>
+          <div className="px-3 py-1.5 text-center" style={S.hint}>
+            <span className="text-[10px]">
+              🪙{' '}
+              <span className="font-bold text-amber-500">+{creditsEarned} coins</span>{' '}
+              {activityType === 'MCQ' ? 'MCQ se' : activityType === 'Writing' ? 'Writing se' : 'Reading se'} earn hue · Balance:{' '}
+              <span className="font-bold" style={S.text}>{credits}</span>
             </span>
           </div>
         )}
 
-        {/* Auto-dismiss progress bar with shimmer */}
-        <div className="h-[3px] bg-slate-100 relative overflow-hidden">
+        {/* Auto-dismiss progress bar */}
+        <div className="h-[3px] relative overflow-hidden" style={{ background: 'var(--nst-color-border)' }}>
           <div
             className="h-full relative overflow-hidden"
             style={{
@@ -158,14 +187,14 @@ export const HomeStatsToast: React.FC<HomeStatsToastProps> = ({
             <span
               className="absolute inset-0"
               style={{
-                background:
-                  'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.6) 50%, transparent 100%)',
+                background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.5) 50%, transparent 100%)',
                 backgroundSize: '200% 100%',
                 animation: 'shimmer-sweep 0.9s linear infinite',
               }}
             />
           </div>
         </div>
+
       </div>
     </div>
   );

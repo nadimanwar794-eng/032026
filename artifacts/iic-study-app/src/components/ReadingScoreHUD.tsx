@@ -86,9 +86,17 @@ export const ReadingScoreHUD: React.FC<Props> = ({
   const isVideo    = state.mode === 'video';
   const isAudio    = state.mode === 'audio';
   const isPdf      = state.mode === 'pdf';
-  const modeIcon   = isVideo ? '🎬' : isAudio ? '🎧' : isPdf ? '📄' : isReading ? '📖' : '✍️';
-  const rewardBase = isVideo ? 8 : isAudio ? 6 : isPdf ? 5 : isReading ? 5 : 10;
-  const intervalLabel = isVideo || isAudio || isPdf ? '30s' : isReading ? '30s' : '1min';
+  const isQa       = state.mode === 'qa';
+  const modeIcon   = isVideo ? '🎬' : isAudio ? '🎧' : isPdf ? '📄' : isQa ? '💬' : isReading ? '📖' : '✍️';
+  // Only Video still earns credits (60s ticker); all others earn pts now
+  const isCreditMode = isVideo;
+  const rewardLabel = isVideo ? '+5 pts / 30s · +10cr / 1min'
+                    : isPdf   ? '+5 pts / 30s (≥2.5% scroll/30s)'
+                    : isQa    ? '+5 pts / 30s (≥5% scroll/30s)'
+                    : state.mode === 'writing' ? '+10 pts / 1min (≥5% scroll/1min)'
+                    : isAudio ? '+5 pts / 30s'
+                    : '+5 pts / 30s';
+  const intervalLabel = isVideo ? '1min' : '30s';
   const remaining  = Math.max(0, state.maxWindowSec - state.sessionElapsedSec);
   const remMin     = Math.floor(remaining / 60);
   const remSec     = fmt2(remaining % 60);
@@ -138,54 +146,54 @@ export const ReadingScoreHUD: React.FC<Props> = ({
           <div
             style={{
               ...popupBase,
-              background:  'rgba(10,10,20,0.93)',
-              border:      `1px solid ${levelColor}44`,
-              padding:     '12px 14px',
-              minWidth:    192,
+              background: 'linear-gradient(135deg, #eef2ff 0%, #f5f3ff 100%)',
+              borderTop: `2px solid ${levelColor}`,
+              border: `1.5px solid rgba(99,102,241,0.25)`,
+              borderTopWidth: 2,
+              borderTopColor: levelColor,
+              padding: '7px 12px',
+              minWidth: 270,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              boxShadow: '0 4px 20px rgba(99,102,241,0.15), inset 0 -1px 0 #c7d2fe',
             }}
           >
-            {/* Header */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
-              <span style={{ fontSize: 15 }}>{modeIcon}</span>
-              <span style={{ color: '#94a3b8', fontSize: 10, fontWeight: 700, letterSpacing: '0.05em' }}>
-                Score Session
+            <span style={{ fontSize: 14, flexShrink: 0 }}>{modeIcon}</span>
+            <span style={{ fontSize: 10, fontWeight: 900, color: levelColor, textTransform: 'uppercase', letterSpacing: '0.06em', flexShrink: 0, whiteSpace: 'nowrap' }}>
+              Score Session
+            </span>
+            <div style={{ width: 1, height: 14, background: '#e2e8f0', flexShrink: 0 }} />
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+              <span style={{ fontSize: 7, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1 }}>Score</span>
+              <span style={{ fontSize: 13, fontWeight: 900, color: levelColor, lineHeight: 1.2 }}>+{state.totalSessionScore}</span>
+            </div>
+            <div style={{ width: 1, height: 14, background: '#e2e8f0', flexShrink: 0 }} />
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+              <span style={{ fontSize: 7, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1 }}>Progress</span>
+              <span style={{ fontSize: 13, fontWeight: 900, color: '#16a34a', lineHeight: 1.2 }}>{progress}%</span>
+            </div>
+            <div style={{ width: 1, height: 14, background: '#e2e8f0', flexShrink: 0 }} />
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+              <span style={{ fontSize: 7, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1 }}>Next</span>
+              <span style={{ fontSize: 11, fontWeight: 900, color: state.isPermanentlyStopped || state.isPaused ? '#ef4444' : '#f59e0b', lineHeight: 1.2, whiteSpace: 'nowrap' }}>
+                {state.isPermanentlyStopped ? 'Scroll karo' : state.isPaused ? 'Paused' : (() => {
+                const pts = state.mode === 'writing' ? 10 : 5;
+                const interval = state.mode === 'writing' ? 60 : 30;
+                return `+${pts} in ${state.nextRewardInSec || interval}s`;
+              })()}
               </span>
-              {state.isPaused && (
-                <span style={{ marginLeft: 'auto', background: '#ef4444cc', color: '#fff', fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 99 }}>
-                  PAUSED
-                </span>
-              )}
             </div>
-
-            {/* Progress row */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, marginBottom: 5 }}>
-              <span style={{ color: '#94a3b8' }}>Progress</span>
-              <span style={{ color: '#fff', fontWeight: 700 }}>{progress}%</span>
-            </div>
-
-            {/* Progress bar */}
-            <div style={{ width: '100%', height: 3, background: '#1e2030', borderRadius: 99, overflow: 'hidden', marginBottom: 8 }}>
-              <div style={{ width: `${progress}%`, height: '100%', background: levelColor, borderRadius: 99, transition: 'width 0.5s ease' }} />
-            </div>
-
-            {/* Next reward + time left */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, alignItems: 'center' }}>
-              {!state.isPaused ? (
-                <span style={{ color: levelColor, fontWeight: 900 }}>
-                  +{rewardBase} in {state.nextRewardInSec}s
-                </span>
-              ) : (
-                <span style={{ color: '#f87171', fontWeight: 700 }}>Score paused</span>
-              )}
-              <span style={{ color: '#64748b', fontSize: 9 }}>{remMin}:{remSec} left</span>
-            </div>
-
-            {/* Level badge */}
-            {levelLabel && (
-              <div style={{ marginTop: 8, paddingTop: 7, borderTop: '1px solid #ffffff18' }}>
-                <span style={{ color: levelColor, fontSize: 9, fontWeight: 800 }}>{levelLabel}</span>
-              </div>
-            )}
+            <div style={{ flex: 1 }} />
+            <button
+              onClick={() => { clearTimer(); setPopup('none'); }}
+              style={{
+                background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)',
+                borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: '#94a3b8', fontSize: 11, fontWeight: 900, cursor: 'pointer', flexShrink: 0, padding: 0, pointerEvents: 'auto',
+              }}
+              aria-label="Dismiss"
+            >✕</button>
           </div>
         )}
 
@@ -194,28 +202,28 @@ export const ReadingScoreHUD: React.FC<Props> = ({
           <div
             style={{
               ...popupBase,
-              background: 'rgba(8,12,28,0.96)',
-              border: '1px solid #6366f155',
+              background: 'linear-gradient(135deg, #eff6ff 0%, #eef2ff 100%)',
+              border: '1.5px solid rgba(99,102,241,0.35)',
               padding: '12px 14px',
               minWidth: 200,
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 }}>
               <span style={{ fontSize: 16 }}>🛡️</span>
-              <span style={{ color: '#a5b4fc', fontSize: 11, fontWeight: 900, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+              <span style={{ color: '#4338ca', fontSize: 11, fontWeight: 900, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
                 Touch Protection
               </span>
             </div>
-            <div style={{ color: '#94a3b8', fontSize: 10, marginBottom: 8, lineHeight: 1.5 }}>
-              Ek topic par <span style={{ color: '#e2e8f0', fontWeight: 700 }}>10 sec</span> ruko<br />
-              aur <span style={{ color: '#86efac', fontWeight: 700 }}>+2 reward</span> pao
+            <div style={{ color: '#475569', fontSize: 10, marginBottom: 8, lineHeight: 1.5 }}>
+              Ek topic par <span style={{ color: '#1e293b', fontWeight: 700 }}>10 sec</span> ruko<br />
+              aur <span style={{ color: '#16a34a', fontWeight: 700 }}>+2 reward</span> pao
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <div
                 style={{
                   flex: 1,
                   height: 4,
-                  background: '#1e2030',
+                  background: '#e2e8f0',
                   borderRadius: 99,
                   overflow: 'hidden',
                 }}
@@ -230,7 +238,7 @@ export const ReadingScoreHUD: React.FC<Props> = ({
                   }}
                 />
               </div>
-              <span style={{ color: '#818cf8', fontWeight: 900, fontSize: 12, minWidth: 24, textAlign: 'right' }}>
+              <span style={{ color: '#6366f1', fontWeight: 900, fontSize: 12, minWidth: 24, textAlign: 'right' }}>
                 {fmt2(state.touchProtectionCooldownSec)}s
               </span>
             </div>
@@ -242,21 +250,31 @@ export const ReadingScoreHUD: React.FC<Props> = ({
           <div
             style={{
               ...popupBase,
-              background:  state.isPaused ? 'rgba(69,10,10,0.95)' : 'rgba(67,20,7,0.95)',
-              border:      `1px solid ${state.isPaused ? '#ef444455' : '#f9731655'}`,
+              background:  state.isPermanentlyStopped ? 'linear-gradient(135deg,#fff1f2,#ffe4e6)' : state.isPaused ? 'linear-gradient(135deg,#fff1f2,#ffe4e6)' : 'linear-gradient(135deg,#fff7ed,#ffedd5)',
+              border:      `1.5px solid ${state.isPermanentlyStopped ? '#fca5a5' : state.isPaused ? '#fca5a5' : '#fdba74'}`,
               padding:     '10px 13px',
               minWidth:    182,
             }}
           >
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-              <span style={{ fontSize: 16, lineHeight: 1.3 }}>{state.isPaused ? '⏸️' : '⚠️'}</span>
+              <span style={{ fontSize: 16, lineHeight: 1.3 }}>
+                {state.isPermanentlyStopped ? '🛑' : state.isPaused ? '⏸️' : '⚠️'}
+              </span>
               <div>
-                <div style={{ color: '#fff', fontSize: 11, fontWeight: 900 }}>
-                  {state.isPaused ? 'Score Paused' : 'Progress Required'}
+                <div style={{ color: '#7f1d1d', fontSize: 11, fontWeight: 900 }}>
+                  {state.isPermanentlyStopped
+                    ? 'Credits Ruk Gaye'
+                    : state.isPaused
+                    ? 'Score Paused'
+                    : 'Scroll Kam Hai'}
                 </div>
-                <div style={{ color: '#cbd5e1', fontSize: 9, marginTop: 3 }}>
-                  {state.isPaused
+                <div style={{ color: '#92400e', fontSize: 9, marginTop: 3 }}>
+                  {state.isPermanentlyStopped
+                    ? 'Scroll karo — credits resume ho jayenge'
+                    : state.isPaused
                     ? 'Padhna jaari rakho, resume ho jayega'
+                    : isCreditMode
+                    ? `Thoda aur scroll karo (${state.scrollFailStreak}/2 fail)`
                     : '10% reading progress chahiye'}
                 </div>
               </div>

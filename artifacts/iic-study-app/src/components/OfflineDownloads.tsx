@@ -4,6 +4,7 @@ import { getOfflineItems, getOfflineItemData, removeOfflineItem, OfflineItem } f
 import { MarksheetCard } from './MarksheetCard';
 import { User, SystemSettings } from '../types';
 import { speakText, stopSpeech } from '../utils/textToSpeech';
+import { renderMathInHtml } from '../utils/mathUtils';
 
 interface Props {
   onBack: () => void;
@@ -156,7 +157,7 @@ export const OfflineDownloads: React.FC<Props> = ({ onBack, hideHeader = false, 
             </div>
           ) : item.type === 'NOTE' && (data.html || data.chunkNotes || data.content) ? (
             data.html ? (
-              <div className="prose prose-slate max-w-none" dangerouslySetInnerHTML={{ __html: data.html }} />
+              <div className="prose prose-slate max-w-none" dangerouslySetInnerHTML={{ __html: renderMathInHtml(data.html) }} />
             ) : (
               <div className="whitespace-pre-wrap text-sm text-slate-700 leading-relaxed font-medium">
                 {data.chunkNotes || data.content || ''}
@@ -173,7 +174,7 @@ export const OfflineDownloads: React.FC<Props> = ({ onBack, hideHeader = false, 
                     {theory && (
                       <div className="mb-8 p-6 bg-slate-50 rounded-2xl border border-slate-200">
                         <h3 className="text-lg font-black text-slate-800 mb-4 border-b border-slate-200 pb-2">Chapter Theory</h3>
-                        <div className="prose prose-slate max-w-none text-sm" dangerouslySetInnerHTML={{ __html: theory.replace(/\n/g, '<br/>') }} />
+                        <div className="prose prose-slate max-w-none text-sm" dangerouslySetInnerHTML={{ __html: renderMathInHtml(theory.replace(/\n/g, '<br/>')) }} />
                       </div>
                     )}
                     {topicNotes && topicNotes.length > 0 && (
@@ -182,7 +183,7 @@ export const OfflineDownloads: React.FC<Props> = ({ onBack, hideHeader = false, 
                         {topicNotes.map((note: any, idx: number) => (
                           <div key={idx} className="p-6 bg-slate-50 rounded-2xl border border-slate-200">
                             <h4 className="font-bold text-slate-700 mb-2">{note.title || note.topic}</h4>
-                            <div className="prose prose-slate max-w-none text-sm" dangerouslySetInnerHTML={{ __html: note.content }} />
+                            <div className="prose prose-slate max-w-none text-sm" dangerouslySetInnerHTML={{ __html: renderMathInHtml(note.content) }} />
                           </div>
                         ))}
                       </div>
@@ -190,18 +191,18 @@ export const OfflineDownloads: React.FC<Props> = ({ onBack, hideHeader = false, 
                     {questions.length > 0 && <h3 className="text-lg font-black text-slate-800 mb-4 border-b border-slate-200 pb-2 mt-8">Practice Questions</h3>}
                     {questions.map((q: any, idx: number) => (
                       <div key={idx} className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                        <p className="font-bold text-slate-800 mb-3">{idx + 1}. <span dangerouslySetInnerHTML={{ __html: q.question }} /></p>
+                        <p className="font-bold text-slate-800 mb-3">{idx + 1}. <span dangerouslySetInnerHTML={{ __html: renderMathInHtml(q.question) }} /></p>
                         <div className="space-y-2">
                           {q.options?.map((opt: string, oIdx: number) => (
                             <div key={oIdx} className={`p-3 rounded-lg border flex items-center ${oIdx === q.correctAnswer ? 'bg-green-50 border-green-200 text-green-800 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
                               {oIdx === q.correctAnswer && <CheckCircle2 size={16} className="mr-2 text-green-600 flex-shrink-0" />}
-                              <span dangerouslySetInnerHTML={{ __html: opt }} />
+                              <span dangerouslySetInnerHTML={{ __html: renderMathInHtml(opt) }} />
                             </div>
                           ))}
                         </div>
                         {q.explanation && (
                           <div className="mt-4 p-3 bg-blue-50 text-blue-800 rounded-lg text-sm border border-blue-100">
-                            <strong>Explanation:</strong> <span dangerouslySetInnerHTML={{ __html: q.explanation }} />
+                            <strong>Explanation:</strong> <span dangerouslySetInnerHTML={{ __html: renderMathInHtml(q.explanation) }} />
                           </div>
                         )}
                       </div>
@@ -226,7 +227,7 @@ export const OfflineDownloads: React.FC<Props> = ({ onBack, hideHeader = false, 
                   return (
                     <div key={idx} className={`p-4 rounded-xl border ${isCorrect ? 'border-green-200 bg-green-50' : isSkipped ? 'border-slate-200 bg-slate-50' : 'border-red-200 bg-red-50'}`}>
                       <div className="flex justify-between items-start mb-2 gap-4">
-                        <p className="font-bold text-slate-800 flex-1">{idx + 1}. <span dangerouslySetInnerHTML={{ __html: q.question }} /></p>
+                        <p className="font-bold text-slate-800 flex-1">{idx + 1}. <span dangerouslySetInnerHTML={{ __html: renderMathInHtml(q.question) }} /></p>
                         <span className={`text-xs font-black px-2 py-1 rounded-full whitespace-nowrap ${isCorrect ? 'bg-green-100 text-green-700' : isSkipped ? 'bg-slate-200 text-slate-700' : 'bg-red-100 text-red-700'}`}>
                           {isCorrect ? 'Correct' : isSkipped ? 'Skipped' : 'Wrong'}
                         </span>
@@ -241,7 +242,7 @@ export const OfflineDownloads: React.FC<Props> = ({ onBack, hideHeader = false, 
                           return (
                             <div key={oIdx} className={`p-2 rounded-lg border text-sm flex items-center ${bgClass}`}>
                               {isActuallyCorrect && <CheckCircle2 size={14} className="mr-2 flex-shrink-0" />}
-                              <span dangerouslySetInnerHTML={{ __html: opt }} />
+                              <span dangerouslySetInnerHTML={{ __html: renderMathInHtml(opt) }} />
                             </div>
                           );
                         })}

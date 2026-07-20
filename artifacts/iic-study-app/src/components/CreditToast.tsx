@@ -1,22 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { onCreditNotify, CreditNotifyPayload } from '../utils/creditNotify';
 
-/**
- * CreditToast — premium white toast cards, stacked with a gap, for
- * coin/points/reward events.
- *
- * Rules (per user request):
- *  • Slim floating card only — never a full-screen blurred modal.
- *  • Multiple notifications firing close together STACK as separate rows
- *    with a visible gap between them (row 1 on top, row 2 below it, etc.)
- *    instead of replacing each other.
- *  • Same look for every notification type: white card, theme-colored
- *    border (matches the app's current theme color) — no per-type colors.
- *  • Every row auto-dismisses on its own after 2 seconds, shown via a
- *    shimmering progress bar along the bottom edge of the card.
- */
 const TOAST_DURATION = 2000;
-const THEME_COLOR_VAR = 'var(--app-bar-color, var(--primary, #3b82f6))';
 
 interface ToastEntry {
   id: number;
@@ -25,48 +10,23 @@ interface ToastEntry {
 
 let toastIdSeq = 0;
 
-const rowContent = (payload: CreditNotifyPayload): { icon: string; text: React.ReactNode } => {
+const pillContent = (payload: CreditNotifyPayload): { text: string; isPositive: boolean } => {
   switch (payload.type) {
     case 'EARN':
-      return {
-        icon: '🪙',
-        text: (
-          <>
-            +{payload.amount} Coins Mile!
-            {payload.source && (
-              <span className="font-normal opacity-70">
-                {' '}· {payload.source === 'reading' ? 'Reading se' : payload.source === 'writing' ? 'Writing se' : 'MCQ se'}
-              </span>
-            )}
-            {payload.remaining !== undefined && (
-              <span className="font-normal opacity-70"> · Balance: {payload.remaining} coins</span>
-            )}
-          </>
-        ),
-      };
+      return { text: `+${payload.amount}🪙`, isPositive: true };
     case 'DEDUCTION':
-      return {
-        icon: '🪙',
-        text: (
-          <>
-            -{payload.amount} Credits Kate
-            {payload.remaining !== undefined && (
-              <span className="font-normal opacity-70"> · Balance: {payload.remaining} CR</span>
-            )}
-          </>
-        ),
-      };
+      return { text: `-${payload.amount}🪙`, isPositive: false };
     case 'POINTS':
-      return { icon: '⭐', text: <>{payload.message || `+${payload.amount} Points Mile!`}</> };
-    case 'FREE_LIMIT':
-      return { icon: '⚠️', text: <>{payload.message || 'Free limit khatam'}</> };
+      return { text: payload.message || `+${payload.amount}⭐`, isPositive: true };
     case 'REWARD':
-      return { icon: '🎁', text: <>{payload.message || 'Naya Reward mila!'}</> };
+      return { text: payload.message || '🎁 Reward!', isPositive: true };
+    case 'FREE_LIMIT':
+      return { text: payload.message || '⚠️ Limit', isPositive: false };
     case 'MAIL':
-      return { icon: '📩', text: <>{payload.message || 'Naya Message aaya!'}</> };
+      return { text: '📩 Message', isPositive: true };
     case 'INFO':
     default:
-      return { icon: 'ℹ️', text: <>{payload.message || ''}</> };
+      return { text: payload.message || '', isPositive: true };
   }
 };
 
@@ -77,10 +37,7 @@ export const CreditToast: React.FC = () => {
   const dismiss = useCallback((id: number) => {
     setToasts(prev => prev.filter(t => t.id !== id));
     const timer = timersRef.current.get(id);
-    if (timer) {
-      clearTimeout(timer);
-      timersRef.current.delete(id);
-    }
+    if (timer) { clearTimeout(timer); timersRef.current.delete(id); }
   }, []);
 
   useEffect(() => {
@@ -95,7 +52,7 @@ export const CreditToast: React.FC = () => {
     });
     return () => {
       unsub();
-      timersRef.current.forEach(timer => clearTimeout(timer));
+      timersRef.current.forEach(t => clearTimeout(t));
       timersRef.current.clear();
     };
   }, []);
@@ -103,35 +60,28 @@ export const CreditToast: React.FC = () => {
   if (toasts.length === 0) return null;
 
   return (
-    <div className="fixed top-0 left-0 right-0 z-[9999] flex flex-col items-stretch gap-2 pt-2 pointer-events-none">
+    <div
+      className="fixed z-[99999] flex flex-col items-end gap-1.5 pointer-events-none"
+      style={{ top: 'calc(env(safe-area-inset-top, 0px) + 12px)', right: 12 }}
+    >
       {toasts.map(({ id, payload }) => {
-        const { icon, text } = rowContent(payload);
+        const { text, isPositive } = pillContent(payload);
+        if (!text) return null;
         return (
           <div
             key={id}
-            className="mx-3 rounded-2xl bg-white shadow-lg overflow-hidden pointer-events-auto cursor-pointer animate-in slide-in-from-top-2 fade-in duration-300"
-            style={{ border: `1.5px solid ${THEME_COLOR_VAR}` }}
+            className="pointer-events-auto cursor-pointer animate-in slide-in-from-right-4 fade-in duration-200"
             onClick={() => dismiss(id)}
+            style={{
+              color: isPositive ? '#10b981' : '#f97316',
+              fontWeight: 900,
+              fontSize: 15,
+              letterSpacing: '-0.01em',
+              textShadow: '0 1px 4px rgba(0,0,0,0.45)',
+              userSelect: 'none',
+            }}
           >
-            <div className="flex items-center gap-2.5 px-3.5 py-2.5">
-              <span className="text-base shrink-0">{icon}</span>
-              <p className="text-xs font-bold leading-tight text-slate-800 flex-1">{text}</p>
-            </div>
-            <div className="h-[3px] w-full bg-slate-100 relative overflow-hidden">
-              <div
-                className="h-full relative overflow-hidden"
-                style={{ background: THEME_COLOR_VAR, animation: `credit-toast-bar ${TOAST_DURATION}ms linear forwards` }}
-              >
-                <span
-                  className="absolute inset-0"
-                  style={{
-                    background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.75) 50%, transparent 100%)',
-                    backgroundSize: '200% 100%',
-                    animation: 'shimmer-sweep 0.9s linear infinite',
-                  }}
-                />
-              </div>
-            </div>
+            {text}
           </div>
         );
       })}

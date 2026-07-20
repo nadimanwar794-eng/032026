@@ -187,9 +187,9 @@ export const StreakLoginPopup: React.FC<Props> = ({ newStreak, prevStreak, isNew
                 ? 'linear-gradient(90deg, #dc2626, #b91c1c)'
                 : isNewRecord
                   ? 'linear-gradient(90deg, #d97706, #b45309)'
-                  : 'linear-gradient(90deg, #1d4ed8, #1e40af)',
+                  : 'linear-gradient(90deg, var(--nst-btn-start, #4f46e5), var(--nst-btn-end, #7c3aed))',
               color: 'white',
-              boxShadow: isDecrement ? '0 4px 20px rgba(239,68,68,0.3)' : isNewRecord ? '0 4px 20px rgba(251,191,36,0.3)' : '0 4px 20px rgba(29,78,216,0.3)',
+              boxShadow: isDecrement ? '0 4px 20px rgba(239,68,68,0.3)' : isNewRecord ? '0 4px 20px rgba(251,191,36,0.3)' : '0 4px 20px rgba(99,102,241,0.3)',
             }}
           >
             {btnLabel}

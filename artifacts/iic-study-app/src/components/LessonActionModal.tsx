@@ -19,8 +19,11 @@ export const LessonActionModal: React.FC<Props> = ({ chapter, onClose, onSelect,
                 className="bg-white w-full max-w-xs rounded-[32px] overflow-hidden shadow-2xl animate-in slide-in-from-bottom-10 duration-300 relative border border-white/20"
                 onClick={(e) => e.stopPropagation()}
             >
-                {/* Header Branding */}
-                <div className="bg-gradient-to-br from-indigo-600 to-violet-600 p-6 pb-8 text-center relative">
+                {/* Header Branding — theme gradient */}
+                <div
+                    className="p-6 pb-8 text-center relative"
+                    style={{ background: 'linear-gradient(135deg, var(--nst-btn-start, #4f46e5) 0%, var(--nst-btn-end, #7c3aed) 100%)' }}
+                >
                     <button
                         onClick={onClose}
                         className="absolute top-4 right-4 p-2 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors backdrop-blur-sm"
@@ -37,7 +40,7 @@ export const LessonActionModal: React.FC<Props> = ({ chapter, onClose, onSelect,
                         />
                     </div>
                     <h2 className="text-white font-black text-lg tracking-tight leading-tight">{appName || 'IIC'}</h2>
-                    <p className="text-indigo-100 text-[10px] uppercase font-bold tracking-widest mt-1">Premium Learning</p>
+                    <p className="text-white/70 text-[10px] uppercase font-bold tracking-widest mt-1">Premium Learning</p>
                 </div>
 
                 {/* Content Body */}
@@ -51,12 +54,18 @@ export const LessonActionModal: React.FC<Props> = ({ chapter, onClose, onSelect,
                     <div className="grid grid-cols-2 gap-2 mb-2">
                         <button
                             onClick={() => onSelect('PDF' as any)}
-                            className="group relative flex flex-col items-center justify-center gap-1.5 p-3 bg-white border border-slate-100 rounded-2xl shadow-sm hover:shadow-md hover:border-blue-200 transition-all active:scale-95"
+                            className="group relative flex flex-col items-center justify-center gap-1.5 p-3 bg-white border border-slate-100 rounded-2xl shadow-sm hover:shadow-md transition-all active:scale-95"
+                            style={{ ['--hover-border' as any]: 'var(--nst-color-brand-20)' }}
+                            onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--nst-color-brand-20)')}
+                            onMouseLeave={e => (e.currentTarget.style.borderColor = '')}
                         >
-                            <div className="w-9 h-9 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                            <div
+                                className="w-9 h-9 rounded-full flex items-center justify-center transition-colors"
+                                style={{ background: 'var(--nst-color-brand-10)', color: 'var(--nst-color-brand)' }}
+                            >
                                 <FileText size={16} />
                             </div>
-                            <span className="font-bold text-slate-600 text-[11px] group-hover:text-blue-600">Reading Notes</span>
+                            <span className="font-bold text-slate-600 text-[11px]" style={{ color: 'var(--nst-color-brand)' }}>Reading Notes</span>
                         </button>
 
                         <button
@@ -90,12 +99,17 @@ export const LessonActionModal: React.FC<Props> = ({ chapter, onClose, onSelect,
                         {!hideMcq && (
                             <button
                                 onClick={() => onSelect('MCQ' as any)}
-                                className="group relative flex flex-col items-center justify-center gap-1.5 p-2.5 bg-white border border-slate-100 rounded-2xl shadow-sm hover:shadow-md hover:border-purple-200 transition-all active:scale-95"
+                                className="group relative flex flex-col items-center justify-center gap-1.5 p-2.5 bg-white border border-slate-100 rounded-2xl shadow-sm hover:shadow-md transition-all active:scale-95"
+                                onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--nst-color-brand-20)')}
+                                onMouseLeave={e => (e.currentTarget.style.borderColor = '')}
                             >
-                                <div className="w-9 h-9 rounded-full bg-purple-50 text-purple-600 flex items-center justify-center group-hover:bg-purple-600 group-hover:text-white transition-colors">
+                                <div
+                                    className="w-9 h-9 rounded-full flex items-center justify-center transition-colors"
+                                    style={{ background: 'var(--nst-color-brand-10)', color: 'var(--nst-color-brand)' }}
+                                >
                                     <CheckSquare size={16} />
                                 </div>
-                                <span className="font-bold text-slate-600 text-[11px] group-hover:text-purple-600">MCQ</span>
+                                <span className="font-bold text-slate-600 text-[11px]">MCQ</span>
                             </button>
                         )}
 

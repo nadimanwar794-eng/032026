@@ -13,6 +13,7 @@ import { fireCreditNotify } from '../utils/creditNotify';
 import { useAppTheme } from '../utils/themeContext';
 import { tryEarnScore } from '../utils/scoreSystem';
 import { rotateScreen } from '../utils/displayPrefs';
+import { fireSessionComplete } from '../utils/sessionNotify';
 
 interface Props {
   questions: MCQItem[];
@@ -29,6 +30,8 @@ interface Props {
   sourceKey?: string;
   /** If true, component opens directly in Projector Mode (TV button shortcut) */
   startInProjectorMode?: boolean;
+  /** Lesson tab bar rendered at the very top (Reading Mode | Writing Mode | MCQ Practice | Projector) */
+  tabBar?: React.ReactNode;
 }
 
 const CREDIT_COST = 5;
@@ -56,7 +59,7 @@ const addTodayCount = (userId: string, n: number) => {
 };
 
 export const FlashcardMcqView: React.FC<Props> = ({
-  questions, title, subtitle, subject, onBack, user, settings, onUpdateUser, sourceMeta, sourceKey, startInProjectorMode
+  questions, title, subtitle, subject, onBack, user, settings, onUpdateUser, sourceMeta, sourceKey, startInProjectorMode, tabBar
 }) => {
   const isMountedRef = useRef(true);
   const [pickedIndices, setPickedIndices] = useState<number[]>([]);
@@ -92,6 +95,14 @@ export const FlashcardMcqView: React.FC<Props> = ({
   const sessionStartRef = useRef(Date.now());
   const viewedIdxRef = useRef<Set<number>>(new Set([0]));
   const sessionCommittedRef = useRef(false); // prevents double-counting on exit
+  // Track which card positions have already given +1 pts this session (Answer Dekho)
+  const revealedPtsRef = useRef<Set<number>>(new Set());
+  // Total pts earned via Answer Dekho reveals this session (for session-complete event)
+  const sessionRevealPtsRef = useRef(0);
+  // Live session score shown in top bar (updates on each reveal)
+  const [sessionScore, setSessionScore] = useState(0);
+  // Score chip tooltip
+  const [scoreTooltip, setScoreTooltip] = useState(false);
 
   // ── MCQ Score Popup ────────────────────────────────────────────────────────
   const [mcqScorePopup, setMcqScorePopup] = useState<number | null>(null);
@@ -103,6 +114,44 @@ export const FlashcardMcqView: React.FC<Props> = ({
     setMcqScorePopup(pts);
     setMcqScoreVisible(true);
     mcqPopupTimerRef.current = setTimeout(() => setMcqScoreVisible(false), 1800);
+  };
+
+  /** Called when user taps "Answer Dekho". Gives +1 pts once per card per session. */
+  const handleRevealAnswer = () => {
+    setFlipped(true);
+    // Award +1 pts only the first time this card is revealed this session
+    if (!revealedPtsRef.current.has(pos)) {
+      revealedPtsRef.current.add(pos);
+      // Always update visual chip so everyone (including admin/test) sees it increment
+      setSessionScore(prev => prev + 1);
+      if (user?.id && !isAdmin && onUpdateUser) {
+        const pts = tryEarnScore(user.id, 1, userTier, userTier !== 'FREE', 0, 'FLASHCARD_REVEAL');
+        if (pts > 0) {
+          sessionRevealPtsRef.current += pts;
+          showMcqScore(pts);
+          const updated = { ...user, totalScore: (user.totalScore || 0) + pts };
+          onUpdateUser(updated);
+          saveUserToLive(updated);
+        }
+      }
+    }
+  };
+
+  /** Back handler — fires flashcard session-complete then calls onBack. */
+  const handleBack = () => {
+    if (sessionRevealPtsRef.current > 0 && user?.id) {
+      const secs = Math.round((Date.now() - sessionStartRef.current) / 1000);
+      fireSessionComplete({
+        type: 'LESSON',
+        subject: subject || '',
+        chapter: title || '',
+        timeSecs: secs,
+        activityType: 'Flashcard',
+        sessionScore: sessionRevealPtsRef.current,
+      });
+      sessionRevealPtsRef.current = 0;
+    }
+    onBack();
   };
 
   const isAdmin = user?.role === 'ADMIN';
@@ -137,6 +186,20 @@ export const FlashcardMcqView: React.FC<Props> = ({
     sessionStartRef.current = Date.now();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [questions]);
+
+  // When parent switches startInProjectorMode (e.g. via overlay tab bar), sync projector mode
+  useEffect(() => {
+    if (startInProjectorMode) {
+      setIsProjectorMode(true);
+      setProjectorQIndex(0);
+      setProjectorReveal(false);
+      setProjectorFocused(false);
+      setProjectorSelected(null);
+    } else if (startInProjectorMode === false) {
+      setIsProjectorMode(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startInProjectorMode]);
 
   useEffect(() => {
     const handleVisibility = () => {
@@ -304,6 +367,7 @@ export const FlashcardMcqView: React.FC<Props> = ({
     setHardReviewMode(false);
     setHardReviewPos(0);
     sessionStartRef.current = Date.now();
+    revealedPtsRef.current = new Set(); // reset per-session reveal tracking
     initSession();
   };
 
@@ -328,8 +392,9 @@ export const FlashcardMcqView: React.FC<Props> = ({
     const canPay = !!(user?.subscriptionLevel && (user.credits ?? 0) >= CREDIT_COST);
     return (
       <div className="fixed inset-0 z-[200] flex flex-col h-[100dvh]" style={tierBgStyle}>
+        {tabBar}
         <div className="px-4 py-3 flex items-center gap-3">
-          <button onClick={onBack} className="bg-white/10 text-white p-2 rounded-full active:scale-95">
+          <button onClick={handleBack} className="bg-white/10 text-white p-2 rounded-full active:scale-95">
             <ArrowLeft size={18} />
           </button>
           <h2 className="text-base font-black text-white">Flashcards</h2>
@@ -361,10 +426,12 @@ export const FlashcardMcqView: React.FC<Props> = ({
   }
 
   if (!currentQ) {
+    // If questions exist but pickedIndices is still empty, initSession is running — return null to avoid flash
+    if (questions.length > 0) return null;
     return (
       <div className="fixed inset-0 z-[200] flex flex-col h-[100dvh]" style={tierBgStyle}>
+        {tabBar}
         <div className="px-4 py-3 flex items-center gap-3">
-          <button onClick={onBack} className="bg-white/10 text-white p-2 rounded-full"><ArrowLeft size={18}/></button>
           <h2 className="text-base font-black text-white">Flashcards</h2>
         </div>
         <div className="flex-1 flex flex-col items-center justify-center text-center px-6">
@@ -380,6 +447,7 @@ export const FlashcardMcqView: React.FC<Props> = ({
   return (
     <>
     <div className="fixed inset-0 z-[200] flex flex-col h-[100dvh]" style={tierBgStyle}>
+      {tabBar}
       {/* MCQ Score Popup */}
       {mcqScorePopup !== null && (
         <div style={{
@@ -397,10 +465,12 @@ export const FlashcardMcqView: React.FC<Props> = ({
         </div>
       )}
       {/* Top Bar */}
-      <div className="shrink-0 px-4 py-3 flex items-center gap-3">
+      <div className="shrink-0 px-3 py-2.5 flex items-center gap-2.5 border-b border-white/10">
+        {/* Back button */}
         <button
-          onClick={onBack}
-          className="bg-white/10 hover:bg-white/20 text-white p-2 rounded-full active:scale-95 transition"
+          onClick={handleBack}
+          className="shrink-0 p-2 bg-white/10 hover:bg-white/20 rounded-xl text-white active:scale-95 transition"
+          title="Wapas jao"
         >
           <ArrowLeft size={18} />
         </button>
@@ -414,8 +484,8 @@ export const FlashcardMcqView: React.FC<Props> = ({
             </>
           ) : (
             <>
-              <p className="text-[10px] font-black text-indigo-300 uppercase tracking-widest truncate">
-                Flashcards · {total} cards
+              <p className="text-[10px] font-black text-amber-300 uppercase tracking-widest truncate">
+                🃏 Flashcards · {total} cards
                 {hardQueueRef.current.length > 0 && (
                   <span className="ml-1 text-red-300">· {hardQueueRef.current.length} Hard</span>
                 )}
@@ -425,6 +495,14 @@ export const FlashcardMcqView: React.FC<Props> = ({
             </>
           )}
         </div>
+        {/* Live session score chip — always visible */}
+        <div className="relative shrink-0" style={{ zIndex: 50 }}>
+          <span
+            onClick={() => { setScoreTooltip(true); setTimeout(() => setScoreTooltip(false), 2500); }}
+            style={{ fontSize: '10px', fontWeight: 900, color: '#4ade80', background: 'rgba(34,197,94,0.18)', border: '1px solid rgba(34,197,94,0.35)', borderRadius: 99, padding: '2px 8px', cursor: 'pointer', display: 'block' }}>
+            📖 {sessionScore}
+          </span>
+          </div>
         <div className="bg-white/10 px-2.5 py-1 rounded-full shrink-0">
           <span className="text-[10px] font-black text-white/70">
             {getTodayCount(userId)}/{isAdmin ? '∞' : dailyLimit}
@@ -530,6 +608,31 @@ export const FlashcardMcqView: React.FC<Props> = ({
         </div>
       </div>
 
+      {/* Flashcard Score HUD — below progress bar */}
+      {scoreTooltip && (
+        <div style={{ margin: '0 16px 10px', background: 'linear-gradient(135deg,#eef2ff,#f5f3ff)', border: '1.5px solid rgba(99,102,241,0.2)', borderTop: '2px solid #16a34a', borderRadius: 12, padding: '7px 12px', whiteSpace: 'nowrap', zIndex: 50, boxShadow: '0 4px 20px rgba(22,163,74,0.15), inset 0 -1px 0 #c7d2fe', animation: 'rshud-slide 0.18s ease', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 14, flexShrink: 0 }}>🃏</span>
+          <span style={{ fontSize: 10, fontWeight: 900, color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.06em', flexShrink: 0 }}>Flashcard Score</span>
+          <div style={{ width: 1, height: 14, background: '#e2e8f0', flexShrink: 0 }} />
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+            <span style={{ fontSize: 7, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1 }}>Score</span>
+            <span style={{ fontSize: 13, fontWeight: 900, color: '#16a34a', lineHeight: 1.2 }}>+{sessionScore}</span>
+          </div>
+          <div style={{ width: 1, height: 14, background: '#e2e8f0', flexShrink: 0 }} />
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+            <span style={{ fontSize: 7, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1 }}>Progress</span>
+            <span style={{ fontSize: 13, fontWeight: 900, color: '#16a34a', lineHeight: 1.2 }}>--</span>
+          </div>
+          <div style={{ width: 1, height: 14, background: '#e2e8f0', flexShrink: 0 }} />
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+            <span style={{ fontSize: 7, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1 }}>Next</span>
+            <span style={{ fontSize: 11, fontWeight: 900, color: '#f59e0b', lineHeight: 1.2 }}>Card reveal pe!</span>
+          </div>
+          <div style={{ flex: 1 }} />
+          <button onClick={() => setScoreTooltip(false)} style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: 11, fontWeight: 900, cursor: 'pointer', flexShrink: 0, padding: 0 }}>✕</button>
+        </div>
+      )}
+
       {/* Flip Card */}
       <div className="flex-1 px-4 flex flex-col justify-center gap-4 overflow-y-auto py-2">
         <div className="w-full max-w-md mx-auto" style={{ perspective: '1200px' }}>
@@ -578,7 +681,7 @@ export const FlashcardMcqView: React.FC<Props> = ({
 
               <button
                 type="button"
-                onClick={() => setFlipped(true)}
+                onClick={handleRevealAnswer}
                 className="mt-auto w-full py-3 rounded-2xl text-white font-black text-sm flex items-center justify-center gap-2 active:scale-95 transition shadow-md"
                 style={{ background: appTheme.btnGrad }}
               >
@@ -838,53 +941,52 @@ export const FlashcardMcqView: React.FC<Props> = ({
 
         return createPortal(
           <div style={overlayStyle}>
+            {tabBar}
             {/* Header — hidden in focus mode */}
             {!projectorFocused && (
-              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 16px', borderBottom:'3px solid #e2e8f0', background:'#1e293b', flexShrink:0 }}>
-                <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                  <Tv size={22} color="#fbbf24" />
-                  <span style={{ color:'#fbbf24', fontWeight:900, fontSize:15, letterSpacing:2 }}>PROJECTOR MODE</span>
-                </div>
-                <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                  <span style={{ color:'#94a3b8', fontWeight:700, fontSize:13 }}>{projectorQIndex + 1}/{total}</span>
-                  {/* Score pill */}
-                  {(projectorCorrect > 0 || projectorWrong > 0) && (
-                    <span style={{ background:'#0f172a', borderRadius:20, padding:'3px 8px', fontSize:12, fontWeight:800, display:'flex', alignItems:'center', gap:5 }}>
-                      <span style={{ color:'#4ade80' }}>✓{projectorCorrect}</span>
-                      <span style={{ color:'#94a3b8' }}>·</span>
-                      <span style={{ color:'#f87171' }}>✗{projectorWrong}</span>
-                    </span>
-                  )}
-                  {/* Focus Mode — icon only, ghost */}
-                  <button
-                    onClick={() => setProjectorFocused(true)}
-                    title="Focus Mode"
-                    style={{ background:'transparent', color:'#a3e635', border:'none', borderRadius:8, padding:'6px', cursor:'pointer', display:'flex', alignItems:'center' }}>
-                    <Maximize2 size={18} />
-                  </button>
-                  {/* Rotate button */}
-                  <button
-                    onClick={async () => {
-                      const result = await rotateScreen();
-                      if (result !== null) { setProjectorRotated(result === 'landscape'); }
-                      else { alert('📱 Phone ko physically rotate karein — landscape ke liye sideways, portrait ke liye seedha.'); }
-                    }}
-                    title={projectorRotated ? 'Portrait mode mein jao' : 'Landscape mode mein jao'}
-                    style={{ background: projectorRotated ? '#6366f1' : '#334155', color:'#fff', border:'none', borderRadius:8, padding:'6px 10px', fontSize:12, fontWeight:700, cursor:'pointer', display:'flex', alignItems:'center', gap:5 }}>
-                    <RotateCw size={14} />
-                    {projectorRotated ? 'Portrait' : 'Landscape'}
-                  </button>
-                  {/* Close — icon only */}
-                  <button onClick={async () => {
+              <div style={{ display:'flex', alignItems:'center', gap:8, padding:'10px 12px', borderBottom:'1px solid #f1f5f9', background:'#ffffff', flexShrink:0, boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
+                {/* Close */}
+                <button onClick={async () => {
                     setIsProjectorMode(false); setProjectorRotated(false); setProjectorFocused(false);
-                    // Portrait pe wapas jao jab projector band ho
                     try { await (screen as any).orientation?.lock?.('portrait'); } catch { /* ignore */ }
                   }}
-                    title="Band Karo"
-                    style={{ background:'#ef4444', color:'#fff', border:'none', borderRadius:8, padding:'6px 8px', fontSize:14, fontWeight:900, cursor:'pointer', display:'flex', alignItems:'center' }}>
-                    <X size={16} />
-                  </button>
+                  title="Band Karo"
+                  style={{ flexShrink:0, padding:'8px', background:'#f8fafc', border:'none', borderRadius:12, color:'#64748b', cursor:'pointer', display:'flex', alignItems:'center' }}>
+                  <X size={18} />
+                </button>
+                {/* Title block */}
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:13, fontWeight:900, color:'#1e293b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', lineHeight:1.2 }}>
+                    {sourceMeta?.lessonTitle || title || 'MCQ Practice'}
+                  </div>
+                  <div style={{ fontSize:10, fontWeight:700, color:'#d97706', textTransform:'uppercase', letterSpacing:'0.05em', lineHeight:1.2, display:'flex', alignItems:'center', gap:4 }}>
+                    <Tv size={10} /> PROJECTOR MODE
+                  </div>
                 </div>
+                {/* Q counter pill */}
+                <div style={{ flexShrink:0, display:'flex', alignItems:'center', gap:4, background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:12, padding:'6px 10px' }}>
+                  <span style={{ fontSize:11, fontWeight:900, color:'#1e293b' }}>{projectorQIndex + 1}</span>
+                  <span style={{ fontSize:10, color:'#94a3b8', fontWeight:700 }}>/ {total}</span>
+                </div>
+                {/* Focus Mode */}
+                <button
+                  onClick={() => setProjectorFocused(true)}
+                  title="Focus Mode"
+                  style={{ flexShrink:0, padding:'8px', background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:12, color:'#16a34a', cursor:'pointer', display:'flex', alignItems:'center' }}>
+                  <Maximize2 size={16} />
+                </button>
+                {/* Rotate button */}
+                <button
+                  onClick={async () => {
+                    const result = await rotateScreen();
+                    if (result !== null) { setProjectorRotated(result === 'landscape'); }
+                    else { alert('📱 Phone ko physically rotate karein — landscape ke liye sideways, portrait ke liye seedha.'); }
+                  }}
+                  title={projectorRotated ? 'Portrait mode' : 'Landscape mode'}
+                  style={{ flexShrink:0, padding:'7px 10px', background: projectorRotated ? '#ede9fe' : '#f8fafc', border: projectorRotated ? '1px solid #c4b5fd' : '1px solid #e2e8f0', borderRadius:12, color: projectorRotated ? '#7c3aed' : '#64748b', fontSize:11, fontWeight:900, cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}>
+                  <RotateCw size={13} />
+                  {projectorRotated ? 'Portrait' : 'Landscape'}
+                </button>
               </div>
             )}
             {/* Focus mode exit button — floating top-right */}

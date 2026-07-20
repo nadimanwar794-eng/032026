@@ -269,8 +269,8 @@ export const CustomPlayer: React.FC<CustomPlayerProps> = ({
                         }
                     }}
                     onTouchStart={e => e.stopPropagation()}
-                    onTouchEnd={e => { e.stopPropagation(); e.preventDefault(); if (!editMode) showTopBar(); }}
-                    onClick={e => { e.stopPropagation(); if (!editMode) showTopBar(); }}
+                    onTouchEnd={e => { e.stopPropagation(); e.preventDefault(); if (!editMode) { onBrandingClick ? onBrandingClick() : showTopBar(); } }}
+                    onClick={e => { e.stopPropagation(); if (!editMode) { onBrandingClick ? onBrandingClick() : showTopBar(); } }}
                     onContextMenu={e => e.preventDefault()}
                     style={{
                         position: 'absolute',

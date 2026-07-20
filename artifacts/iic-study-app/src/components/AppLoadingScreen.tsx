@@ -77,13 +77,7 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
     } catch { return 'IIC'; }
   });
 
-  const [developerName] = useState<string>(() => {
-    try {
-      const s = localStorage.getItem('nst_system_settings');
-      const o = s ? JSON.parse(s) : null;
-      return (o?.developerName ?? '').toString().trim() || 'Nadim Anwar';
-    } catch { return 'Nadim Anwar'; }
-  });
+  const developerName = 'Shivangi Singh';
 
   const [showFooter] = useState<boolean>(() => {
     try {

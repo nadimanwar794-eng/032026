@@ -103,6 +103,13 @@ export const RevisionHubScreen: React.FC<Props> = ({
     return unsub;
   }, []);
 
+  // Only show MCQs that have a topic name (lessonTitle) set — lessons without
+  // a title are considered incomplete/draft and should not appear in Revision Hub.
+  const hubLessons = useMemo(
+    () => allLessons.filter(l => l.lessonTitle && String(l.lessonTitle).trim() !== ''),
+    [allLessons],
+  );
+
   // Subjects are derived purely from lessons that actually exist in Firebase
   // for the selected class — no hardcoded subject list, so a subject only
   // ever shows up once real notes/MCQ content has been added for it.
@@ -110,7 +117,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
     if (!mcqSelectedClass) return [];
     const names = Array.from(
       new Set(
-        allLessons
+        hubLessons
           .filter(l => l.classLevel === mcqSelectedClass && l.subject)
           .map(l => l.subject as string),
       ),
@@ -118,17 +125,20 @@ export const RevisionHubScreen: React.FC<Props> = ({
     return names
       .sort((a, b) => a.localeCompare(b))
       .map(name => ({ id: name, name }));
-  }, [mcqSelectedClass, allLessons]);
+  }, [mcqSelectedClass, hubLessons]);
 
   // Lessons available for current class + subject
-  const subjectLessons = allLessons.filter(
+  const subjectLessons = hubLessons.filter(
     l => l.classLevel === mcqSelectedClass && l.subject === mcqSelectedSubject
   );
 
   // MCQs come from the selected lesson (new system) or fallback to legacy settings
-  const classMcqs: any[] = mcqSelectedLesson
+  // Exclude MCQs without a topic name — blank-topic MCQs would appear as
+  // "General" which should not show in Revision Hub.
+  const classMcqs: any[] = (mcqSelectedLesson
     ? (mcqSelectedLesson.mcqs || [])
-    : [];
+    : []
+  ).filter((q: any) => q.topic && String(q.topic).trim() !== '');
 
   const currentQ = sessionActive ? sessionMcqs[sessionQIndex] : null;
 
@@ -690,7 +700,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
 
               const ClassBtn = ({ c }: { c: string }) => {
                 const subjCount = new Set(
-                  allLessons.filter(l => l.classLevel === c && l.subject).map(l => l.subject as string),
+                  hubLessons.filter(l => l.classLevel === c && l.subject).map(l => l.subject as string),
                 ).size;
                 const isBoard = boardClasses.includes(c);
                 return (
@@ -769,7 +779,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
               Subject Choose Karein
             </p>
             {mcqSubjects.map((sub: any) => {
-              const lessonCount = allLessons.filter(l => l.classLevel === mcqSelectedClass && l.subject === sub.name).length;
+              const lessonCount = hubLessons.filter(l => l.classLevel === mcqSelectedClass && l.subject === sub.name).length;
               return (
                 <button
                   key={sub.id}
@@ -823,7 +833,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
                     <p className="font-bold text-slate-800 text-sm truncate">{lesson.lessonTitle}</p>
                     <div className="flex flex-wrap gap-1 mt-0.5">
                       <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: `${primary}18`, color: primary }}>
-                        {lesson.mcqCount} MCQs
+                        {(lesson.mcqs || []).filter((q: any) => q.topic && String(q.topic).trim() !== '').length} MCQs
                       </span>
                       {(lesson.topics || []).slice(0, 2).map((t: string) => (
                         <span key={t} className="text-[9px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full truncate max-w-[90px]">

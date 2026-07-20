@@ -2,34 +2,51 @@
  * Reading Score Engine — time-based active reading/writing rewards
  *
  * Reading Mode:
- *   • Every 30 sec of active reading  → +5 score
- *   • Max reward window by level (L1-L8: 5 min, L9: 5.5 min … L15: 10 min)
+ *   • Every 30 sec of active reading  → +5 pts
+ *   • Max reward window by level (L1-L8: 5 min … L15: 10 min)
  *   • Progress validation every 2 min: need ≥10% net forward progress
- *   • Anti-spam: only net forward topic progress counts
- *   • TTS topic highlight: each topic read via TTS → +1 score (NO cooldown — natural timing)
- *   • Manual topic tap: user must stay on topic for 10 sec → +2 score (Touch Protection)
+ *   • TTS topic highlight → +1 pts; Manual topic 10s → +2 pts
  *
  * Writing Mode:
- *   • Every 1 min of writing → +10 score
- *   • Need ≥5% net scroll progress per minute — if scroll < 5%, reward is skipped for that minute
+ *   • Every 60 sec → +10 pts (earns pts, not credits)
+ *   • Scroll check: need ≥5% net scroll per 60 sec (independent timer)
+ *   • After 2 consecutive failed scroll checks: scoring stops (isPermanentlyStopped)
+ *   • Resumes when user scrolls again
+ *
+ * Video Mode:
+ *   • Every 6 sec of active play → +1 pts
+ *   • Every 60 sec of active play → +10 credits
+ *   • No reward when paused/stopped (call setVideoPlaying(bool))
+ *
+ * PDF Mode:
+ *   • Every 30 sec → +5 pts (earns pts, not credits)
+ *   • Scroll check: need ≥2.5% net scroll per 30 sec (independent timer)
+ *   • Stop after 2 consecutive fails; resumes when user scrolls again
+ *
+ * Q&A Mode:
+ *   • Every 30 sec → +5 pts (earns pts, not credits)
+ *   • Scroll check: need ≥5% net scroll per 30 sec (independent timer)
+ *   • Stop after 2 consecutive fails; resumes when user scrolls again
+ *
+ * Audio Mode:
+ *   • Every 30 sec → +5 pts
  */
 
-import { tryEarnScore, logScoreActivity } from './scoreSystem';
+import { tryEarnScore } from './scoreSystem';
 
 /** Max reward window in seconds by level */
 export const getReadingWindowSeconds = (level: number): number => {
-  if (level <= 8) return 300;     // 5 min
-  if (level === 9)  return 330;   // 5.5 min
-  if (level === 10) return 360;   // 6 min
-  if (level === 11) return 390;   // 6.5 min
-  if (level === 12) return 420;   // 7 min
-  if (level === 13) return 450;   // 7.5 min
-  if (level === 14) return 480;   // 8 min
-  return 600;                     // L15 = 10 min
+  if (level <= 8) return 300;
+  if (level === 9)  return 330;
+  if (level === 10) return 360;
+  if (level === 11) return 390;
+  if (level === 12) return 420;
+  if (level === 13) return 450;
+  if (level === 14) return 480;
+  return 600;
 };
 
 export type WarningLevel = 0 | 1 | 2 | 3;
-// 0 = scoring active, 1 = warn (2 min no progress), 2 = about to pause (3 min), 3 = paused
 
 export interface ReadingScoreState {
   warningLevel: WarningLevel;
@@ -37,14 +54,17 @@ export interface ReadingScoreState {
   nextRewardInSec: number;
   sessionElapsedSec: number;
   maxWindowSec: number;
-  lastScoreEarned: number;        // pts earned in last tick (for popup)
+  lastScoreEarned: number;
   totalSessionScore: number;
-  progressPercent: number;        // net forward progress %
-  mode: 'reading' | 'writing' | 'video' | 'audio' | 'pdf';
-  isWindowClosed: boolean;        // max window reached
-  // Touch Protection (manual tap anti-abuse)
-  touchProtectionActive: boolean; // true while 10-sec countdown is running
-  touchProtectionCooldownSec: number; // seconds remaining in current countdown
+  progressPercent: number;
+  mode: 'reading' | 'writing' | 'video' | 'audio' | 'pdf' | 'qa';
+  isWindowClosed: boolean;
+  touchProtectionActive: boolean;
+  touchProtectionCooldownSec: number;
+  // Scroll-based stop state (writing, pdf, qa, video)
+  isPermanentlyStopped: boolean;  // stopped due to 2 consecutive scroll fails
+  scrollFailStreak: number;       // 0-2: how many consecutive fails
+  totalCreditsEarned: number;     // credits earned this session
 }
 
 export interface ReadingScoreConfig {
@@ -53,66 +73,98 @@ export interface ReadingScoreConfig {
   subscriptionLevel?: string;
   isPremium?: boolean;
   boostPercent?: number;
-  mode?: 'reading' | 'writing' | 'video' | 'audio' | 'pdf';
-  /** Context label shown in coin history: e.g. "Physics Ch 3" */
+  mode?: 'reading' | 'writing' | 'video' | 'audio' | 'pdf' | 'qa';
+  /** Context label shown in coin history */
   lessonLabel?: string;
-  /** Called whenever score is earned. Parent should update totalScore in Firebase. */
+  /** Called when pts are earned (updates totalScore). Reading mode only. */
   onScoreEarned?: (pts: number, activity: string) => void;
+  /** Called when credits are earned directly (does NOT affect pts/totalScore).
+   *  Used for Video (60s), PDF (60s), Writing (60s), Q&A (60s). */
+  onCreditsEarned?: (credits: number, activity: string) => void;
 }
 
-const READING_INTERVAL_SEC = 30;       // reward every 30s
-const WRITING_INTERVAL_SEC = 60;       // reward every 1 min (60s)
-const VIDEO_INTERVAL_SEC   = 30;       // reward every 30s (same as reading)
-const AUDIO_INTERVAL_SEC   = 30;       // reward every 30s (same as reading)
-const PDF_INTERVAL_SEC     = 30;       // reward every 30s (same as reading)
-const READING_REWARD_BASE = 5;         // +5 base per interval
-const WRITING_REWARD_BASE = 10;        // +10 base per 1 min
-const VIDEO_REWARD_BASE   = 8;         // +8 base per 60s watch
-const AUDIO_REWARD_BASE   = 6;         // +6 base per 60s listen
-const PDF_REWARD_BASE     = 5;         // +5 base per 60s read
-const TTS_HIGHLIGHT_REWARD = 1;        // +1 per TTS topic read
-const VALIDATION_INTERVAL_SEC = 120;   // check progress every 2 min
-const MIN_PROGRESS_PCT = 10;           // 10% net forward required per 2 min
-const WRITING_MIN_PROGRESS_PCT = 5;    // 5% net forward for write mode
+// ── Constants ────────────────────────────────────────────────────────────────
+const READING_INTERVAL_SEC        = 30;   // +5 pts every 30s
+const WRITING_INTERVAL_SEC        = 60;   // +10 pts every 60s
+const WRITING_SCROLL_CHECK_SEC    = 60;   // scroll check every 60s (independent)
+const VIDEO_PTS_INTERVAL_SEC      = 30;   // +5 pts every 30s of playing
+const VIDEO_CR_INTERVAL_SEC       = 60;   // +10 credits every 60s of playing
+const AUDIO_INTERVAL_SEC          = 30;   // +5 pts every 30s
+const PDF_INTERVAL_SEC            = 30;   // +5 pts every 30s
+const PDF_SCROLL_CHECK_SEC        = 30;   // scroll check every 30s (independent)
+const QA_INTERVAL_SEC             = 30;   // +5 pts every 30s
+const QA_SCROLL_CHECK_SEC         = 30;   // scroll check every 30s (independent)
 
-const WARN1_THRESHOLD_SEC = 120;       // 2 min no progress → warn1
-const WARN2_THRESHOLD_SEC = 180;       // 3 min → warn2
-const PAUSE_THRESHOLD_SEC = 240;       // 4 min → pause
+const READING_REWARD_BASE  = 5;
+const WRITING_PTS_BASE     = 10;   // pts (not credits)
+const VIDEO_PTS_BASE       = 5;
+const VIDEO_CREDIT_BASE    = 10;
+const AUDIO_REWARD_BASE    = 5;    // 5 pts (was 6)
+const PDF_PTS_BASE         = 5;    // pts (not credits)
+const QA_PTS_BASE          = 5;    // pts (not credits)
 
-const MANUAL_STAY_MS = 10_000;         // must stay on topic 10s to earn manual reward
-const MANUAL_REWARD_PTS = 2;           // +2 for manual topic engagement
+const TTS_HIGHLIGHT_REWARD   = 1;
+const VALIDATION_INTERVAL_SEC = 120;
+const MIN_PROGRESS_PCT        = 10;   // reading: 10% per 2min
+const WRITING_MIN_SCROLL_PCT  = 5;    // writing: 5% per 60s check
+const PDF_MIN_SCROLL_PCT      = 2.5;  // pdf: 2.5% per 30s check
+const QA_MIN_SCROLL_PCT       = 5;    // Q&A: 5% per 30s check
+const MAX_SCROLL_FAIL_STREAK  = 2;    // stop after 2 consecutive fails
 
-const TTS_MIN_INTERVAL_MS = 3_000;     // TTS: min 3 sec between highlights (prevents 3x-speed farming)
+const WARN1_THRESHOLD_SEC = 120;
+const WARN2_THRESHOLD_SEC = 180;
+const PAUSE_THRESHOLD_SEC = 240;
+
+const MANUAL_STAY_MS    = 10_000;
+const MANUAL_REWARD_PTS = 2;
+const TTS_MIN_INTERVAL_MS = 3_000;
 
 export class ReadingScoreSession {
   private config: ReadingScoreConfig;
   private startTime = 0;
-  private lastRewardTime = 0;
+  private lastRewardTime = 0;       // general: reading/audio
+  private lastPtsRewardTime = 0;    // video: 6s pts ticker
+  private lastCreditRewardTime = 0; // video/pdf/writing/qa: 60s credit ticker
   private lastValidationTime = 0;
   private lastValidationProgress = 0;
-  private maxProgressReached = 0;      // highest % seen (anti-spam)
-  private noProgressSec = 0;           // continuous seconds without progress
-  private lastWritingRewardProgress = 0; // scroll % at last writing reward (for per-min 5% check)
+  private maxProgressReached = 0;
+  private noProgressSec = 0;
+  private lastIntervalProgress = 0; // scroll % at last writing/pdf/qa interval check
   private warningLevel: WarningLevel = 0;
   private isPaused = false;
   private totalSessionScore = 0;
+  private totalCreditsEarned = 0;
   private lastScoreEarned = 0;
   private sessionElapsedSec = 0;
   private isWindowClosed = false;
-  private mode: 'reading' | 'writing' | 'video' | 'audio' | 'pdf';
+  private mode: 'reading' | 'writing' | 'video' | 'audio' | 'pdf' | 'qa';
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private onStateChange?: (state: ReadingScoreState) => void;
   private currentProgress = 0;
   private ttsProgressSinceValidation = false;
 
-  // TTS rate-limit (prevents 3x-speed farming)
+  // Video play state
+  private isVideoPlaying = false;
+  private videoPlayingSecsSinceLastPts = 0;   // counts up to VIDEO_PTS_INTERVAL_SEC
+  private videoPlayingSecsSinceLastCr  = 0;   // counts up to VIDEO_CR_INTERVAL_SEC
+
+  // Scroll-fail tracking (writing/pdf/qa)
+  private scrollFailStreak = 0;
+  private isPermanentlyStopped = false;
+  private lastScrollCheckTime = 0;   // separate from credit timer
+
+  // TTS rate-limit
   private lastTtsHighlightRewardTime = 0;
 
-  // Touch Protection state
+  // Touch Protection
   private touchProtectionActive = false;
   private touchProtectionTopicIdx = -1;
   private touchProtectionStartMs = 0;
   private touchProtectionTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  // Page Visibility — pause when tab/app is hidden
+  private isPageVisible = true;
+  private visibilityHandler: (() => void) | null = null;
 
   constructor(config: ReadingScoreConfig, onStateChange?: (state: ReadingScoreState) => void) {
     this.config = config;
@@ -123,6 +175,8 @@ export class ReadingScoreSession {
   start() {
     this.startTime = Date.now();
     this.lastRewardTime = this.startTime;
+    this.lastPtsRewardTime = this.startTime;
+    this.lastCreditRewardTime = this.startTime;
     this.lastValidationTime = this.startTime;
     this.lastValidationProgress = 0;
     this.maxProgressReached = 0;
@@ -130,13 +184,38 @@ export class ReadingScoreSession {
     this.warningLevel = 0;
     this.isPaused = false;
     this.totalSessionScore = 0;
+    this.totalCreditsEarned = 0;
     this.lastScoreEarned = 0;
     this.sessionElapsedSec = 0;
     this.isWindowClosed = false;
     this.ttsProgressSinceValidation = false;
     this.lastTtsHighlightRewardTime = 0;
-    this.lastWritingRewardProgress = 0;
+    this.lastIntervalProgress = 0;
+    this.scrollFailStreak = 0;
+    this.isPermanentlyStopped = false;
+    this.lastScrollCheckTime = this.startTime;
+    this.isVideoPlaying = false;
+    this.videoPlayingSecsSinceLastPts = 0;
+    this.videoPlayingSecsSinceLastCr  = 0;
     this._clearTouchProtection();
+
+    // ── Page Visibility: pause timers when user switches apps/tabs ──────────
+    if (typeof document !== 'undefined') {
+      this.isPageVisible = !document.hidden;
+      this.visibilityHandler = () => {
+        const nowVisible = !document.hidden;
+        if (nowVisible && !this.isPageVisible) {
+          // Just became visible — reset all timer anchors so hidden time is NOT counted
+          const now = Date.now();
+          this.lastRewardTime       = now;
+          this.lastPtsRewardTime    = now;
+          this.lastCreditRewardTime = now;
+          this.lastValidationTime   = now;
+        }
+        this.isPageVisible = nowVisible;
+      };
+      document.addEventListener('visibilitychange', this.visibilityHandler);
+    }
 
     this.intervalId = setInterval(() => this.tick(), 1000);
     this.emitState();
@@ -147,46 +226,64 @@ export class ReadingScoreSession {
       clearInterval(this.intervalId);
       this.intervalId = null;
     }
+    // Remove visibility listener
+    if (this.visibilityHandler && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+      this.visibilityHandler = null;
+    }
     this._clearTouchProtection();
   }
 
-  /** Call whenever the user's reading progress changes (0-100) */
+  /** Update scroll/reading progress (0-100). For reading: topic progress. For writing/pdf/qa: scroll %. */
   updateProgress(percent: number) {
     const clipped = Math.max(0, Math.min(100, percent));
-    // Net forward progress only (anti-spam)
+    const isScrollMode = this.mode === 'writing' || this.mode === 'pdf' || this.mode === 'qa';
+
+    // Net forward progress only
     if (clipped > this.maxProgressReached) {
       this.maxProgressReached = clipped;
-      // Progress made → reset no-progress timer, clear warnings
-      if (this.warningLevel > 0 || this.isPaused) {
-        this.noProgressSec = 0;
-        this.warningLevel = 0;
-        this.isPaused = false;
+
+      // Reading mode: reset stall warnings on progress
+      if (this.mode === 'reading') {
+        if (this.warningLevel > 0 || this.isPaused) {
+          this.noProgressSec = 0;
+          this.warningLevel = 0;
+          this.isPaused = false;
+          this.emitState();
+        }
+      }
+
+      // Scroll modes: if permanently stopped, resume on new scroll progress
+      if (isScrollMode && this.isPermanentlyStopped) {
+        this.isPermanentlyStopped = false;
+        this.scrollFailStreak = 0;
+        this.lastIntervalProgress = clipped; // reset baseline from here
+        this.lastCreditRewardTime = Date.now(); // restart credit timer
+        this.lastScrollCheckTime = Date.now(); // restart scroll check timer
         this.emitState();
       }
     }
     this.currentProgress = clipped;
   }
 
-  /** Called when TTS reads a topic aloud.
-   *  +1 per topic, but minimum 3 sec between rewards — prevents 3x-speed farming.
-   *  Activity still resets stall warnings regardless of reward eligibility. */
+  /** For video mode: call when play/pause state changes. */
+  setVideoPlaying(playing: boolean) {
+    this.isVideoPlaying = playing;
+    this.emitState();
+  }
+
+  /** TTS highlight event — reading mode only */
   onTtsHighlight() {
     this.ttsProgressSinceValidation = true;
-    // TTS activity = progress, reset stall warnings
     if (this.warningLevel > 0 || this.isPaused) {
       this.noProgressSec = 0;
       this.warningLevel = 0;
       this.isPaused = false;
     }
     if (this.isWindowClosed) return;
-
-    // If Touch Protection is active (user just tapped manually), suppress TTS rewards.
-    // This prevents manual-tap → TTS-auto-fire → instant reward bypass.
-    // After the 10-sec countdown completes (+2 awarded), TTS rewards resume normally.
     if (this.touchProtectionActive) return;
 
     const now = Date.now();
-    // Rate-limit: at most +1 every 3 seconds (normal speed reads fine; 3x-speed capped)
     if (this.lastTtsHighlightRewardTime > 0 && now - this.lastTtsHighlightRewardTime < TTS_MIN_INTERVAL_MS) return;
 
     const pts = tryEarnScore(
@@ -209,25 +306,17 @@ export class ReadingScoreSession {
     }
   }
 
-  /** Called when user MANUALLY taps a topic (Touch Protection).
-   *  User must stay on the same topic for 10 sec to earn +2.
-   *  Tapping a different topic before 10 sec cancels the pending reward.
-   *  Returns true if a new countdown started, false if same topic (already counting). */
+  /** Manual topic tap (Touch Protection) — reading mode only */
   onManualTopicEnter(topicIdx: number): void {
     if (this.isWindowClosed) return;
-
-    // Same topic tapped again while counting → ignore (already running)
     if (this.touchProtectionActive && this.touchProtectionTopicIdx === topicIdx) return;
 
-    // Cancel any previous pending reward
     this._clearTouchProtection();
-
     this.touchProtectionActive = true;
     this.touchProtectionTopicIdx = topicIdx;
     this.touchProtectionStartMs = Date.now();
     this.emitState();
 
-    // Award +2 after 10 sec of staying on the same topic
     this.touchProtectionTimeoutId = setTimeout(() => {
       this.touchProtectionTimeoutId = null;
       this.touchProtectionActive = false;
@@ -248,7 +337,7 @@ export class ReadingScoreSession {
       if (pts > 0) {
         this.totalSessionScore += pts;
         this.lastScoreEarned = pts;
-        this.ttsProgressSinceValidation = true; // counts as valid activity
+        this.ttsProgressSinceValidation = true;
         this.config.onScoreEarned?.(pts, 'READ_MANUAL_TOPIC_10S');
       }
       this.emitState();
@@ -266,17 +355,27 @@ export class ReadingScoreSession {
   }
 
   getState(): ReadingScoreState {
-    const intervalSec =
-      this.mode === 'reading' ? READING_INTERVAL_SEC :
-      this.mode === 'writing' ? WRITING_INTERVAL_SEC :
-      this.mode === 'video'   ? VIDEO_INTERVAL_SEC   :
-      this.mode === 'audio'   ? AUDIO_INTERVAL_SEC   :
-      PDF_INTERVAL_SEC;
     const now = Date.now();
-    const elapsed = this.intervalId ? (now - this.lastRewardTime) / 1000 : 0;
-    const nextRewardInSec = Math.max(0, Math.ceil(intervalSec - elapsed));
 
-    // Touch protection countdown seconds remaining
+    // nextRewardInSec: depends on mode
+    let nextRewardInSec = 0;
+    if (this.mode === 'reading') {
+      const elapsed = this.intervalId ? (now - this.lastRewardTime) / 1000 : 0;
+      nextRewardInSec = Math.max(0, Math.ceil(READING_INTERVAL_SEC - elapsed));
+    } else if (this.mode === 'audio') {
+      const elapsed = this.intervalId ? (now - this.lastRewardTime) / 1000 : 0;
+      nextRewardInSec = Math.max(0, Math.ceil(AUDIO_INTERVAL_SEC - elapsed));
+    } else if (this.mode === 'video') {
+      // Show countdown to next pts reward (30s)
+      const secsLeft = VIDEO_PTS_INTERVAL_SEC - this.videoPlayingSecsSinceLastPts;
+      nextRewardInSec = Math.max(0, secsLeft);
+    } else {
+      // writing/pdf/qa: show countdown to next credit tick
+      const elapsed = this.intervalId ? (now - this.lastCreditRewardTime) / 1000 : 0;
+      const interval = this.mode === 'writing' ? WRITING_INTERVAL_SEC : this.mode === 'qa' ? QA_INTERVAL_SEC : PDF_INTERVAL_SEC;
+      nextRewardInSec = Math.max(0, Math.ceil(interval - elapsed));
+    }
+
     let touchProtectionCooldownSec = 0;
     if (this.touchProtectionActive && this.touchProtectionStartMs > 0) {
       const msElapsed = now - this.touchProtectionStartMs;
@@ -296,14 +395,19 @@ export class ReadingScoreSession {
       isWindowClosed: this.isWindowClosed,
       touchProtectionActive: this.touchProtectionActive,
       touchProtectionCooldownSec,
+      isPermanentlyStopped: this.isPermanentlyStopped,
+      scrollFailStreak: this.scrollFailStreak,
+      totalCreditsEarned: this.totalCreditsEarned,
     };
   }
 
   private tick() {
+    // Skip entirely when page is hidden — no time accumulation, no rewards
+    if (!this.isPageVisible) return;
+
     this.sessionElapsedSec++;
     const maxWindow = getReadingWindowSeconds(this.config.userLevel);
 
-    // Max window reached → close scoring
     if (this.sessionElapsedSec >= maxWindow) {
       if (!this.isWindowClosed) {
         this.isWindowClosed = true;
@@ -313,31 +417,90 @@ export class ReadingScoreSession {
       return;
     }
 
-    // Video/Audio/PDF: no scroll validation — always active, never pause
-    // Writing: simplified per-minute scroll check (handled in reward section below — no warn/pause)
-    if (this.mode === 'video' || this.mode === 'audio' || this.mode === 'pdf' || this.mode === 'writing') {
-      this.warningLevel = 0;
-      this.isPaused = false;
-    } else {
-      // Validation check every 2 min (reading only)
+    // ── Video mode: separate 6s pts + 60s credits ────────────────────────────
+    if (this.mode === 'video') {
+      if (this.isVideoPlaying) {
+        this.videoPlayingSecsSinceLastPts++;
+        this.videoPlayingSecsSinceLastCr++;
+
+        // +1 pts every 6 seconds of play
+        if (this.videoPlayingSecsSinceLastPts >= VIDEO_PTS_INTERVAL_SEC) {
+          this.videoPlayingSecsSinceLastPts = 0;
+          const pts = tryEarnScore(
+            this.config.userId,
+            VIDEO_PTS_BASE,
+            this.config.subscriptionLevel,
+            this.config.isPremium,
+            this.config.boostPercent,
+            'VIDEO_WATCH_6S',
+            undefined,
+            undefined,
+            this.config.lessonLabel,
+          );
+          if (pts > 0) {
+            this.totalSessionScore += pts;
+            this.lastScoreEarned = pts;
+            this.config.onScoreEarned?.(pts, 'VIDEO_WATCH_6S');
+          }
+        }
+
+        // +10 credits every 60 seconds of play
+        if (this.videoPlayingSecsSinceLastCr >= VIDEO_CR_INTERVAL_SEC) {
+          this.videoPlayingSecsSinceLastCr = 0;
+          this._awardCredits(VIDEO_CREDIT_BASE, 'VIDEO_WATCH_60S');
+        }
+      }
+      this.emitState();
+      return;
+    }
+
+    // ── Audio mode: unchanged — pts every 30s ────────────────────────────────
+    if (this.mode === 'audio') {
+      const elapsed = (Date.now() - this.lastRewardTime) / 1000;
+      if (elapsed >= AUDIO_INTERVAL_SEC) {
+        this.lastRewardTime = Date.now();
+        const pts = tryEarnScore(
+          this.config.userId,
+          AUDIO_REWARD_BASE,
+          this.config.subscriptionLevel,
+          this.config.isPremium,
+          this.config.boostPercent,
+          'AUDIO_LISTEN_30S',
+          undefined,
+          undefined,
+          this.config.lessonLabel,
+        );
+        if (pts > 0) {
+          this.totalSessionScore += pts;
+          this.lastScoreEarned = pts;
+          this.config.onScoreEarned?.(pts, 'AUDIO_LISTEN_30S');
+        } else {
+          this.lastScoreEarned = 0;
+        }
+      }
+      this.emitState();
+      return;
+    }
+
+    // ── Reading mode: pts-based with validation ──────────────────────────────
+    if (this.mode === 'reading') {
+      // Validation check every 2 min
       const secSinceValidation = (Date.now() - this.lastValidationTime) / 1000;
       if (secSinceValidation >= VALIDATION_INTERVAL_SEC) {
         const netProgress = this.maxProgressReached - this.lastValidationProgress;
         const validProgress = netProgress >= MIN_PROGRESS_PCT || this.ttsProgressSinceValidation;
-
         if (!validProgress) {
           this.noProgressSec += Math.round(secSinceValidation);
         } else {
           this.noProgressSec = 0;
           this.warningLevel = 0;
         }
-
         this.lastValidationProgress = this.maxProgressReached;
         this.lastValidationTime = Date.now();
         this.ttsProgressSinceValidation = false;
       }
 
-      // Warning / pause logic (reading only)
+      // Warning / pause
       if (this.noProgressSec >= PAUSE_THRESHOLD_SEC) {
         this.warningLevel = 3;
         this.isPaused = true;
@@ -351,51 +514,76 @@ export class ReadingScoreSession {
         this.warningLevel = 0;
         this.isPaused = false;
       }
+
+      if (!this.isPaused) {
+        const elapsed = (Date.now() - this.lastRewardTime) / 1000;
+        if (elapsed >= READING_INTERVAL_SEC) {
+          this.lastRewardTime = Date.now();
+          const pts = tryEarnScore(
+            this.config.userId,
+            READING_REWARD_BASE,
+            this.config.subscriptionLevel,
+            this.config.isPremium,
+            this.config.boostPercent,
+            'READ_ACTIVE_30S',
+            undefined,
+            undefined,
+            this.config.lessonLabel,
+          );
+          if (pts > 0) {
+            this.totalSessionScore += pts;
+            this.lastScoreEarned = pts;
+            this.config.onScoreEarned?.(pts, 'READ_ACTIVE_30S');
+          } else {
+            this.lastScoreEarned = 0;
+          }
+        }
+      }
+
+      this.emitState();
+      return;
     }
 
-    // Award score on interval (if not paused / window closed)
-    if (!this.isPaused && !this.isWindowClosed) {
-      const intervalSec =
-        this.mode === 'reading' ? READING_INTERVAL_SEC :
-        this.mode === 'writing' ? WRITING_INTERVAL_SEC :
-        this.mode === 'video'   ? VIDEO_INTERVAL_SEC   :
-        this.mode === 'audio'   ? AUDIO_INTERVAL_SEC   :
-        PDF_INTERVAL_SEC;
-      const elapsed = (Date.now() - this.lastRewardTime) / 1000;
-      if (elapsed >= intervalSec) {
-        this.lastRewardTime = Date.now();
+    // ── Writing / PDF / Q&A: independent scroll-check + pts-award timers ────
+    const minScrollPct = this.mode === 'qa' ? QA_MIN_SCROLL_PCT : this.mode === 'pdf' ? PDF_MIN_SCROLL_PCT : WRITING_MIN_SCROLL_PCT;
+    const ptsInterval  = this.mode === 'qa' ? QA_INTERVAL_SEC     : this.mode === 'writing' ? WRITING_INTERVAL_SEC : PDF_INTERVAL_SEC;
+    const scrollCheckInt = this.mode === 'qa' ? QA_SCROLL_CHECK_SEC : this.mode === 'writing' ? WRITING_SCROLL_CHECK_SEC : PDF_SCROLL_CHECK_SEC;
+    const ptsBase      = this.mode === 'qa' ? QA_PTS_BASE         : this.mode === 'writing' ? WRITING_PTS_BASE        : PDF_PTS_BASE;
+    const activityKey  = this.mode === 'qa' ? 'QA_ACTIVE'         : this.mode === 'writing' ? 'WRITE_ACTIVE'          : 'PDF_ACTIVE';
 
-        // Writing mode: per-minute 5% scroll check — skip reward if not enough progress
-        if (this.mode === 'writing') {
-          const netScroll = this.currentProgress - this.lastWritingRewardProgress;
-          if (netScroll < WRITING_MIN_PROGRESS_PCT) {
-            // Not enough scroll this minute — skip reward silently
-            this.lastScoreEarned = 0;
-            this.emitState();
-            return;
-          }
-          this.lastWritingRewardProgress = this.currentProgress;
+    // ── Scroll check (independent timer) ────────────────────────────────────
+    const secSinceScrollCheck = (Date.now() - this.lastScrollCheckTime) / 1000;
+    if (secSinceScrollCheck >= scrollCheckInt) {
+      this.lastScrollCheckTime = Date.now();
+      const netScroll = this.currentProgress - this.lastIntervalProgress;
+      if (netScroll < minScrollPct) {
+        this.scrollFailStreak = Math.min(this.scrollFailStreak + 1, MAX_SCROLL_FAIL_STREAK);
+        if (this.scrollFailStreak >= MAX_SCROLL_FAIL_STREAK) {
+          this.isPermanentlyStopped = true;
+          this.warningLevel = 3;
+        } else {
+          this.warningLevel = 1;
         }
+      } else {
+        this.scrollFailStreak = 0;
+        this.warningLevel = 0;
+        this.lastIntervalProgress = this.currentProgress;
+      }
+    }
 
-        const baseScore =
-          this.mode === 'reading' ? READING_REWARD_BASE :
-          this.mode === 'writing' ? WRITING_REWARD_BASE :
-          this.mode === 'video'   ? VIDEO_REWARD_BASE   :
-          this.mode === 'audio'   ? AUDIO_REWARD_BASE   :
-          PDF_REWARD_BASE;
-        const activity =
-          this.mode === 'reading' ? 'READ_ACTIVE_30S'    :
-          this.mode === 'writing' ? 'WRITE_ACTIVE_1MIN'  :
-          this.mode === 'video'   ? 'VIDEO_WATCH_60S'    :
-          this.mode === 'audio'   ? 'AUDIO_LISTEN_60S'   :
-          'PDF_READ_60S';
+    // ── Pts award (independent timer) — only if not permanently stopped ─────
+    if (!this.isPermanentlyStopped) {
+      const elapsed = (Date.now() - this.lastCreditRewardTime) / 1000;
+      if (elapsed >= ptsInterval) {
+        this.lastCreditRewardTime = Date.now();
+        // Award as pts (affects totalScore), not credits
         const pts = tryEarnScore(
           this.config.userId,
-          baseScore,
+          ptsBase,
           this.config.subscriptionLevel,
           this.config.isPremium,
           this.config.boostPercent,
-          activity,
+          activityKey,
           undefined,
           undefined,
           this.config.lessonLabel,
@@ -403,14 +591,19 @@ export class ReadingScoreSession {
         if (pts > 0) {
           this.totalSessionScore += pts;
           this.lastScoreEarned = pts;
-          this.config.onScoreEarned?.(pts, activity);
-        } else {
-          this.lastScoreEarned = 0;
+          this.config.onScoreEarned?.(pts, activityKey);
         }
       }
     }
 
     this.emitState();
+  }
+
+  /** Award credits directly (no pts/totalScore effect). */
+  private _awardCredits(amount: number, activity: string) {
+    this.totalCreditsEarned += amount;
+    this.lastScoreEarned = amount; // show in HUD (totalCreditsEarned used for display)
+    this.config.onCreditsEarned?.(amount, activity);
   }
 
   private emitState() {

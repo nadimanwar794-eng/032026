@@ -19,6 +19,7 @@ import { tryEarnScore } from '../utils/scoreSystem';
 import { ReadingScoreSession, ReadingScoreState } from '../utils/readingScoreEngine';
 import { ReadingScoreHUD } from './ReadingScoreHUD';
 import { PaginatedPdfViewer, PaginatedPdfHandle } from './PaginatedPdfViewer';
+import { fireSessionComplete } from '../utils/sessionNotify';
 
 interface Props {
   url: string;
@@ -33,6 +34,8 @@ interface Props {
   isPremium?: boolean;
   boostPercent?: number;
   onScoreEarned?: (pts: number) => void;
+  /** Called when credits are earned directly (does NOT affect pts/totalScore) */
+  onCreditsEarned?: (credits: number, activity: string) => void;
   /** Next chapter navigation */
   onNext?: () => void;
   nextTitle?: string;
@@ -73,6 +76,7 @@ const MILESTONE_SCORES = [
 export const PdfViewer: React.FC<Props> = ({
   url, title, onBack, sessionKey,
   userId, userLevel = 1, subscriptionLevel, isPremium, boostPercent = 0, onScoreEarned,
+  onCreditsEarned,
   onNext, nextTitle, onSchoolModeSwitch, isAdmin, onAdminBoard,
 }) => {
   const key = sessionKey || btoa(url).replace(/[^a-z0-9]/gi, '').slice(0, 24);
@@ -107,12 +111,20 @@ export const PdfViewer: React.FC<Props> = ({
   const headerHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const jumpInputRef = useRef<HTMLInputElement>(null);
 
-  // ── PDF time-based score session (no scroll tracking possible in iframe) ──
+  // ── PDF time-based score session: 60s/min → +10 credits with ≥5% scroll check ──
   const pdfScoreSessionRef = useRef<ReadingScoreSession | null>(null);
   const [pdfScoreState, setPdfScoreState] = useState<ReadingScoreState | null>(null);
 
+  // Score chip tooltip
+  const [pdfScoreTooltip, setPdfScoreTooltip] = useState(false);
+  // Track credits earned this PDF session so we can queue a session-complete event on exit
+  const pdfSessionCreditsRef = useRef(0);
+  const pdfSessionStartMsRef = useRef(Date.now());
+
   useEffect(() => {
     if (!userId) return;
+    pdfSessionStartMsRef.current = Date.now();
+    pdfSessionCreditsRef.current = 0;
     const session = new ReadingScoreSession(
       {
         userId,
@@ -121,7 +133,11 @@ export const PdfViewer: React.FC<Props> = ({
         isPremium,
         boostPercent: boostPercent || 0,
         mode: 'pdf',
-        onScoreEarned: (pts) => onScoreEarned?.(pts),
+        // PDF earns pts — onScoreEarned updates totalScore
+        onScoreEarned: (pts) => {
+          pdfSessionCreditsRef.current += pts;
+          onScoreEarned?.(pts);
+        },
       },
       (state) => setPdfScoreState(state),
     );
@@ -133,6 +149,23 @@ export const PdfViewer: React.FC<Props> = ({
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, url]);
+
+  /** Back handler — fires session-complete event then calls onBack. */
+  const handleBack = useCallback(() => {
+    if (pdfSessionCreditsRef.current > 0) {
+      const secs = Math.round((Date.now() - pdfSessionStartMsRef.current) / 1000);
+      fireSessionComplete({
+        type: 'LESSON',
+        subject: '',
+        chapter: title || '',
+        timeSecs: secs,
+        activityType: 'PDF',
+        sessionScore: pdfSessionCreditsRef.current,
+      });
+      pdfSessionCreditsRef.current = 0;
+    }
+    onBack();
+  }, [onBack, title]);
 
   const showToast = useCallback((msg: string, ms = 2000) => {
     setToast(msg);
@@ -172,10 +205,14 @@ export const PdfViewer: React.FC<Props> = ({
     }
   };
 
-  // Progress milestones
+  // Progress milestones + scroll % update for credit session
   useEffect(() => {
     if (!userId || totalPages <= 0) return;
     const pct = Math.round((currentPage / totalPages) * 100);
+
+    // Feed scroll % into the credit session so it can check ≥5% scroll/min
+    pdfScoreSessionRef.current?.updateProgress(pct);
+
     for (const ms of MILESTONE_SCORES) {
       if (pct >= ms.pct && !awardedMilestones.has(ms.pct)) {
         const earned = tryEarnScore(userId, ms.base, subscriptionLevel, isPremium, boostPercent, 'PDF_MILESTONE');
@@ -356,7 +393,7 @@ export const PdfViewer: React.FC<Props> = ({
         }`}
       >
         {/* Back */}
-        <button onClick={onBack} className="p-2 bg-white/10 rounded-xl active:bg-white/20 transition shrink-0">
+        <button onClick={handleBack} className="p-2 bg-white/10 rounded-xl active:bg-white/20 transition shrink-0">
           <ArrowLeft size={18} />
         </button>
 
@@ -373,6 +410,41 @@ export const PdfViewer: React.FC<Props> = ({
 
         {/* Title */}
         <h2 className="flex-1 font-bold text-sm truncate min-w-0">{title}</h2>
+
+        {/* Live PDF score chip — always visible */}
+        <div className="relative shrink-0" style={{ zIndex: 50 }}>
+          <span
+            onClick={() => { setPdfScoreTooltip(true); setTimeout(() => setPdfScoreTooltip(false), 2500); }}
+            style={{ fontSize: '10px', fontWeight: 900, color: '#86efac', background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.28)', borderRadius: 99, padding: '2px 7px', whiteSpace: 'nowrap', cursor: 'pointer', display: 'block' }}>
+            📖 {pdfScoreState
+              ? `+${pdfScoreState.totalSessionScore}pts`
+              : '+0pts'}
+          </span>
+           {pdfScoreTooltip && (
+            <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 6, background: 'linear-gradient(135deg,#eef2ff,#f5f3ff)', border: '1.5px solid rgba(99,102,241,0.2)', borderTopWidth: 2, borderTopColor: '#16a34a', borderTop: '2px solid #16a34a', borderRadius: 12, padding: '7px 12px', whiteSpace: 'nowrap', zIndex: 100, boxShadow: '0 4px 20px rgba(22,163,74,0.15), inset 0 -1px 0 #c7d2fe', animation: 'rshud-slide 0.18s ease', display: 'flex', alignItems: 'center', gap: 8, minWidth: 260 }}>
+              <span style={{ fontSize: 14, flexShrink: 0 }}>📄</span>
+              <span style={{ fontSize: 10, fontWeight: 900, color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.06em', flexShrink: 0 }}>PDF Score</span>
+              <div style={{ width: 1, height: 14, background: '#e2e8f0', flexShrink: 0 }} />
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+                <span style={{ fontSize: 7, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1 }}>Score</span>
+                <span style={{ fontSize: 13, fontWeight: 900, color: '#16a34a', lineHeight: 1.2 }}>+{pdfScoreState ? pdfScoreState.totalSessionScore : 0}</span>
+              </div>
+              <div style={{ width: 1, height: 14, background: '#e2e8f0', flexShrink: 0 }} />
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+                <span style={{ fontSize: 7, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1 }}>Progress</span>
+                <span style={{ fontSize: 13, fontWeight: 900, color: '#16a34a', lineHeight: 1.2 }}>{pdfScoreState ? `${Math.round(pdfScoreState.progressPercent ?? 0)}%` : '0%'}</span>
+              </div>
+              <div style={{ width: 1, height: 14, background: '#e2e8f0', flexShrink: 0 }} />
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+                <span style={{ fontSize: 7, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1 }}>Next</span>
+                <span style={{ fontSize: 11, fontWeight: 900, color: pdfScoreState?.isPermanentlyStopped ? '#ef4444' : '#f59e0b', lineHeight: 1.2 }}>
+                  {pdfScoreState?.isPermanentlyStopped ? 'Scroll karo' : pdfScoreState?.isPaused ? 'Paused' : `+5 in ${pdfScoreState?.nextRewardInSec ?? 30}s`}
+                </span>
+              </div>
+              <div style={{ flex: 1 }} />
+              <button onClick={() => setPdfScoreTooltip(false)} style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: 11, fontWeight: 900, cursor: 'pointer', flexShrink: 0, padding: 0 }}>✕</button>
+            </div>
+          )}        </div>
 
         {/* Page counter */}
         <button

@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { PwaInstallPrompt } from "./components/PwaInstallPrompt";
 
-import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { 
   ClassLevel, Subject, Chapter, AppState, Board, Stream, User, ContentType, SystemSettings, ActivityLogEntry, WeeklyTest, LessonContent, ActiveSubscription, InboxMessage
 } from './types';
@@ -12,8 +12,9 @@ import { storage } from './utils/storage';
 import { recalculateSubscriptionStatus, addSubscription } from './utils/subscriptionUtils';
 import { getLevelInfo, getLevelLimitBonus } from './utils/levelSystem';
 import { fireCreditNotify, setHomeTabActive } from './utils/creditNotify';
-import { onSessionComplete, SessionCompletePayload } from './utils/sessionNotify';
+import { onSessionComplete, queueSession, consumeSessionQueue, SessionCompletePayload } from './utils/sessionNotify';
 import { SessionSummaryBanner } from './components/SessionSummaryBanner';
+import { GroupedSessionBanner } from './components/GroupedSessionBanner';
 import { loadRoutineData } from './utils/routineStorage';
 import { applyDeduction, getTotalCredits } from './utils/creditSystem';
 import { signInAnonymously } from 'firebase/auth';
@@ -393,51 +394,87 @@ const App: React.FC = () => {
     }
   }, [studentTab]);
 
-  // ── Home-page coin sync ───────────────────────────────────────────────────
-  // Jab bhi user HOME pe aata hai: earned pts ka ½ (level≥5) ya ¼ (level<5)
-  // coins mein convert karke account mein add ho jaata hai.
+  // ── Home-page coin sync + session queue consumption ──────────────────────
+  // Jab bhi user HOME pe aata hai:
+  //   1. Earned pts → coins convert (existing logic)
+  //   2. Session queue consume karo — agar sessions hain to grouped/single banner dikhao
   // localStorage key "nst_credit_sync_score_<uid>" last-synced pts track karta hai.
   useEffect(() => {
     if (studentTab !== 'HOME') return;
     const user = state.user;
     if (!user?.id) return;
 
+    // ── Step 1: Coin sync ───────────────────────────────────────────────────
     const syncKey = `nst_credit_sync_score_${user.id}`;
     const raw = localStorage.getItem(syncKey);
     const currentScore = user.totalScore || 0;
+    let coinsFromSync = 0;
 
     if (raw === null) {
-      // Pehli baar: sirf baseline set karo, coins nahi milenge purane pts ke liye
+      // Pehli baar: sirf baseline set karo
       localStorage.setItem(syncKey, String(currentScore));
+    } else {
+      const lastSynced = parseInt(raw, 10);
+      const delta = currentScore - lastSynced;
+      if (delta > 0) {
+        localStorage.setItem(syncKey, String(currentScore));
+        const routineOn = loadRoutineData(user.id).enabled;
+        const ratio = routineOn ? 0.5 : 0.25;
+        coinsFromSync = Math.floor(delta * ratio);
+        if (coinsFromSync > 0) {
+          const newCredits = (user.credits || 0) + coinsFromSync;
+          const updatedUser = { ...user, credits: newCredits };
+          setState(prev => ({ ...prev, user: updatedUser }));
+          saveUserToLive(updatedUser);
+        }
+      }
+    }
+
+    // ── Step 2: Session queue consume karo ─────────────────────────────────
+    const queue = consumeSessionQueue();
+    if (queue.length === 0) {
+      // Koi session nahi — agar sirf coins mile to CreditToast dikhao
+      if (coinsFromSync > 0) {
+        fireCreditNotify({ type: 'EARN', amount: coinsFromSync, remaining: (user.credits || 0) + coinsFromSync, source: 'reading' });
+      }
       return;
     }
 
-    const lastSynced = parseInt(raw, 10);
-    const delta = currentScore - lastSynced;
-    if (delta <= 0) return;
-
-    // Sync point pehle update karo taaki double-award na ho
-    localStorage.setItem(syncKey, String(currentScore));
-
-    const routineOn = loadRoutineData(user.id).enabled;
-    const ratio = routineOn ? 0.5 : 0.25;
-    const coins = Math.floor(delta * ratio);
-    if (coins <= 0) return;
-
-    const newCredits = (user.credits || 0) + coins;
-    const updatedUser = { ...user, credits: newCredits };
-    setState(prev => ({ ...prev, user: updatedUser }));
-    saveUserToLive(updatedUser);
-
-    if (pendingSessionRef.current) {
-      // Pending session summary exists — put coins into the big home banner
-      // instead of firing the small CreditToast.
-      setPendingSessionSummary(prev =>
-        prev ? { ...prev, coinsEarned: (prev.coinsEarned ?? 0) + coins } : null
-      );
-    } else {
-      fireCreditNotify({ type: 'EARN', amount: coins, remaining: newCredits, source: 'reading' });
+    // Sync se mile coins ko last session mein add karo
+    if (coinsFromSync > 0) {
+      queue[queue.length - 1] = {
+        ...queue[queue.length - 1],
+        coinsEarned: (queue[queue.length - 1].coinsEarned ?? 0) + coinsFromSync,
+      };
     }
+
+    // Har session ka credit history record karo + bonusPts augment karo
+    const discount = getLevelInfo(user.totalScore || 0).discount;
+    const augmentedQueue = queue.map(sess => {
+      const bonusPts = sess.sessionScore != null && sess.sessionScore > 0
+        ? Math.round(sess.sessionScore * discount / 100)
+        : 0;
+      if (sess.sessionScore != null && user.id) {
+        const actLabel = (sess.activityType === 'MCQ' || sess.type === 'MCQ') ? 'MCQ'
+          : sess.activityType === 'Writing' ? 'Writing Notes' : 'Reading Notes';
+        recordCreditTx(
+          user.id,
+          sess.coinsEarned || 0,
+          `EARN_SESSION_${(sess.activityType || sess.type || 'MCQ').toUpperCase()}`,
+          [actLabel, sess.chapter].filter(Boolean).join(' · ') || 'Study Session',
+          user.credits,
+          sess.sessionScore,
+          bonusPts,
+          sess.timeSecs,
+          sess.activityType || sess.type,
+          sess.chapter,
+        );
+      }
+      return { ...sess, bonusPts };
+    });
+
+    // Banner dikhao — merge with any already-displaying sessions
+    applySessionQueue(augmentedQueue);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [studentTab, state.user?.id]);
 
@@ -447,17 +484,40 @@ const App: React.FC = () => {
   const [streakLoginPopup, setStreakLoginPopup] = useState<{newStreak: number; prevStreak: number; isNewRecord: boolean} | null>(null);
   const [levelUpNotif, setLevelUpNotif] = useState<{level: number; label: string; emoji: string; color: string} | null>(null);
 
-  // ── HomeStatsToast — state.user update ke baad dikhao; 1.5s fallback ──────────
-  const [homeStatsVisible, setHomeStatsVisible] = useState(false);
+  // ── MCQ session queue helpers ─────────────────────────────────────────────
+  // homeTabActiveRef: track karo ki user HOME pe hai (MCQ race-condition fix)
+  const homeTabActiveRef = useRef(false);
+  useEffect(() => { homeTabActiveRef.current = studentTab === 'HOME'; }, [studentTab]);
+
+  // MCQ session ko queue karo + agar HOME pe already hain to turant banner dikhao
+  const enqueueMcqAndShow = (earned: number, earnedC: number, secs: number) => {
+    queueSession({
+      type: 'MCQ',
+      subject: '',
+      chapter: mcqChapterNameRef.current,
+      timeSecs: secs,
+      coinsEarned: earnedC,
+      sessionScore: earned,
+      activityType: mcqActivityTypeRef.current,
+    });
+    // Agar user already HOME pe hai to abhi hi consume karo + merge
+    if (homeTabActiveRef.current) {
+      const queue = consumeSessionQueue();
+      applySessionQueue(queue);
+    }
+    // Agar HOME pe nahi — queue mein rahega, HOME tab pe aane pe dikhega
+  };
+
+  // ── Fallback timer (1.5s) agar Firebase se score update late aaye ─────────
   const [mcqJustEnded, setMcqJustEnded] = useState(false);
   const mcqFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!mcqJustEnded) return;
-    // Fallback: agar state.user 1.5s mein update na ho tab bhi dikhao (score refs se lo)
     const snapScore = userTotalScoreRef.current;
     const snapCredits = userCreditsRef.current;
     const snapStart = scoreAtSessionStartRef.current;
     const snapStartC = creditsAtSessionStartRef.current;
+    const snapSecs = mcqSessionSecondsRef.current;
     mcqFallbackTimerRef.current = setTimeout(() => {
       if (!awaitingPostMcqDataRef.current) return; // score-effect ne handle kar liya
       awaitingPostMcqDataRef.current = false;
@@ -466,34 +526,11 @@ const App: React.FC = () => {
       setMcqSessionScore(earned);
       setMcqSessionCredits(earnedC);
       setMcqJustEnded(false);
-      if (revisionHubOpenRef.current) { pendingHomeStatsRef.current = true; } else { setHomeStatsVisible(true); }
+      enqueueMcqAndShow(earned, earnedC, snapSecs);
     }, 1500);
     return () => { if (mcqFallbackTimerRef.current) clearTimeout(mcqFallbackTimerRef.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mcqJustEnded]);
-
-  // Session khatam hone pe credit history mein save karo (session card format)
-  const prevHomeStatsVisibleRef = useRef(false);
-  useEffect(() => {
-    if (homeStatsVisible && !prevHomeStatsVisibleRef.current && state.user?.id) {
-      const bonusPts = Math.round(mcqSessionScore * (getLevelInfo(state.user.totalScore || 0).discount / 100));
-      const actLabel = mcqActivityType === 'MCQ' ? 'MCQ' : mcqActivityType === 'Writing' ? 'Writing Notes' : 'Reading Notes';
-      const desc = [actLabel, mcqChapterName].filter(Boolean).join(' · ');
-      recordCreditTx(
-        state.user.id,
-        mcqSessionCredits,
-        `EARN_SESSION_${mcqActivityType.toUpperCase()}`,
-        desc || 'Study Session',
-        state.user.credits,
-        // Extra session fields stored inline via type extension
-        mcqSessionScore,
-        bonusPts,
-        mcqSessionSeconds,
-        mcqActivityType,
-        mcqChapterName,
-      );
-    }
-    prevHomeStatsVisibleRef.current = homeStatsVisible;
-  }, [homeStatsVisible]);
 
   // ── MCQ session active flag + full session tracking ──────────────────────────
   const [inMcqSession, setInMcqSession] = useState(false);
@@ -502,6 +539,13 @@ const App: React.FC = () => {
   const [mcqSessionSeconds, setMcqSessionSeconds] = useState(0); // is session ki duration
   const [mcqChapterName, setMcqChapterName] = useState('');
   const [mcqActivityType, setMcqActivityType] = useState('MCQ');
+  // Refs — enqueueMcqAndShow mein stale closures avoid karne ke liye
+  const mcqChapterNameRef = useRef('');
+  const mcqActivityTypeRef = useRef('MCQ');
+  const mcqSessionSecondsRef = useRef(0);
+  useEffect(() => { mcqChapterNameRef.current = mcqChapterName; }, [mcqChapterName]);
+  useEffect(() => { mcqActivityTypeRef.current = mcqActivityType; }, [mcqActivityType]);
+  useEffect(() => { mcqSessionSecondsRef.current = mcqSessionSeconds; }, [mcqSessionSeconds]);
   const scoreAtSessionStartRef = useRef(0);
   const creditsAtSessionStartRef = useRef(0);
   const sessionStartTimeRef = useRef(0); // session shuru hone ka timestamp
@@ -529,7 +573,9 @@ const App: React.FC = () => {
     setMcqSessionCredits(earnedC);
     setMcqJustEnded(false);
     // RevisionHub open hai to home pe jane pe dikhao
-    if (revisionHubOpenRef.current) { pendingHomeStatsRef.current = true; } else { setHomeStatsVisible(true); }
+    // Notification queue mein daal do — HOME tab pe aane pe dikhega
+    enqueueMcqAndShow(earned, earnedC, mcqSessionSecondsRef.current);
+    if (revisionHubOpenRef.current) { pendingHomeStatsRef.current = true; }
   }, [state.user?.totalScore, state.user?.credits]);
 
   // RevisionHub open/close track karo — toast defer karo jab tak hub band na ho
@@ -539,7 +585,13 @@ const App: React.FC = () => {
       revisionHubOpenRef.current = false;
       if (pendingHomeStatsRef.current) {
         pendingHomeStatsRef.current = false;
-        setTimeout(() => setHomeStatsVisible(true), 300);
+        // Session already queued — agar HOME tab pe hain to abhi consume + merge karo
+        if (homeTabActiveRef.current) {
+          setTimeout(() => {
+            const queue = consumeSessionQueue();
+            applySessionQueue(queue);
+          }, 300);
+        }
       }
     };
     window.addEventListener('iic-revision-hub-opened', openHandler);
@@ -549,6 +601,38 @@ const App: React.FC = () => {
       window.removeEventListener('iic-revision-hub-closed', closeHandler);
     };
   }, []);
+
+  // ── Pending lesson coins — deferred from session, applied 4s after HOME ─────
+  const pendingLessonCreditsRef = useRef(0);
+  const pendingLessonTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleSessionCreditsEarned = useCallback((credits: number) => {
+    if (credits <= 0) return;
+    pendingLessonCreditsRef.current += credits;
+  }, []);
+
+  useEffect(() => {
+    if (studentTab !== 'HOME') return;
+    if (pendingLessonCreditsRef.current <= 0) return;
+    // Start 4-second timer — apply coins 4s after landing on HOME
+    pendingLessonTimerRef.current = setTimeout(() => {
+      const coins = pendingLessonCreditsRef.current;
+      if (coins <= 0) return;
+      pendingLessonCreditsRef.current = 0;
+      // Add to user balance
+      const currentUser = state.user;
+      if (!currentUser) return;
+      const newCredits = (currentUser.credits || 0) + coins;
+      const updated = { ...currentUser, credits: newCredits };
+      setState(prev => ({ ...prev, user: updated }));
+      saveUserToLive(updated);
+      fireCreditNotify({ type: 'EARN', amount: coins, remaining: newCredits, source: 'reading' });
+    }, 4000);
+    return () => {
+      if (pendingLessonTimerRef.current) clearTimeout(pendingLessonTimerRef.current);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studentTab]);
 
   // HOME tab pe EARN notifications suppress karo (HomeStatsToast mein dikhega)
   useEffect(() => { setHomeTabActive(studentTab === 'HOME'); }, [studentTab]);
@@ -584,16 +668,36 @@ const App: React.FC = () => {
   const [lastTestResult, setLastTestResult] = useState<MCQResult | null>(null);
   const [lastTestQuestions, setLastTestQuestions] = useState<MCQItem[] | null>(null); // NEW: For granular analysis
   const [pendingSessionSummary, setPendingSessionSummary] = useState<SessionCompletePayload | null>(null);
-  const pendingSessionRef = useRef<SessionCompletePayload | null>(null);
-  useEffect(() => { pendingSessionRef.current = pendingSessionSummary; }, [pendingSessionSummary]);
+  // Grouped sessions — 2+ activities ek saath HOME pe aane pe
+  const [groupedSessions, setGroupedSessions] = useState<SessionCompletePayload[]>([]);
 
-  // Listen for lesson-complete events fired from MyRoutine
+  // Track currently displaying sessions so new ones can be MERGED (not replaced)
+  const displayedSessionsRef = useRef<SessionCompletePayload[]>([]);
+
+  // Safely show sessions — merges with any already-displaying banner
+  // Always uses GroupedSessionBanner (works for 1+ sessions)
+  const applySessionQueue = useCallback((newQueue: SessionCompletePayload[]) => {
+    if (newQueue.length === 0) return;
+    const merged = [...displayedSessionsRef.current, ...newQueue];
+    displayedSessionsRef.current = merged;
+    setPendingSessionSummary(null);
+    setGroupedSessions(merged);
+  }, []);
+
+  // Listen for lesson-complete events (Reading / Writing) — queue karo, HOME pe dikhao
   useEffect(() => {
     const unsub = onSessionComplete((payload) => {
-      setPendingSessionSummary(payload);
+      // Queue mein daalo
+      queueSession(payload);
+      // Agar HOME tab pe already hain to turant consume karo
+      if (homeTabActiveRef.current) {
+        const queue = consumeSessionQueue();
+        applySessionQueue(queue);
+      }
     });
     return unsub;
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applySessionQueue]);
   
   // CUSTOM DIALOG STATE (GLOBAL)
   const [alertConfig, setAlertConfig] = useState<{isOpen: boolean, message: string}>({isOpen: false, message: ''});
@@ -1697,7 +1801,7 @@ const App: React.FC = () => {
     sessionStartTimeRef.current = 0;
     sessionEndProcessedRef.current = false;
     setMcqJustEnded(false);
-    setHomeStatsVisible(false);
+    // homeStatsVisible removed — queue-based system use hota hai ab
     if (!state.originalAdmin) {
         localStorage.setItem('nst_current_user', JSON.stringify(user));
     }
@@ -1738,6 +1842,12 @@ const App: React.FC = () => {
         return;
     }
 
+    // Admin / Sub-Admin → seedha Admin Dashboard pe bhejo
+    if (user.role === 'ADMIN' || user.role === 'SUB_ADMIN') {
+      setState(prev => ({ ...prev, user, view: 'ADMIN_DASHBOARD' }));
+      return;
+    }
+
     setState(prev => ({
       ...prev,
       user,
@@ -1747,10 +1857,6 @@ const App: React.FC = () => {
       selectedStream: user.stream || null,
       language: user.board === 'BSEB' ? 'Hindi' : 'English',
     }));
-
-    if (user.role === 'ADMIN' || user.role === 'SUB_ADMIN') {
-      setTimeout(() => setAlertConfig({ isOpen: true, message: `👋 Welcome, ${user.name || 'Admin'}!\n\nAap Student Dashboard pe hain.\nAdmin Panel ke liye Profile → Admin Panel pe jayein.` }), 600);
-    }
   };
 
   const [logoutPending, setLogoutPending] = useState(false);
@@ -3302,6 +3408,7 @@ const App: React.FC = () => {
                               isFirstChapter={_isFirstChapter}
                               onAdminBoard={(state.user?.role === 'ADMIN' || state.user?.role === 'SUB_ADMIN') ? () => setState(prev => ({...prev, view: 'ADMIN'})) : undefined}
                               onSendToMcqCommunity={(draft) => setAppMcqCommunityDraft(draft)}
+                              onSessionCreditsEarned={handleSessionCreditsEarned}
                onAdminEdit={(state.user?.role === 'ADMIN' || state.user?.role === 'SUB_ADMIN') ? () => {
                                 try {
                                   const ch = state.selectedChapter;
@@ -3609,29 +3716,31 @@ const App: React.FC = () => {
           </div>
       )}
     </div>
-    {/* CreditToast hataya — HomeStatsToast se replace kiya */}
-    {/* Home page pe aate hi stats toast — pts, bonus, credits, time */}
-    {state.user && (
-      <HomeStatsToast
-        sessionScore={mcqSessionScore}
-        creditsEarned={mcqSessionCredits}
-        bonusPts={Math.round(mcqSessionScore * (getLevelInfo(state.user.totalScore || 0).discount / 100))}
-        sessionSeconds={mcqSessionSeconds}
-        chapterName={mcqChapterName}
-        activityType={mcqActivityType}
-        totalScore={state.user.totalScore || 0}
-        credits={state.user.credits || 0}
-        visible={homeStatsVisible}
-        onDismiss={() => { setHomeStatsVisible(false); setMcqSessionScore(0); setMcqSessionCredits(0); setMcqSessionSeconds(0); }}
-      />
-    )}
-    {/* Session summary banner — MCQ/Lesson khatam hote hi immediately dikhta hai */}
-    {pendingSessionSummary && (
+    {/* ── Session Notification System ────────────────────────────────────────
+        HOME tab pe aane pe dikhta hai:
+        • 1 activity → SessionSummaryBanner (single card)
+        • 2+ activities → GroupedSessionBanner (total + More button)
+    ────────────────────────────────────────────────────────────────────── */}
+
+    {/* Single activity banner */}
+    {pendingSessionSummary && !groupedSessions.length && (
       <div className="fixed inset-x-0 top-0 z-[9990] pointer-events-none">
         <div className="pointer-events-auto">
           <SessionSummaryBanner
             summary={pendingSessionSummary}
-            onDismiss={() => setPendingSessionSummary(null)}
+            onDismiss={() => { setPendingSessionSummary(null); displayedSessionsRef.current = []; }}
+          />
+        </div>
+      </div>
+    )}
+
+    {/* Session banner — 1+ activities (always uses GroupedSessionBanner) */}
+    {groupedSessions.length >= 1 && (
+      <div className="fixed inset-x-0 top-0 z-[9990] pointer-events-none">
+        <div className="pointer-events-auto">
+          <GroupedSessionBanner
+            sessions={groupedSessions}
+            onDismiss={() => { setGroupedSessions([]); setPendingSessionSummary(null); displayedSessionsRef.current = []; }}
           />
         </div>
       </div>

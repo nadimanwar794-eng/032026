@@ -3266,3 +3266,22 @@ body[data-iic-notes-focus] [data-iic-float-logo] { display: none !important; }
   filter: none;
   pointer-events: auto;
 }
+
+/* ── Coin Gate premium shimmer ── */
+@keyframes coin-gate-shimmer {
+  0%   { transform: translateX(-120%); }
+  100% { transform: translateX(120%); }
+}
+.cg-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.cg-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.22) 50%, transparent 100%);
+  animation: coin-gate-shimmer 2.4s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 1;
+}

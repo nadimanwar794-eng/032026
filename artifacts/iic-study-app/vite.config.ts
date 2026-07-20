@@ -98,6 +98,13 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, 'dist/public'),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        // Prevent Rollup from reordering module declarations in a way that
+        // can cause TDZ (Temporal Dead Zone) errors in production bundles.
+        hoistTransitiveImports: false,
+      },
+    },
   },
   server: {
     port,

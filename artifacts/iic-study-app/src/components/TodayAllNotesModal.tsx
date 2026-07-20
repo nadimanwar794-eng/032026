@@ -275,7 +275,7 @@ export const TodayAllNotesModal: React.FC<Props> = ({ dueNotes, user, onClose, o
             <div className="px-5 pt-5 pb-3 border-b border-slate-100 shrink-0">
               <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto mb-4" />
               <div className="flex items-center gap-2 mb-1">
-                <CheckCheck size={20} className="text-indigo-600 shrink-0" />
+                <CheckCheck size={20} className="shrink-0" style={{ color: 'var(--nst-color-brand)' }} />
                 <h3 className="text-base font-black text-slate-800">Kya aapne revision kar liya?</h3>
               </div>
               <p className="text-xs text-slate-500 ml-7">
@@ -310,18 +310,17 @@ export const TodayAllNotesModal: React.FC<Props> = ({ dueNotes, user, onClose, o
                   <button
                     key={`${b.chapterId}::${b.pageKey}::${b.topic}`}
                     onClick={() => toggleCheck(idx)}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl border-2 text-left transition-all active:scale-[0.98] ${
-                      isChecked
-                        ? 'border-indigo-400 bg-indigo-50'
-                        : 'border-slate-200 bg-white'
-                    }`}
+                    className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl border-2 text-left transition-all active:scale-[0.98]"
+                    style={isChecked
+                      ? { borderColor: 'var(--nst-color-brand)', background: 'var(--nst-color-brand-5)' }
+                      : { borderColor: '#e2e8f0', background: 'white' }}
                   >
                     {isChecked
-                      ? <CheckCircle2 size={20} className="text-indigo-600 shrink-0" />
+                      ? <CheckCircle2 size={20} className="shrink-0" style={{ color: 'var(--nst-color-brand)' }} />
                       : <Circle size={20} className="text-slate-300 shrink-0" />
                     }
                     <div className="flex-1 min-w-0">
-                      <p className={`text-sm font-bold truncate ${isChecked ? 'text-indigo-800' : 'text-slate-700'}`}>
+                      <p className="text-sm font-bold truncate" style={isChecked ? { color: 'var(--nst-color-brand)' } : { color: '#374151' }}>
                         {b.topic}
                       </p>
                       {b.subjectName && (
@@ -329,7 +328,7 @@ export const TodayAllNotesModal: React.FC<Props> = ({ dueNotes, user, onClose, o
                       )}
                     </div>
                     {isChecked && (
-                      <span className="shrink-0 text-[10px] font-black bg-indigo-100 text-indigo-600 px-2 py-0.5 rounded-full">
+                      <span className="shrink-0 text-[10px] font-black px-2 py-0.5 rounded-full" style={{ background: 'var(--nst-color-brand-10)', color: 'var(--nst-color-brand)' }}>
                         MCQ tayaar
                       </span>
                     )}
@@ -342,7 +341,8 @@ export const TodayAllNotesModal: React.FC<Props> = ({ dueNotes, user, onClose, o
             <div className="px-4 pt-4 pb-[calc(env(safe-area-inset-bottom,0px)+76px)] border-t border-slate-100 space-y-2.5 shrink-0">
               <button
                 onClick={handleConfirmExit}
-                className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white font-black py-4 rounded-2xl text-sm shadow-lg shadow-indigo-200 transition-all"
+                className="w-full flex items-center justify-center gap-2 active:scale-[0.98] text-white font-black py-4 rounded-2xl text-sm shadow-lg transition-all"
+                style={{ background: 'linear-gradient(135deg, var(--nst-btn-start, #4f46e5), var(--nst-btn-end, #7c3aed))' }}
               >
                 <CheckCircle2 size={18} />
                 {checkedIdxs.size > 0
@@ -388,11 +388,10 @@ export const TodayAllNotesModal: React.FC<Props> = ({ dueNotes, user, onClose, o
         <button
           onClick={() => setFocusMode(f => !f)}
           title={focusMode ? 'Focus Mode band karo' : 'Focus Mode on karo'}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors shrink-0 ${
-            focusMode
-              ? 'bg-indigo-600 text-white border-indigo-600'
-              : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200'
-          }`}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors shrink-0"
+          style={focusMode
+            ? { background: 'var(--nst-color-brand)', color: 'white', borderColor: 'var(--nst-color-brand)' }
+            : { background: '#f1f5f9', color: '#475569', borderColor: '#e2e8f0' }}
         >
           {focusMode ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
           {focusMode ? 'Exit' : 'Focus'}
@@ -419,11 +418,11 @@ export const TodayAllNotesModal: React.FC<Props> = ({ dueNotes, user, onClose, o
             <div key={key} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
 
               {/* Topic header */}
-              <div className="bg-indigo-50 border-b border-indigo-100 px-4 py-3 flex items-center gap-2">
-                <BookOpen size={14} className="text-indigo-600 shrink-0" />
+              <div className="border-b px-4 py-3 flex items-center gap-2" style={{ background: 'var(--nst-color-brand-5)', borderColor: 'var(--nst-color-brand-20)' }}>
+                <BookOpen size={14} className="shrink-0" style={{ color: 'var(--nst-color-brand)' }} />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-black text-indigo-800 leading-snug">{entry.title}</p>
-                  <p className="text-[10px] text-indigo-500 truncate">
+                  <p className="text-sm font-black leading-snug" style={{ color: 'var(--nst-color-brand)' }}>{entry.title}</p>
+                  <p className="text-[10px] truncate" style={{ color: 'var(--nst-color-brand-60, #6366f1)' }}>
                     {entry.bucket.subjectName}{entry.bucket.chapterTitle ? ` · ${entry.bucket.chapterTitle}` : ''}
                   </p>
                 </div>
@@ -449,11 +448,10 @@ export const TodayAllNotesModal: React.FC<Props> = ({ dueNotes, user, onClose, o
                   onClick={() => !entry.loading && !entry.error && entry.content && handleSpeak(idx, entry.content)}
                   disabled={entry.loading || entry.error || !entry.content}
                   title={isSpeaking ? 'Padhna roko' : 'Yeh topic suno'}
-                  className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-colors shrink-0 ${
-                    isSpeaking
-                      ? 'bg-rose-100 text-rose-700 border border-rose-300'
-                      : 'bg-indigo-600 text-white hover:bg-indigo-700'
-                  } disabled:opacity-40 disabled:cursor-not-allowed`}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-colors shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+                  style={isSpeaking
+                    ? { background: '#ffe4e6', color: '#be123c', border: '1px solid #fda4af' }
+                    : { background: 'var(--nst-color-brand)', color: 'white' }}
                 >
                   {isSpeaking ? <Square size={12} /> : <Volume2 size={12} />}
                   {isSpeaking ? 'Roko' : 'Suno'}
@@ -524,7 +522,8 @@ export const TodayAllNotesModal: React.FC<Props> = ({ dueNotes, user, onClose, o
 
                 {!entry.loading && !entry.error && entry.content && (
                   <p
-                    className={`text-sm leading-relaxed whitespace-pre-wrap text-slate-700 ${isSpeaking ? 'bg-indigo-50 rounded-xl p-3 border border-indigo-100' : ''}`}
+                    className="text-sm leading-relaxed whitespace-pre-wrap text-slate-700"
+                    style={isSpeaking ? { background: 'var(--nst-color-brand-5)', borderRadius: '12px', padding: '12px', border: '1px solid var(--nst-color-brand-20)' } : undefined}
                   >
                     {entry.content}
                   </p>

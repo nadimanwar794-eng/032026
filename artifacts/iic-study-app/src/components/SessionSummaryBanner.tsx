@@ -1,12 +1,14 @@
 /**
  * SessionSummaryBanner — HOME tab pe dikhne wala bada summary card.
  * Jab user MCQ ya lesson khatam karke HOME pe aata hai, yeh card dikhta hai
- * jisme session ka poora detail hota hai: subject, chapter, score, time, coins.
+ * jisme session ka poora detail hota hai: subject, chapter, score, time, coins, pts.
+ *
+ * v2: Added sessionScore (pts earned) display + "More ▾" breakdown toggle.
  */
 
 import React, { useEffect, useState } from 'react';
 import { SessionCompletePayload } from '../utils/sessionNotify';
-import { X, Clock, Star, Coins, CheckCircle2, BookOpen } from 'lucide-react';
+import { X, Clock, Star, CheckCircle2, BookOpen, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface SessionSummaryBannerProps {
   summary: SessionCompletePayload;
@@ -15,18 +17,33 @@ interface SessionSummaryBannerProps {
 
 function formatTime(secs: number): string {
   if (!secs || secs <= 0) return '—';
-  const m = Math.floor(secs / 60);
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
   const s = Math.floor(secs % 60);
-  if (m === 0) return `${s} सेकंड`;
-  if (s === 0) return `${m} मिनट`;
-  return `${m} मि. ${s} से.`;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
 }
+
+const ACTIVITY_EMOJI: Record<string, string> = {
+  MCQ: '📝',
+  Reading: '📖',
+  Writing: '✍️',
+  LESSON: '📚',
+};
+
+const ACTIVITY_LABEL: Record<string, string> = {
+  MCQ: 'MCQ',
+  Reading: 'Reading Notes',
+  Writing: 'Writing Notes',
+  LESSON: 'Lesson',
+};
 
 export const SessionSummaryBanner: React.FC<SessionSummaryBannerProps> = ({ summary, onDismiss }) => {
   const [visible, setVisible] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
-    // Small delay so the enter animation runs
     const t = setTimeout(() => setVisible(true), 50);
     return () => clearTimeout(t);
   }, []);
@@ -41,6 +58,13 @@ export const SessionSummaryBanner: React.FC<SessionSummaryBannerProps> = ({ summ
     pct >= 80 ? 'text-emerald-400' :
     pct >= 50 ? 'text-amber-400' :
     'text-red-400';
+
+  // MCQ sessions mein activityType override karo — reading/writing chapter ka MCQ ho to bhi "MCQ" label dikhao
+  const activityKey = isMCQ ? 'MCQ' : (summary.activityType || 'LESSON');
+  const activityEmoji = ACTIVITY_EMOJI[activityKey] || '📖';
+  const activityLabel = ACTIVITY_LABEL[activityKey] || activityKey;
+  const hasPts = (summary.sessionScore ?? 0) > 0;
+  const hasCoins = (summary.coinsEarned ?? 0) > 0;
 
   return (
     <div
@@ -68,7 +92,7 @@ export const SessionSummaryBanner: React.FC<SessionSummaryBannerProps> = ({ summ
         />
       </div>
 
-      <div className="px-4 pt-3 pb-4">
+      <div className="px-4 pt-3 pb-3">
         {/* Header row */}
         <div className="flex items-start justify-between gap-2 mb-3">
           <div className="flex items-center gap-2.5">
@@ -82,7 +106,7 @@ export const SessionSummaryBanner: React.FC<SessionSummaryBannerProps> = ({ summ
             </div>
             <div>
               <p className="text-xs font-semibold text-yellow-400 uppercase tracking-widest leading-none mb-0.5">
-                {isMCQ ? 'MCQ Complete! 🎯' : 'Lesson Complete! 📚'}
+                {isMCQ ? 'MCQ Complete! 🎯' : 'Session Complete! 📚'}
               </p>
               <p className="text-[13px] font-bold text-white leading-tight line-clamp-1">
                 {summary.chapter}
@@ -101,9 +125,28 @@ export const SessionSummaryBanner: React.FC<SessionSummaryBannerProps> = ({ summ
         </div>
 
         {/* Stats row */}
-        <div className="grid gap-2"
-          style={{ gridTemplateColumns: isMCQ ? 'repeat(3, 1fr)' : 'repeat(2, 1fr)' }}
+        <div
+          className="grid gap-2 mb-2"
+          style={{
+            gridTemplateColumns: isMCQ
+              ? (hasPts ? 'repeat(4, 1fr)' : 'repeat(3, 1fr)')
+              : (hasPts ? 'repeat(3, 1fr)' : 'repeat(2, 1fr)'),
+          }}
         >
+          {/* Pts earned — show when sessionScore > 0 */}
+          {hasPts && (
+            <StatCard
+              icon={<Star size={14} />}
+              label="Points"
+              value={
+                <span className="text-base font-black text-yellow-400">
+                  +{summary.sessionScore}
+                </span>
+              }
+              sub="⭐ earned"
+            />
+          )}
+
           {/* Score (MCQ only) */}
           {isMCQ && (
             <StatCard
@@ -128,23 +171,60 @@ export const SessionSummaryBanner: React.FC<SessionSummaryBannerProps> = ({ summ
           {/* Coins */}
           <StatCard
             icon={<span className="text-sm">🪙</span>}
-            label="Coins Mile"
+            label="Coins"
             value={
-              summary.coinsEarned != null
-                ? <span className="text-base font-black text-yellow-400">+{summary.coinsEarned}</span>
+              hasCoins
+                ? <span className="text-base font-black text-amber-400">+{summary.coinsEarned}</span>
                 : <span className="text-base font-black text-slate-500">—</span>
             }
           />
         </div>
 
-        {/* Lesson-only: lesson reward line */}
-        {!isMCQ && (
-          <div
-            className="mt-2 px-3 py-2 rounded-xl text-xs font-semibold text-emerald-300 flex items-center gap-1.5"
-            style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.2)' }}
-          >
-            <Star size={12} className="shrink-0" />
-            Revision Hub unlock ho gaya! Pura chapter dobara practice karo.
+        {/* More ▾ toggle — activity breakdown */}
+        <button
+          onClick={() => setExpanded(prev => !prev)}
+          className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-xl text-[11px] font-semibold text-slate-400 hover:text-white transition active:scale-95"
+          style={{ border: '1px solid rgba(255,255,255,0.08)' }}
+        >
+          {expanded ? (
+            <>
+              <ChevronUp size={13} />
+              Less
+            </>
+          ) : (
+            <>
+              <ChevronDown size={13} />
+              More — activity detail dekho
+            </>
+          )}
+        </button>
+
+        {/* Expanded breakdown */}
+        {expanded && (
+          <div className="mt-2">
+            <div
+              className="flex items-center gap-2 px-3 py-2 rounded-xl"
+              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.07)' }}
+            >
+              <span className="text-base shrink-0">{activityEmoji}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] font-bold text-white leading-none truncate">{activityLabel}</p>
+                {summary.chapter && (
+                  <p className="text-[9px] text-slate-400 leading-none mt-0.5 truncate">{summary.chapter}</p>
+                )}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {hasPts && (
+                  <span className="text-[10px] font-bold text-yellow-400">+{summary.sessionScore}⭐</span>
+                )}
+                {hasCoins && (
+                  <span className="text-[10px] font-bold text-amber-400">+{summary.coinsEarned}🪙</span>
+                )}
+                {summary.timeSecs > 0 && (
+                  <span className="text-[10px] text-slate-400">{formatTime(summary.timeSecs)}</span>
+                )}
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -162,12 +242,12 @@ function StatCard({
 }) {
   return (
     <div
-      className="rounded-xl px-3 py-2.5 flex flex-col gap-0.5"
+      className="rounded-xl px-2 py-2.5 flex flex-col gap-0.5"
       style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.09)' }}
     >
       <div className="flex items-center gap-1 text-slate-400 mb-1">
         <span className="opacity-80">{icon}</span>
-        <span className="text-[10px] font-semibold uppercase tracking-wider">{label}</span>
+        <span className="text-[9px] font-semibold uppercase tracking-wider">{label}</span>
       </div>
       {value}
       {sub && <p className="text-[10px] text-slate-500 leading-none">{sub}</p>}

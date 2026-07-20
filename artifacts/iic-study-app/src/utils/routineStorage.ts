@@ -13,6 +13,39 @@ export interface RoutineSubjectConfig {
   currentLessonIndex: number; // where we are in the repetition cycle
 }
 
+// ── Routine Slot: one daily study track (book+subject, 1 lesson/day) ──────────
+export interface RoutineSlot {
+  id: string;
+  bookName: string;
+  classLevel?: string;
+  subjectId: string;
+  displayName: string;
+  emoji: string;
+  categoryName?: string;
+  currentLessonIndex: number;
+  startLessonIndex: number;
+  totalLessons: number;
+}
+
+// ── New Category model: one slot = one named group of rotating subjects ────────
+export interface RoutineCategorySubject {
+  subjectId: string;
+  bookName: string;
+  classLevel?: string;
+  displayName: string;
+  emoji: string;
+  currentLessonIndex: number;
+  totalLessons: number;
+}
+
+export interface RoutineCategory {
+  id: string;
+  categoryName: string;
+  emoji: string;                      // emoji of first/primary subject
+  subjects: RoutineCategorySubject[]; // all subjects in this category
+  currentSubjectIndex: number;        // which subject is active today (rotates on completion)
+}
+
 export interface PageProgress {
   pageRead: boolean;
   mcqDone: boolean;
@@ -73,8 +106,15 @@ export interface RoutineData {
   revisionUnlockedLessons: Record<string, boolean>; // lessonId → true
   // ── Routine track selection ──────────────────────────────────────────────
   routineMode: 'SCHOOL' | 'COMPETITION' | null;
-  selectedClass: string | null;  // school: '6'–'12'
-  selectedBook: string | null;   // competition: 'Lucent GK', 'Speedy Science', etc.
+  selectedClass: string | null;   // school: '6'–'12'
+  selectedBook: string | null;    // competition: single book (legacy)
+  selectedBooks: string[];        // competition: multiple books (primary)
+  // ── Multi-category slot system ───────────────────────────────────────────────
+  routineSlots: RoutineSlot[];          // legacy — kept for migration only
+  routineCategories: RoutineCategory[]; // primary: one entry per named category
+  unlockedTierSlot: boolean;            // paid with coins (tier-price)
+  unlockedLevel5Slot: boolean;          // legacy flag — level bonus now computed from level directly
+  unlockedLevel8Slot: boolean;          // legacy flag — level bonus now computed from level directly
 }
 
 const STORAGE_KEY = 'nst_my_routine_v1';
@@ -83,17 +123,57 @@ export function getTodayStr(): string {
   return new Date().toISOString().split('T')[0];
 }
 
+/** Migrate old routineSlots (one-slot-per-subject) → routineCategories (one-category-per-name) */
+function migrateSlotsToCats(slots: RoutineSlot[]): RoutineCategory[] {
+  if (!slots?.length) return [];
+  const map = new Map<string, RoutineCategory>();
+  for (const slot of slots) {
+    const key = slot.categoryName || slot.displayName || slot.subjectId;
+    if (!map.has(key)) {
+      map.set(key, {
+        id: `cat_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        categoryName: slot.categoryName || key,
+        emoji: slot.emoji,
+        subjects: [],
+        currentSubjectIndex: 0,
+      });
+    }
+    map.get(key)!.subjects.push({
+      subjectId: slot.subjectId,
+      bookName: slot.bookName,
+      classLevel: slot.classLevel,
+      displayName: slot.displayName,
+      emoji: slot.emoji,
+      currentLessonIndex: slot.currentLessonIndex,
+      totalLessons: slot.totalLessons,
+    });
+  }
+  return Array.from(map.values());
+}
+
 export function loadRoutineData(userId: string): RoutineData {
   try {
     const raw = localStorage.getItem(`${STORAGE_KEY}_${userId}`);
     if (raw) {
       const parsed = JSON.parse(raw);
+      const slots: RoutineSlot[] = parsed.routineSlots ?? [];
+      // Migrate old slots to categories if needed
+      const cats: RoutineCategory[] =
+        parsed.routineCategories?.length
+          ? parsed.routineCategories
+          : migrateSlotsToCats(slots);
       return {
         ...parsed,
         revisionUnlockedLessons: parsed.revisionUnlockedLessons || {},
         routineMode: parsed.routineMode ?? null,
         selectedClass: parsed.selectedClass ?? null,
         selectedBook: parsed.selectedBook ?? null,
+        selectedBooks: parsed.selectedBooks ?? [],
+        routineSlots: slots,
+        routineCategories: cats,
+        unlockedTierSlot: parsed.unlockedTierSlot ?? false,
+        unlockedLevel5Slot: parsed.unlockedLevel5Slot ?? false,
+        unlockedLevel8Slot: parsed.unlockedLevel8Slot ?? false,
       };
     }
   } catch {}
@@ -111,6 +191,12 @@ export function loadRoutineData(userId: string): RoutineData {
     routineMode: null,
     selectedClass: null,
     selectedBook: null,
+    selectedBooks: [],
+    routineSlots: [],
+    routineCategories: [],
+    unlockedTierSlot: false,
+    unlockedLevel5Slot: false,
+    unlockedLevel8Slot: false,
   };
 }
 
@@ -365,6 +451,7 @@ export function claimAllPendingCoins(data: RoutineData, tier: UserSubTier): { da
     data: { ...data, coins: data.coins + earned, dailyClaims: updatedClaims },
     earned,
   };
+
 }
 
 export function advanceLessonInCycle(sub: RoutineSubjectConfig): RoutineSubjectConfig {
@@ -373,4 +460,25 @@ export function advanceLessonInCycle(sub: RoutineSubjectConfig): RoutineSubjectC
     next = sub.startLessonIndex;
   }
   return { ...sub, currentLessonIndex: next };
+}
+
+// ── Slot capacity helpers ─────────────────────────────────────────────────────
+export function getBaseSlotCount(tier: UserSubTier): number {
+  if (tier === 'MAX_PRO') return 4;
+  if (tier === 'PRO') return 3;
+  return 2;
+}
+
+export function getTierSlotCost(tier: UserSubTier): number {
+  if (tier === 'MAX_PRO') return 500;
+  if (tier === 'PRO') return 250;
+  return 100;
+}
+
+export function getActualMaxSlots(tier: UserSubTier, level: number, data: RoutineData): number {
+  let max = getBaseSlotCount(tier);
+  if (data.unlockedTierSlot) max++;
+  if (level >= 5) max++;   // auto-unlocks at Level 5 achievement
+  if (level >= 8) max++;   // auto-unlocks at Level 8 achievement
+  return max;
 }

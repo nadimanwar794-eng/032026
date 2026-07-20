@@ -6,10 +6,10 @@ import { TimeConfig } from '../types';
 interface Props {
     latestVersion: string;
     updateUrl: string;
-    launchDate?: string; // NEW: Timer for App Launch (ISO)
-    gracePeriodDays?: number; // NEW
-    gracePeriod?: TimeConfig; // NEW: Granular Config
-    durationSeconds?: number; // NEW
+    launchDate?: string;
+    gracePeriodDays?: number;
+    gracePeriod?: TimeConfig;
+    durationSeconds?: number;
     onClose?: () => void;
 }
 
@@ -17,12 +17,9 @@ export const UpdatePopup: React.FC<Props> = ({ latestVersion, updateUrl, launchD
     const [isForceUpdate, setIsForceUpdate] = useState(false);
     const [timeLeft, setTimeLeft] = useState('');
 
-    // Auto Dismiss if durationSeconds > 0
     useEffect(() => {
         if (!isForceUpdate && durationSeconds && durationSeconds > 0 && onClose) {
-            const timer = setTimeout(() => {
-                onClose();
-            }, durationSeconds * 1000);
+            const timer = setTimeout(() => { onClose(); }, durationSeconds * 1000);
             return () => clearTimeout(timer);
         }
     }, [isForceUpdate, durationSeconds, onClose]);
@@ -31,9 +28,8 @@ export const UpdatePopup: React.FC<Props> = ({ latestVersion, updateUrl, launchD
         const updateTimer = () => {
             const now = Date.now();
             let deadline = 0;
-            
-            // Calculate Grace Duration (Milliseconds)
             let graceDuration = 0;
+
             if (gracePeriod) {
                 graceDuration = (gracePeriod.days * 24 * 60 * 60 * 1000) +
                                 (gracePeriod.hours * 60 * 60 * 1000) +
@@ -44,11 +40,8 @@ export const UpdatePopup: React.FC<Props> = ({ latestVersion, updateUrl, launchD
             }
 
             if (launchDate) {
-                // New "Timer Bomb" Logic (Global Launch Date + Grace Period)
-                const launchTime = new Date(launchDate).getTime();
-                deadline = launchTime + graceDuration;
+                deadline = new Date(launchDate).getTime() + graceDuration;
             } else {
-                // Legacy Logic (First Seen + Grace Period)
                 if (!latestVersion) return;
                 const key = `nst_update_first_seen_${latestVersion}`;
                 const firstSeen = localStorage.getItem(key);
@@ -60,7 +53,6 @@ export const UpdatePopup: React.FC<Props> = ({ latestVersion, updateUrl, launchD
                 }
             }
 
-            // Check Status
             if (now >= deadline) {
                 setIsForceUpdate(true);
                 setTimeLeft("Expired");
@@ -70,7 +62,7 @@ export const UpdatePopup: React.FC<Props> = ({ latestVersion, updateUrl, launchD
                 const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
                 const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
                 const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-                
+
                 if (days > 0) setTimeLeft(`${days}d ${hours}h ${minutes}m`);
                 else if (hours > 0) setTimeLeft(`${hours}h ${minutes}m ${seconds}s`);
                 else setTimeLeft(`${minutes}m ${seconds}s`);
@@ -80,15 +72,17 @@ export const UpdatePopup: React.FC<Props> = ({ latestVersion, updateUrl, launchD
         updateTimer();
         const interval = setInterval(updateTimer, 1000);
         return () => clearInterval(interval);
-
     }, [latestVersion, launchDate, gracePeriodDays, gracePeriod]);
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-sm animate-in fade-in">
             <div className="bg-white w-full rounded-3xl shadow-2xl overflow-hidden relative animate-in zoom-in-95 duration-300">
-                {/* Header Image/Icon */}
-                <div className="bg-gradient-to-br from-blue-600 to-indigo-600 p-8 flex justify-center items-center relative overflow-hidden">
-                    <div className="absolute top-0 left-0 w-full h-full opacity-10 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
+                {/* Header — theme gradient */}
+                <div
+                    className="p-8 flex justify-center items-center relative overflow-hidden"
+                    style={{ background: 'linear-gradient(135deg, var(--nst-btn-start, #4f46e5) 0%, var(--nst-btn-end, #7c3aed) 100%)' }}
+                >
+                    <div className="absolute top-0 left-0 w-full h-full opacity-10 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]" />
                     <div className="bg-white/20 p-4 rounded-full backdrop-blur-md shadow-xl relative z-10">
                         <Rocket size={48} className="text-white animate-pulse" />
                     </div>
@@ -99,45 +93,46 @@ export const UpdatePopup: React.FC<Props> = ({ latestVersion, updateUrl, launchD
                         <h2 className="text-2xl font-black text-slate-800">
                             {isForceUpdate ? "Version Expired" : "Update Available!"}
                         </h2>
-                        <p className="text-sm font-bold text-blue-600 bg-blue-50 inline-block px-3 py-1 rounded-full mt-1">
+                        <p
+                            className="text-sm font-bold inline-block px-3 py-1 rounded-full mt-1"
+                            style={{ background: 'var(--nst-color-brand-10)', color: 'var(--nst-color-brand)' }}
+                        >
                             New Version {latestVersion}
                         </p>
                     </div>
 
                     <p className="text-sm text-slate-600 leading-relaxed">
-                        {isForceUpdate 
+                        {isForceUpdate
                             ? "This version is no longer supported. You must update to continue using the app."
-                            : "A new version of the app is available with exciting new features and performance improvements."
-                        }
-                        
+                            : "A new version of the app is available with exciting new features and performance improvements."}
                         <span className={`block mt-2 font-bold ${isForceUpdate ? 'text-red-500' : 'text-orange-500'}`}>
                             {isForceUpdate ? "⛔ APP LOCKED" : `⏳ Old Version Dies in: ${timeLeft}`}
                         </span>
                     </p>
 
-                    <a 
-                        href={updateUrl} 
-                        target="_blank" 
+                    <a
+                        href={updateUrl}
+                        target="_blank"
                         rel="noreferrer"
-                        className="w-full bg-blue-600 text-white font-bold py-4 rounded-xl shadow-lg hover:bg-blue-700 hover:shadow-xl transition-all flex items-center justify-center gap-2 group"
+                        className="w-full text-white font-bold py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 group hover:opacity-90 active:scale-95"
+                        style={{ background: 'linear-gradient(135deg, var(--nst-btn-start, #4f46e5), var(--nst-btn-end, #7c3aed))' }}
                     >
                         <Download size={20} className="group-hover:translate-y-1 transition-transform" />
                         {isForceUpdate ? "Download New Version" : "Update Now"}
                     </a>
 
                     {!isForceUpdate && onClose && (
-                        <button 
-                            onClick={onClose} 
+                        <button
+                            onClick={onClose}
                             className="text-xs font-bold text-slate-500 hover:text-slate-600 uppercase tracking-widest mt-2"
                         >
                             Remind Me Later
                         </button>
                     )}
                 </div>
-                
-                {/* Close Button (Only if not forced) */}
+
                 {!isForceUpdate && onClose && (
-                    <button 
+                    <button
                         onClick={onClose}
                         className="absolute top-4 right-4 p-2 bg-black/10 hover:bg-black/20 text-white rounded-full transition-colors"
                     >

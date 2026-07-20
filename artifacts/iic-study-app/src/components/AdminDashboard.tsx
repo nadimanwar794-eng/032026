@@ -6489,19 +6489,6 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                               <div><label className="text-xs font-bold uppercase text-slate-600">AI Assistant Name</label><input type="text" value={localSettings.aiName || 'IIC AI'} onChange={e => setLocalSettings({...localSettings, aiName: e.target.value})} className="w-full p-3 border rounded-xl" placeholder="IIC AI" /></div>
                           </div>
 
-                          {/* Developer Name — appears as "Developed by …" on the loading screen and student profile page. */}
-                          <div>
-                              <label className="text-xs font-bold uppercase text-slate-600">Developer Name</label>
-                              <input
-                                  type="text"
-                                  value={localSettings.developerName ?? 'Nadim Anwar'}
-                                  onChange={e => setLocalSettings({...localSettings, developerName: e.target.value})}
-                                  className="w-full p-3 border rounded-xl"
-                                  placeholder="Nadim Anwar"
-                              />
-                              <p className="text-[10px] text-slate-500 mt-1">Loading screen aur Profile page par "Developed by …" me dikhta hai.</p>
-                          </div>
-
                           {/* === Custom Books — admin can add new "Sar Sangrah / Speedy" jaisi books ===
                               Har book ek subject ban jaata hai jo student dashboard pe page-wise notes/MCQ
                               dikhata hai (date-wise hierarchy ki jagah). Same notes Homework page pe bhi
