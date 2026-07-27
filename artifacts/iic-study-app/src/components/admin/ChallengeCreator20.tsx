@@ -3,16 +3,19 @@ import React, { useState } from 'react';
 import { Challenge20, ClassLevel, MCQItem, Subject } from '../../types';
 import { fetchLessonContent } from '../../services/groq';
 import { parseMCQText } from '../../utils/mcqParser';
-import { saveChallenge20, saveQuestionsToBank, fetchRandomQuestionsFromBank, getAllChallenges, deleteChallenge20 } from '../../services/questionBank';
+import { saveChallenge20, saveQuestionsToBank, getAllChallenges, deleteChallenge20 } from '../../services/questionBank';
+import { buildAutoMixQuestions } from '../../utils/challengeGenerator';
 import { DEFAULT_SUBJECTS, getSubjectsList } from '../../constants';
 import { Sparkles, Trophy, Calendar, Save, RefreshCw, Plus, Layers, Trash2, History } from 'lucide-react';
 
 interface Props {
   onBack: () => void;
   language: 'English' | 'Hindi';
+  autoChallengeEnabled?: boolean;
+  onToggleAutoChallenge?: () => void;
 }
 
-export const ChallengeCreator20: React.FC<Props> = ({ onBack, language }) => {
+export const ChallengeCreator20: React.FC<Props> = ({ onBack, language, autoChallengeEnabled, onToggleAutoChallenge }) => {
   const [viewMode, setViewMode] = useState<'CREATE' | 'HISTORY'>('CREATE');
   const [pastChallenges, setPastChallenges] = useState<Challenge20[]>([]);
 
@@ -189,28 +192,20 @@ export const ChallengeCreator20: React.FC<Props> = ({ onBack, language }) => {
   const handlePreviewAuto = async () => {
       setLoading(true);
       try {
-          const bankQuestions = await fetchRandomQuestionsFromBank(classLevel, autoCount);
+          // Pull from completed lessons + revision hub (no AI)
+          const mixed = buildAutoMixQuestions(
+              classLevel,
+              null,   // null = scan all boards for this class level
+              null,
+              type === 'DAILY_CHALLENGE' ? 'DAILY' : 'WEEKLY'
+          );
 
-          // Also fetch questions from past challenges to mix them
-          const allPastChallenges = await getAllChallenges();
-          const pastQuestions = allPastChallenges
-              .filter(c => c.classLevel === classLevel)
-              .flatMap(c => c.questions);
-
-          // Deduplicate based on question text to avoid same questions
-          const combined = [...bankQuestions, ...pastQuestions];
-          const uniqueQuestionsMap = new Map();
-          combined.forEach(q => {
-              uniqueQuestionsMap.set(q.question.trim().toLowerCase(), q);
-          });
-
-          let finalPool = Array.from(uniqueQuestionsMap.values());
+          // Override count with admin-chosen autoCount
+          const finalPool = mixed.slice(0, autoCount);
 
           if (finalPool.length === 0) {
-              alert("No questions in bank or past challenges for this class yet! Use AI or Import Mode first.");
+              alert("Koi completed lesson nahi mila! Pehle students kuch chapters padhen.");
           } else {
-              // Shuffle and slice to the required count
-              finalPool = finalPool.sort(() => 0.5 - Math.random()).slice(0, autoCount);
               setQuestions(finalPool);
               setStep('PREVIEW');
           }
@@ -288,19 +283,39 @@ export const ChallengeCreator20: React.FC<Props> = ({ onBack, language }) => {
               </div>
 
               {viewMode === 'CREATE' && (
-                  <div className="flex bg-slate-100 p-1 rounded-lg">
-                     <button
-                        onClick={() => setType('DAILY_CHALLENGE')}
-                        className={`px-4 py-2 rounded-md text-xs font-bold transition-all ${type === 'DAILY_CHALLENGE' ? 'bg-white shadow text-red-600' : 'text-slate-600'}`}
-                     >
-                        Daily Challenge
-                     </button>
-                     <button
-                        onClick={() => setType('WEEKLY_TEST')}
-                        className={`px-4 py-2 rounded-md text-xs font-bold transition-all ${type === 'WEEKLY_TEST' ? 'bg-white shadow text-blue-600' : 'text-slate-600'}`}
-                     >
-                        Weekly Test
-                     </button>
+                  <div className="flex items-center gap-3 flex-wrap">
+                     <div className="flex bg-slate-100 p-1 rounded-lg">
+                        <button
+                           onClick={() => setType('DAILY_CHALLENGE')}
+                           className={`px-4 py-2 rounded-md text-xs font-bold transition-all ${type === 'DAILY_CHALLENGE' ? 'bg-white shadow text-red-600' : 'text-slate-600'}`}
+                        >
+                           Daily Challenge
+                        </button>
+                        <button
+                           onClick={() => setType('WEEKLY_TEST')}
+                           className={`px-4 py-2 rounded-md text-xs font-bold transition-all ${type === 'WEEKLY_TEST' ? 'bg-white shadow text-blue-600' : 'text-slate-600'}`}
+                        >
+                           Weekly Test
+                        </button>
+                     </div>
+
+                     {/* AUTO-TRIGGER TOGGLE — sirf Daily Challenge tab pe dikhega */}
+                     {type === 'DAILY_CHALLENGE' && onToggleAutoChallenge && (
+                         <button
+                             onClick={onToggleAutoChallenge}
+                             title={autoChallengeEnabled !== false ? "Auto popup ON — tap to turn OFF" : "Auto popup OFF — tap to turn ON"}
+                             className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold border-2 transition-all ${
+                                 autoChallengeEnabled !== false
+                                     ? 'bg-green-50 border-green-400 text-green-700'
+                                     : 'bg-slate-100 border-slate-300 text-slate-500'
+                             }`}
+                         >
+                             <span className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${autoChallengeEnabled !== false ? 'bg-green-500' : 'bg-slate-300'}`}>
+                                 <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${autoChallengeEnabled !== false ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                             </span>
+                             Auto Trigger {autoChallengeEnabled !== false ? 'ON' : 'OFF'}
+                         </button>
+                     )}
                   </div>
               )}
           </div>

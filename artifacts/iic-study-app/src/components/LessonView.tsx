@@ -13,11 +13,13 @@ import rehypeKatex from 'rehype-katex';
 import { decodeHtml } from '../utils/htmlDecoder';
 import { storage } from '../utils/storage';
 import { getChapterData, saveUserHistory, saveTestResult, saveUserToLive, saveAdminMark2Topics, subscribeAdminMark2Topics, saveSuggestion } from '../firebase';
+import { getRoutineLessonCreditGiven, setRoutineLessonCreditGiven } from '../utils/routineFirebase';
 import { WriteModeCorrection } from "./WriteModeCorrection";
 import { SpeakButton } from './SpeakButton';
 import { McqSpeakButtons } from './McqSpeakButtons';
 import { ChunkedNotesReader } from './ChunkedNotesReader';
-import { renderMathInHtml } from '../utils/mathUtils';
+import { renderMathInHtml, formatExplanationHtml } from '../utils/mathUtils';
+import McqQuestionDisplay from './McqQuestionDisplay';
 import { stopSpeaking } from '../utils/ttsHighlighter';
 import { speakText, stripHtml } from '../utils/textToSpeech';
 import jsPDF from 'jspdf';
@@ -36,6 +38,7 @@ import { ReadingScoreHUD } from './ReadingScoreHUD';
 import { PdfViewer } from './PdfViewer';
 import { useAppTheme } from '../utils/themeContext';
 import { fireSessionComplete } from '../utils/sessionNotify';
+import { deferStudyCoins } from '../utils/studyRewards';
 
 
 interface Props {
@@ -156,6 +159,25 @@ export const LessonView: React.FC<Props> = ({
   const userRef = useRef(user);
   useEffect(() => { userRef.current = user; }, [user]);
 
+  // ── Routine credit gating ─────────────────────────────────────────────────
+  // isFirstTimeRef: true  → credits flow normally (first-ever visit)
+  // isFirstTimeRef: false → pts only, no credits (repeat visit)
+  // Firebase check runs on mount; pessimistic default = true (first time).
+  // creditsEarnedThisSessionRef tracks whether this session actually earned anything
+  // so we only write to Firebase if the user actually did something.
+  const isFirstTimeRef = useRef(true);
+  const creditsEarnedThisSessionRef = useRef(false);
+
+  useEffect(() => {
+    const uid = user?.id;
+    const lid = chapter?.id;
+    if (!uid || !lid) return;
+    getRoutineLessonCreditGiven(uid, lid).then(alreadyGiven => {
+      isFirstTimeRef.current = !alreadyGiven;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, chapter?.id]);
+
   // ── Session-complete accumulation (pts + credits per mode) ──────────────────
   const sessionReadingPtsRef = useRef(0);
   const sessionWritingPtsRef = useRef(0);
@@ -270,9 +292,20 @@ export const LessonView: React.FC<Props> = ({
       pendingSessionCreditsRef.current = 0;
       setPendingCreditDisplay(0);
     }
+    // ── Routine Firebase: mark credits given after first session ──────────────
+    // If this was a first-time session and the user actually earned credits/pts,
+    // write to Firebase so the next visit knows to give pts only (no credits).
+    if (isFirstTimeRef.current && creditsEarnedThisSessionRef.current) {
+      const uid = userRef.current?.id;
+      const lid = chapter?.id;
+      if (uid && lid) {
+        isFirstTimeRef.current = false; // prevent double-write if back is called again
+        setRoutineLessonCreditGiven(uid, lid).catch(() => {});
+      }
+    }
     onBack();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flushSessionEvents, onBack, onSessionCreditsEarned]);
+  }, [flushSessionEvents, onBack, onSessionCreditsEarned, chapter?.id]);
 
   // ── Coin accumulation: fractional carry-over prevents small events losing coins ──
   // Reading coins are awarded immediately per interval but fractional amounts
@@ -302,25 +335,21 @@ export const LessonView: React.FC<Props> = ({
     const _onUpdateUser = onUpdateUserRef.current;
     if (!_user || !_onUpdateUser) return;
 
+    // ── Routine credit gating: MCQ coins only on first visit ─────────────────
+    if (!isFirstTimeRef.current) return;
+
     const userLevel = getLevelFromScore(_user.totalScore || 0);
-    const ratio = userLevel >= 5 ? 0.5 : 0.25;
+    const ratio = userLevel >= 5 ? (1 / 6) : 0.125;
     const coins = Math.floor(totalPts * ratio);
     if (coins <= 0) return;
+
+    creditsEarnedThisSessionRef.current = true;
 
     // Save coins so flushSessionEvents can include them in MCQ session payload
     mcqFlushCrRef.current += coins;
 
-    const newCredits = (_user.credits || 0) + coins;
-    const updatedWithCoins = { ..._user, credits: newCredits };
-    _onUpdateUser(updatedWithCoins);
-    saveUserToLive(updatedWithCoins);
-
-    fireCreditNotify({
-      type: 'EARN',
-      amount: coins,
-      remaining: newCredits,
-      source: 'mcq',
-    });
+    // Study coins stay pending until the student returns to Home.
+    deferStudyCoins(_user.id, coins);
   }, []);
 
   const handleReadingScoreEarned = useCallback((pts: number, activity: string) => {
@@ -350,18 +379,24 @@ export const LessonView: React.FC<Props> = ({
     // Update totalScore immediately — reading/MCQ pts only
     const scoreUpdated = { ..._user, totalScore: (_user.totalScore || 0) + pts };
 
-    // Fractional coin accumulator: add this event's coin-value to running total,
-    // then award only the integer part — remainder carries to the next event.
-    const userLevel = getLevelFromScore(_user.totalScore || 0);
-    const ratio = userLevel >= 5 ? 0.5 : 0.25;
-    coinFracAccumRef.current += pts * ratio;
-    const coins = Math.floor(coinFracAccumRef.current);
-    coinFracAccumRef.current -= coins;
+    // ── Routine credit gating: coins only on first visit ─────────────────────
+    // If isFirstTimeRef is false (repeat visit), skip coin accumulation — pts only.
+    if (isFirstTimeRef.current) {
+      // Fractional coin accumulator: add this event's coin-value to running total,
+      // then award only the integer part — remainder carries to the next event.
+      const userLevel = getLevelFromScore(_user.totalScore || 0);
+      const ratio = userLevel >= 5 ? (1 / 6) : 0.125;
+      coinFracAccumRef.current += pts * ratio;
+      const coins = Math.floor(coinFracAccumRef.current);
+      coinFracAccumRef.current -= coins;
 
-    // Coins deferred — accumulate for session-end (no immediate balance update / notification)
-    if (coins > 0) {
-      pendingSessionCreditsRef.current += coins;
-      setPendingCreditDisplay(pendingSessionCreditsRef.current);
+      // Coins deferred — accumulate for session-end (no immediate balance update / notification)
+      if (coins > 0) {
+        deferStudyCoins(_user.id, coins);
+        pendingSessionCreditsRef.current += coins;
+        setPendingCreditDisplay(pendingSessionCreditsRef.current);
+        creditsEarnedThisSessionRef.current = true;
+      }
     }
     _onUpdateUser(scoreUpdated);
     saveUserToLive(scoreUpdated);
@@ -379,9 +414,14 @@ export const LessonView: React.FC<Props> = ({
       sessionWritingCrRef.current += credits; markModeActive('Writing');
     }
 
+    // ── Routine credit gating: credits only on first visit ────────────────────
+    if (!isFirstTimeRef.current) return;
+
     // Defer — collect in session box, apply 4s after HOME
+    deferStudyCoins(userRef.current?.id, credits);
     pendingSessionCreditsRef.current += credits;
     setPendingCreditDisplay(pendingSessionCreditsRef.current);
+    creditsEarnedThisSessionRef.current = true;
   }, []);
 
   // Award MCQ coins once when results are shown (session over)
@@ -991,9 +1031,16 @@ export const LessonView: React.FC<Props> = ({
           const strippedContent = filteredContent
               .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
               .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+              // Block-level closers → newline so 📌/📖/📝/💡 section markers
+              // stay on separate lines; without this, splitNoteSections' heading
+              // regex ([^\n]*) grabs the entire content as one giant heading and
+              // repeats it across all three tabs (Book Text / Smart Notes / आसान समझ).
+              .replace(/<\/?\s*(?:p|div|h[1-6]|li|ul|ol|tr|td|th|section|article|blockquote|pre|br)\s*[^>]*>/gi, '\n')
               .replace(/<[^>]*>/g, ' ')
               .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-              .replace(/\s+/g, ' ').trim();
+              .replace(/[^\S\n]+/g, ' ')   // collapse spaces/tabs but keep newlines
+              .replace(/\n{3,}/g, '\n\n')  // max 2 consecutive newlines
+              .trim();
 
           const isPremiumUser = !!(user?.isPremium || (user?.subscriptionTier && user.subscriptionTier !== 'FREE'));
           const HTML_UNLOCK_COST = 10;
@@ -1193,9 +1240,9 @@ export const LessonView: React.FC<Props> = ({
                                           }
                                           if (!readableText) return null;
                                           return (
-                                              <div className="notes-html-content p-4 sm:p-6 border-b border-slate-100 whitespace-pre-wrap text-slate-700" style={{ fontSize: '15px', lineHeight: '1.8' }}>
-                                                  {readableText}
-                                              </div>
+                                              <div className="notes-html-content p-4 sm:p-6 border-b border-slate-100 text-slate-700" style={{ fontSize: '15px', lineHeight: '1.8' }}
+                                                  dangerouslySetInnerHTML={{ __html: renderMathInHtml(readableText) }}
+                                              />
                                           );
                                       })()}
                                       {/* Write mode HTML */}
@@ -3074,14 +3121,7 @@ export const LessonView: React.FC<Props> = ({
                                                                            Skip
                                                                        </span>
                                                                    )}
-                                                                   <div dangerouslySetInnerHTML={{ __html: renderMathInHtml(q.question) }} className="prose prose-sm max-w-none" />
-                                                                   {q.statements && q.statements.length > 0 && (
-                                                                       <div className="mt-3 mb-2 flex flex-col space-y-2">
-                                                                           {q.statements.map((stmt, sIdx) => (
-                                                                               <div key={sIdx} className="bg-slate-50/80 p-3 rounded-lg border-l-4 border-indigo-200 text-slate-700 text-sm font-medium" dangerouslySetInnerHTML={{ __html: renderMathInHtml(stmt) }} />
-                                                                           ))}
-                                                                       </div>
-                                                                   )}
+                                                                   <McqQuestionDisplay q={q} questionClassName="prose prose-sm max-w-none" />
                                                                </div>
                                                            </div>
                                                            <div className="flex items-center gap-1.5 shrink-0">
@@ -3149,7 +3189,7 @@ export const LessonView: React.FC<Props> = ({
                                                                    </div>
                                                                    <SpeakButton text={q.explanation} className="p-1 text-blue-400 hover:bg-blue-100" iconSize={14} />
                                                                </div>
-                                                               <div className="text-slate-600 text-sm leading-relaxed prose prose-sm max-w-none w-full" dangerouslySetInnerHTML={{ __html: renderMathInHtml(q.explanation) }} />
+                                                               <div className="text-slate-600 text-sm leading-relaxed prose prose-sm max-w-none w-full" dangerouslySetInnerHTML={{ __html: formatExplanationHtml(q.explanation) }} />
                                                            </div>
                                                        )}
                                                    </div>
@@ -3163,7 +3203,7 @@ export const LessonView: React.FC<Props> = ({
                                                <h4 className="font-bold text-amber-900 flex items-center gap-2 mb-2">
                                                    <Lightbulb size={18} /> {topic} Revision Note
                                                </h4>
-                                               <div className="prose prose-sm max-w-none w-full text-amber-800" dangerouslySetInnerHTML={{ __html: decodeHtml(topicNote.content || topicNote.html || '') }} />
+                                               <div className="prose prose-sm max-w-none w-full text-amber-800" dangerouslySetInnerHTML={{ __html: renderMathInHtml(decodeHtml(topicNote.content || topicNote.html || '')) }} />
                                            </div>
                                        )}
                                    </div>
@@ -3188,14 +3228,7 @@ export const LessonView: React.FC<Props> = ({
                                            <div className="font-bold text-slate-800 flex gap-3 leading-relaxed flex-1">
                                                <span className="bg-blue-100 text-blue-700 w-6 h-6 rounded-full flex items-center justify-center text-xs shrink-0 font-bold mt-0.5">{idx + 1}</span>
                                                <div className="w-full">
-                                                   <div dangerouslySetInnerHTML={{ __html: renderMathInHtml(q.question) }} className="prose prose-sm max-w-none" />
-                                                   {q.statements && q.statements.length > 0 && (
-                                                       <div className="mt-3 mb-2 flex flex-col space-y-2">
-                                                           {q.statements.map((stmt, sIdx) => (
-                                                               <div key={sIdx} className="bg-slate-50/80 p-3 rounded-lg border-l-4 border-indigo-200 text-slate-700 text-sm font-medium" dangerouslySetInnerHTML={{ __html: renderMathInHtml(stmt) }} />
-                                                           ))}
-                                                       </div>
-                                                   )}
+                                                   <McqQuestionDisplay q={q} questionClassName="prose prose-sm max-w-none" />
                                                </div>
                                            </div>
                                            <div className="flex flex-col items-end gap-1.5 shrink-0">
@@ -3369,7 +3402,7 @@ export const LessonView: React.FC<Props> = ({
                                                            </div>
                                                            <SpeakButton text={q.explanation} className="p-1 text-blue-400 hover:bg-blue-100" iconSize={14} />
                                                        </div>
-                                                       <div className="text-slate-600 text-sm leading-relaxed prose prose-sm max-w-none w-full" dangerouslySetInnerHTML={{ __html: renderMathInHtml(q.explanation) }} />
+                                                       <div className="text-slate-600 text-sm leading-relaxed prose prose-sm max-w-none w-full" dangerouslySetInnerHTML={{ __html: formatExplanationHtml(q.explanation) }} />
                                                    </div>
                                                )}
                                                {q.commonMistake && (
@@ -3441,14 +3474,7 @@ export const LessonView: React.FC<Props> = ({
                                             {idx + 1}
                                         </span>
                                         <div className="font-bold text-slate-800 text-sm w-full">
-                                            <div dangerouslySetInnerHTML={{ __html: renderMathInHtml(q.question) }}></div>
-                                            {q.statements && q.statements.length > 0 && (
-                                                <div className="mt-2 flex flex-col space-y-2">
-                                                    {q.statements.map((stmt, sIdx) => (
-                                                        <div key={sIdx} className="bg-slate-50/80 p-2 rounded-lg border-l-4 border-indigo-200 text-slate-700 text-xs font-medium" dangerouslySetInnerHTML={{ __html: renderMathInHtml(stmt) }} />
-                                                    ))}
-                                                </div>
-                                            )}
+                                            <McqQuestionDisplay q={q} questionClassName="text-sm" stmtClassName="bg-slate-50/80 p-2 rounded-lg border-l-4 border-indigo-200 text-slate-700 text-xs font-medium leading-snug" />
                                         </div>
                                     </div>
                                     <div className="ml-9 space-y-1 mb-2">
@@ -3466,7 +3492,7 @@ export const LessonView: React.FC<Props> = ({
                                         })}
                                     </div>
                                     <div className="ml-9 p-2 bg-slate-50 text-[10px] text-slate-600 italic rounded">
-                                        <span className="font-bold">Explanation:</span> <span dangerouslySetInnerHTML={{ __html: renderMathInHtml(q.explanation || 'N/A') }}></span>
+                                        <span className="font-bold">Explanation:</span> <span dangerouslySetInnerHTML={{ __html: formatExplanationHtml(q.explanation || "N/A") }}></span>
                                     </div>
                                 </div>
                             );
@@ -3505,16 +3531,19 @@ export const LessonView: React.FC<Props> = ({
                                <div className="flex-[2]"></div> // Spacer if no next button on last page
                            )}
 
-                           {/* Submit Button - Always visible if condition met, or on last page */}
-                           {(canSubmit || !hasMore) && (
-                               <button
-                                   onClick={handleSubmitRequest}
-                                   disabled={!canSubmit}
-                                   className={`flex-[2] py-3 font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg ${canSubmit ? 'bg-green-600 text-white shadow-green-100' : 'bg-slate-200 text-slate-500'}`}
-                               >
-                                   Submit <Trophy size={20} />
-                               </button>
-                           )}
+                           {/* Submit Button - Always visible; disabled with hint until threshold met */}
+                           <button
+                               onClick={handleSubmitRequest}
+                               disabled={!canSubmit}
+                               className={`flex-[2] py-3 font-bold rounded-xl flex flex-col items-center justify-center gap-0.5 shadow-lg transition-all ${canSubmit ? 'bg-green-600 text-white shadow-green-100' : 'bg-slate-100 text-slate-400 border border-slate-200'}`}
+                           >
+                               <span className="flex items-center gap-1.5">Submit <Trophy size={18} /></span>
+                               {!canSubmit && (
+                                   <span className="text-[9px] font-black leading-none opacity-70">
+                                       {minRequired - attemptedCount} more to go
+                                   </span>
+                               )}
+                           </button>
                        </>
                    )}
 

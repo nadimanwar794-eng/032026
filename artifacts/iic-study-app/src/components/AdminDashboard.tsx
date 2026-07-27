@@ -5,6 +5,8 @@ import { User, ViewState, SystemSettings, Subject, Chapter, MCQItem, RecoveryReq
 import { List, GraduationCap, LayoutDashboard, Users, Search, Trash2, Save, X, Eye, EyeOff, Shield, Megaphone, CheckCircle, ListChecks, Database, FileText, Monitor, Sparkles, Banknote, BrainCircuit, AlertOctagon, ArrowLeft, ArrowRight, Key, Bell, ShieldCheck, Lock, Globe, Layers, Zap, PenTool, RefreshCw, RotateCcw, Plus, LogOut, Download, Upload, CreditCard, Ticket, Video, Image as ImageIcon, Type, Link, FileJson, Activity, AlertTriangle, Gift, Book, Mail, Edit3, MessageSquare, ShoppingBag, Cloud, Rocket, Code2, Layers as LayersIcon, Wifi, WifiOff, Copy, Crown, Gamepad2, Calendar, BookOpen, Image, HelpCircle, Youtube, Play, Star, Trophy, Palette, Settings, Headphones, Layout, Bot, LayoutDashboard as DashboardIcon, Loader2, Gauge, LayoutGrid, ArrowUpCircle, KeyRound, Award, Send, GitCompare, Lightbulb, ThumbsUp, ThumbsDown, Building2, TrendingUp } from 'lucide-react';
 import { getSubjectsList, DEFAULT_SUBJECTS, DEFAULT_APP_FEATURES, ALL_APP_FEATURES, STUDENT_APP_FEATURES, DEFAULT_CONTENT_INFO_CONFIG, ADMIN_PERMISSIONS, APP_VERSION, STATIC_SYLLABUS, LEVEL_UNLOCKABLE_FEATURES, LUCENT_SUBJECT_OPTIONS_BASE, getClassSubjectOptions, SUPPORT_PHONE } from '../constants';
 import { AdminClassMcqManager } from './AdminClassMcqManager';
+import { AdminCompetitionMcqManager } from './AdminCompetitionMcqManager';
+import { CoachingMcqEditor } from './CoachingMcqEditor';
 import { fetchChapters, fetchLessonContent } from '../services/groq';
 import { runAutoPilot, runCommandMode } from '../services/autoPilot';
 import { parseMCQText } from '../utils/mcqParser';
@@ -12,6 +14,7 @@ import { saveTopicNotes } from '../utils/revisionTrackerV2';
 import { TOP_BAR_EFFECTS, EFFECT_CATEGORIES, TopBarEffectsLayer } from '../utils/topBarEffects';
 import { generateSecureRandomString, generateSecureRandomId } from '../utils/cryptoUtils';
 import { saveChapterData, bulkSaveLinks, checkFirebaseConnection, saveSystemSettings, subscribeToUsers, rtdb, saveUserToLive, db, getChapterData, saveCustomSyllabus, deleteCustomSyllabus, subscribeToUniversalAnalysis, saveAiInteraction, saveSecureKeys, getSecureKeys, subscribeToApiUsage, subscribeToDrafts, resetAllContent, recoverContentFromCache, checkRecoveryStatus, backupAllContentToFirebase, restoreContentFromFirebaseBackup, rebuildContentIndex, deleteHomeworkEntry, deleteLucentEntry, subscribeToDemands, updateDemandStatus, subscribeGlobalChat, subscribeSupportChat, deleteGlobalMessage, deleteSupportMessage, subscribeAllSupportThreads, sendGlobalMessage, sendSupportMessage, subscribeToCompareAnalytics, deleteCompareAnalyticsByQuery, addCompreBookNote, deleteCompreBookNote, getCompreBookNotes, updateCompreBookNote, getAppFeedbacks, exportBackupAsJson, importBackupFromJson, subscribeSuggestions, adminReplySuggestion, deleteSuggestion, reactToSuggestion, resolvesuggestion, applyNoteCorrection, applyMcqCorrection, applyMcqFullEdit, saveMcqLesson, deleteMcqLesson } from '../firebase'; // IMPORT FIREBASE
+import { subscribeToMaintenance, saveMaintenance, clearMaintenance, markCrashFixed, MaintenanceState, MaintenanceTarget } from '../utils/maintenanceManager';
 import { ref, set, onValue, update, push, get, query as rtdbQueryAdmin, orderByChild as obcAdmin, limitToLast as ltlAdmin } from "firebase/database";
 import { doc, deleteDoc, setDoc, getDocs, collection, writeBatch, deleteField } from "firebase/firestore";
 import { storage } from '../utils/storage';
@@ -146,7 +149,8 @@ type AdminTab =
   | 'REVISION_MCQ_MANAGER' // Revision Hub MCQ Manager
   | 'COACHING_HOMEWORK' // Coaching Homework Manager
   | 'COACHING_MANAGER' // 🏫 Full Coaching School System
-  | 'COACHING_CENTRES'; // 🏫 Create/Assign/Subscription — Super Admin
+  | 'COACHING_CENTRES' // 🏫 Create/Assign/Subscription — Super Admin
+  | 'COMPETITION_MCQ_MANAGER'; // MCQ Practice Manager for Competition Books
 
 interface ContentConfig {
     freeLink?: string;
@@ -414,6 +418,25 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
 
   const [activeTab, setActiveTab] = useState<AdminTab>('DASHBOARD');
   const [effectsSubTab, setEffectsSubTab] = useState<'TOPBAR' | 'PROFILE'>('TOPBAR');
+
+  // --- SMART CRASH PROTECTION: Maintenance State ---
+  const [maintenanceData, setMaintenanceData] = useState<MaintenanceState | null>(null);
+  const [maintForm, setMaintForm] = useState({ title: '', message: '', retryMinutes: 30, target: 'ALL' as MaintenanceTarget, active: false });
+  const [maintSaving, setMaintSaving] = useState(false);
+  useEffect(() => {
+    return subscribeToMaintenance(setMaintenanceData);
+  }, []);
+  useEffect(() => {
+    if (maintenanceData?.config) {
+      setMaintForm({
+        title: maintenanceData.config.title || '',
+        message: maintenanceData.config.message || '',
+        retryMinutes: maintenanceData.config.retryMinutes || 30,
+        target: maintenanceData.config.target || 'ALL',
+        active: maintenanceData.config.active || false,
+      });
+    }
+  }, [maintenanceData?.config?.updatedAt]);
   const [colorPaletteOpen, setColorPaletteOpen] = useState(true);
   const [customColor, setCustomColor] = useState('#a78bfa');
   const [activeNoteTab, setActiveNoteTab] = useState<'PREMIUM' | 'DEEP_DIVE' | 'ADDITIONAL' | 'TEACHER' | 'MULTI_HTML'>('PREMIUM');
@@ -714,7 +737,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   const [newBookNoteMode, setNewBookNoteMode] = useState<'single' | 'multi' | 'mcq'>('single');
   // Type selector for new custom book being created in Settings
   const [newCustomBookType, setNewCustomBookType] = useState<'single' | 'multi'>('single');
-  const [newBookNoteMcqs, setNewBookNoteMcqs] = useState<Array<{ id: string; question: string; options: string[]; correctAnswer: number }>>([]);
+  const [newBookNoteMcqs, setNewBookNoteMcqs] = useState<any[]>([]);
   const [newBookNoteBulk, setNewBookNoteBulk] = useState<string | undefined>(undefined);
   // ── Compre Book Notes (stored in Firestore compre_notes, shown in Compare → Book Notes tab) ──
   const [cnTitle, setCnTitle] = useState('');
@@ -788,7 +811,6 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
     pages: [{ id: Date.now().toString(), pageNo: '1', content: '', chunkNotes: '', htmlNotes: '' }],
   });
   // Per-page bulk MCQ paste: keyed by page id -> textarea content. When non-undefined the paste UI is open.
-  const [lucentPageBulk, setLucentPageBulk] = useState<Record<string, string>>({});
   const [cn612EditingId, setCn612EditingId] = useState<string | null>(null);
   const [cn612FilterClass, setCn612FilterClass] = useState<string>('ALL');
   const [bnMoveCopyModal, setBnMoveCopyModal] = useState<{ entry: any; origIdx: number; mode: 'move' | 'copy' } | null>(null);
@@ -1045,7 +1067,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   // Dynamic subject options — changes based on which classLevel admin selected.
   // For COMPETITION: competition subjects (built-in + custom). For class 6-12: all subjects of that class.
   const activeLucentSubjectOptions: { id: string; name: string }[] = (() => {
-    if (newLucent.classLevel === 'COMPETITION') return [...LUCENT_SUBJECT_OPTIONS_BASE.filter(s => !hiddenLucentSubjectIds.has(s.id)), ...customLucentSubjectsList.filter(s => !(s as any).bookId)];
+    if (newLucent.classLevel === 'COMPETITION') return [...LUCENT_SUBJECT_OPTIONS_BASE.filter(s => !hiddenLucentSubjectIds.has(s.id)), ...customLucentSubjectsList.filter(s => !(s as any).bookId), ...customBooksList.map(b => ({ id: b.id, name: `📗 ${b.name}` }))];
     try {
       const seen = new Set<string>();
       const results: { id: string; name: string }[] = [];
@@ -4230,6 +4252,134 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                       </span>
                     </button>
                   )}
+
+                  {/* ══ SMART CRASH PROTECTION: Maintenance Control Panel ══ */}
+                  <div className="w-full mt-3">
+                    {/* Crash alerts */}
+                    {(maintenanceData?.crashes?.studentDashboard?.detected || maintenanceData?.crashes?.adminDashboard?.detected) && (
+                      <div className="mb-3 space-y-2">
+                        {maintenanceData?.crashes?.studentDashboard?.detected && (
+                          <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-2xl px-4 py-2.5">
+                            <span className="text-base shrink-0">🚨</span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-black text-red-700">Student Dashboard Crashed!</p>
+                              <p className="text-[10px] text-red-400 line-clamp-1">{maintenanceData.crashes.studentDashboard.errorMessage}</p>
+                            </div>
+                            <button
+                              onClick={() => markCrashFixed('studentDashboard').catch(() => {})}
+                              className="shrink-0 text-[10px] font-black text-white bg-green-600 px-3 py-1.5 rounded-xl hover:bg-green-700 transition-colors"
+                            >
+                              ✅ Fixed
+                            </button>
+                          </div>
+                        )}
+                        {maintenanceData?.crashes?.adminDashboard?.detected && (
+                          <div className="flex items-center gap-3 bg-orange-50 border border-orange-200 rounded-2xl px-4 py-2.5">
+                            <span className="text-base shrink-0">⚠️</span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-black text-orange-700">Admin Dashboard Crashed!</p>
+                              <p className="text-[10px] text-orange-400 line-clamp-1">{maintenanceData.crashes.adminDashboard.errorMessage}</p>
+                            </div>
+                            <button
+                              onClick={() => markCrashFixed('adminDashboard').catch(() => {})}
+                              className="shrink-0 text-[10px] font-black text-white bg-green-600 px-3 py-1.5 rounded-xl hover:bg-green-700 transition-colors"
+                            >
+                              ✅ Fixed
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Maintenance message form */}
+                    <details className="group">
+                      <summary className="flex items-center gap-2 cursor-pointer bg-amber-50 border border-amber-200 rounded-2xl px-4 py-2.5 hover:bg-amber-100 transition-colors list-none">
+                        <span className="text-sm">🔧</span>
+                        <span className="text-xs font-black text-amber-800 flex-1">Emergency Maintenance Announcement</span>
+                        {maintenanceData?.config?.active && (
+                          <span className="text-[9px] font-black text-white bg-red-500 px-2 py-0.5 rounded-full animate-pulse">ACTIVE</span>
+                        )}
+                        <span className="text-amber-500 text-xs group-open:rotate-180 transition-transform">▼</span>
+                      </summary>
+                      <div className="mt-2 bg-white border border-amber-200 rounded-2xl p-4 space-y-3">
+                        <div>
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Title</label>
+                          <input
+                            value={maintForm.title}
+                            onChange={e => setMaintForm(f => ({ ...f, title: e.target.value }))}
+                            placeholder="System Upgrade in Progress"
+                            className="w-full text-xs border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:border-blue-400"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Message</label>
+                          <textarea
+                            value={maintForm.message}
+                            onChange={e => setMaintForm(f => ({ ...f, message: e.target.value }))}
+                            placeholder="We are updating our system to improve your experience. Please try again after 30 minutes."
+                            rows={3}
+                            className="w-full text-xs border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:border-blue-400 resize-none"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Retry Time</label>
+                            <select
+                              value={maintForm.retryMinutes}
+                              onChange={e => setMaintForm(f => ({ ...f, retryMinutes: Number(e.target.value) }))}
+                              className="w-full text-xs border border-slate-200 rounded-xl px-2 py-2 focus:outline-none focus:border-blue-400"
+                            >
+                              <option value={15}>15 min</option>
+                              <option value={30}>30 min</option>
+                              <option value={60}>1 hour</option>
+                              <option value={120}>2 hours</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Target</label>
+                            <select
+                              value={maintForm.target}
+                              onChange={e => setMaintForm(f => ({ ...f, target: e.target.value as MaintenanceTarget }))}
+                              className="w-full text-xs border border-slate-200 rounded-xl px-2 py-2 focus:outline-none focus:border-blue-400"
+                            >
+                              <option value="ALL">All Users</option>
+                              <option value="STUDENT_DASHBOARD">Student Dashboard</option>
+                              <option value="ROUTINE">Routine</option>
+                              <option value="REVISION_HUB">Revision Hub</option>
+                              <option value="MCQ">MCQ</option>
+                              <option value="VIDEOS">Videos</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div className="flex gap-2 pt-1">
+                          <button
+                            disabled={maintSaving}
+                            onClick={async () => {
+                              setMaintSaving(true);
+                              try {
+                                await saveMaintenance({ ...maintForm, active: true });
+                              } finally { setMaintSaving(false); }
+                            }}
+                            className="flex-1 bg-red-600 text-white font-black text-xs py-2.5 rounded-2xl hover:bg-red-700 transition-colors disabled:opacity-60"
+                          >
+                            🚨 Activate Maintenance
+                          </button>
+                          {maintenanceData?.config?.active && (
+                            <button
+                              disabled={maintSaving}
+                              onClick={async () => {
+                                setMaintSaving(true);
+                                try { await clearMaintenance(); } finally { setMaintSaving(false); }
+                              }}
+                              className="flex-1 bg-green-600 text-white font-black text-xs py-2.5 rounded-2xl hover:bg-green-700 transition-colors disabled:opacity-60"
+                            >
+                              ✅ Maintenance Complete
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </details>
+                  </div>
 
                   {/* TOOLBAR: utility actions (left) + system links (right), visually separated */}
                   <div className="w-full flex flex-col lg:flex-row lg:items-stretch gap-2.5 lg:gap-3 justify-center">
@@ -9311,213 +9461,35 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                     }} className="w-full mt-1 p-2 border border-slate-200 rounded text-sm outline-none min-h-[80px] resize-y focus:border-slate-400 bg-white" placeholder="Legacy content (backward compatibility)" />
                                                   </details>
                                               </div>
-                                              {/* Per-page MCQs (admin-curated). Each MCQ gets a question + 4 options +
-                                                  correct answer index. Stored on the LucentPageNote so the student
-                                                  reader uses these instead of AI-generating. */}
+                                              {/* Per-page MCQs — upgraded to CoachingMcqEditor */}
                                               <div className="border-t border-slate-200 pt-2 mt-1">
-                                                  <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
-                                                      <label className="text-[9px] font-bold text-emerald-700 uppercase">📝 Page MCQs ({(pg.mcqs || []).length})</label>
-                                                      <div className="flex gap-1">
-                                                          <button type="button" onClick={() => {
-                                                              setLucentPageBulk(prev => {
-                                                                  const cp = { ...prev };
-                                                                  if (cp[pg.id] === undefined) cp[pg.id] = '';
-                                                                  else delete cp[pg.id];
-                                                                  return cp;
-                                                              });
-                                                          }} className="bg-amber-500 text-white px-2 py-0.5 rounded text-[10px] font-bold hover:bg-amber-600 flex items-center gap-1">
-                                                              📋 Bulk Paste
-                                                          </button>
-                                                          <button type="button" onClick={() => {
-                                                              const updated = [...newLucent.pages];
-                                                              const existing = updated[pgIdx].mcqs || [];
-                                                              updated[pgIdx] = {
-                                                                  ...updated[pgIdx],
-                                                                  mcqs: [...existing, { id: `mcq_${Date.now()}_${Math.random()}`, question: '', options: ['', '', '', ''], correctAnswer: 0 } as any]
-                                                              };
-                                                              setNewLucent({...newLucent, pages: updated});
-                                                          }} className="bg-emerald-600 text-white px-2 py-0.5 rounded text-[10px] font-bold hover:bg-emerald-700 flex items-center gap-1">
-                                                              <Plus size={10} /> Add MCQ
-                                                          </button>
-                                                      </div>
-                                                  </div>
-                                                  {lucentPageBulk[pg.id] !== undefined && (
-                                                      <div className="bg-amber-50 border border-amber-200 rounded p-2 mb-2 space-y-1.5">
-                                                          <p className="text-[9px] text-amber-800 font-bold">Yahan poora MCQ block paste karein. Hindi/English dono format support karta hai (**प्रश्न:**, **सही उत्तर:**, **Q 1:**, **Ans:** etc.)</p>
-                                                          <textarea
-                                                              value={lucentPageBulk[pg.id]}
-                                                              onChange={e => setLucentPageBulk(prev => ({ ...prev, [pg.id]: e.target.value }))}
-                                                              placeholder={"**प्रश्न:** ... ?\nA) ...\nB) ...\nC) ...\nD) ...\n**सही उत्तर:** B) ..."}
-                                                              className="w-full p-1.5 border border-amber-300 rounded text-[11px] font-mono outline-none h-32 focus:border-amber-500"
-                                                          />
-                                                          <div className="flex gap-1">
-                                                              <button type="button" onClick={() => {
-                                                                  const raw = (lucentPageBulk[pg.id] || '').trim();
-                                                                  if (!raw) return alert('Text khaali hai.');
-                                                                  const norm = normalizeMcqPaste(raw);
-                                                                  const parsed = parseMCQText(norm);
-                                                                  if (!parsed.questions || parsed.questions.length === 0) {
-                                                                      return alert('Parse fail. Format check karein. (**प्रश्न:** ya **Question:** marker zaroori hai)');
-                                                                  }
-                                                                  const updated = [...newLucent.pages];
-                                                                  const existing = updated[pgIdx].mcqs || [];
-                                                                  const added = parsed.questions.map(q => ({
-                                                                      id: `mcq_${Date.now()}_${Math.random()}`,
-                                                                      question: (q.question || '').replace(/<br\/?>/g, '\n').trim(),
-                                                                      statements: (q.statements && q.statements.length > 0) ? q.statements : undefined,
-                                                                      options: (q.options || ['', '', '', '']).slice(0, 4),
-                                                                      correctAnswer: q.correctAnswer ?? 0,
-                                                                  })) as any[];
-                                                                  updated[pgIdx] = { ...updated[pgIdx], mcqs: [...existing, ...added] };
-                                                                  setNewLucent({...newLucent, pages: updated});
-                                                                  setLucentPageBulk(prev => { const cp = { ...prev }; delete cp[pg.id]; return cp; });
-                                                                  setAlertConfig({ isOpen: true, message: `✅ ${added.length} MCQ add ho gaye!` });
-                                                              }} className="flex-1 bg-amber-600 text-white px-2 py-1 rounded text-[10px] font-bold hover:bg-amber-700">
-                                                                  Parse & Add All
-                                                              </button>
-                                                              <button type="button" onClick={() => {
-                                                                  setLucentPageBulk(prev => { const cp = { ...prev }; delete cp[pg.id]; return cp; });
-                                                              }} className="bg-slate-200 text-slate-700 px-2 py-1 rounded text-[10px] font-bold hover:bg-slate-300">
-                                                                  Cancel
-                                                              </button>
-                                                          </div>
-                                                      </div>
-                                                  )}
-                                                  {(pg.mcqs || []).map((mcq, mIdx) => (
-                                                      <div key={(mcq as any).id || mIdx} className="bg-white border border-emerald-100 rounded p-2 mb-2 space-y-1.5 relative">
-                                                          <button type="button" onClick={() => {
-                                                              const updated = [...newLucent.pages];
-                                                              updated[pgIdx] = { ...updated[pgIdx], mcqs: (updated[pgIdx].mcqs || []).filter((_, i) => i !== mIdx) };
-                                                              setNewLucent({...newLucent, pages: updated});
-                                                          }} className="absolute top-1 right-1 p-0.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded">
-                                                              <Trash2 size={11} />
-                                                          </button>
-                                                          <input type="text" value={mcq.question} onChange={e => {
-                                                              const updated = [...newLucent.pages];
-                                                              const mcqs = [...(updated[pgIdx].mcqs || [])];
-                                                              mcqs[mIdx] = { ...mcqs[mIdx], question: e.target.value };
-                                                              updated[pgIdx] = { ...updated[pgIdx], mcqs };
-                                                              setNewLucent({...newLucent, pages: updated});
-                                                          }} className="w-full p-1.5 pr-6 border border-slate-200 rounded text-xs outline-none focus:border-emerald-500" placeholder={`Q${mIdx + 1}: Question?`} />
-                                                          {/* Statements — for "निम्नलिखित कथनों पर विचार करें" type MCQs.
-                                                              Har statement ek alag line mein likho. Ye options mein nahi jayenge. */}
-                                                          <div className="bg-blue-50 border border-blue-200 rounded p-1.5 space-y-1">
-                                                              <label className="text-[9px] font-black text-blue-700 uppercase block">📋 Statements (Statement-type MCQ ke liye — ek statement per line)</label>
-                                                              <textarea
-                                                                  value={((mcq as any).statements || []).join('\n')}
-                                                                  onChange={e => {
-                                                                      const updated = [...newLucent.pages];
-                                                                      const mcqs = [...(updated[pgIdx].mcqs || [])];
-                                                                      const raw = e.target.value;
-                                                                      const stmts = raw.split('\n').map(s => s.trim()).filter(Boolean);
-                                                                      mcqs[mIdx] = { ...mcqs[mIdx], statements: stmts.length > 0 ? stmts : undefined } as any;
-                                                                      updated[pgIdx] = { ...updated[pgIdx], mcqs };
-                                                                      setNewLucent({...newLucent, pages: updated});
-                                                                  }}
-                                                                  className="w-full p-1 border border-blue-200 rounded text-[11px] outline-none focus:border-blue-500 bg-white resize-none"
-                                                                  rows={3}
-                                                                  placeholder={"1. Bharat ki rajdhani Delhi hai.\n2. Bharat ek loktantrik desh hai.\n(khaali chhodein agar statement-type nahi hai)"}
-                                                              />
-                                                              <p className="text-[9px] text-blue-600">💡 Ye statements question ke baad, options se pehle dikhenge. Options mein mat likhein.</p>
-                                                          </div>
-                                                          <div className="grid grid-cols-2 gap-1">
-                                                              {(mcq.options || ['', '', '', '']).map((opt, oi) => (
-                                                                  <div key={oi} className="flex items-center gap-1">
-                                                                      <input type="radio" name={`correct-${pg.id}-${mIdx}`} checked={(mcq.correctAnswer ?? 0) === oi} onChange={() => {
-                                                                          const updated = [...newLucent.pages];
-                                                                          const mcqs = [...(updated[pgIdx].mcqs || [])];
-                                                                          mcqs[mIdx] = { ...mcqs[mIdx], correctAnswer: oi };
-                                                                          updated[pgIdx] = { ...updated[pgIdx], mcqs };
-                                                                          setNewLucent({...newLucent, pages: updated});
-                                                                      }} className="shrink-0" />
-                                                                      <input type="text" value={opt} onChange={e => {
-                                                                          const updated = [...newLucent.pages];
-                                                                          const mcqs = [...(updated[pgIdx].mcqs || [])];
-                                                                          const opts = [...(mcqs[mIdx].options || ['', '', '', ''])];
-                                                                          opts[oi] = e.target.value;
-                                                                          mcqs[mIdx] = { ...mcqs[mIdx], options: opts };
-                                                                          updated[pgIdx] = { ...updated[pgIdx], mcqs };
-                                                                          setNewLucent({...newLucent, pages: updated});
-                                                                      }} className="w-full p-1 border border-slate-200 rounded text-[11px] outline-none focus:border-emerald-500" placeholder={`Option ${String.fromCharCode(65 + oi)}`} />
-                                                                  </div>
-                                                              ))}
-                                                          </div>
-                                                          <p className="text-[9px] text-slate-500">✓ Sahi answer ke saamne radio click karein</p>
-                                                      </div>
-                                                  ))}
+                                                  <CoachingMcqEditor
+                                                      value={(pg.mcqs || []) as any}
+                                                      onChange={(mcqs) => {
+                                                          const updated = [...newLucent.pages];
+                                                          updated[pgIdx] = { ...updated[pgIdx], mcqs: mcqs as any };
+                                                          setNewLucent({...newLucent, pages: updated});
+                                                      }}
+                                                      accent="emerald"
+                                                  />
                                               </div>
                                           </div>
                                       ))}
                                   </div>}
-                                  {/* MCQ-only section: show single bulk MCQ builder for page[0] */}
+                                  {/* MCQ-only section — upgraded to CoachingMcqEditor */}
                                   {newLucent.mcqOnly && (() => {
                                       const pg = newLucent.pages[0];
                                       return (
                                           <div className="space-y-2 border border-emerald-200 rounded-xl p-3 bg-emerald-50">
-                                              <div className="flex items-center justify-between flex-wrap gap-2">
-                                                  <label className="text-[10px] font-black text-emerald-700 uppercase">📝 MCQs ({(pg.mcqs || []).length})</label>
-                                                  <div className="flex gap-1">
-                                                      <button type="button" onClick={() => {
-                                                          setLucentPageBulk(prev => {
-                                                              const cp = { ...prev };
-                                                              if (cp[pg.id] === undefined) cp[pg.id] = '';
-                                                              else delete cp[pg.id];
-                                                              return cp;
-                                                          });
-                                                      }} className="bg-amber-500 text-white px-2 py-1 rounded text-[10px] font-bold hover:bg-amber-600">📋 Bulk Paste</button>
-                                                      <button type="button" onClick={() => {
-                                                          const updated = [...newLucent.pages];
-                                                          const existing = updated[0].mcqs || [];
-                                                          updated[0] = { ...updated[0], mcqs: [...existing, { id: `mcq_${Date.now()}_${Math.random()}`, question: '', options: ['', '', '', ''], correctAnswer: 0 } as any] };
-                                                          setNewLucent({...newLucent, pages: updated});
-                                                      }} className="bg-emerald-600 text-white px-2 py-1 rounded text-[10px] font-bold hover:bg-emerald-700 flex items-center gap-1"><Plus size={10} /> Add MCQ</button>
-                                                  </div>
-                                              </div>
-                                              {lucentPageBulk[pg.id] !== undefined && (
-                                                  <div className="bg-white border border-amber-200 rounded p-2 space-y-1.5">
-                                                      <p className="text-[9px] text-amber-800 font-bold">Yahan poora MCQ block paste karein.</p>
-                                                      <textarea value={lucentPageBulk[pg.id]} onChange={e => setLucentPageBulk(prev => ({ ...prev, [pg.id]: e.target.value }))} placeholder={"**प्रश्न:** ... ?\nA) ...\nB) ...\nC) ...\nD) ...\n**सही उत्तर:** B) ..."} className="w-full p-1.5 border border-amber-300 rounded text-[11px] font-mono outline-none h-32 focus:border-amber-500" />
-                                                      <div className="flex gap-1">
-                                                          <button type="button" onClick={() => {
-                                                              const raw = (lucentPageBulk[pg.id] || '').trim();
-                                                              if (!raw) return alert('Text khaali hai.');
-                                                              const parsed = parseMCQText(normalizeMcqPaste(raw));
-                                                              if (!parsed.questions?.length) return alert('Parse fail. Format check karein.');
-                                                              const updated = [...newLucent.pages];
-                                                              const existing = updated[0].mcqs || [];
-                                                              const added = parsed.questions.map(q => ({ id: `mcq_${Date.now()}_${Math.random()}`, question: (q.question || '').replace(/<br\/?>/g, '\n').trim(), options: (q.options || ['', '', '', '']).slice(0, 4), correctAnswer: q.correctAnswer ?? 0 })) as any[];
-                                                              updated[0] = { ...updated[0], mcqs: [...existing, ...added] };
-                                                              setNewLucent({...newLucent, pages: updated});
-                                                              setLucentPageBulk(prev => { const cp = { ...prev }; delete cp[pg.id]; return cp; });
-                                                              setAlertConfig({ isOpen: true, message: `✅ ${added.length} MCQ add ho gaye!` });
-                                                          }} className="flex-1 bg-amber-600 text-white px-2 py-1 rounded text-[10px] font-bold hover:bg-amber-700">Parse & Add All</button>
-                                                          <button type="button" onClick={() => setLucentPageBulk(prev => { const cp = { ...prev }; delete cp[pg.id]; return cp; })} className="bg-slate-200 text-slate-700 px-2 py-1 rounded text-[10px] font-bold">Cancel</button>
-                                                      </div>
-                                                  </div>
-                                              )}
-                                              {(pg.mcqs || []).map((mcq: any, mIdx: number) => (
-                                                  <div key={mcq.id || mIdx} className="bg-white border border-emerald-100 rounded p-2 space-y-1.5 relative">
-                                                      <button type="button" onClick={() => {
-                                                          const updated = [...newLucent.pages];
-                                                          updated[0] = { ...updated[0], mcqs: (updated[0].mcqs || []).filter((_: any, i: number) => i !== mIdx) };
-                                                          setNewLucent({...newLucent, pages: updated});
-                                                      }} className="absolute top-1 right-1 p-0.5 text-red-400 hover:text-red-600 rounded"><Trash2 size={12} /></button>
-                                                      <textarea value={mcq.question} onChange={e => {
-                                                          const updated = [...newLucent.pages]; const mcqs = [...(updated[0].mcqs || [])]; mcqs[mIdx] = { ...mcqs[mIdx], question: e.target.value }; updated[0] = { ...updated[0], mcqs }; setNewLucent({...newLucent, pages: updated});
-                                                      }} className="w-full p-1 border border-slate-200 rounded text-[11px] outline-none min-h-[50px] resize-none focus:border-emerald-400 pr-6" placeholder={`Q${mIdx + 1}: Question likhein`} />
-                                                      {(mcq.options || ['', '', '', '']).map((opt: string, oi: number) => (
-                                                          <div key={oi} className="flex items-center gap-1">
-                                                              <input type="radio" name={`mcq_${pg.id}_${mIdx}`} checked={mcq.correctAnswer === oi} onChange={() => {
-                                                                  const updated = [...newLucent.pages]; const mcqs = [...(updated[0].mcqs || [])]; mcqs[mIdx] = { ...mcqs[mIdx], correctAnswer: oi }; updated[0] = { ...updated[0], mcqs }; setNewLucent({...newLucent, pages: updated});
-                                                              }} />
-                                                              <input type="text" value={opt} onChange={e => {
-                                                                  const updated = [...newLucent.pages]; const mcqs = [...(updated[0].mcqs || [])]; const opts = [...(mcqs[mIdx].options || ['', '', '', ''])]; opts[oi] = e.target.value; mcqs[mIdx] = { ...mcqs[mIdx], options: opts }; updated[0] = { ...updated[0], mcqs }; setNewLucent({...newLucent, pages: updated});
-                                                              }} className="flex-1 p-1 border border-slate-200 rounded text-[11px] outline-none focus:border-emerald-500" placeholder={`Option ${String.fromCharCode(65 + oi)}`} />
-                                                          </div>
-                                                      ))}
-                                                  </div>
-                                              ))}
-                                              {(pg.mcqs || []).length === 0 && <p className="text-[10px] text-emerald-600 text-center py-2">Koi MCQ nahi hai. "Add MCQ" ya "Bulk Paste" se add karein.</p>}
+                                              <CoachingMcqEditor
+                                                  value={(pg.mcqs || []) as any}
+                                                  onChange={(mcqs) => {
+                                                      const updated = [...newLucent.pages];
+                                                      updated[0] = { ...updated[0], mcqs: mcqs as any };
+                                                      setNewLucent({...newLucent, pages: updated});
+                                                  }}
+                                                  accent="emerald"
+                                              />
                                           </div>
                                       );
                                   })()}
@@ -10548,128 +10520,19 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                                       </div>
                                                                   </details>
                                                               </div>
-                                                              {/* Per-page MCQ editor */}
+                                                              {/* Per-page MCQ editor — upgraded to CoachingMcqEditor */}
                                                               <div className="border-t border-slate-200 pt-2 mt-1">
-                                                                  <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
-                                                                      <label className="text-[9px] font-bold text-emerald-700 uppercase">📝 Page MCQs ({(pg.mcqs || []).length})</label>
-                                                                      <div className="flex gap-1">
-                                                                          <button type="button" onClick={() => {
-                                                                              setLucentPageBulk(prev => {
-                                                                                  const cp = { ...prev };
-                                                                                  if (cp[pg.id] === undefined) cp[pg.id] = '';
-                                                                                  else delete cp[pg.id];
-                                                                                  return cp;
-                                                                              });
-                                                                          }} className="bg-amber-500 text-white px-2 py-0.5 rounded text-[10px] font-bold hover:bg-amber-600 flex items-center gap-1">
-                                                                              📋 Bulk Paste
-                                                                          </button>
-                                                                          <button type="button" onClick={() => {
-                                                                              const updated = [...(localSettings.lucentNotes || [])];
-                                                                              const pages = [...updated[i].pages];
-                                                                              const existing = pages[pgIdx].mcqs || [];
-                                                                              pages[pgIdx] = {
-                                                                                  ...pages[pgIdx],
-                                                                                  mcqs: [...existing, { id: `mcq_${Date.now()}_${Math.random()}`, question: '', options: ['', '', '', ''], correctAnswer: 0 } as any]
-                                                                              };
-                                                                              updated[i] = { ...updated[i], pages };
-                                                                              setLocalSettings({ ...localSettings, lucentNotes: updated });
-                                                                          }} className="bg-emerald-600 text-white px-2 py-0.5 rounded text-[10px] font-bold hover:bg-emerald-700 flex items-center gap-1">
-                                                                              <Plus size={10} /> Add MCQ
-                                                                          </button>
-                                                                      </div>
-                                                                  </div>
-                                                                  {lucentPageBulk[pg.id] !== undefined && (
-                                                                      <div className="bg-amber-50 border border-amber-200 rounded p-2 mb-2 space-y-1.5">
-                                                                          <p className="text-[9px] text-amber-800 font-bold">Yahan poora MCQ block paste karein. Hindi/English dono format support karta hai.</p>
-                                                                          <textarea
-                                                                              value={lucentPageBulk[pg.id]}
-                                                                              onChange={e => setLucentPageBulk(prev => ({ ...prev, [pg.id]: e.target.value }))}
-                                                                              placeholder={"**प्रश्न:** ... ?\nA) ...\nB) ...\nC) ...\nD) ...\n**सही उत्तर:** B) ..."}
-                                                                              className="w-full p-1.5 border border-amber-300 rounded text-[11px] font-mono outline-none h-32 focus:border-amber-500"
-                                                                          />
-                                                                          <div className="flex gap-1">
-                                                                              <button type="button" onClick={() => {
-                                                                                  const raw = (lucentPageBulk[pg.id] || '').trim();
-                                                                                  if (!raw) return alert('Text khaali hai.');
-                                                                                  const norm = normalizeMcqPaste(raw);
-                                                                                  const parsed = parseMCQText(norm);
-                                                                                  if (!parsed.questions || parsed.questions.length === 0) {
-                                                                                      return alert('Parse fail. Format check karein.');
-                                                                                  }
-                                                                                  const updated = [...(localSettings.lucentNotes || [])];
-                                                                                  const pages = [...updated[i].pages];
-                                                                                  const existing = pages[pgIdx].mcqs || [];
-                                                                                  const added = parsed.questions.map(q => ({
-                                                                                      id: `mcq_${Date.now()}_${Math.random()}`,
-                                                                                      question: (q.question || '').replace(/<br\/?>/g, '\n').trim(),
-                                                                                      options: (q.options || ['', '', '', '']).slice(0, 4),
-                                                                                      correctAnswer: q.correctAnswer ?? 0,
-                                                                                  })) as any[];
-                                                                                  pages[pgIdx] = { ...pages[pgIdx], mcqs: [...existing, ...added] };
-                                                                                  updated[i] = { ...updated[i], pages };
-                                                                                  setLocalSettings({ ...localSettings, lucentNotes: updated });
-                                                                                  setLucentPageBulk(prev => { const cp = { ...prev }; delete cp[pg.id]; return cp; });
-                                                                                  setAlertConfig({ isOpen: true, message: `✅ ${added.length} MCQ add ho gaye!` });
-                                                                              }} className="flex-1 bg-amber-600 text-white px-2 py-1 rounded text-[10px] font-bold hover:bg-amber-700">
-                                                                                  Parse & Add All
-                                                                              </button>
-                                                                              <button type="button" onClick={() => {
-                                                                                  setLucentPageBulk(prev => { const cp = { ...prev }; delete cp[pg.id]; return cp; });
-                                                                              }} className="bg-slate-200 text-slate-700 px-2 py-1 rounded text-[10px] font-bold hover:bg-slate-300">
-                                                                                  Cancel
-                                                                              </button>
-                                                                          </div>
-                                                                      </div>
-                                                                  )}
-                                                                  {(pg.mcqs || []).map((mcq, mIdx) => (
-                                                                      <div key={(mcq as any).id || mIdx} className="bg-white border border-emerald-100 rounded p-2 mb-2 space-y-1.5 relative">
-                                                                          <button type="button" onClick={() => {
-                                                                              const updated = [...(localSettings.lucentNotes || [])];
-                                                                              const pages = [...updated[i].pages];
-                                                                              pages[pgIdx] = { ...pages[pgIdx], mcqs: (pages[pgIdx].mcqs || []).filter((_, idx) => idx !== mIdx) };
-                                                                              updated[i] = { ...updated[i], pages };
-                                                                              setLocalSettings({ ...localSettings, lucentNotes: updated });
-                                                                          }} className="absolute top-1 right-1 p-0.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded">
-                                                                              <Trash2 size={11} />
-                                                                          </button>
-                                                                          <input type="text" value={mcq.question} onChange={e => {
-                                                                              const updated = [...(localSettings.lucentNotes || [])];
-                                                                              const pages = [...updated[i].pages];
-                                                                              const mcqs = [...(pages[pgIdx].mcqs || [])];
-                                                                              mcqs[mIdx] = { ...mcqs[mIdx], question: e.target.value };
-                                                                              pages[pgIdx] = { ...pages[pgIdx], mcqs };
-                                                                              updated[i] = { ...updated[i], pages };
-                                                                              setLocalSettings({ ...localSettings, lucentNotes: updated });
-                                                                          }} className="w-full p-1.5 pr-6 border border-slate-200 rounded text-xs outline-none focus:border-emerald-500" placeholder={`Q${mIdx + 1}: Question?`} />
-                                                                          <div className="grid grid-cols-2 gap-1">
-                                                                              {(mcq.options || ['', '', '', '']).map((opt, oi) => (
-                                                                                  <div key={oi} className="flex items-center gap-1">
-                                                                                      <input type="radio" name={`hist-correct-${pg.id}-${mIdx}`} checked={(mcq.correctAnswer ?? 0) === oi} onChange={() => {
-                                                                                          const updated = [...(localSettings.lucentNotes || [])];
-                                                                                          const pages = [...updated[i].pages];
-                                                                                          const mcqs = [...(pages[pgIdx].mcqs || [])];
-                                                                                          mcqs[mIdx] = { ...mcqs[mIdx], correctAnswer: oi };
-                                                                                          pages[pgIdx] = { ...pages[pgIdx], mcqs };
-                                                                                          updated[i] = { ...updated[i], pages };
-                                                                                          setLocalSettings({ ...localSettings, lucentNotes: updated });
-                                                                                      }} className="shrink-0" />
-                                                                                      <input type="text" value={opt} onChange={e => {
-                                                                                          const updated = [...(localSettings.lucentNotes || [])];
-                                                                                          const pages = [...updated[i].pages];
-                                                                                          const mcqs = [...(pages[pgIdx].mcqs || [])];
-                                                                                          const opts = [...(mcqs[mIdx].options || ['', '', '', ''])];
-                                                                                          opts[oi] = e.target.value;
-                                                                                          mcqs[mIdx] = { ...mcqs[mIdx], options: opts };
-                                                                                          pages[pgIdx] = { ...pages[pgIdx], mcqs };
-                                                                                          updated[i] = { ...updated[i], pages };
-                                                                                          setLocalSettings({ ...localSettings, lucentNotes: updated });
-                                                                                      }} className="w-full p-1 border border-slate-200 rounded text-[11px] outline-none focus:border-emerald-500" placeholder={`Option ${String.fromCharCode(65 + oi)}`} />
-                                                                                  </div>
-                                                                              ))}
-                                                                          </div>
-                                                                          <p className="text-[9px] text-slate-500">✓ Sahi answer ke saamne radio click karein</p>
-                                                                      </div>
-                                                                  ))}
+                                                                  <CoachingMcqEditor
+                                                                      value={(pg.mcqs || []) as any}
+                                                                      onChange={(mcqs) => {
+                                                                          const updated = [...(localSettings.lucentNotes || [])];
+                                                                          const pages = [...updated[i].pages];
+                                                                          pages[pgIdx] = { ...pages[pgIdx], mcqs: mcqs as any };
+                                                                          updated[i] = { ...updated[i], pages };
+                                                                          setLocalSettings({ ...localSettings, lucentNotes: updated });
+                                                                      }}
+                                                                      accent="emerald"
+                                                                  />
                                                               </div>
                                                               </div>
                                                               )}
@@ -10983,7 +10846,22 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
       )}
 
       {activeTab === 'CHALLENGE_CREATOR_20' && (
-          <ChallengeCreator20 onBack={() => setActiveTab('DASHBOARD')} language={localSettings.aiModel?.includes('Hindi') ? 'Hindi' : 'English'} />
+          <ChallengeCreator20
+              onBack={() => setActiveTab('DASHBOARD')}
+              language={localSettings.aiModel?.includes('Hindi') ? 'Hindi' : 'English'}
+              autoChallengeEnabled={localSettings.dailyChallengeConfig?.autoChallengeEnabled !== false}
+              onToggleAutoChallenge={() => {
+                  const updated = {
+                      ...localSettings,
+                      dailyChallengeConfig: {
+                          ...(localSettings.dailyChallengeConfig || { mode: 'AUTO', rewardPercentage: 90 }),
+                          autoChallengeEnabled: localSettings.dailyChallengeConfig?.autoChallengeEnabled === false ? true : false
+                      }
+                  };
+                  setLocalSettings(updated);
+                  handleSaveSettings(updated);
+              }}
+          />
       )}
 
       {activeTab === 'CONFIG_CHALLENGE' && (
@@ -11422,6 +11300,109 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                 </div>
                               </div>
 
+                                {/* School Card */}
+                                <div className="mb-3 mt-3 p-2.5 bg-white rounded-xl border border-indigo-100">
+                                  <p className="text-[10px] font-black text-slate-700 mb-1.5">🏫 School Card (Home)</p>
+                                  <div className="flex gap-2">
+                                    <div className="flex-1">
+                                      <p className="text-[9px] text-slate-400 mb-1">Background</p>
+                                      <div className="flex items-center gap-1.5">
+                                        <input type="color" value={localSettings.homeSchoolCardBg || '#ffffff'} onChange={e => setLocalSettings({...localSettings, homeSchoolCardBg: e.target.value})} className="w-8 h-8 rounded-lg cursor-pointer border border-slate-200 shrink-0" />
+                                        <input type="text" value={localSettings.homeSchoolCardBg || ''} onChange={e => setLocalSettings({...localSettings, homeSchoolCardBg: e.target.value})} placeholder="Default" className="flex-1 p-1 border rounded-lg text-[9px] uppercase font-mono bg-slate-50" />
+                                        {localSettings.homeSchoolCardBg && <button onClick={() => setLocalSettings({...localSettings, homeSchoolCardBg: undefined})} className="text-[9px] text-red-400 font-black shrink-0">✕</button>}
+                                      </div>
+                                    </div>
+                                    <div className="flex-1">
+                                      <p className="text-[9px] text-slate-400 mb-1">Border / Accent</p>
+                                      <div className="flex items-center gap-1.5">
+                                        <input type="color" value={localSettings.homeSchoolCardBorder || '#6366f1'} onChange={e => setLocalSettings({...localSettings, homeSchoolCardBorder: e.target.value})} className="w-8 h-8 rounded-lg cursor-pointer border border-slate-200 shrink-0" />
+                                        <input type="text" value={localSettings.homeSchoolCardBorder || ''} onChange={e => setLocalSettings({...localSettings, homeSchoolCardBorder: e.target.value})} placeholder="Default" className="flex-1 p-1 border rounded-lg text-[9px] uppercase font-mono bg-slate-50" />
+                                        {localSettings.homeSchoolCardBorder && <button onClick={() => setLocalSettings({...localSettings, homeSchoolCardBorder: undefined})} className="text-[9px] text-red-400 font-black shrink-0">✕</button>}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="flex gap-1.5 mt-2 flex-wrap">
+                                    {['#ffffff','#eff6ff','#f0fdf4','#fef3c7','#fdf4ff','#fff1f2','#f0fdfa','#1e293b'].map(c => (
+                                      <button key={c} onClick={() => setLocalSettings({...localSettings, homeSchoolCardBg: c})} className="w-5 h-5 rounded border-2 transition-all hover:scale-110" style={{ background: c, borderColor: (localSettings.homeSchoolCardBg||'') === c ? '#6366f1' : '#e2e8f0' }} title={c} />
+                                    ))}
+                                  </div>
+                                  <div className="flex items-center justify-between mt-2.5 pt-2.5 border-t border-slate-100">
+                                    <div>
+                                      <p className="text-[9px] font-black text-slate-700">Card Style</p>
+                                      <p className="text-[8px] text-slate-400 mt-0.5">{localSettings.homeSchoolCard3D ? '🎲 3D raised' : '⬜ 2D flat'}</p>
+                                    </div>
+                                    <button onClick={() => setLocalSettings({...localSettings, homeSchoolCard3D: !localSettings.homeSchoolCard3D})} className={`px-3 py-1.5 rounded-xl text-[10px] font-black transition-all border ${localSettings.homeSchoolCard3D ? 'bg-indigo-600 text-white border-indigo-700 shadow-sm' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
+                                      {localSettings.homeSchoolCard3D ? '🎲 3D ON' : '⬜ 2D'}
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {/* Coaching Card */}
+                                <div className="mb-3 p-2.5 bg-white rounded-xl border border-indigo-100">
+                                  <p className="text-[10px] font-black text-slate-700 mb-1.5">🏫 Coaching Card (Home)</p>
+                                  <div className="flex gap-2">
+                                    <div className="flex-1">
+                                      <p className="text-[9px] text-slate-400 mb-1">Background</p>
+                                      <div className="flex items-center gap-1.5">
+                                        <input type="color" value={localSettings.homeCoachingCardBg || '#ffffff'} onChange={e => setLocalSettings({...localSettings, homeCoachingCardBg: e.target.value})} className="w-8 h-8 rounded-lg cursor-pointer border border-slate-200 shrink-0" />
+                                        <input type="text" value={localSettings.homeCoachingCardBg || ''} onChange={e => setLocalSettings({...localSettings, homeCoachingCardBg: e.target.value})} placeholder="Default" className="flex-1 p-1 border rounded-lg text-[9px] uppercase font-mono bg-slate-50" />
+                                        {localSettings.homeCoachingCardBg && <button onClick={() => setLocalSettings({...localSettings, homeCoachingCardBg: undefined})} className="text-[9px] text-red-400 font-black shrink-0">✕</button>}
+                                      </div>
+                                    </div>
+                                    <div className="flex-1">
+                                      <p className="text-[9px] text-slate-400 mb-1">Border / Accent</p>
+                                      <div className="flex items-center gap-1.5">
+                                        <input type="color" value={localSettings.homeCoachingCardBorder || '#6366f1'} onChange={e => setLocalSettings({...localSettings, homeCoachingCardBorder: e.target.value})} className="w-8 h-8 rounded-lg cursor-pointer border border-slate-200 shrink-0" />
+                                        <input type="text" value={localSettings.homeCoachingCardBorder || ''} onChange={e => setLocalSettings({...localSettings, homeCoachingCardBorder: e.target.value})} placeholder="Default" className="flex-1 p-1 border rounded-lg text-[9px] uppercase font-mono bg-slate-50" />
+                                        {localSettings.homeCoachingCardBorder && <button onClick={() => setLocalSettings({...localSettings, homeCoachingCardBorder: undefined})} className="text-[9px] text-red-400 font-black shrink-0">✕</button>}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="flex gap-1.5 mt-2 flex-wrap">
+                                    {['#ffffff','#eff6ff','#f0fdf4','#fef3c7','#fdf4ff','#fff1f2','#f0fdfa','#1e293b'].map(c => (
+                                      <button key={c} onClick={() => setLocalSettings({...localSettings, homeCoachingCardBg: c})} className="w-5 h-5 rounded border-2 transition-all hover:scale-110" style={{ background: c, borderColor: (localSettings.homeCoachingCardBg||'') === c ? '#6366f1' : '#e2e8f0' }} title={c} />
+                                    ))}
+                                  </div>
+                                  <div className="flex items-center justify-between mt-2.5 pt-2.5 border-t border-slate-100">
+                                    <div>
+                                      <p className="text-[9px] font-black text-slate-700">Card Style</p>
+                                      <p className="text-[8px] text-slate-400 mt-0.5">{localSettings.homeCoachingCard3D ? '🎲 3D raised' : '⬜ 2D flat'}</p>
+                                    </div>
+                                    <button onClick={() => setLocalSettings({...localSettings, homeCoachingCard3D: !localSettings.homeCoachingCard3D})} className={`px-3 py-1.5 rounded-xl text-[10px] font-black transition-all border ${localSettings.homeCoachingCard3D ? 'bg-indigo-600 text-white border-indigo-700 shadow-sm' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
+                                      {localSettings.homeCoachingCard3D ? '🎲 3D ON' : '⬜ 2D'}
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {/* Content List Card Colors */}
+                                <div className="p-2.5 bg-white rounded-xl border border-indigo-100">
+                                  <p className="text-[10px] font-black text-slate-700 mb-0.5">📋 Book / Lesson / Page List Cards</p>
+                                  <p className="text-[8px] text-slate-400 mb-1.5">Teeno jagah ek hi color apply hoga — subject list, lesson list, page list</p>
+                                  <div className="flex gap-2">
+                                    <div className="flex-1">
+                                      <p className="text-[9px] text-slate-400 mb-1">Background</p>
+                                      <div className="flex items-center gap-1.5">
+                                        <input type="color" value={localSettings.contentListCardBg || '#ffffff'} onChange={e => setLocalSettings({...localSettings, contentListCardBg: e.target.value})} className="w-8 h-8 rounded-lg cursor-pointer border border-slate-200 shrink-0" />
+                                        <input type="text" value={localSettings.contentListCardBg || ''} onChange={e => setLocalSettings({...localSettings, contentListCardBg: e.target.value})} placeholder="Default" className="flex-1 p-1 border rounded-lg text-[9px] uppercase font-mono bg-slate-50" />
+                                        {localSettings.contentListCardBg && <button onClick={() => setLocalSettings({...localSettings, contentListCardBg: undefined})} className="text-[9px] text-red-400 font-black shrink-0">✕</button>}
+                                      </div>
+                                    </div>
+                                    <div className="flex-1">
+                                      <p className="text-[9px] text-slate-400 mb-1">Border / Accent</p>
+                                      <div className="flex items-center gap-1.5">
+                                        <input type="color" value={localSettings.contentListCardBorder || '#3b82f6'} onChange={e => setLocalSettings({...localSettings, contentListCardBorder: e.target.value})} className="w-8 h-8 rounded-lg cursor-pointer border border-slate-200 shrink-0" />
+                                        <input type="text" value={localSettings.contentListCardBorder || ''} onChange={e => setLocalSettings({...localSettings, contentListCardBorder: e.target.value})} placeholder="Default" className="flex-1 p-1 border rounded-lg text-[9px] uppercase font-mono bg-slate-50" />
+                                        {localSettings.contentListCardBorder && <button onClick={() => setLocalSettings({...localSettings, contentListCardBorder: undefined})} className="text-[9px] text-red-400 font-black shrink-0">✕</button>}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="flex gap-1.5 mt-2 flex-wrap">
+                                    {['#ffffff','#eff6ff','#f0fdf4','#fef3c7','#fdf4ff','#fff1f2','#f0fdfa','#1e293b'].map(c => (
+                                      <button key={c} onClick={() => setLocalSettings({...localSettings, contentListCardBg: c})} className="w-5 h-5 rounded border-2 transition-all hover:scale-110" style={{ background: c, borderColor: (localSettings.contentListCardBg||'') === c ? '#6366f1' : '#e2e8f0' }} title={c} />
+                                    ))}
+                                  </div>
+                                </div>
+
                               {/* ── DESIGN TOKENS LIVE PREVIEW ── */}
                               <div className="mt-3">
                                 <button
@@ -11739,6 +11720,34 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
               {/* CHALLENGE CONFIG */}
               <div className="bg-gradient-to-br from-red-50 to-orange-50 p-6 rounded-3xl border border-red-100 space-y-4">
                   <h4 className="font-bold text-red-900 flex items-center gap-2 text-lg"><Trophy size={20} /> Daily MCQ Challenge</h4>
+
+                  {/* AUTO-TRIGGER MASTER TOGGLE */}
+                  <div className="bg-white p-4 rounded-xl border border-red-100 shadow-sm flex items-center justify-between gap-4">
+                      <div>
+                          <p className="font-bold text-slate-800 text-sm">Auto Daily Challenge (Master Switch)</p>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                              {localSettings.dailyChallengeConfig?.autoChallengeEnabled !== false
+                                  ? "✅ ON — Students ko roz login pe challenge popup aayega apne aap"
+                                  : "❌ OFF — Popup band hai, koi bhi student ko auto challenge nahi aayega"}
+                          </p>
+                      </div>
+                      <button
+                          onClick={() => setLocalSettings({
+                              ...localSettings,
+                              dailyChallengeConfig: {
+                                  ...(localSettings.dailyChallengeConfig || { mode: 'AUTO', rewardPercentage: 90 }),
+                                  autoChallengeEnabled: localSettings.dailyChallengeConfig?.autoChallengeEnabled === false ? true : false
+                              }
+                          })}
+                          className={`flex-shrink-0 relative inline-flex h-7 w-12 items-center rounded-full transition-colors shadow-inner ${
+                              localSettings.dailyChallengeConfig?.autoChallengeEnabled !== false ? 'bg-green-500' : 'bg-slate-300'
+                          }`}
+                      >
+                          <span className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                              localSettings.dailyChallengeConfig?.autoChallengeEnabled !== false ? 'translate-x-6' : 'translate-x-1'
+                          }`} />
+                      </button>
+                  </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="bg-white p-4 rounded-xl border border-red-100 shadow-sm">
@@ -13054,61 +13063,78 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                               )}
                                           </div>
                                       </div>
-                                      <div>
-                                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">📚 Kis Book ka Content Hai?</label>
-                                          <div className="flex gap-1.5">
-                                              <input
-                                                  type="text"
-                                                  list="admin-book-name-list-2"
-                                                  value={newLucent.bookName}
-                                                  onChange={e => setNewLucent({...newLucent, bookName: e.target.value})}
-                                                  className="flex-1 p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500"
-                                                  placeholder="Book chuniye ya khud likhiye..."
-                                              />
-                                              <button
-                                                  type="button"
-                                                  onClick={() => {
-                                                      const name = newLucent.bookName.trim();
-                                                      if (!name) return;
-                                                      if (customLucentBooksList.includes(name)) return;
-                                                      setLocalSettings({ ...localSettings, customLucentBooks: [...customLucentBooksList, name] });
-                                                  }}
-                                                  title="Is book ko save karo future use ke liye"
-                                                  className="px-2.5 py-1.5 bg-indigo-600 text-white rounded text-[11px] font-black hover:bg-indigo-700 active:scale-95 whitespace-nowrap"
-                                              >＋ Save</button>
-                                          </div>
-                                          <datalist id="admin-book-name-list-2">
-                                              <option value="Lucent" />
-                                              <option value="Speedy Science" />
-                                              <option value="Speedy Social Science" />
-                                              <option value="Sar Sangrah" />
-                                              {customLucentBooksList.map(b => <option key={b} value={b} />)}
-                                          </datalist>
-                                          {/* Saved custom books chips */}
-                                          {customLucentBooksList.length > 0 && (
-                                              <div className="flex flex-wrap gap-1 mt-1.5">
-                                                  {customLucentBooksList.map(b => (
-                                                      <div key={b} className="flex items-center gap-1 bg-indigo-50 border border-indigo-200 rounded-full pl-2 pr-1 py-0.5">
-                                                          <button
-                                                              type="button"
-                                                              onClick={() => setNewLucent({...newLucent, bookName: b})}
-                                                              className="text-[11px] font-bold text-indigo-800 hover:text-indigo-600"
-                                                          >{b}</button>
-                                                          <button
-                                                              type="button"
-                                                              onClick={() => setLocalSettings({ ...localSettings, customLucentBooks: customLucentBooksList.filter(x => x !== b) })}
-                                                              className="text-[10px] text-red-400 hover:text-red-600 font-black px-0.5"
-                                                              title="Remove"
-                                                          >✕</button>
-                                                      </div>
-                                                  ))}
-                                              </div>
-                                          )}
-                                          <p className="text-[10px] text-indigo-600 font-bold mt-1">
-                                              ⚠️ Yahan jo naam likhoge, student app mein usi naam ka alag book card banega.
-                                              Khaali chhodne par "Lucent" card mein jayega.
-                                          </p>
-                                      </div>
+                                       <div>
+                                           <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">📚 Kis Book ka Content Hai?</label>
+                                           {/* Custom Books quick-select */}
+                                           {customBooksList.length > 0 && (
+                                               <div className="flex flex-wrap gap-1 mb-1.5">
+                                                   {customBooksList.map(b => (
+                                                       <button
+                                                           key={b.id}
+                                                           type="button"
+                                                           onClick={() => setNewLucent({...newLucent, bookName: b.name})}
+                                                           className={`px-2.5 py-1 rounded-full border-2 text-[11px] font-black transition-all ${newLucent.bookName === b.name ? 'bg-teal-600 text-white border-teal-600' : 'bg-white text-teal-700 border-teal-300 hover:border-teal-500'}`}
+                                                       >📗 {b.name}</button>
+                                                   ))}
+                                                   <button
+                                                       type="button"
+                                                       onClick={() => setNewLucent({...newLucent, bookName: 'Lucent'})}
+                                                       className={`px-2.5 py-1 rounded-full border-2 text-[11px] font-black transition-all ${newLucent.bookName === 'Lucent' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-indigo-700 border-indigo-300 hover:border-indigo-500'}`}
+                                                   >📘 Lucent</button>
+                                               </div>
+                                           )}
+                                           <div className="flex gap-1.5">
+                                               <input
+                                                   type="text"
+                                                   list="admin-book-name-list-2"
+                                                   value={newLucent.bookName}
+                                                   onChange={e => setNewLucent({...newLucent, bookName: e.target.value})}
+                                                   className="flex-1 p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500"
+                                                   placeholder="Book chuniye ya khud likhiye..."
+                                               />
+                                               <button
+                                                   type="button"
+                                                   onClick={() => {
+                                                       const name = newLucent.bookName.trim();
+                                                       if (!name) return;
+                                                       if (customLucentBooksList.includes(name)) return;
+                                                       setLocalSettings({ ...localSettings, customLucentBooks: [...customLucentBooksList, name] });
+                                                   }}
+                                                   title="Is book ko save karo future use ke liye"
+                                                   className="px-2.5 py-1.5 bg-indigo-600 text-white rounded text-[11px] font-black hover:bg-indigo-700 active:scale-95 whitespace-nowrap"
+                                               >＋ Save</button>
+                                           </div>
+                                           <datalist id="admin-book-name-list-2">
+                                               <option value="Lucent" />
+                                               <option value="Speedy Science" />
+                                               <option value="Speedy Social Science" />
+                                               <option value="Sar Sangrah" />
+                                               {customBooksList.map(b => <option key={b.id} value={b.name} />)}
+                                               {customLucentBooksList.map(b => <option key={b} value={b} />)}
+                                           </datalist>
+                                           {customLucentBooksList.length > 0 && (
+                                               <div className="flex flex-wrap gap-1 mt-1.5">
+                                                   {customLucentBooksList.map(b => (
+                                                       <div key={b} className="flex items-center gap-1 bg-indigo-50 border border-indigo-200 rounded-full pl-2 pr-1 py-0.5">
+                                                           <button
+                                                               type="button"
+                                                               onClick={() => setNewLucent({...newLucent, bookName: b})}
+                                                               className="text-[11px] font-bold text-indigo-800 hover:text-indigo-600"
+                                                           >{b}</button>
+                                                           <button
+                                                               type="button"
+                                                               onClick={() => setLocalSettings({ ...localSettings, customLucentBooks: customLucentBooksList.filter(x => x !== b) })}
+                                                               className="text-[10px] text-red-400 hover:text-red-600 font-black px-0.5"
+                                                               title="Remove"
+                                                           >✕</button>
+                                                       </div>
+                                                   ))}
+                                               </div>
+                                           )}
+                                           <p className="text-[10px] text-indigo-600 font-bold mt-1">
+                                               💡 Custom Book select karne par usi book mein notes dikhenge. Khaali chhodne par "Lucent" card mein jayega.
+                                           </p>
+                                       </div>
                                       {/* ── Smart Paste ───────────────────────────────────────────────────── */}
                                       <div className="bg-violet-50 border border-violet-200 rounded-xl p-3 space-y-2">
                                           <button
@@ -13284,36 +13310,15 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                       </div>
                                                   </div>
                                                   <div className="border-t border-slate-200 pt-2">
-                                                      <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
-                                                          <label className="text-[9px] font-bold text-emerald-700 uppercase">📝 Page MCQs ({(pg.mcqs||[]).length})</label>
-                                                          <div className="flex gap-1">
-                                                              <button type="button" onClick={() => setLucentPageBulk(prev => { const cp={...prev}; cp[pg.id]===undefined ? cp[pg.id]='' : delete cp[pg.id]; return cp; })} className="bg-amber-500 text-white px-2 py-0.5 rounded text-[10px] font-bold hover:bg-amber-600">📋 Bulk Paste</button>
-                                                              <button type="button" onClick={() => { const u=[...newLucent.pages]; u[pgIdx]={...u[pgIdx],mcqs:[...(u[pgIdx].mcqs||[]),{id:`mcq_${Date.now()}_${Math.random()}`,question:'',options:['','','',''],correctAnswer:0} as any]}; setNewLucent({...newLucent,pages:u}); }} className="bg-emerald-600 text-white px-2 py-0.5 rounded text-[10px] font-bold hover:bg-emerald-700 flex items-center gap-1"><Plus size={10}/> Add MCQ</button>
-                                                          </div>
-                                                      </div>
-                                                      {lucentPageBulk[pg.id] !== undefined && (
-                                                          <div className="bg-amber-50 border border-amber-200 rounded p-2 mb-2 space-y-1.5">
-                                                              <textarea value={lucentPageBulk[pg.id]} onChange={e => setLucentPageBulk(prev=>({...prev,[pg.id]:e.target.value}))} placeholder={"**प्रश्न:** ...?\nA) ...\nB) ...\nC) ...\nD) ...\n**सही उत्तर:** B) ..."} className="w-full p-1.5 border border-amber-300 rounded text-[11px] font-mono outline-none h-32 focus:border-amber-500" />
-                                                              <div className="flex gap-1">
-                                                                  <button type="button" onClick={() => { const raw=(lucentPageBulk[pg.id]||'').trim(); if(!raw)return alert('Text khaali hai.'); const parsed=parseMCQText(normalizeMcqPaste(raw)); if(!parsed.questions?.length)return alert('Parse fail.'); const u=[...newLucent.pages]; u[pgIdx]={...u[pgIdx],mcqs:[...(u[pgIdx].mcqs||[]),...parsed.questions.map(q=>({id:`mcq_${Date.now()}_${Math.random()}`,question:(q.question||'').replace(/<br\/?>/g,'\n').trim(),options:(q.options||['','','','']).slice(0,4),correctAnswer:q.correctAnswer??0})) as any[]]}; setNewLucent({...newLucent,pages:u}); setLucentPageBulk(prev=>{const cp={...prev};delete cp[pg.id];return cp;}); setAlertConfig({isOpen:true,message:'✅ MCQs add ho gaye!'}); }} className="flex-1 bg-amber-600 text-white px-2 py-1 rounded text-[10px] font-bold hover:bg-amber-700">Parse & Add All</button>
-                                                                  <button type="button" onClick={() => setLucentPageBulk(prev=>{const cp={...prev};delete cp[pg.id];return cp;})} className="bg-slate-200 text-slate-700 px-2 py-1 rounded text-[10px] font-bold hover:bg-slate-300">Cancel</button>
-                                                              </div>
-                                                          </div>
-                                                      )}
-                                                      {(pg.mcqs||[]).map((mcq,mIdx) => (
-                                                          <div key={(mcq as any).id||mIdx} className="bg-white border border-emerald-100 rounded p-2 mb-2 space-y-1.5 relative">
-                                                              <button type="button" onClick={() => { const u=[...newLucent.pages]; u[pgIdx]={...u[pgIdx],mcqs:(u[pgIdx].mcqs||[]).filter((_,i)=>i!==mIdx)}; setNewLucent({...newLucent,pages:u}); }} className="absolute top-1 right-1 p-0.5 text-red-400 hover:text-red-600 rounded"><Trash2 size={11}/></button>
-                                                              <input type="text" value={mcq.question} onChange={e => { const u=[...newLucent.pages]; const ms=[...(u[pgIdx].mcqs||[])]; ms[mIdx]={...ms[mIdx],question:e.target.value}; u[pgIdx]={...u[pgIdx],mcqs:ms}; setNewLucent({...newLucent,pages:u}); }} className="w-full p-1.5 pr-6 border border-slate-200 rounded text-xs outline-none focus:border-emerald-500" placeholder={`Q${mIdx+1}: Question?`} />
-                                                              <div className="grid grid-cols-2 gap-1">
-                                                                  {(mcq.options||['','','','']).map((opt,oi) => (
-                                                                      <div key={oi} className="flex items-center gap-1">
-                                                                          <input type="radio" name={`bn-correct-${pg.id}-${mIdx}`} checked={(mcq.correctAnswer??0)===oi} onChange={() => { const u=[...newLucent.pages]; const ms=[...(u[pgIdx].mcqs||[])]; ms[mIdx]={...ms[mIdx],correctAnswer:oi}; u[pgIdx]={...u[pgIdx],mcqs:ms}; setNewLucent({...newLucent,pages:u}); }} className="shrink-0" />
-                                                                          <input type="text" value={opt} onChange={e => { const u=[...newLucent.pages]; const ms=[...(u[pgIdx].mcqs||[])]; const opts=[...(ms[mIdx].options||['','','',''])]; opts[oi]=e.target.value; ms[mIdx]={...ms[mIdx],options:opts}; u[pgIdx]={...u[pgIdx],mcqs:ms}; setNewLucent({...newLucent,pages:u}); }} className="w-full p-1 border border-slate-200 rounded text-[11px] outline-none focus:border-emerald-500" placeholder={`Option ${String.fromCharCode(65+oi)}`} />
-                                                                      </div>
-                                                                  ))}
-                                                              </div>
-                                                          </div>
-                                                      ))}
+                                                      <CoachingMcqEditor
+                                                          value={(pg.mcqs || []) as any}
+                                                          onChange={(mcqs) => {
+                                                              const u = [...newLucent.pages];
+                                                              u[pgIdx] = { ...u[pgIdx], mcqs: mcqs as any };
+                                                              setNewLucent({...newLucent, pages: u});
+                                                          }}
+                                                          accent="emerald"
+                                                      />
                                                   </div>
                                               </div>
                                           ))}
@@ -13399,53 +13404,23 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                   <label className="text-[10px] font-black text-emerald-700 uppercase block mb-1">📌 Title *</label>
                                                   <input type="text" value={newBookNote.title} onChange={e => setNewBookNote({...newBookNote, title: e.target.value})} className="w-full p-2 border border-emerald-300 rounded-lg text-sm outline-none focus:border-emerald-500 bg-white" placeholder="e.g. Chapter 5 MCQ, Biology Set 1…" />
                                               </div>
-                                              <div className="bg-white border border-emerald-200 rounded-xl p-3 space-y-2">
-                                                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                                                      <label className="text-[10px] font-bold text-emerald-700 uppercase flex items-center gap-1">📝 MCQs ({newBookNoteMcqs.length})</label>
-                                                      <div className="flex gap-1">
-                                                          <button type="button" onClick={() => setNewBookNoteBulk(prev => prev === undefined ? '' : undefined)} className="bg-amber-500 text-white px-2 py-0.5 rounded text-[10px] font-bold hover:bg-amber-600">📋 Bulk Paste</button>
-                                                          <button type="button" onClick={() => setNewBookNoteMcqs(prev => [...prev, { id: `mcq_${Date.now()}_${Math.random()}`, question: '', options: ['', '', '', ''], correctAnswer: 0 }])} className="bg-emerald-600 text-white px-2 py-0.5 rounded text-[10px] font-bold hover:bg-emerald-700 flex items-center gap-1"><Plus size={10}/> Add MCQ</button>
-                                                      </div>
-                                                  </div>
-                                                  {newBookNoteBulk !== undefined && (
-                                                      <div className="bg-amber-50 border border-amber-200 rounded p-2 space-y-1.5">
-                                                          <textarea value={newBookNoteBulk} onChange={e => setNewBookNoteBulk(e.target.value)} placeholder={"**प्रश्न:** ... ?\nA) ...\nB) ...\nC) ...\nD) ...\n**सही उत्तर:** B) ..."} className="w-full p-1.5 border border-amber-300 rounded text-[11px] font-mono outline-none h-32 focus:border-amber-500" />
-                                                          <div className="flex gap-1">
-                                                              <button type="button" onClick={() => {
-                                                                  const raw = (newBookNoteBulk || '').trim();
-                                                                  if (!raw) return alert('Text khaali hai.');
-                                                                  const parsed = parseMCQText(normalizeMcqPaste(raw));
-                                                                  if (!parsed.questions?.length) return alert('Parse fail. Format check karein.');
-                                                                  const added = parsed.questions.map(q => ({ id: `mcq_${Date.now()}_${Math.random()}`, question: (q.question || '').replace(/<br\/?>/g, '\n').trim(), options: (q.options || ['', '', '', '']).slice(0, 4), correctAnswer: q.correctAnswer ?? 0 }));
-                                                                  setNewBookNoteMcqs(prev => [...prev, ...added]);
-                                                                  setNewBookNoteBulk(undefined);
-                                                                  setAlertConfig({ isOpen: true, message: `✅ ${added.length} MCQ add ho gaye!` });
-                                                              }} className="flex-1 bg-amber-600 text-white px-2 py-1 rounded text-[10px] font-bold hover:bg-amber-700">Parse & Add All</button>
-                                                              <button type="button" onClick={() => setNewBookNoteBulk(undefined)} className="bg-slate-200 text-slate-700 px-2 py-1 rounded text-[10px] font-bold hover:bg-slate-300">Cancel</button>
-                                                          </div>
-                                                      </div>
-                                                  )}
-                                                  {newBookNoteMcqs.map((mcq, mIdx) => (
-                                                      <div key={mcq.id} className="bg-emerald-50 border border-emerald-100 rounded p-2 space-y-1.5 relative">
-                                                          <button type="button" onClick={() => setNewBookNoteMcqs(prev => prev.filter((_, i) => i !== mIdx))} className="absolute top-1 right-1 p-0.5 text-red-400 hover:text-red-600 rounded"><Trash2 size={11}/></button>
-                                                          <input type="text" value={mcq.question} onChange={e => setNewBookNoteMcqs(prev => { const cp=[...prev]; cp[mIdx]={...cp[mIdx],question:e.target.value}; return cp; })} className="w-full p-1.5 pr-6 border border-slate-200 rounded text-xs outline-none focus:border-emerald-500 bg-white" placeholder={`Q${mIdx+1}: Question?`} />
-                                                          <div className="grid grid-cols-2 gap-1">
-                                                              {(mcq.options || ['', '', '', '']).map((opt, oi) => (
-                                                                  <div key={oi} className="flex items-center gap-1">
-                                                                      <input type="radio" name={`bn-mcqonly-${mcq.id}-${mIdx}`} checked={(mcq.correctAnswer ?? 0) === oi} onChange={() => setNewBookNoteMcqs(prev => { const cp=[...prev]; cp[mIdx]={...cp[mIdx],correctAnswer:oi}; return cp; })} className="shrink-0" />
-                                                                      <input type="text" value={opt} onChange={e => setNewBookNoteMcqs(prev => { const cp=[...prev]; const opts=[...(cp[mIdx].options||['','','',''])]; opts[oi]=e.target.value; cp[mIdx]={...cp[mIdx],options:opts}; return cp; })} className="w-full p-1 border border-slate-200 rounded text-[11px] outline-none focus:border-emerald-500 bg-white" placeholder={`Option ${String.fromCharCode(65 + oi)}`} />
-                                                                  </div>
-                                                              ))}
-                                                          </div>
-                                                      </div>
-                                                  ))}
-                                              </div>
+                                               <CoachingMcqEditor
+                                                   value={newBookNoteMcqs}
+                                                   onChange={setNewBookNoteMcqs}
+                                               />
                                               <button onClick={() => {
                                                   const titleVal = newBookNote.title.trim();
                                                   if (!titleVal) return alert('Title zaroori hai.');
-                                                  const structuredMcqs = newBookNoteMcqs
-                                                      .filter(m => m.question.trim() && m.options.some(o => o.trim()))
-                                                      .map(m => ({ question: m.question.trim(), options: m.options, correctAnswer: m.correctAnswer, topic: 'General' }));
+                                                   const structuredMcqs = newBookNoteMcqs
+                                                       .filter(m => m.question.trim() && m.options.some(o => o.trim()))
+                                                       .map(m => ({
+                                                           ...m,
+                                                           question: m.question.trim(),
+                                                           options: m.options.map((o: string) => o.trim()),
+                                                           statements: m.statements?.filter((s: string) => s.trim()),
+                                                           topic: m.topic?.trim() || 'General',
+                                                           explanation: m.explanation?.trim() || undefined,
+                                                       }));
                                                   if (!structuredMcqs.length) return alert('Kam se kam ek MCQ add karein.');
                                                   const hwItem: any = {
                                                       id: Date.now().toString(),
@@ -13670,47 +13645,10 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           })()}
                                       </div>
 
-                                      <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 space-y-2">
-                                          <div className="flex items-center justify-between gap-2 flex-wrap">
-                                              <label className="text-[10px] font-bold text-emerald-700 uppercase flex items-center gap-1">📝 MCQs ({newBookNoteMcqs.length})</label>
-                                              <div className="flex gap-1">
-                                                  <button type="button" onClick={() => setNewBookNoteBulk(prev => prev === undefined ? '' : undefined)} className="bg-amber-500 text-white px-2 py-0.5 rounded text-[10px] font-bold hover:bg-amber-600">📋 Bulk Paste</button>
-                                                  <button type="button" onClick={() => setNewBookNoteMcqs(prev => [...prev, { id: `mcq_${Date.now()}_${Math.random()}`, question: '', options: ['', '', '', ''], correctAnswer: 0 }])} className="bg-emerald-600 text-white px-2 py-0.5 rounded text-[10px] font-bold hover:bg-emerald-700 flex items-center gap-1"><Plus size={10}/> Add MCQ</button>
-                                              </div>
-                                          </div>
-                                          {newBookNoteBulk !== undefined && (
-                                              <div className="bg-amber-50 border border-amber-200 rounded p-2 space-y-1.5">
-                                                  <textarea value={newBookNoteBulk} onChange={e => setNewBookNoteBulk(e.target.value)} placeholder={"**प्रश्न:** ... ?\nA) ...\nB) ...\nC) ...\nD) ...\n**सही उत्तर:** B) ..."} className="w-full p-1.5 border border-amber-300 rounded text-[11px] font-mono outline-none h-32 focus:border-amber-500" />
-                                                  <div className="flex gap-1">
-                                                      <button type="button" onClick={() => {
-                                                          const raw = (newBookNoteBulk || '').trim();
-                                                          if (!raw) return alert('Text khaali hai.');
-                                                          const parsed = parseMCQText(normalizeMcqPaste(raw));
-                                                          if (!parsed.questions?.length) return alert('Parse fail. Format check karein.');
-                                                          const added = parsed.questions.map(q => ({ id: `mcq_${Date.now()}_${Math.random()}`, question: (q.question || '').replace(/<br\/?>/g, '\n').trim(), options: (q.options || ['', '', '', '']).slice(0, 4), correctAnswer: q.correctAnswer ?? 0 }));
-                                                          setNewBookNoteMcqs(prev => [...prev, ...added]);
-                                                          setNewBookNoteBulk(undefined);
-                                                          setAlertConfig({ isOpen: true, message: `✅ ${added.length} MCQ add ho gaye!` });
-                                                      }} className="flex-1 bg-amber-600 text-white px-2 py-1 rounded text-[10px] font-bold hover:bg-amber-700">Parse & Add All</button>
-                                                      <button type="button" onClick={() => setNewBookNoteBulk(undefined)} className="bg-slate-200 text-slate-700 px-2 py-1 rounded text-[10px] font-bold hover:bg-slate-300">Cancel</button>
-                                                  </div>
-                                              </div>
-                                          )}
-                                          {newBookNoteMcqs.map((mcq, mIdx) => (
-                                              <div key={mcq.id} className="bg-white border border-emerald-100 rounded p-2 space-y-1.5 relative">
-                                                  <button type="button" onClick={() => setNewBookNoteMcqs(prev => prev.filter((_, i) => i !== mIdx))} className="absolute top-1 right-1 p-0.5 text-red-400 hover:text-red-600 rounded"><Trash2 size={11}/></button>
-                                                  <input type="text" value={mcq.question} onChange={e => setNewBookNoteMcqs(prev => { const cp=[...prev]; cp[mIdx]={...cp[mIdx],question:e.target.value}; return cp; })} className="w-full p-1.5 pr-6 border border-slate-200 rounded text-xs outline-none focus:border-emerald-500" placeholder={`Q${mIdx+1}: Question?`} />
-                                                  <div className="grid grid-cols-2 gap-1">
-                                                      {(mcq.options || ['', '', '', '']).map((opt, oi) => (
-                                                          <div key={oi} className="flex items-center gap-1">
-                                                              <input type="radio" name={`bn-mcq-${mcq.id}-${mIdx}`} checked={(mcq.correctAnswer ?? 0) === oi} onChange={() => setNewBookNoteMcqs(prev => { const cp=[...prev]; cp[mIdx]={...cp[mIdx],correctAnswer:oi}; return cp; })} className="shrink-0" />
-                                                              <input type="text" value={opt} onChange={e => setNewBookNoteMcqs(prev => { const cp=[...prev]; const opts=[...(cp[mIdx].options||['','','',''])]; opts[oi]=e.target.value; cp[mIdx]={...cp[mIdx],options:opts}; return cp; })} className="w-full p-1 border border-slate-200 rounded text-[11px] outline-none focus:border-emerald-500" placeholder={`Option ${String.fromCharCode(65 + oi)}`} />
-                                                          </div>
-                                                      ))}
-                                                  </div>
-                                              </div>
-                                          ))}
-                                      </div>
+                                      <CoachingMcqEditor
+                                          value={newBookNoteMcqs}
+                                          onChange={setNewBookNoteMcqs}
+                                      />
                                       <div>
                                           <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">🎬 Video URL (Optional)</label>
                                           <input type="text" value={newBookNote.videoUrl} onChange={e => setNewBookNote({...newBookNote, videoUrl: e.target.value})} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-amber-500" placeholder="Video link" />
@@ -13725,7 +13663,14 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           if (!newBookNote.chunkNotes.trim() && !newBookNote.htmlNotes.trim() && !newBookNote.notes.trim()) return alert('Read Mode ya Write Mode mein kuch notes likhein.');
                                           const structuredMcqs = newBookNoteMcqs
                                               .filter(m => m.question.trim() && m.options.some(o => o.trim()))
-                                              .map(m => ({ question: m.question.trim(), options: m.options, correctAnswer: m.correctAnswer, topic: 'General' }));
+                                               .map(m => ({
+                                                   ...m,
+                                                   question: m.question.trim(),
+                                                   options: m.options.map((o: string) => o.trim()),
+                                                   statements: m.statements?.filter((s: string) => s.trim()),
+                                                   topic: m.topic?.trim() || 'General',
+                                                   explanation: m.explanation?.trim() || undefined,
+                                               }));
                                           const baseItem: any = {
                                               date: newBookNote.date,
                                               title: `Page ${pg}`,
@@ -14221,7 +14166,18 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           classTarget: (hw as any).classTarget || 'ALL',
                                           board: (hw as any).board || '' as '' | 'NCERT_EN' | 'NCERT_HI' | 'BSEB',
                                       });
-                                      setNewBookNoteMcqs(mcqs.map(m => ({ id: m.id || `mcq_${Date.now()}_${Math.random()}`, question: m.question || '', options: m.options || ['', '', '', ''], correctAnswer: m.correctAnswer ?? 0 })));
+                                       setNewBookNoteMcqs(mcqs.map(m => ({
+                                           id: m.id || `mcq_${Date.now()}_${Math.random()}`,
+                                           topic: (m as any).topic || '',
+                                           question: m.question || '',
+                                           statements: (m as any).statements || [],
+                                           options: m.options || ['', '', '', ''],
+                                           correctAnswer: m.correctAnswer ?? 0,
+                                           explanation: (m as any).explanation || '',
+                                           concept: (m as any).concept || '',
+                                           examTip: (m as any).examTip || '',
+                                           difficultyLevel: (m as any).difficultyLevel || '',
+                                       })));
                                       setBnEditingId(hw.id || null);
                                       setBookNotesTab('ADD');
                                       document.querySelector('.bg-amber-50.border-amber-200.rounded-2xl')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -14295,6 +14251,16 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
               </div>
           );
       })()}
+          </ErrorBoundary>
+      )}
+
+      {/* ══════════════════════════════════════════════
+          COMPETITION MCQ PRACTICE MANAGER
+          Competition Books → MCQ Practice
+      ══════════════════════════════════════════════ */}
+      {activeTab === 'COMPETITION_MCQ_MANAGER' && (
+          <ErrorBoundary fallbackLabel="Competition MCQ Practice Manager" compact>
+            <AdminCompetitionMcqManager onBack={() => setActiveTab('DASHBOARD')} />
           </ErrorBoundary>
       )}
 
@@ -14477,38 +14443,16 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           </div>
                                           <p className="text-[8px] text-rose-600">💡 Google Drive links: File ko "Anyone with the link" se share karein. App ke andar hi play hoga — user bahar nahi jayega.</p>
                                       </div>
-                                      {/* MCQ Section */}
                                       <div className="border-t border-slate-200 pt-2">
-                                          <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
-                                              <label className="text-[9px] font-bold text-emerald-700 uppercase">📝 Page MCQs ({(pg.mcqs||[]).length})</label>
-                                              <div className="flex gap-1">
-                                                  <button type="button" onClick={() => setLucentPageBulk(prev => { const cp={...prev}; cp[pg.id]===undefined ? cp[pg.id]='' : delete cp[pg.id]; return cp; })} className="bg-amber-500 text-white px-2 py-0.5 rounded text-[10px] font-bold hover:bg-amber-600">📋 Bulk Paste</button>
-                                                  <button type="button" onClick={() => { const u=[...newLucent.pages]; u[pgIdx]={...u[pgIdx],mcqs:[...(u[pgIdx].mcqs||[]),{id:`mcq_${Date.now()}_${Math.random()}`,question:'',options:['','','',''],correctAnswer:0} as any]}; setNewLucent({...newLucent,pages:u}); }} className="bg-emerald-600 text-white px-2 py-0.5 rounded text-[10px] font-bold hover:bg-emerald-700 flex items-center gap-1"><Plus size={10}/> Add MCQ</button>
-                                              </div>
-                                          </div>
-                                          {lucentPageBulk[pg.id] !== undefined && (
-                                              <div className="bg-amber-50 border border-amber-200 rounded p-2 mb-2 space-y-1.5">
-                                                  <textarea value={lucentPageBulk[pg.id]} onChange={e => setLucentPageBulk(prev=>({...prev,[pg.id]:e.target.value}))} placeholder={"**प्रश्न:** ...?\nA) ...\nB) ...\nC) ...\nD) ...\n**सही उत्तर:** B) ..."} className="w-full p-1.5 border border-amber-300 rounded text-[11px] font-mono outline-none h-32 focus:border-amber-500" />
-                                                  <div className="flex gap-1">
-                                                      <button type="button" onClick={() => { const raw=(lucentPageBulk[pg.id]||'').trim(); if(!raw)return alert('Text khaali hai.'); const parsed=parseMCQText(normalizeMcqPaste(raw)); if(!parsed.questions?.length)return alert('Parse fail.'); const u=[...newLucent.pages]; u[pgIdx]={...u[pgIdx],mcqs:[...(u[pgIdx].mcqs||[]),...parsed.questions.map(q=>({id:`mcq_${Date.now()}_${Math.random()}`,question:(q.question||'').replace(/<br\/?>/g,'\n').trim(),options:(q.options||['','','','']).slice(0,4),correctAnswer:q.correctAnswer??0})) as any[]]}; setNewLucent({...newLucent,pages:u}); setLucentPageBulk(prev=>{const cp={...prev};delete cp[pg.id];return cp;}); setAlertConfig({isOpen:true,message:'✅ MCQs add ho gaye!'}); }} className="flex-1 bg-amber-600 text-white px-2 py-1 rounded text-[10px] font-bold hover:bg-amber-700">Parse & Add All</button>
-                                                      <button type="button" onClick={() => setLucentPageBulk(prev=>{const cp={...prev};delete cp[pg.id];return cp;})} className="bg-slate-200 text-slate-700 px-2 py-1 rounded text-[10px] font-bold hover:bg-slate-300">Cancel</button>
-                                                  </div>
-                                              </div>
-                                          )}
-                                          {(pg.mcqs||[]).map((mcq,mIdx) => (
-                                              <div key={(mcq as any).id||mIdx} className="bg-white border border-emerald-100 rounded p-2 mb-2 space-y-1.5 relative">
-                                                  <button type="button" onClick={() => { const u=[...newLucent.pages]; u[pgIdx]={...u[pgIdx],mcqs:(u[pgIdx].mcqs||[]).filter((_,i)=>i!==mIdx)}; setNewLucent({...newLucent,pages:u}); }} className="absolute top-1 right-1 p-0.5 text-red-400 hover:text-red-600 rounded"><Trash2 size={11}/></button>
-                                                  <input type="text" value={mcq.question} onChange={e => { const u=[...newLucent.pages]; const ms=[...(u[pgIdx].mcqs||[])]; ms[mIdx]={...ms[mIdx],question:e.target.value}; u[pgIdx]={...u[pgIdx],mcqs:ms}; setNewLucent({...newLucent,pages:u}); }} className="w-full p-1.5 pr-6 border border-slate-200 rounded text-xs outline-none focus:border-emerald-500" placeholder={`Q${mIdx+1}: Question?`} />
-                                                  <div className="grid grid-cols-2 gap-1">
-                                                      {(mcq.options||['','','','']).map((opt,oi) => (
-                                                          <div key={oi} className="flex items-center gap-1">
-                                                              <input type="radio" name={`cn612-correct-${pg.id}-${mIdx}`} checked={(mcq.correctAnswer??0)===oi} onChange={() => { const u=[...newLucent.pages]; const ms=[...(u[pgIdx].mcqs||[])]; ms[mIdx]={...ms[mIdx],correctAnswer:oi}; u[pgIdx]={...u[pgIdx],mcqs:ms}; setNewLucent({...newLucent,pages:u}); }} className="shrink-0" />
-                                                              <input type="text" value={opt} onChange={e => { const u=[...newLucent.pages]; const ms=[...(u[pgIdx].mcqs||[])]; const opts=[...(ms[mIdx].options||['','','',''])]; opts[oi]=e.target.value; ms[mIdx]={...ms[mIdx],options:opts}; u[pgIdx]={...u[pgIdx],mcqs:ms}; setNewLucent({...newLucent,pages:u}); }} className="w-full p-1 border border-slate-200 rounded text-[11px] outline-none focus:border-emerald-500" placeholder={`Option ${String.fromCharCode(65+oi)}`} />
-                                                          </div>
-                                                      ))}
-                                                  </div>
-                                              </div>
-                                          ))}
+                                          <CoachingMcqEditor
+                                              value={(pg.mcqs || []) as any[]}
+                                              onChange={(mcqs) => {
+                                                  const updated = [...newLucent.pages];
+                                                  updated[pgIdx] = { ...updated[pgIdx], mcqs };
+                                                  setNewLucent({ ...newLucent, pages: updated });
+                                              }}
+                                              accent="green"
+                                          />
                                       </div>
                                   </div>
                               ))}

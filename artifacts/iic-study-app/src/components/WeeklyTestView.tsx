@@ -5,6 +5,7 @@ import { WeeklyTest, MCQItem } from '../types';
 import { Clock, AlertTriangle, CheckCircle, Trophy, ArrowLeft } from 'lucide-react';
 import { CustomAlert, CustomConfirm } from './CustomDialogs';
 import { addMistakes, removeMistakeByQuestion } from '../utils/mistakeBank';
+import { renderMathInHtml } from '../utils/mathUtils';
 
 interface Props {
   test: WeeklyTest;
@@ -168,7 +169,7 @@ export const WeeklyTestView: React.FC<Props> = ({ test, onComplete, onExit }) =>
             <div key={idx} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
               <h4 className="font-bold text-slate-800 mb-4 flex gap-3">
                 <span className="bg-slate-100 text-slate-600 w-6 h-6 rounded-full flex items-center justify-center text-xs shrink-0 font-bold mt-0.5">{idx + 1}</span>
-                {q.question}
+                <span dangerouslySetInnerHTML={{ __html: renderMathInHtml(q.question) }} />
               </h4>
               <div className="space-y-2">
                 {q.options && q.options.map((opt, oIdx) => (
@@ -180,7 +181,7 @@ export const WeeklyTestView: React.FC<Props> = ({ test, onComplete, onExit }) =>
                         ? 'bg-blue-50 border-blue-500 text-blue-700 ring-1 ring-blue-500' 
                         : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'}`}
                   >
-                    {opt}
+                    <span dangerouslySetInnerHTML={{ __html: renderMathInHtml(opt) }} />
                     {answers[idx] === oIdx && <CheckCircle size={16} className="text-blue-600" />}
                   </button>
                 ))}

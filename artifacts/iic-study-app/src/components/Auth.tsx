@@ -601,7 +601,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
       (sc.address || '').toLowerCase().includes(schoolSearch.toLowerCase())
     );
     return (
-      <div className="min-h-screen flex flex-col bg-slate-50 px-4 font-sans py-8">
+      <div className="min-h-screen flex flex-col bg-black px-4 font-sans py-8">
         <div className="w-full max-w-md mx-auto">
           <div className="bg-white p-6 rounded-3xl shadow-xl border border-slate-200 animate-in zoom-in">
             <div className="w-14 h-14 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-3">
@@ -697,7 +697,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
 
   if (view === 'SUCCESS_ID') {
       return (
-        <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4 font-sans">
+        <div className="min-h-screen flex items-center justify-center bg-black px-4 font-sans">
             <div className="bg-white p-8 rounded-3xl shadow-xl w-full border border-slate-200 text-center animate-in zoom-in">
                 <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
                     <ShieldCheck size={32} />
@@ -725,9 +725,10 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
   }
 
   const isVideoMode = (appSettings?.loginPageStyle ?? settings?.loginPageStyle) === 'video';
+  const isDark = true; // Force full-black page always
 
   return (
-    <div className={`min-h-screen flex items-center justify-center px-4 font-sans py-10 relative ${isVideoMode ? '' : 'bg-slate-50'}`}>
+    <div className={`min-h-screen flex items-center justify-center px-4 font-sans py-10 relative bg-black`}>
       {/* ── Video background (admin-controlled) ── */}
       {isVideoMode && (() => {
         const rawUrl = appSettings?.loginVideoUrl?.trim() || '/login-bg.mp4';
@@ -790,33 +791,33 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
       <div className={`p-8 rounded-3xl shadow-xl w-full relative overflow-hidden`}
         style={{
           position: 'relative', zIndex: 2,
-          background: isVideoMode ? 'rgba(10,12,28,0.82)' : '#ffffff',
-          border: isVideoMode ? '1px solid rgba(255,255,255,0.12)' : '1px solid #e2e8f0',
-          backdropFilter: isVideoMode ? 'blur(16px)' : undefined,
+          background: isDark ? 'rgba(10,12,28,0.95)' : '#ffffff',
+          border: isDark ? '1px solid rgba(255,255,255,0.12)' : '1px solid #e2e8f0',
+          backdropFilter: isDark ? 'blur(16px)' : undefined,
         }}
       >
-        {!isVideoMode && <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50 rounded-bl-full -mr-10 -mt-10 z-0"></div>}
+        {!isDark && <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50 rounded-bl-full -mr-10 -mt-10 z-0"></div>}
         
-        <button onClick={() => setShowGuide(true)} className={`absolute top-4 left-4 z-20 hover:text-blue-400 ${isVideoMode ? 'text-slate-300' : 'text-slate-500 hover:text-blue-600'}`}>
+        <button onClick={() => setShowGuide(true)} className={`absolute top-4 left-4 z-20 hover:text-blue-400 text-slate-300`}>
             <HelpCircle size={24} />
         </button>
 
         <div className="text-center mb-8 relative z-10 mt-6">
-          <div className={`w-32 h-32 rounded-full flex items-center justify-center mx-auto mb-4 p-1 overflow-hidden ${isVideoMode ? 'bg-white/10 ring-4 ring-white/10' : 'bg-white shadow-[0_0_40px_rgba(59,130,246,0.15)] ring-4 ring-slate-50'}`}>
+          <div className={`w-32 h-32 rounded-full flex items-center justify-center mx-auto mb-4 p-1 overflow-hidden bg-white/10 ring-4 ring-white/10`}>
               {settings?.appLogo ? (
                   <img src={settings.appLogo} alt="App Logo" className="w-full h-full object-cover rounded-full" />
               ) : (
-                  <h1 className={`text-5xl font-black ${isVideoMode ? 'text-white' : 'text-blue-600'}`}>{settings?.appShortName || 'NSTA'}</h1>
+                  <h1 className={`text-5xl font-black text-white`}>{settings?.appShortName || 'NSTA'}</h1>
               )}
           </div>
-          <h1 className={`text-[2.5rem] font-black mb-1 tracking-tight leading-none mx-auto mt-6 ${isVideoMode ? 'text-white' : 'text-[#111827]'}`}>
+          <h1 className={`text-[2.5rem] font-black mb-1 tracking-tight leading-none mx-auto mt-6 text-white`}>
               {settings?.appShortName || 'NSTA'}
           </h1>
-          <p className={`font-bold tracking-[0.15em] text-[10px] uppercase mt-3 ${isVideoMode ? 'text-slate-300' : 'text-[#64748b]'}`}>The Future of Learning</p>
+          <p className={`font-bold tracking-[0.15em] text-[10px] uppercase mt-3 text-slate-300`}>The Future of Learning</p>
         </div>
 
         {view !== 'HOME' && (
-            <h2 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2 relative z-10">
+            <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2 relative z-10">
               {view === 'LOGIN' && <LogIn className="text-blue-600" />}
               {view === 'SIGNUP' && <UserPlus className="text-blue-600" />}
               {view === 'RECOVERY' && <KeyRound className="text-orange-500" />}
@@ -854,11 +855,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
                  <button
                    type="button"
                    onClick={() => { setFormData(f => ({ ...f, id: '', password: '' })); setView('RECOVERY'); }}
-                   className={`w-full py-3.5 rounded-[2rem] flex items-center justify-center gap-2 font-bold text-sm transition-all active:scale-95 border ${
-                     isVideoMode
-                       ? 'border-orange-400/40 text-orange-300 hover:bg-orange-400/10'
-                       : 'border-orange-200 text-orange-600 hover:bg-orange-50'
-                   }`}
+                   className={`w-full py-3.5 rounded-[2rem] flex items-center justify-center gap-2 font-bold text-sm transition-all active:scale-95 border border-orange-400/40 text-orange-300 hover:bg-orange-400/10`}
                  >
                    <KeyRound size={16} />
                    Account Recover Karo
@@ -890,7 +887,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
                      <div className="text-center mt-6">
                          <div className="relative">
                              <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200"></div></div>
-                             <div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-slate-500 font-bold">Or continue with</span></div>
+                             <div className="relative flex justify-center text-xs uppercase"><span className="bg-[rgba(10,12,28,0.95)] px-2 text-slate-400 font-bold">Or continue with</span></div>
                          </div>
 
                          <button type="button" onClick={handleGoogleAuth} className="w-full mt-4 relative overflow-hidden bg-gradient-to-r from-[#4285F4] via-[#34A853] to-[#EA4335] p-[2px] rounded-2xl shadow-lg active:scale-95 transition-all hover:shadow-xl hover:scale-[1.01]">
@@ -985,7 +982,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
                     <div className="text-center mt-4">
                       <div className="relative">
                         <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200"></div></div>
-                        <div className="relative flex justify-center text-xs uppercase"><span className={`px-2 text-slate-400 font-bold ${isVideoMode ? 'bg-[rgba(10,12,28,0.82)]' : 'bg-white'}`}>Ya Google se</span></div>
+                        <div className="relative flex justify-center text-xs uppercase"><span className={`px-2 text-slate-400 font-bold bg-[rgba(10,12,28,0.95)]`}>Ya Google se</span></div>
                       </div>
                       <button type="button" onClick={handleGoogleAuth} className="w-full mt-4 relative overflow-hidden bg-gradient-to-r from-[#4285F4] via-[#34A853] to-[#EA4335] p-[2px] rounded-2xl shadow-lg active:scale-95 transition-all hover:shadow-xl hover:scale-[1.01]">
                         <div className="flex items-center justify-center gap-3 bg-white rounded-[14px] py-3 px-4">

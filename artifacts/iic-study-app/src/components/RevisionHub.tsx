@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import type { User, StudentTab, SystemSettings, TopicItem, TopicStatus } from '../types';
 import { BrainCircuit, Clock, CheckCircle, TrendingUp, AlertTriangle, ArrowRight, BookOpen, AlertCircle, X, FileText, CheckSquare, Calendar, Zap, AlertCircle as AlertIcon, ChevronDown, ChevronUp, Loader2, Lock, Unlock, MessageSquare, Bot, PlayCircle, Star, Volume2, Mic, AlertOctagon, Crown, Layout, Trophy, Maximize, XCircle } from 'lucide-react';
 import jsPDF from 'jspdf';
+import { renderMathInHtml } from '../utils/mathUtils';
 import { generateCustomNotes } from '../services/groq';
 import { saveAiInteraction, getChapterData, saveUserToLive, saveDemand } from '../firebase';
 import { storage } from '../utils/storage';
@@ -1653,12 +1654,12 @@ const RevisionHubComponent: React.FC<Props> = ({ user, onTabChange, settings, on
                                                             <div key={qIdx} className="bg-white p-3 rounded-xl border border-red-100 shadow-sm">
                                                                 <div className="flex gap-2 mb-2">
                                                                     <span className="text-xs font-black text-red-500 bg-red-50 px-1.5 py-0.5 rounded h-fit">Q{q.qIndex + 1}</span>
-                                                                    <p className="text-xs font-bold text-slate-700 leading-relaxed" dangerouslySetInnerHTML={{ __html: q.question }} />
+                                                                    <p className="text-xs font-bold text-slate-700 leading-relaxed" dangerouslySetInnerHTML={{ __html: renderMathInHtml(q.question) }} />
                                                                 </div>
 
                                                                 <div className="bg-green-50 p-2 rounded-lg border border-green-100">
                                                                     <p className="text-[10px] font-bold text-green-700 mb-0.5">Correct Answer:</p>
-                                                                    <p className="text-xs text-green-800 font-medium" dangerouslySetInnerHTML={{ __html: String(q.correctAnswer) }} />
+                                                                    <p className="text-xs text-green-800 font-medium" dangerouslySetInnerHTML={{ __html: renderMathInHtml(String(q.correctAnswer)) }} />
                                                                 </div>
 
                                                                 {q.explanation && (

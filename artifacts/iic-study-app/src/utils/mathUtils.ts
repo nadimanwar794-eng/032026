@@ -59,38 +59,48 @@ const applySubscripts = (text: string): string =>
 // like "8^\circ 4'" in notes becomes "8° 4'" without needing $…$ wrappers.
 // ─────────────────────────────────────────────────────────────────────────────
 const LATEX_SYMBOL_MAP: [RegExp, string][] = [
-  [/\^\{?\\circ\}?/g,   '°'],   // ^\circ  or  ^{\circ}  → °
-  [/\\circ\b/g,          '°'],   // standalone \circ → °
-  [/\\times\b/g,         '×'],
-  [/\\div\b/g,           '÷'],
-  [/\\pm\b/g,            '±'],
-  [/\\mp\b/g,            '∓'],
-  [/\\approx\b/g,        '≈'],
-  [/\\infty\b/g,         '∞'],
-  [/\\leq?\b/g,          '≤'],
-  [/\\geq?\b/g,          '≥'],
-  [/\\neq\b/g,           '≠'],
-  [/\\cdot\b/g,          '·'],
-  [/\\ldots\b/g,         '…'],
-  [/\\alpha\b/g,         'α'],
-  [/\\beta\b/g,          'β'],
-  [/\\gamma\b/g,         'γ'],
-  [/\\delta\b/g,         'δ'],
-  [/\\epsilon\b/g,       'ε'],
-  [/\\theta\b/g,         'θ'],
-  [/\\lambda\b/g,        'λ'],
-  [/\\mu\b/g,            'μ'],
-  [/\\nu\b/g,            'ν'],
-  [/\\pi\b/g,            'π'],
-  [/\\rho\b/g,           'ρ'],
-  [/\\sigma\b/g,         'σ'],
-  [/\\tau\b/g,           'τ'],
-  [/\\phi\b/g,           'φ'],
-  [/\\omega\b/g,         'ω'],
-  [/\\Delta\b/g,         'Δ'],
-  [/\\Sigma\b/g,         'Σ'],
-  [/\\Omega\b/g,         'Ω'],
-  [/\\sqrt\{([^}]+)\}/g, '√($1)'],  // \sqrt{x} → √(x)
+  [/\^\{?\\circ\}?/g,        '°'],   // ^\circ  or  ^{\circ}  → °
+  [/\\circ\b/g,               '°'],   // standalone \circ → °
+  [/\\times\b/g,              '×'],
+  [/\\div\b/g,                '÷'],
+  [/\\pm\b/g,                 '±'],
+  [/\\mp\b/g,                 '∓'],
+  [/\\approx\b/g,             '≈'],
+  [/\\infty\b/g,              '∞'],
+  [/\\leq?\b/g,               '≤'],
+  [/\\geq?\b/g,               '≥'],
+  [/\\neq\b/g,                '≠'],
+  [/\\cdot\b/g,               '·'],
+  [/\\ldots\b/g,              '…'],
+  [/\\alpha\b/g,              'α'],
+  [/\\beta\b/g,               'β'],
+  [/\\gamma\b/g,              'γ'],
+  [/\\delta\b/g,              'δ'],
+  [/\\epsilon\b/g,            'ε'],
+  [/\\theta\b/g,              'θ'],
+  [/\\lambda\b/g,             'λ'],
+  [/\\mu\b/g,                 'μ'],
+  [/\\nu\b/g,                 'ν'],
+  [/\\pi\b/g,                 'π'],
+  [/\\rho\b/g,                'ρ'],
+  [/\\sigma\b/g,              'σ'],
+  [/\\tau\b/g,                'τ'],
+  [/\\phi\b/g,                'φ'],
+  [/\\omega\b/g,              'ω'],
+  [/\\Delta\b/g,              'Δ'],
+  [/\\Sigma\b/g,              'Σ'],
+  [/\\Omega\b/g,              'Ω'],
+  [/\\sqrt\{([^}]+)\}/g,      '√($1)'],  // \sqrt{x} → √(x)
+  // Arrow symbols (common in chemistry equations and notes)
+  [/\\rightarrow\b/g,         '→'],
+  [/\\leftarrow\b/g,          '←'],
+  [/\\to\b/g,                 '→'],   // \to is alias for \rightarrow
+  [/\\Rightarrow\b/g,         '⇒'],
+  [/\\Leftarrow\b/g,          '⇐'],
+  [/\\leftrightarrow\b/g,     '↔'],
+  [/\\Leftrightarrow\b/g,     '⟺'],
+  [/\\uparrow\b/g,            '↑'],
+  [/\\downarrow\b/g,          '↓'],
 ];
 
 const applyLatexSymbols = (text: string): string => {
@@ -115,12 +125,21 @@ const applyDegrees = (text: string): string =>
 // ─────────────────────────────────────────────────────────────────────────────
 const applyArrows = (text: string): string =>
   text
-    .replace(/&lt;=&gt;/g, '⇌')
-    .replace(/<=/g,        '⇌')   // already unescaped in text nodes
-    .replace(/--&gt;/g,   '→')
-    .replace(/&lt;--/g,   '←')
-    .replace(/\b-&gt;\b/g,'→')
-    .replace(/\b&lt;-\b/g,'←');
+    // HTML-escaped variants (produced by renderMathInText or pre-escaped HTML)
+    .replace(/&lt;=&gt;/g,  '⇌')   // <=>
+    .replace(/--&gt;/g,     '→')   // -->
+    .replace(/&lt;--/g,     '←')   // <--
+    .replace(/\b-&gt;\b/g,  '→')   // ->
+    .replace(/\b&lt;-\b/g,  '←')   // <-
+    // Literal variants (text nodes in raw HTML where < > appear unescaped)
+    .replace(/<==>/g,        '⇌')   // <==>
+    .replace(/<==>/g,        '⇌')
+    .replace(/<=>/g,         '⇌')   // <=>  (must come BEFORE <- to avoid partial match)
+    .replace(/-->/g,         '→')   // -->
+    .replace(/<--/g,         '←')   // <--
+    .replace(/\B->\B/g,      '→')   // ->  (not at word boundary to avoid breaking other tokens)
+    .replace(/(?<!\S)->/g,   '→')   // -> after whitespace
+    .replace(/->(?!\S)/g,    '→');  // -> before whitespace
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main export — renders ALL supported math/science notations in an HTML string.
@@ -162,9 +181,21 @@ export const renderMathInHtml = (html: string): string => {
     catch { return match; }
   });
 
-  // ── 5-9. Plain-text patterns (text nodes only, won't touch KaTeX HTML) ──
+    // ── 5. Bare LaTeX macros with braces (outside $..$ delimiters) ────────
+  // These appear in notes/content without dollar-sign wrapping, e.g.
+  // "4Na + O2 \rightarrow \mathbf{2Na2O}"
+  out = out.replace(/\\mathbf\{([^}]*)\}/g, '<strong>$1</strong>');
+  out = out.replace(/\\textbf\{([^}]*)\}/g, '<strong>$1</strong>');
+  out = out.replace(/\\emph\{([^}]*)\}/g,   '<em>$1</em>');
+  out = out.replace(/\\textit\{([^}]*)\}/g,  '<em>$1</em>');
+  out = out.replace(/\\mathrm\{([^}]*)\}/g,  '$1');
+  out = out.replace(/\\text\{([^}]*)\}/g,    '$1');
+  out = out.replace(/\\overline\{([^}]*)\}/g,'$1\u0305');  // combining overline
+  out = out.replace(/\\underline\{([^}]*)\}/g,'<u>$1</u>');
+
+  // ── 6-10. Plain-text patterns (text nodes only, won't touch KaTeX HTML) ──
   out = processTextNodes(out, text => {
-    text = applyLatexSymbols(text);  // ^\circ → °, \times → ×, etc.
+    text = applyLatexSymbols(text);  // ^\circ → °, \times → ×, \rightarrow → →, etc.
     text = applySuperscripts(text);
     text = applySubscripts(text);
     text = applyDegrees(text);
@@ -173,6 +204,27 @@ export const renderMathInHtml = (html: string): string => {
   });
 
   return out;
+};
+
+/**
+ * Format an explanation string for display.
+ * Explanations are stored as "• A) … • B) … • C) … ---"
+ * This splits on bullet markers and renders each point as its own <p> block
+ * so they stack vertically instead of running together as a paragraph.
+ */
+export const formatExplanationHtml = (raw: string): string => {
+  if (!raw) return '';
+  // Strip trailing separator "---" (with optional surrounding spaces/newlines)
+  const cleaned = raw.replace(/\s*---\s*$/, '').trim();
+  // Split on " • " in the middle, and strip a leading "• " if present
+  const parts = cleaned.split(/\s*•\s+/).filter(Boolean);
+  if (parts.length <= 1) {
+    // No bullet structure — just render as-is
+    return renderMathInHtml(cleaned);
+  }
+  return parts
+    .map(p => `<p style="margin:0 0 0.5em 0;">${renderMathInHtml(p.trim())}</p>`)
+    .join('');
 };
 
 /**

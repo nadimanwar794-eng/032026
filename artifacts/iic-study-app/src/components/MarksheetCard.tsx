@@ -64,7 +64,7 @@ import { applyDeduction, getTotalCredits } from "../utils/creditSystem";
 import { CustomConfirm } from "./CustomDialogs"; // Import CustomConfirm
 import { SpeakButton } from "./SpeakButton";
 import { MarksheetPieChart, MarksheetTopicBarChart } from "./MarksheetCharts";
-import { renderMathInHtml } from "../utils/mathUtils";
+import { renderMathInHtml, formatExplanationHtml } from "../utils/mathUtils";
 import { downloadAsPDF } from "../utils/downloadUtils";
 import { saveOfflineItem } from "../utils/offlineStorage";
 import { storage } from "../utils/storage";
@@ -548,7 +548,7 @@ export const MarksheetCard: React.FC<Props> = ({
     page * ITEMS_PER_PAGE,
   );
 
-  const devName = settings?.footerText || "Shivangi Singh";
+  const devName = settings?.footerText || "Nadim Anwar";
 
   useEffect(() => {
     if (initialView === "ANALYSIS" || result.ultraAnalysisReport) {
@@ -1234,7 +1234,7 @@ export const MarksheetCard: React.FC<Props> = ({
                                     <div
                                       className="text-xs text-slate-800 leading-relaxed font-medium"
                                       dangerouslySetInnerHTML={{
-                                        __html: renderMathInHtml(q.explanation),
+                                        __html: formatExplanationHtml(q.explanation),
                                       }}
                                     />
                                   </div>
@@ -1778,7 +1778,7 @@ export const MarksheetCard: React.FC<Props> = ({
                       <div
                         className="text-xs text-slate-800 leading-relaxed font-medium"
                         dangerouslySetInnerHTML={{
-                          __html: renderMathInHtml(q.explanation),
+                          __html: formatExplanationHtml(q.explanation),
                         }}
                       />
                     </div>
@@ -2218,7 +2218,7 @@ export const MarksheetCard: React.FC<Props> = ({
                             <div
                               className="text-xs text-slate-700 leading-relaxed font-medium"
                               dangerouslySetInnerHTML={{
-                                __html: renderMathInHtml(q.explanation),
+                                __html: formatExplanationHtml(q.explanation),
                               }}
                             />
                           </div>

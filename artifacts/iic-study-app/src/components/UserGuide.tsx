@@ -188,6 +188,16 @@ const SECTIONS: HelpSection[] = [
                 tags: ['Star', 'Bookmark', 'Favorite', 'Quick Access'],
                 tip: 'Har chapter ke 3-5 most important notes star karo — last-minute revision easy ho jaati hai.'
             },
+            {
+                icon: <Trophy size={16} />,
+                title: 'Competition Mode',
+                subtitle: 'High-level competitive exam content — Lucent, NCERT, Speedy jaise books',
+                desc: 'Competition Mode ek alag section hai jo specifically competitive exams (SSC, Railway, BPSC, etc.) ke liye hai. Yahan milta hai: 📖 Book-style reader (Lucent GK, Speedy, Sar Sangrah, etc.) — page-by-page structured notes. 🏆 Competition MCQ Practice Sets — admin-added MCQ batches chapter-wise. 📄 Competition PDF Notes — premium competition material. 🎬 Competition Video Lectures. Free users: Limited chapters per day (admin-set). Ultra users: Unlimited access to all competition content. Kaise access: Home → Competition tab ya Study section mein Competition select karo. Each page/chapter mein TTS, star, aur MCQ bhi available hota hai.',
+                color: 'violet',
+                tags: ['Competition', 'Lucent', 'SSC', 'Railway', 'BPSC', 'Book Reader', 'MCQ Sets', 'Ultra'],
+                tip: 'Competition mode mein Lucent GK book daily ek chapter padho — 3 mahine mein poori book complete ho jaayegi!',
+                warning: '⚠️ Competition Mode Ultra subscription se unlock hota hai. Free users ke liye limited chapters per day.'
+            },
         ]
     },
     {
@@ -231,6 +241,15 @@ const SECTIONS: HelpSection[] = [
                 desc: 'Kuch videos kisi specific chapter se nahi hote — jaise motivational talks, general study tips, board exam guidance. Ye "Playlist" section mein milte hain. Subject select karne ki zaroorat nahi — seedha playlist section mein milega. Useful for: Mock test guidance, Board exam tips, Science experiments, General knowledge videos.',
                 color: 'orange',
                 tags: ['General Videos', 'Playlist', 'Motivational', 'Tips'],
+            },
+            {
+                icon: <Volume2 size={16} />,
+                title: 'Audio Studio',
+                subtitle: 'Apna koi bhi text aawaz mein sunao — Hindi ya English',
+                desc: 'Audio Studio ek powerful Text-to-Speech (TTS) tool hai jo aapke custom text ko aawaz mein convert karta hai. Kaise use karein: Profile ya Tools section mein "Audio Studio" dhundho. Apna text paste karo (notes, questions, kuch bhi). Language select karo — Hindi ya English. Play button dabaao — app bol ke padhega. Pause, resume, stop bhi kar sakte ho. Copy button se text copy ho jaata hai. Ye sirf TTS "Read" button se alag hai — yahan aap khud apna text type ya paste karke sun sakte ho, content uss par dependent nahi hota.',
+                color: 'sky',
+                tags: ['Audio Studio', 'TTS', 'Custom Text', 'Hindi', 'English', 'Voice'],
+                tip: 'Apne handwritten notes ya book se text copy karo, Audio Studio mein paste karo aur sun lo — perfect passive learning!'
             },
         ]
     },
@@ -295,6 +314,16 @@ const SECTIONS: HelpSection[] = [
                 color: 'purple',
                 tags: ['Community', 'MCQ Share', 'Discussion', 'Doubt Clearing'],
             },
+            {
+                icon: <ClipboardList size={16} />,
+                title: 'Weekly Test',
+                subtitle: 'Admin-created timed weekly mock tests — exam jaisa experience',
+                desc: 'Weekly Tests admin-assigned special mock exams hote hain jo chapter ya subject ke hisaab se hote hain. Regular MCQ Test Mode se alag — ye properly scheduled weekly exam hota hai with a separate timer jo restart nahi hota (session persist karta hai). Kaise access: Home page pe "Weekly Test" card ya notification. Ya Revision Hub se bhi mil sakta hai. Test start ho jaaye toh timer chal jaata hai — beech mein band karoge toh waqt chalta rahega. Submit karne pe detailed marksheet milti hai. Galat jawab Mistake Bank mein jaate hain.',
+                color: 'indigo',
+                tags: ['Weekly Test', 'Scheduled Exam', 'Timed', 'Marksheet', 'Mistake Bank'],
+                tip: 'Weekly Test se asli exam ki taiyaari hoti hai — isko seriously lo, real exam jaisa environment rakh ke baitho.',
+                warning: '⚠️ Timer background mein bhi chalta rehta hai — test start karne ke baad poora complete karo.'
+            },
         ]
     },
     {
@@ -330,6 +359,24 @@ const SECTIONS: HelpSection[] = [
                 color: 'emerald',
                 tags: ['AI Generate', 'Custom Notes', 'Topic Notes', 'Instant'],
                 tip: 'Job Interview ya competitive exam ke liye custom topic notes banwao jo app mein available na ho!'
+            },
+            {
+                icon: <Calendar size={16} />,
+                title: 'AI Study Planner',
+                subtitle: 'AI se personalized daily study timetable banwao',
+                desc: 'AI Hub mein ek Study Planner feature hai jo aapke hisaab se customized study timetable generate karta hai. Kaise use: AI Hub → "Study Planner" section. Apna exam date, weak subjects aur available daily hours batao. AI ek optimized, realistic timetable banata hai jo subjects aur chapters ke hisaab se divided hota hai. Timetable app mein save hota hai — roz dekh sakte ho. Planner time ke saath adjust bhi hota hai. Free/Basic users ke liye basic plan, Ultra users ke liye detailed AI-powered plan milta hai.',
+                color: 'violet',
+                tags: ['Study Planner', 'Timetable', 'AI Plan', 'Exam Prep', 'Schedule'],
+                tip: 'Exam 30 din dur ho toh Study Planner use karo — AI exactly batata hai roz kya padhna hai!'
+            },
+            {
+                icon: <Target size={16} />,
+                title: 'Study Goal Timer',
+                subtitle: 'Focus session track karo aur coins earn karo',
+                desc: 'AI Hub ya Home mein "Study Timer" ya "Study Goal" feature milega. Yahan aap apna daily study goal set kar sakte ho (e.g. 2 hours). Timer chalu karo jab padhai start karo — focus track hota hai. Session complete karne pe automatically coins milte hain (engagement reward). Progress bar dikhta hai — kitna goal complete hua. Ye Pomodoro-style focused study ko reward karta hai. Coins aur score dono milte hain timer sessions se.',
+                color: 'amber',
+                tags: ['Study Timer', 'Goal', 'Focus', 'Earn Coins', 'Engagement Reward'],
+                tip: 'Roz 1-2 ghante ka study goal set karo — timer complete karne pe automatic coins milte hain bina kuch aur kiye!'
             },
         ]
     },
@@ -397,7 +444,7 @@ const SECTIONS: HelpSection[] = [
                 icon: <TrendingUp size={16} />,
                 title: 'Level System',
                 subtitle: 'MCQ karo, padho aur level up karo — rewards milte hain',
-                desc: 'App mein 11 levels hain — Level 1 (Beginner 🌱) se Level 11 (Supreme 🏆) tak. Score kaise milta hai: MCQ sahi karna (+points), Daily login (+10), Notes padha (+points), Video dekha (+points). Level up hone ke fayde: Higher levels pe zyada daily login bonus milta hai. Discount store pe milti hai (L3: 2%, L7: 10%, L11: 20%). MCQ daily limit badhti hai. Write Mode ke free uses badhte hain. Apna level Profile tab mein dekhein.',
+                desc: 'App mein 15 levels hain — Level 1 (Beginner 🌱) se Level 15 (Absolute Legend 💠) tak. Score kaise milta hai: MCQ sahi karna (+points), Daily login (+10), Notes padha (+points), Video dekha (+points), Credits kharch karna (+1 per CR), Code redeem (+5 pts). Level up ke fayde: L3 pe 2% store discount shuru. L4 pe Progress Bonus unlock (daily login bonus badhta hai). L7 pe colored username. L8 pe Smart Notes hamesha ke liye FREE. L9 pe Elite Frame & Badge. L10 pe Champion Frame + Smart Notes + Explanation free. L11-L15 pe Daily Limit Bonus (2.5x se 5x tak) aur exclusive themes aur effects. Apna level Profile tab mein dekhein. Daily score limit: Free=1500, Basic=2500, Ultra=3500 pts/day.',
                 color: 'violet',
                 tags: ['Level 1-11', 'Score', 'XP', 'Rewards', 'Daily Login Bonus', 'Discount'],
                 tip: 'Roz MCQ karo aur daily login karo — slow aur steady level badhta rehega, aur rewards automatically milte rahenge!'
@@ -410,6 +457,16 @@ const SECTIONS: HelpSection[] = [
                 color: 'yellow',
                 tags: ['Leaderboard', 'Rank', 'Top Students', 'Competition'],
                 tip: 'Leaderboard se motivation milti hai! Top 10 mein aane ki koshish karo — study bhi hogi, game bhi feel hoga.'
+            },
+            {
+                icon: <Trophy size={16} />,
+                title: 'Daily Challenge',
+                subtitle: 'Roz ek special 100-question timed challenge — jeet ke premium pao',
+                desc: 'Daily Challenge ek special timed MCQ contest hai jo roz available hota hai. 100 questions, limited time. Ye regular MCQ se alag hai — ye competition format mein hota hai. Kaise khelein: Home screen ya Game Zone mein "Daily Challenge" button. Start karo — timer shuru ho jaata hai. Best score leaderboard mein show hota hai. Jeet gaye toh premium access ya special rewards milte hain. Class-wise alag leaderboard hai — apne competitors se compare karo. Challenge sirf ek baar diya ja sakta hai per day.',
+                color: 'orange',
+                tags: ['Daily Challenge', 'Competition', '100 Questions', 'Timer', 'Leaderboard', 'Prize'],
+                tip: 'Roz subah fresh mind mein Daily Challenge do — concentration peak hoti hai aur score better aata hai.',
+                warning: '⚠️ Ek baar start ho gaya toh timer chal jaata hai — uninterrupted time nikalke baitho.'
             },
             {
                 icon: <Flame size={16} />,
@@ -487,10 +544,20 @@ const SECTIONS: HelpSection[] = [
                 icon: <Moon size={16} />,
                 title: 'Theme Change (Light / Dark / Blue)',
                 subtitle: 'App ka color theme apni pasand ke anusar badlo',
-                desc: 'App ke 3 themes hain: ☀️ Light Mode — default white theme. 🌑 Dark Mode — pure black background — aankhon ke liye better raat ko. 🔵 Blue Dark Mode — blue-dark theme — elegant look. Theme change karne ke liye: Profile tab → "Theme" button. Ya top bar mein direct icon. Theme change turant hoti hai — reload ki zaroorat nahi.',
+                desc: 'App ke 3 built-in themes hain: ☀️ Light Mode — default white theme. 🌑 Dark Mode — pure black background — aankhon ke liye better raat ko. 🔵 Blue Dark Mode — blue-dark theme — elegant look. Theme change karne ke liye: Profile tab → "Theme" button. Ya top bar mein direct icon. Theme change turant hoti hai — reload ki zaroorat nahi.',
                 color: 'slate',
                 tags: ['Theme', 'Dark Mode', 'Light Mode', 'Blue Mode'],
                 tip: 'Raat ko padho toh Dark Mode use karo — aankhon pe strain bahut kam hoti hai.'
+            },
+            {
+                icon: <Sparkles size={16} />,
+                title: 'Custom Theme Creator',
+                subtitle: '200 CR mein apna khud ka personalized theme banao',
+                desc: 'App mein ek premium "Theme Customizer" feature hai jahan aap puri app ka color scheme apne hisaab se banao. Kaise access: Profile → "Custom Theme" ya Theme section mein "Create Custom" option. Cost: 200 Credits ek baar. Kya customize ho sakta hai: Top bar color, Navigation bar, Button colors, Card backgrounds, Text colors, Accent glow, aur bhi bahut kuch. Ek naam aur emoji bhi de sakte ho apne theme ko. Theme save hoti hai — dobara coins nahi lagte. Admins globally ek "Global Theme" bhi set kar sakte hain jo sab par apply hoti hai (admin override).',
+                color: 'violet',
+                tags: ['Custom Theme', 'Theme Customizer', 'Personalize', '200 CR', 'Colors'],
+                tip: 'Ek baar 200 CR invest karo — phir life bhar apni pasand ki app theme enjoy karo!',
+                warning: '⚠️ 200 CR ek baar katenge. Custom theme banane se pehle apna credit balance dekho.'
             },
             {
                 icon: <Globe size={16} />,

@@ -37,8 +37,8 @@ const THEME_STYLES: Record<ThemeVariant, {
     badge: 'text-gray-500',
   },
   blue: {
-    bg: 'bg-[#050d1f]',
-    text: 'text-white',
+    bg: 'bg-[#000000]',
+   text: 'text-white',
     subtext: 'text-blue-400/70',
     boxBg: 'bg-blue-950/60',
     boxBorder: 'border-blue-900/60',
@@ -77,7 +77,7 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
     } catch { return 'IIC'; }
   });
 
-  const developerName = 'Shivangi Singh';
+  const developerName = 'Nadim Anwar';
 
   const [showFooter] = useState<boolean>(() => {
     try {
@@ -171,28 +171,18 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
     setTimeout(() => setLogoTapped(false), 600);
   };
 
-  const t = THEME_STYLES[themeVariant];
-  const iconColor1 = themeVariant === 'light' ? 'text-blue-500' : 'text-blue-400';
-  const iconColor2 = themeVariant === 'light' ? 'text-violet-600' : 'text-purple-400';
-  const iconColor3 = themeVariant === 'light' ? 'text-rose-500' : 'text-rose-400';
-  const iconColor4 = themeVariant === 'light' ? 'text-emerald-600' : 'text-emerald-400';
-  const iconColor5 = themeVariant === 'light' ? 'text-amber-500' : 'text-amber-400';
-  const iconColor6 = themeVariant === 'light' ? 'text-indigo-600' : 'text-indigo-400';
-  const iconColor7 = themeVariant === 'light' ? 'text-teal-600' : 'text-teal-400';
-  const iconColor8 = themeVariant === 'light' ? 'text-orange-500' : 'text-orange-400';
+  const t = THEME_STYLES.black;
+  const iconColor1 = 'text-blue-400';
+  const iconColor2 = 'text-purple-400';
+  const iconColor3 = 'text-rose-400';
+  const iconColor4 = 'text-emerald-400';
+  const iconColor5 = 'text-amber-400';
+  const iconColor6 = 'text-indigo-400';
+  const iconColor7 = 'text-teal-400';
+  const iconColor8 = 'text-orange-400';
 
   return (
-    <div className={`fixed inset-0 z-[9999] flex flex-col items-center justify-center ${t.bg} ${t.text} overflow-hidden w-full mx-auto`}>
-      {/* Animated background gradient */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none opacity-20">
-        <div className={`absolute top-[-10%] left-[-10%] w-[120%] h-[120%] ${
-          themeVariant === 'blue'
-            ? 'bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.4)_0%,transparent_55%)]'
-            : themeVariant === 'black'
-            ? 'bg-[radial-gradient(circle_at_center,rgba(99,102,241,0.25)_0%,transparent_55%)]'
-            : 'bg-[radial-gradient(circle_at_center,rgba(99,102,241,0.15)_0%,transparent_55%)]'
-        } animate-[spin_15s_linear_infinite]`} />
-      </div>
+    <div className={`fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-black text-white overflow-hidden w-full mx-auto`}>
 
       <div className="relative z-10 flex flex-col items-center w-full px-8">
         <button
@@ -308,11 +298,20 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, 
             </span>
             {showFooter && (
               <>
-                <span className={`${t.badge} opacity-40 text-[10px]`}>·</span>
-                <span className={`text-[11px] font-medium ${t.badge} opacity-60 tracking-wide`}>
-                  Developed by {developerName}
+                <span className={`${t.badge} opacity-25 text-[10px]`}>·</span>
+                <span
+                  className={`text-[10px] ${t.badge}`}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '4px',
+                    padding: '2px 8px', borderRadius: '999px',
+                    border: '1px solid rgba(255,255,255,0.12)',
+                    background: 'rgba(255,255,255,0.05)',
+                    letterSpacing: '0.01em',
+                  }}
+                >
+                  <span style={{ opacity: 0.45, fontWeight: 400, fontSize: '9px' }}>Developed by</span>
+                  <span style={{ opacity: 0.85, fontWeight: 600, fontSize: '10px' }}>{developerName}</span>
                 </span>
-                <span className={`${t.badge} opacity-30 text-[10px]`}>|</span>
               </>
             )}
             <span className={`text-[11px] ${t.badge} font-mono opacity-50 tracking-widest`}>

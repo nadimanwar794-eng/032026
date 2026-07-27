@@ -577,6 +577,18 @@ export const ALL_FEATURES: Feature[] = [
         color: 'amber'
     },
     {
+        id: 'ADMIN_COMPETITION_MCQ',
+        label: 'MCQ Practice Sets',
+        group: 'CONTENT',
+        surfaceLevel: 3,
+        adminVisible: true,
+        adminTab: 'COMPETITION_MCQ_MANAGER',
+        requiredPermission: 'MANAGE_CONTENT',
+        icon: 'CheckSquare',
+        color: 'violet',
+        description: 'Competition Books → MCQ Practice ke liye MCQ sets add karein.'
+    },
+    {
         id: 'ADMIN_CLASS_NOTES',
         label: 'Class 6-12 Notes',
         group: 'CONTENT',

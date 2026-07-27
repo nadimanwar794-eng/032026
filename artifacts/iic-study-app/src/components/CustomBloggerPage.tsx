@@ -61,11 +61,22 @@ export const CustomBloggerPage: React.FC<Props> = ({ onBack, settings }) => {
             </div>
             <div className="flex flex-col items-end text-[10px] text-slate-600 font-medium leading-tight">
                 <span>App Version: {APP_VERSION}</span>
-                {settings?.showFooter !== false && <span>Developed by Shivangi Singh</span>}
+                {settings?.showFooter !== false && (
+                    <span style={{
+                        display: 'inline-flex', alignItems: 'center', gap: '3px',
+                        padding: '1px 6px', borderRadius: '999px',
+                        border: '1px solid rgba(0,0,0,0.12)',
+                        fontSize: '9px', letterSpacing: '0.01em',
+                        color: '#64748b',
+                    }}>
+                        <span style={{ fontWeight: 400 }}>Developed by</span>
+                        <span style={{ fontWeight: 700, color: '#1e293b' }}>Nadim Anwar</span>
+                    </span>
+                )}
             </div>
         </div>
         
-        <div className="p-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <div className="px-0 py-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
             {driveId && (
                 <div className="mb-6">
                     <div className="rounded-xl overflow-hidden shadow-md bg-black relative" style={{ aspectRatio: '16/9' }}>

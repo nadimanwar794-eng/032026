@@ -23,27 +23,37 @@ export interface NoteSections {
  * Returns null when the input doesn't look like this 3-section format (so
  * callers can fall back to treating the whole content as a single page).
  */
-// Require the actual labels (not just a stray emoji somewhere) before we
-// treat a note as "Suno 3-section" format, so ordinary single-section notes
-// that merely happen to contain 📖/📝/💡 characters are left untouched.
-const BOOK_LABEL_RE = /📖\s*Book\s*Text\s*:/i;
-const SMART_LABEL_RE = /📝\s*Smart\s*Notes?\s*:/i;
-const EXPLAIN_LABEL_RE = /💡\s*(?:आसान\s*समझ)?\s*(?:[\/(]?\s*Explanation\s*[\/)]?)?\s*:/i;
+// Match section labels by their icon (📖 📝 💡). Handles all common formats:
+//   📖 Book Text (किताब का मूल टेक्स्ट):   ← icon + label + Hindi paren
+//   📖 Book Text:                            ← icon + label
+//   📖 **Book Text:**                        ← icon + bold-markdown label
+//   📖 **Book Text (किताब का मूल टेक्स्ट):** ← icon + bold + Hindi
+//   📖:                                      ← icon + colon only
+//   📖                                       ← bare icon
+//
+// Pattern anatomy (same for all three icons):
+//   ICON \s* [**]? [LABEL_TEXT [**]?]? \s* [(Hindi)]? \s* :? \s* [**]? \s*
+// The trailing [**]? consumes the closing bold marker in ":**" style labels.
+const _PAREN = '(?:\\([^)]*\\))?';
+const BOOK_LABEL_RE    = /📖\s*(?:\*\*)?(?:Book\s*Text)?\s*(?:\*\*)?\s*(?:\([^)]*\))?\s*:?\s*(?:\*\*)?/i;
+const SMART_LABEL_RE   = /📝\s*(?:\*\*)?(?:Smart\s*Notes?)?\s*(?:\*\*)?\s*(?:\([^)]*\))?\s*:?\s*(?:\*\*)?/i;
+const EXPLAIN_LABEL_RE = /💡\s*(?:\*\*)?(?:(?:आसान\s*समझ)\s*(?:\*\*)?\s*(?:\([^)]*\))?\s*(?:[/(]?\s*Explanation\s*[/)]?)?|Explanation)?\s*:?\s*(?:\*\*)?/i;
 
-// Global variants of the same labels, used to find every occurrence and where
-// its label text ends (so the body segment can start right after the label
-// without a separate strip pass). Anchoring on the full label — not just the
-// bare emoji — means a 📖/📝/💡 that shows up inside normal body text (e.g. as
-// decoration on an unrelated line) is never mistaken for a section boundary.
-const BOOK_LABEL_G = /📖\s*Book\s*Text\s*:\s*/gi;
-const SMART_LABEL_G = /📝\s*Smart\s*Notes?\s*:\s*/gi;
-const EXPLAIN_LABEL_G = /💡\s*(?:आसान\s*समझ)?\s*(?:[\/(]?\s*Explanation\s*[\/)]?)?\s*:\s*/gi;
+// Global variants — same patterns with global flag + trailing \s* to eat the newline.
+const BOOK_LABEL_G    = /📖\s*(?:\*\*)?(?:Book\s*Text)?\s*(?:\*\*)?\s*(?:\([^)]*\))?\s*:?\s*(?:\*\*)?\s*/gi;
+const SMART_LABEL_G   = /📝\s*(?:\*\*)?(?:Smart\s*Notes?)?\s*(?:\*\*)?\s*(?:\([^)]*\))?\s*:?\s*(?:\*\*)?\s*/gi;
+const EXPLAIN_LABEL_G = /💡\s*(?:\*\*)?(?:(?:आसान\s*समझ)\s*(?:\*\*)?\s*(?:\([^)]*\))?\s*(?:[/(]?\s*Explanation\s*[/)]?)?|Explanation)?\s*:?\s*(?:\*\*)?\s*/gi;
 // Heading lines: "📌 <heading text>" up to the end of that line.
 const HEADING_LABEL_G = /📌\s*([^\n]*)/g;
 
 export function splitNoteSections(raw: string): NoteSections | null {
   if (!raw) return null;
-  if (!BOOK_LABEL_RE.test(raw) || !SMART_LABEL_RE.test(raw) || !EXPLAIN_LABEL_RE.test(raw)) return null;
+  // Require at least ONE of the three section labels — any format is accepted.
+  // Notes that have none of the three labels fall through to single-page mode.
+  const hasBook = BOOK_LABEL_RE.test(raw);
+  const hasSmart = SMART_LABEL_RE.test(raw);
+  const hasExplain = EXPLAIN_LABEL_RE.test(raw);
+  if (!hasBook && !hasSmart && !hasExplain) return null;
 
   // Collect every labelled marker in document order (not a per-block search,
   // which only ever found the FIRST 📖/📝/💡 inside a block and silently

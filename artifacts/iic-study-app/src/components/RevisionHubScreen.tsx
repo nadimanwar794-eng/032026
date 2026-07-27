@@ -9,13 +9,16 @@ import { RevisionHubV2 } from './RevisionHubV2';
 import { McqReviewHub } from './McqReviewHub';
 import { MonthlyMarksheet } from './MonthlyMarksheet';
 import { PerformanceGraph } from './PerformanceGraph';
-import { subscribeMcqLessons, saveUserToLive } from '../firebase';
+import { subscribeMcqLessons, saveUserToLive, saveTestResult, saveUserHistory } from '../firebase';
 import { useAppTheme } from '../utils/themeContext';
 import {
-  recordAttempt, applyInitialSchedule, bucketKey,
+  recordAttempt, applyInitialSchedule, bucketKey, getAllBuckets,
 } from '../utils/revisionTrackerV2';
+import { getStudyActivitySummary, formatActivityDuration } from '../utils/activityTracker';
+import { syncAllRevisionBuckets } from '../utils/revisionFirebase';
 import { applyDeduction, getTotalCredits } from '../utils/creditSystem';
 import { CreditConfirmationModal } from './CreditConfirmationModal';
+import { renderMathInHtml } from '../utils/mathUtils';
 
 type HubTab = 'MCQ' | 'REVISION' | 'PERFORMANCE';
 
@@ -103,10 +106,27 @@ export const RevisionHubScreen: React.FC<Props> = ({
     return unsub;
   }, []);
 
-  // Only show MCQs that have a topic name (lessonTitle) set — lessons without
-  // a title are considered incomplete/draft and should not appear in Revision Hub.
+  // Helper: returns true if this MCQ has a real topic (non-empty, non-"General").
+  // "General" is the default label mcqParser assigns to MCQs pasted without
+  // <TOPIC: ...> tags — it effectively means "no topic" and must be treated
+  // the same as a blank topic throughout Revision Hub.
+  const isRealTopicMcq = (q: any) => {
+    const t = String(q?.topic ?? '').trim();
+    return t !== '' && t.toLowerCase() !== 'general';
+  };
+
+  // Only show lessons that have at least one real topic-wise MCQ.
+  // This cleanly excludes:
+  //   • Pure page-sync lessons (all MCQs are "General" / no-topic)
+  //   • Draft/incomplete lessons with no lessonTitle
+  // Lessons that mix page MCQs ("General") with proper topic MCQs are still
+  // shown — the "General" MCQs are filtered out below in classMcqs.
   const hubLessons = useMemo(
-    () => allLessons.filter(l => l.lessonTitle && String(l.lessonTitle).trim() !== ''),
+    () => allLessons.filter(l => {
+      if (!l.lessonTitle || !String(l.lessonTitle).trim()) return false;
+      const mcqs: any[] = Array.isArray(l.mcqs) ? l.mcqs : [];
+      return mcqs.some(isRealTopicMcq);
+    }),
     [allLessons],
   );
 
@@ -132,13 +152,12 @@ export const RevisionHubScreen: React.FC<Props> = ({
     l => l.classLevel === mcqSelectedClass && l.subject === mcqSelectedSubject
   );
 
-  // MCQs come from the selected lesson (new system) or fallback to legacy settings
-  // Exclude MCQs without a topic name — blank-topic MCQs would appear as
-  // "General" which should not show in Revision Hub.
+  // MCQs from the selected lesson — only real topic-wise MCQs.
+  // Excludes blank-topic MCQs and "General" MCQs (page-synced content).
   const classMcqs: any[] = (mcqSelectedLesson
     ? (mcqSelectedLesson.mcqs || [])
     : []
-  ).filter((q: any) => q.topic && String(q.topic).trim() !== '');
+  ).filter(isRealTopicMcq);
 
   const currentQ = sessionActive ? sessionMcqs[sessionQIndex] : null;
 
@@ -312,6 +331,17 @@ export const RevisionHubScreen: React.FC<Props> = ({
       } catch (_) {}
     });
 
+    // ── Sync all revision buckets to Firebase after session (fire-and-forget) ──
+    try {
+      const allBuckets = getAllBuckets();
+      const bucketMap: Record<string, any> = {};
+      allBuckets.forEach((b: any) => {
+        const k = `${b.subjectId}::${b.chapterId}::${b.pageKey}::${b.topic}`;
+        bucketMap[k] = b;
+      });
+      syncAllRevisionBuckets(user.id, bucketMap);
+    } catch (_) {}
+
     // ── Save to mcqHistory so My Routine + score tracking can see it ──────────
     if (totalAnswered > 0 && onUpdateUser) {
       const newEntry = {
@@ -332,6 +362,13 @@ export const RevisionHubScreen: React.FC<Props> = ({
         performanceTag: totalCorrect / totalAnswered >= 0.8 ? 'EXCELLENT' : totalCorrect / totalAnswered >= 0.5 ? 'GOOD' : 'NEEDS_IMPROVEMENT',
         type: 'REVISION_MCQ',
       };
+      // Keep a durable per-attempt copy in Firebase as well as the user's
+      // aggregated mcqHistory. This makes the complete test history recoverable
+      // independently on another device.
+      try {
+        saveTestResult(user.id, newEntry);
+        saveUserHistory(user.id, newEntry);
+      } catch (_) {}
       // ── Pts: +2 sahi jawab, +1 galat jawab ──────────────────────────────
       const ptsEarned = (totalCorrect * 2) + ((totalAnswered - totalCorrect) * 1);
       const updatedUser = {
@@ -477,7 +514,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
               <div className="flex items-start gap-2">
                 <p className="font-bold text-slate-800 text-sm leading-relaxed flex-1"
-                  dangerouslySetInnerHTML={{ __html: (currentQ.question || '').replace(/<br\/?>/g, '\n') }}
+                  dangerouslySetInnerHTML={{ __html: renderMathInHtml((currentQ.question || '').replace(/<br\/?>/g, '\n')) }}
                 />
                 {onSendToMcqCommunity && (
                   <button
@@ -513,7 +550,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
                     className={`w-full text-left px-4 py-3 rounded-xl text-sm font-medium border-2 transition-all ${cls}`}
                   >
                     <span className="font-black mr-2">{String.fromCharCode(65 + oi)}.</span>
-                    {opt}
+                    <span dangerouslySetInnerHTML={{ __html: renderMathInHtml(opt) }} />
                   </button>
                 );
               })}
@@ -636,16 +673,16 @@ export const RevisionHubScreen: React.FC<Props> = ({
                         <div className="flex-1 min-w-0">
                           <p className="text-[10px] font-black text-slate-400 mb-0.5">Q{qi + 1} · {q.topic || 'General'}</p>
                           <p className="text-xs font-bold text-slate-800 leading-relaxed line-clamp-2"
-                            dangerouslySetInnerHTML={{ __html: (q.question || '').replace(/<br\/?>/g, ' ') }}
+                            dangerouslySetInnerHTML={{ __html: renderMathInHtml((q.question || '').replace(/<br\/?>/g, ' ')) }}
                           />
                           <div className="mt-1.5 space-y-0.5">
                             {!isCorrect && (
                               <p className="text-[10px] text-rose-600 font-bold">
-                                ❌ Tumhara: {String.fromCharCode(65 + userAns)}. {q.options?.[userAns] || ''}
+                                ❌ Tumhara: {String.fromCharCode(65 + userAns)}. <span dangerouslySetInnerHTML={{ __html: renderMathInHtml(q.options?.[userAns] || '') }} />
                               </p>
                             )}
                             <p className="text-[10px] text-emerald-700 font-bold">
-                              ✅ Sahi: {String.fromCharCode(65 + q.correctAnswer)}. {q.options?.[q.correctAnswer] || ''}
+                              ✅ Sahi: {String.fromCharCode(65 + q.correctAnswer)}. <span dangerouslySetInnerHTML={{ __html: renderMathInHtml(q.options?.[q.correctAnswer] || '') }} />
                             </p>
                           </div>
                         </div>
@@ -917,27 +954,110 @@ export const RevisionHubScreen: React.FC<Props> = ({
         )}
 
         {/* Performance Tab */}
-        {activeTab === 'PERFORMANCE' && (
-          <div className="p-4 space-y-4">
-            <PerformanceGraph
-              history={(user as any).mcqHistory || []}
-              user={user}
-            />
-            <button
-              onClick={() => setShowMonthlySheet(true)}
-              className="w-full flex items-center justify-between px-4 py-3.5 rounded-2xl border border-indigo-200 bg-indigo-50 active:scale-[0.99] transition-all"
-            >
-              <div className="flex items-center gap-3">
-                <span className="text-2xl">📊</span>
-                <div className="text-left">
-                  <p className="font-black text-slate-800 text-sm">Monthly Report</p>
-                  <p className="text-[10px] text-slate-500">Full marksheet aur analysis</p>
+        {activeTab === 'PERFORMANCE' && (() => {
+          const topicSummaries = getStudyActivitySummary(user.id).filter(s => s.mcq.attempts > 0 || Object.keys(s.seconds).length > 0);
+          return (
+            <div className="p-4 space-y-4">
+              <PerformanceGraph
+                history={(user as any).mcqHistory || []}
+                user={user}
+              />
+
+              {/* Topic-wise Progress from activityTracker */}
+              {topicSummaries.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 px-1">📚 Topic-wise Progress</p>
+                  {topicSummaries.map((s, i) => {
+                    const latest = s.mcq.latest;
+                    const prev = s.mcq.previous;
+                    const latestPct = latest ? Math.round((latest.correct / Math.max(1, latest.total)) * 100) : 0;
+                    const prevPct = prev ? Math.round((prev.correct / Math.max(1, prev.total)) * 100) : 0;
+                    const totalSec = Object.values(s.seconds).reduce((a, b) => a + (b || 0), 0);
+                    return (
+                      <div key={i} className="bg-white rounded-2xl border border-slate-100 shadow-sm px-4 py-3 space-y-1.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[12px] font-black text-slate-800 truncate">{s.topic}</p>
+                            {s.subject && (
+                              <p className="text-[10px] text-slate-400 font-bold">{s.subject}</p>
+                            )}
+                          </div>
+                          {totalSec > 0 && (
+                            <span className="text-[9px] font-bold text-slate-400 shrink-0 flex items-center gap-0.5">
+                              <Clock size={9} />{formatActivityDuration(totalSec)}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* MCQ scores */}
+                        {latest && (
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${latestPct >= 70 ? 'bg-emerald-50 text-emerald-700' : latestPct >= 40 ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-600'}`}>
+                              Last: {latest.correct}/{latest.total} ({latestPct}%)
+                            </span>
+                            {prev && (
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${prevPct >= 70 ? 'bg-emerald-50 text-emerald-700' : prevPct >= 40 ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-600'} opacity-70`}>
+                                Prev: {prev.correct}/{prev.total} ({prevPct}%)
+                              </span>
+                            )}
+                            {/* Improvement arrow */}
+                            {prev && latestPct !== prevPct && (
+                              <span className={`text-[10px] font-black ${latestPct > prevPct ? 'text-emerald-600' : 'text-rose-500'}`}>
+                                {latestPct > prevPct ? `↑ +${latestPct - prevPct}%` : `↓ ${latestPct - prevPct}%`}
+                              </span>
+                            )}
+                            <span className="text-[9px] text-slate-400">{s.mcq.attempts} attempt{s.mcq.attempts !== 1 ? 's' : ''}</span>
+                          </div>
+                        )}
+
+                        {/* Last 5 question timings */}
+                        {s.mcq.timings.length > 0 && (
+                          <div className="flex items-center gap-1 flex-wrap">
+                            <span className="text-[8px] text-slate-400 font-bold">⏱</span>
+                            {s.mcq.timings.map((t, ti) => (
+                              <span key={ti} className="text-[8px] font-bold bg-slate-100 text-slate-600 px-1 py-[1px] rounded">
+                                {t}s
+                              </span>
+                            ))}
+                            <span className="text-[8px] text-slate-400">last q timings</span>
+                          </div>
+                        )}
+
+                        {/* Mode-wise time breakdown */}
+                        <div className="flex flex-wrap gap-1">
+                          {(Object.entries(s.seconds) as [string, number][])
+                            .filter(([, sec]) => sec > 0)
+                            .map(([mode, sec]) => {
+                              const emoji = mode === 'READING' ? '📖' : mode === 'WRITING' ? '✍️' : mode === 'MCQ' ? '🧠' : mode === 'VIDEO' ? '🎬' : mode === 'PDF' ? '📄' : mode === 'AUDIO' ? '🔊' : mode === 'FLASHCARD' ? '🃏' : '💬';
+                              return (
+                                <span key={mode} className="text-[8px] font-bold bg-slate-50 border border-slate-100 text-slate-500 px-1.5 py-[2px] rounded-full">
+                                  {emoji} {formatActivityDuration(sec)}
+                                </span>
+                              );
+                            })}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              </div>
-              <ChevronRight size={16} className="text-indigo-400" />
-            </button>
-          </div>
-        )}
+              )}
+
+              <button
+                onClick={() => setShowMonthlySheet(true)}
+                className="w-full flex items-center justify-between px-4 py-3.5 rounded-2xl border border-indigo-200 bg-indigo-50 active:scale-[0.99] transition-all"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">📊</span>
+                  <div className="text-left">
+                    <p className="font-black text-slate-800 text-sm">Monthly Report</p>
+                    <p className="text-[10px] text-slate-500">Full marksheet aur analysis</p>
+                  </div>
+                </div>
+                <ChevronRight size={16} className="text-indigo-400" />
+              </button>
+            </div>
+          );
+        })()}
       </div>
 
       {showMonthlySheet && (

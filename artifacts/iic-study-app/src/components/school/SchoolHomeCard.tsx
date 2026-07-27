@@ -8,22 +8,24 @@ interface Props {
   onOpen: () => void;
   onChangeSchool: () => void;
   themeAccent?: string;
+  cardBg?: string;
   card3D?: boolean;
 }
 
-export const SchoolHomeCard: React.FC<Props> = ({ school, onOpen, onChangeSchool, themeAccent, card3D = false }) => {
+export const SchoolHomeCard: React.FC<Props> = ({ school, onOpen, onChangeSchool, themeAccent, cardBg, card3D = false }) => {
   const accent = themeAccent || school.bannerColor || "#6366f1";
+  const bg = cardBg || '#ffffff';
   const initial = school.name.trim().slice(0, 2).toUpperCase();
 
   const cardStyle: React.CSSProperties = card3D
     ? {
-        background: '#ffffff',
+        background: bg,
         border: `2px solid ${accent}`,
         boxShadow: `0 1px 0 rgba(255,255,255,0.85) inset, 0 4px 0 ${accent}bb, 0 7px 18px ${accent}28`,
         transform: 'translateY(-1px)',
       }
     : {
-        background: '#ffffff',
+        background: bg,
         border: `2px solid ${accent}`,
         boxShadow: `0 1px 4px rgba(0,0,0,0.06)`,
       };

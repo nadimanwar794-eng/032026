@@ -3,15 +3,19 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { User, MCQItem, MCQResult, TopicItem, SystemSettings } from '../types';
 import { X, CheckCircle, ArrowRight, Loader2, BrainCircuit, AlertCircle, List, Tag, Trophy, TrendingDown, Minus, TrendingUp, Star, Calendar, ChevronRight, Tv, RotateCw, Maximize2, Minimize2 } from 'lucide-react';
+import { renderMathInHtml, formatExplanationHtml } from '../utils/mathUtils';
 import { rotateScreen } from '../utils/displayPrefs';
 import { getChapterData, saveUserToLive, saveTestResult, saveDemand } from '../firebase';
 import { storage } from '../utils/storage';
 import { generateAnalysisJson } from '../utils/analysisUtils';
-import { recordAttempt as recordRevisionAttempt, applyInitialSchedule, bucketKey } from '../utils/revisionTrackerV2';
+import { recordAttempt as recordRevisionAttempt, applyInitialSchedule, bucketKey, getTrackerMap } from '../utils/revisionTrackerV2';
 import { addMistakes, removeMistakeByQuestion } from '../utils/mistakeBank';
 import { getEffectiveDailyLimit, getLevelInfo, UNLIMITED } from '../utils/levelSystem';
 import { SubscriptionEngine } from '../utils/engines/subscriptionEngine';
 import { tryEarnScore, subtractDailyScore, getMcqStreakBonus } from '../utils/scoreSystem';
+import { hapticCorrect, hapticWrong } from '../utils/haptic';
+import { loadRoutineData } from '../utils/routineStorage';
+import { deferStudyCoins } from '../utils/studyRewards';
 
 interface InterleavedQ extends MCQItem {
     _topicIndex: number;
@@ -20,6 +24,12 @@ interface InterleavedQ extends MCQItem {
     _chapterName: string;
     _subjectId: string;
     _subjectName: string;
+}
+
+interface AttemptHistoryEntry {
+    accuracy: number;
+    tier: 'weak' | 'average' | 'strong' | 'mastered';
+    at: number;
 }
 
 interface TopicSessionResult {
@@ -31,6 +41,11 @@ interface TopicSessionResult {
     percentage: number;
     tier: 'weak' | 'average' | 'strong' | 'mastered';
     nextRevisionDays: number;
+    // Internal fields used to enrich results post-loop
+    _subjectId?: string;
+    _chapterId?: string;
+    // sessionHistory[0] = current (just completed), [1] = previous, [2] = 2 back
+    sessionHistory?: AttemptHistoryEntry[];
 }
 
 interface Props {
@@ -61,12 +76,14 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
 
     // ── MCQ Score Popup ────────────────────────────────────────────────────────
     const [mcqScorePopup, setMcqScorePopup] = useState<number | null>(null);
+    const [mcqScoreCredits, setMcqScoreCredits] = useState<number | null>(null);
     const [mcqScoreVisible, setMcqScoreVisible] = useState(false);
     const mcqPopupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    const showMcqScore = (pts: number) => {
+    const showMcqScore = (pts: number, credits?: number) => {
         if (mcqPopupTimerRef.current) clearTimeout(mcqPopupTimerRef.current);
         setMcqScorePopup(pts);
+        setMcqScoreCredits(credits ?? null);
         setMcqScoreVisible(true);
         mcqPopupTimerRef.current = setTimeout(() => setMcqScoreVisible(false), 1800);
     };
@@ -200,22 +217,34 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
             const _tier = _subValid && user.subscriptionLevel === 'ULTRA' ? 'ULTRA' :
                           _subValid && user.subscriptionLevel === 'BASIC' ? 'BASIC' : 'FREE';
             if (isCorrect) {
+                hapticCorrect();
                 const newStreak = mcqStreak + 1;
                 setMcqStreak(newStreak);
                 const pts = tryEarnScore(user.id, 2, _tier, _subValid, 0, 'REVISION_MCQ_CORRECT');
                 const bonus = getMcqStreakBonus(newStreak);
                 const bonusPts = bonus > 0 ? tryEarnScore(user.id, bonus, _tier, _subValid, 0, `REVISION_MCQ_STREAK_${newStreak}`) : 0;
                 const totalPts = pts + bonusPts;
+                // Credits = ⅙ (routine on) ya ⅛ (routine off) of pts earned
+                const _routineOn = loadRoutineData(user.id).enabled;
+                const _creditRatio = _routineOn ? (1 / 6) : (1 / 8);
+                const _creditsEarned = totalPts > 0 ? Math.max(1, Math.floor(totalPts * _creditRatio)) : 0;
                 if (totalPts > 0) {
                     const _u = userRef.current;
                     if (_u && onUpdateUser) {
-                        const updated = { ..._u, totalScore: (_u.totalScore || 0) + totalPts };
+                        deferStudyCoins(_u.id, _creditsEarned);
+                        const updated = {
+                            ..._u,
+                            totalScore: (_u.totalScore || 0) + totalPts,
+                        };
                         onUpdateUser(updated);
                         saveUserToLive(updated);
+                        // Home-sync key update — yahi pts ab credit sync se skip honge
+                        try { localStorage.setItem(`nst_credit_sync_score_${_u.id}`, String((_u.totalScore || 0) + totalPts)); } catch {}
                     }
-                    showMcqScore(totalPts);
+                    showMcqScore(totalPts, _creditsEarned);
                 }
             } else {
+                hapticWrong();
                 setMcqStreak(0);
                 subtractDailyScore(user.id, 1);
                 const _u = userRef.current;
@@ -334,6 +363,8 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                 percentage: Math.round(percentage),
                 tier,
                 nextRevisionDays,
+                _subjectId: meta._subjectId,
+                _chapterId: meta._chapterId,
             });
 
             // Mistake bank
@@ -457,6 +488,18 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
             wrongQuestions: megaWrongQuestions,
         };
 
+        // Enrich topicSummary with sessionHistory from revision tracker
+        // (applyInitialSchedule above has already written sessionHistory[0] = current attempt)
+        try {
+            const trackerMap = getTrackerMap();
+            topicSummary.forEach((item: any) => {
+                if (item._subjectId && item._chapterId) {
+                    const bk = bucketKey(item._subjectId, item._chapterId, item._chapterId, item.topicName);
+                    item.sessionHistory = trackerMap[bk]?.sessionHistory;
+                }
+            });
+        } catch (_) {}
+
         // Store results + show summary screen instead of immediately closing
         pendingCompleteRef.current = { results: [megaResult], questions: interleavedQuestions };
         setSessionSummary(topicSummary);
@@ -558,6 +601,52 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                                         />
                                     </div>
                                 </div>
+
+                                {/* Attempt Comparison — shown only if there are previous attempts */}
+                                {result.sessionHistory && result.sessionHistory.length >= 2 && (() => {
+                                    // sessionHistory[0] = current, [1] = previous, [2] = 2 back
+                                    const tierColors: Record<string, string> = {
+                                        weak:     'bg-rose-100 text-rose-700',
+                                        average:  'bg-amber-100 text-amber-700',
+                                        strong:   'bg-emerald-100 text-emerald-700',
+                                        mastered: 'bg-indigo-100 text-indigo-700',
+                                    };
+                                    const tierLabels: Record<string, string> = {
+                                        weak: 'Weak', average: 'Avg', strong: 'Strong', mastered: '⭐'
+                                    };
+                                    const entries = result.sessionHistory.slice(0, 3).reverse(); // oldest → newest
+                                    // Arrow between entries: up if better, down if worse, same
+                                    return (
+                                        <div className="mx-4 mb-2 px-3 py-2 bg-white/60 rounded-xl border border-slate-200/80">
+                                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1.5">Pichhle Attempts</p>
+                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                                {entries.map((e, i) => {
+                                                    const pct = Math.round(e.accuracy * 100);
+                                                    const isCurrent = i === entries.length - 1;
+                                                    const prevEntry = i > 0 ? entries[i - 1] : null;
+                                                    const trend = prevEntry
+                                                        ? e.accuracy > prevEntry.accuracy ? '↑' : e.accuracy < prevEntry.accuracy ? '↓' : '→'
+                                                        : null;
+                                                    return (
+                                                        <React.Fragment key={i}>
+                                                            {trend && (
+                                                                <span className={`text-[10px] font-black ${trend === '↑' ? 'text-emerald-500' : trend === '↓' ? 'text-rose-400' : 'text-slate-400'}`}>
+                                                                    {trend}
+                                                                </span>
+                                                            )}
+                                                            <div className={`flex flex-col items-center px-2 py-1 rounded-lg ${tierColors[e.tier] || 'bg-slate-100 text-slate-600'} ${isCurrent ? 'ring-2 ring-offset-1 ring-indigo-400' : 'opacity-70'}`}>
+                                                                <span className="text-[11px] font-black leading-none">{pct}%</span>
+                                                                <span className="text-[8px] font-semibold leading-none mt-0.5">
+                                                                    {isCurrent ? 'Abhi' : i === 0 && entries.length === 3 ? '2 Pehle' : 'Pichhla'}
+                                                                </span>
+                                                            </div>
+                                                        </React.Fragment>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
 
                                 {/* Tier badge + next revision */}
                                 <div className="px-4 pb-3 flex items-center justify-between gap-2">
@@ -688,8 +777,14 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                     transform: mcqScoreVisible ? 'translateY(0) scale(1)' : 'translateY(8px) scale(0.95)',
                     transition: 'opacity 0.25s, transform 0.25s',
                     pointerEvents: 'none',
+                    display: 'flex', alignItems: 'center', gap: 6,
                 }}>
-                    {mcqScorePopup < 0 ? `❌ ${mcqScorePopup} pts` : `⭐ +${mcqScorePopup} pts`}
+                    <span>{mcqScorePopup < 0 ? `❌ ${mcqScorePopup} pts` : `⭐ +${mcqScorePopup} pts`}</span>
+                    {mcqScoreCredits !== null && mcqScoreCredits > 0 && (
+                        <span style={{ fontSize: 12, opacity: 0.9, borderLeft: '1px solid rgba(255,255,255,0.4)', paddingLeft: 6 }}>
+                            +{mcqScoreCredits} 🪙
+                        </span>
+                    )}
                 </div>
             )}
             {/* Sidebar */}
@@ -787,11 +882,11 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                 </div>
 
                 <div className="text-lg font-bold text-slate-800 mb-8 leading-relaxed">
-                    <span dangerouslySetInnerHTML={{ __html: question.question }} />
+                    <span dangerouslySetInnerHTML={{ __html: renderMathInHtml(question.question) }} />
                     {question.statements && question.statements.length > 0 && (
                         <div className="mt-4 mb-2 flex flex-col space-y-2">
                             {question.statements.map((stmt: string, sIdx: number) => (
-                                <div key={sIdx} className="bg-slate-50/80 p-3 rounded-lg border-l-4 border-indigo-200 text-slate-700 text-base font-medium" dangerouslySetInnerHTML={{ __html: stmt }} />
+                                <div key={sIdx} className="bg-slate-50/80 p-3 rounded-lg border-l-4 border-indigo-200 text-slate-700 text-base font-medium" dangerouslySetInnerHTML={{ __html: renderMathInHtml(stmt) }} />
                             ))}
                         </div>
                     )}
@@ -817,7 +912,7 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                                 }`}>
                                     {['A','B','C','D'][idx]}
                                 </div>
-                                <span className="flex-1">{opt}</span>
+                                <span className="flex-1" dangerouslySetInnerHTML={{ __html: renderMathInHtml(opt) }} />
                             </button>
                         );
                     })}
@@ -883,7 +978,7 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                         <div style={{ flex:1, overflowY:'auto', padding: projectorFocused ? '24px' : '18px 24px 12px', display:'flex', flexDirection:'column', gap:14, minHeight:0 }}>
                             <div style={{ display:'flex', alignItems:'flex-start', gap:12 }}>
                                 <span style={{ background:'#3b82f6', color:'#fff', borderRadius:999, width:36, height:36, display:'flex', alignItems:'center', justifyContent:'center', fontSize:16, fontWeight:900, flexShrink:0 }}>{projectorQIdx + 1}</span>
-                                <p style={{ fontSize:20, fontWeight:800, color:'#1e293b', lineHeight:1.45, flex:1 }} dangerouslySetInnerHTML={{ __html: pq.question }} />
+                                <p style={{ fontSize:20, fontWeight:800, color:'#1e293b', lineHeight:1.45, flex:1 }} dangerouslySetInnerHTML={{ __html: renderMathInHtml(pq.question) }} />
                             </div>
                             <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
                                 {pq.options.map((opt: string, oi: number) => {
@@ -905,13 +1000,13 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                                             }}
                                             style={{ textAlign:'left', padding:'14px 18px', borderRadius:12, border:`2px solid ${border}`, background:bg, color, fontSize:17, fontWeight:700, cursor: answered ? 'default' : 'pointer', display:'flex', alignItems:'center', gap:12, transition:'all 0.15s' }}>
                                             <span style={{ width:32, height:32, borderRadius:999, background: answered && isCorrect ? '#4ade80' : answered && isSelected ? '#f87171' : '#e2e8f0', color: answered && (isCorrect || isSelected) ? '#fff' : '#475569', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:900, fontSize:14, flexShrink:0 }}>{optionLetters[oi]}</span>
-                                            {opt}
+                                            <span dangerouslySetInnerHTML={{ __html: renderMathInHtml(opt) }} />
                                         </button>
                                     );
                                 })}
                             </div>
                             {pq.explanation && projectorSelected !== null && (
-                                <p style={{ fontSize:14, color:'#64748b', fontStyle:'italic', marginTop:4 }}>{pq.explanation}</p>
+                                <div style={{ fontSize:14, color:'#64748b', marginTop:4 }} dangerouslySetInnerHTML={{ __html: formatExplanationHtml(pq.explanation) }} />
                             )}
                         </div>
                         {/* Nav footer */}

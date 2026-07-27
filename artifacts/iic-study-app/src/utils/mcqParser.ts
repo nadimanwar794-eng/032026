@@ -1,6 +1,39 @@
 import { MCQItem } from '../types';
 
 /**
+ * Normalize the markdown-heavy paste format used by coaching books before
+ * parsing. The lightning marker is only a visual tag; it must never decide
+ * whether a question has numbered statements.
+ */
+export function normalizeMcqPaste(raw: string): string {
+    let text = raw.replace(/\r\n/g, '\n');
+
+    // Remove empty duplicate answer labels such as:
+    // **सही उत्तर:
+    // **सही उत्तर:** B) ...
+    text = text.replace(
+        /^[ \t]*(?:\*{1,2})?\s*(?:सही\s*उत्तर|Ans(?:wer)?)\s*[:：]\s*(?:\*{1,2})?\s*$/gim,
+        '',
+    );
+    text = text.replace(
+        /\*\*\s*(?:सही\s*उत्तर|Ans(?:wer)?)\s*[:：]\s*\n+\s*(?=\*\*\s*(?:सही\s*उत्तर|Ans(?:wer)?))/gi,
+        '',
+    );
+
+    // Strip visual/category markers from the beginning of question lines.
+    text = text.replace(
+        /^\s*\[(?:[⚡🔥💡🎯⭐✨🏆⚠️🌟][^\]]*?|[^\]]{1,10})\]\s*/gm,
+        '',
+    );
+
+    // Markdown bold is presentation-only here. Removing it also turns
+    // **सही उत्तर:** B) ... into the parser-friendly सही उत्तर: B) ...
+    text = text.replace(/\*\*/g, '');
+
+    return text;
+}
+
+/**
  * Parses a raw text containing MCQ questions formatted with specific emojis and headers
  * into an array of MCQItem objects.
  *
@@ -37,13 +70,13 @@ function extractStatements(questionText: string): { statements: string[], cleane
     const statements: string[] = [];
     let cleanedQuestion = "";
 
-    const lines = questionText.split('<br/>');
+    const lines = questionText.split(/<br\/>|\n/);
     let inStatementBlock = false;
     let currentStatement = "";
     const tempQuestionLines: string[] = [];
     const endingQuestionLines: string[] = [];
 
-    const statementStartRegex = /^(?:Statement\s*\d+|कथन\s*\d+|\d+[\)\.])\s*[:\-\.]?(.*)/i;
+    const statementStartRegex = /^(?:(?:Statement|कथन)\s*(?:[0-9]+|[IVXivx]+)|\d+[\)\.])\s*[:\-\.]?(.*)/i;
     const endingQuestionRegex = /^(?:which of the|उपर्युक्त|उपरोक्त|choose the|select the|find the|निम्नलिखित में से|कूट\b|कूट का|उपर्युक्त कथनों|\*\*\s*कूट)/i;
 
     for (let i = 0; i < lines.length; i++) {
@@ -104,13 +137,44 @@ function parseSimpleFormatBlock(block: string, topic: string): Partial<MCQItem> 
     const lines = block.split('\n').map(l => l.trim()).filter(l => l);
     if (lines.length < 3) return null;
 
-    // First line: Q: / Q1. / Q1) / plain question text
-    const questionLineMatch = lines[0].match(/^(?:\*?\s*)?(?:Q\s*\d*\s*[:.)\s]|प्रश्न\s*\d*\s*[:.])\s*([\s\S]+)/i)
+    // First line: **Q1:** / Q1. / Q1) / **प्रश्न 1:** / प्रश्न 1. / plain question text
+    const questionLineMatch = lines[0].match(/^\*{0,2}\s*(?:Q\s*\d*\s*[:.)\s]|प्रश्न\s*\d*\s*[:.])\*{0,2}\s*([\s\S]+)/i)
         || lines[0].match(/^(?:Q\s*\d+[\.\)]\s*)?([\s\S]+)/i);
     if (!questionLineMatch) return null;
 
-    const questionText = questionLineMatch[1].trim();
+    let questionText = questionLineMatch[1].trim();
     if (!questionText) return null;
+
+    // ── Collect multi-line question body ─────────────────────────────────────
+    // Lines between the Q-marker and the first option/answer may contain:
+    //   • Statement lines  (कथन I: …, कथन II: …, 1. …, 2. …)
+    //   • Intro context    (निम्नलिखित कथनों पर विचार कीजिए:)
+    //   • Closing question (उपर्युक्त में से कौन-सा/से …?)
+    // All of them belong to the question body — collect them here.
+    // A line is treated as an MCQ option only when its content is ≤100 chars.
+    // Statement labels (A. Statement one full sentence…) are longer and must NOT
+    // stop the question-body collection early.
+    const isOptionLine   = (l: string) => {
+        const m = l.match(/^(\*?)\s*([A-D])[:.)\s]\s*(.+)/i);
+        return !!m && m[3].trim().length <= 100;
+    };
+    // Also handles **सही उत्तर: (bold markdown prefix used in some paste formats)
+    const isAnswerLine   = (l: string) => /^(?:\*{1,2}\s*)?(?:Ans|Answer|सही\s*उत्तर)\s*:/i.test(l) || /^✅\s*Correct\s+Answer\s*:/i.test(l);
+    const isExplainLine  = (l: string) => /^(?:Explanation|Exp|व्याख्या)\s*:/i.test(l);
+
+    let bodyStart = 1; // index of first option/answer/explanation line
+    const extraBodyLines: string[] = [];
+    for (let i = 1; i < lines.length; i++) {
+        if (isOptionLine(lines[i]) || isAnswerLine(lines[i]) || isExplainLine(lines[i])) {
+            bodyStart = i;
+            break;
+        }
+        extraBodyLines.push(lines[i]);
+        bodyStart = i + 1; // will be reset each iteration; final value = past last extra line
+    }
+    if (extraBodyLines.length > 0) {
+        questionText = questionText + '\n' + extraBodyLines.join('\n');
+    }
 
     // Collect option lines
     const optionMap: Record<number, string> = {};
@@ -119,7 +183,7 @@ function parseSimpleFormatBlock(block: string, topic: string): Partial<MCQItem> 
     let explanationLines: string[] = [];
     let collectingExplanation = false;
 
-    for (let i = 1; i < lines.length; i++) {
+    for (let i = bodyStart; i < lines.length; i++) {
         const line = lines[i];
 
         // Option lines: *A) / *A: / A) / A. / A:
@@ -134,9 +198,9 @@ function parseSimpleFormatBlock(block: string, topic: string): Partial<MCQItem> 
             continue;
         }
 
-        // Answer line: Ans: / Answer: / ✅ Correct Answer: / सही उत्तर:
-        if (/^(?:Ans|Answer|सही\s*उत्तर)\s*:/i.test(line) || /^✅\s*Correct\s+Answer\s*:/i.test(line)) {
-            answerLine = line.replace(/^(?:✅\s*)?(?:Correct\s+)?(?:Answer|Ans|सही\s*उत्तर)\s*:\s*/i, '').trim();
+        // Answer line: Ans: / Answer: / ✅ Correct Answer: / सही उत्तर: / **सही उत्तर:
+        if (/^(?:\*{1,2}\s*)?(?:Ans|Answer|सही\s*उत्तर)\s*:/i.test(line) || /^✅\s*Correct\s+Answer\s*:/i.test(line)) {
+            answerLine = line.replace(/^(?:\*{1,2}\s*)?(?:✅\s*)?(?:Correct\s+)?(?:Answer|Ans|सही\s*उत्तर)\s*:\s*/i, '').trim();
             continue;
         }
 
@@ -194,6 +258,7 @@ function parseSimpleFormatBlock(block: string, topic: string): Partial<MCQItem> 
 export function parseMCQText(text: string): { questions: MCQItem[], notes: {title: string, content: string}[] } {
   const questions: MCQItem[] = [];
   const notes: {title: string, content: string}[] = [];
+  text = normalizeMcqPaste(text);
 
   // ── Extract <NOTE: title>...</NOTE: title> blocks first ──────────────────
   // These are explicit note sections the user pastes alongside MCQs.
@@ -217,8 +282,8 @@ export function parseMCQText(text: string): { questions: MCQItem[], notes: {titl
     cleanText = cleanText.slice(0, start) + cleanText.slice(end);
   }
 
-  // ── Detect if text contains simple Q1./Q2. format ────────────────────────
-  const hasSimpleFormat = /^\s*(?:Q\s*\d+[\.\)]|<TOPIC:)/im.test(cleanText);
+  // ── Detect if text contains simple Q1./Q2. or **प्रश्न 1.** format ──────
+  const hasSimpleFormat = /^\s*(?:\*{0,2}\s*(?:Q\s*\d+[\.\)]|प्रश्न\s*\d+\s*[:.)])|<TOPIC:)/im.test(cleanText);
 
   if (hasSimpleFormat) {
     // ── SIMPLE FORMAT PARSER ─────────────────────────────────────────────────
@@ -256,17 +321,17 @@ export function parseMCQText(text: string): { questions: MCQItem[], notes: {titl
       }
     }
 
-    // For each topic section, split by Q1. / Q2. markers and parse each block
+    // For each topic section, split by Q1. / Q2. / प्रश्न 1. markers and parse each block
     for (const { topic, content } of topicParts) {
-      // Split by Q<number>. or Q<number>)
-      const qBlocks = content.split(/(?=^\s*Q\s*\d+[\.\)])/im).filter(b => b.trim());
+      // Split by Q<number>. or Q<number>) or **प्रश्न <number>: markers
+      const qBlocks = content.split(/(?=^\s*\*{0,2}\s*(?:Q\s*\d+[\.\)]|प्रश्न\s*\d+\s*[:.)]))/im).filter(b => b.trim());
 
       for (const block of qBlocks) {
         const trimmed = block.trim();
         if (!trimmed) continue;
 
-        // Skip if this block doesn't start with Q<number>
-        if (!/^Q\s*\d+[\.\)]/i.test(trimmed)) continue;
+        // Skip if this block doesn't start with Q<number> or (optional **) प्रश्न <number>
+        if (!/^\*{0,2}\s*(?:Q\s*\d+[\.\)]|प्रश्न\s*\d+\s*[:.)])/i.test(trimmed)) continue;
 
         const parsed = parseSimpleFormatBlock(trimmed, topic);
         if (parsed && parsed.question && parsed.options && parsed.options.length >= 2 && parsed.correctAnswer !== undefined) {

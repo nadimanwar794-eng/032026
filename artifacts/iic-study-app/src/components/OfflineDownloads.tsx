@@ -4,7 +4,7 @@ import { getOfflineItems, getOfflineItemData, removeOfflineItem, OfflineItem } f
 import { MarksheetCard } from './MarksheetCard';
 import { User, SystemSettings } from '../types';
 import { speakText, stopSpeech } from '../utils/textToSpeech';
-import { renderMathInHtml } from '../utils/mathUtils';
+import { renderMathInHtml, formatExplanationHtml } from '../utils/mathUtils';
 
 interface Props {
   onBack: () => void;
@@ -202,7 +202,7 @@ export const OfflineDownloads: React.FC<Props> = ({ onBack, hideHeader = false, 
                         </div>
                         {q.explanation && (
                           <div className="mt-4 p-3 bg-blue-50 text-blue-800 rounded-lg text-sm border border-blue-100">
-                            <strong>Explanation:</strong> <span dangerouslySetInnerHTML={{ __html: renderMathInHtml(q.explanation) }} />
+                            <strong>Explanation:</strong> <span dangerouslySetInnerHTML={{ __html: formatExplanationHtml(q.explanation) }} />
                           </div>
                         )}
                       </div>

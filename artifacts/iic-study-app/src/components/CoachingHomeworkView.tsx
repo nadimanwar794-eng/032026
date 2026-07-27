@@ -4,10 +4,12 @@ import { createPortal } from 'react-dom';
 import { ref, onValue, off } from 'firebase/database';
 import { rtdb } from '../firebase';
 import { getCoaching } from '../coaching-firebase';
-import { ChevronRight, X, BookOpen, FileText, HelpCircle, ChevronDown, ChevronUp, ArrowLeft, Calendar, Loader2, BookOpenCheck, Send, Plus } from 'lucide-react';
+import { ChevronRight, ChevronLeft, SkipForward, ZoomIn, ZoomOut, X, BookOpen, FileText, HelpCircle, ChevronDown, ChevronUp, ArrowLeft, Calendar, Loader2, BookOpenCheck, Send, Plus } from 'lucide-react';
 import { hapticMedium, hapticStrong } from '../utils/haptic';
 import { ChunkedNotesReader } from './ChunkedNotesReader';
 import { tryEarnScore, getActiveBoost } from '../utils/scoreSystem';
+import { inlineMd } from '../utils/mcqRender';
+import { renderMathInHtml, formatExplanationHtml } from '../utils/mathUtils';
 
 interface CoachingNote {
   id: string;
@@ -19,6 +21,7 @@ interface CoachingMcq {
   id: string;
   question: string;
   options: string[];
+  statements?: string[];
   /** Single correct answer (legacy) */
   correctAnswer?: number;
   /** Multiple correct answers (new) */
@@ -98,6 +101,98 @@ function getCorrectSet(mcq: CoachingMcq): Set<number> {
     return new Set([mcq.correctAnswer]);
   }
   return new Set([0]);
+}
+
+type CoachingQuestionParts = {
+  intro: string;
+  statements: string[];
+  suffix: string;
+};
+
+/**
+ * Coaching homework is stored in a few formats. Some questions have real
+ * newlines, while pasted questions often keep `1. ... 2. ... 3. ...` on one
+ * line. Split both formats before rendering so statements never appear as a
+ * single paragraph.
+ */
+function splitCoachingQuestion(question: string): CoachingQuestionParts {
+  const text = (question || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/\r/g, '')
+    .trim();
+  if (!text) return { intro: '', statements: [], suffix: '' };
+
+  const statementStart = /(?:^|\s)(?:(?:\*\s*)?)(\d+)[.)]\s+/g;
+  const matches = [...text.matchAll(statementStart)];
+  if (matches.length < 2) {
+    return { intro: text, statements: [], suffix: '' };
+  }
+
+  const firstStart = matches[0].index ?? 0;
+  const intro = text.slice(0, firstStart).replace(/[:\s]+$/, '').trim();
+  const statements: string[] = [];
+  for (let i = 0; i < matches.length; i++) {
+    const start = (matches[i].index ?? 0) + matches[i][0].length;
+    const end = i + 1 < matches.length ? (matches[i + 1].index ?? text.length) : text.length;
+    const value = text.slice(start, end).trim();
+    if (value) statements.push(value);
+  }
+
+  // The last numbered item can be followed by the actual question. When the
+  // source has a clear question marker, move that part below the statements.
+  const suffixMatch = statements.length
+    ? statements[statements.length - 1].match(/\s+(?=(?:उपर्युक्त|उपरोक्त|निम्नलिखित में से|कौन-सा|कौन सा|which of|choose the|select the|कूट))/i)
+    : null;
+  let suffix = '';
+  if (suffixMatch?.index !== undefined) {
+    const last = statements[statements.length - 1];
+    suffix = last.slice(suffixMatch.index).trim();
+    statements[statements.length - 1] = last.slice(0, suffixMatch.index).trim();
+  }
+
+  return { intro, statements, suffix };
+}
+
+function QuestionText({ question, accent, statements }: { question: string; accent: string; statements?: string[] }) {
+  const parts = splitCoachingQuestion(question);
+  const render = (value: string) => renderMathInHtml(inlineMd(value));
+  const explicitStatements = (statements || []).map(s => s.trim()).filter(Boolean);
+  const displayStatements = explicitStatements.length > 0 ? explicitStatements : parts.statements;
+  const hasStatements = displayStatements.length > 0;
+
+  return (
+    <div className="space-y-2">
+      {parts.intro && (
+        <p
+          className="text-[12px] font-bold text-slate-800 leading-relaxed"
+          dangerouslySetInnerHTML={{ __html: render(parts.intro) }}
+        />
+      )}
+      {hasStatements && (
+        <div className="space-y-1.5">
+          {displayStatements.map((statement, index) => (
+            <div
+              key={`${statement}-${index}`}
+              className="rounded-lg border px-2.5 py-2 text-[11px] font-medium leading-relaxed text-slate-700"
+              style={{ borderColor: `${accent}25`, background: '#fff' }}
+            >
+              <span className="mr-1 font-black" style={{ color: accent }}>{index + 1}.</span>
+              <span dangerouslySetInnerHTML={{ __html: render(statement) }} />
+            </div>
+          ))}
+        </div>
+      )}
+      {parts.suffix && (
+        <p
+          className="text-[12px] font-bold text-slate-800 leading-relaxed"
+          dangerouslySetInnerHTML={{ __html: render(parts.suffix) }}
+        />
+      )}
+      {!parts.intro && !hasStatements && !parts.suffix && (
+        <p className="text-[12px] font-bold text-slate-800 leading-relaxed" dangerouslySetInnerHTML={{ __html: render(question) }} />
+      )}
+    </div>
+  );
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -249,7 +344,7 @@ function NoteCard({ note, accent, directOpen = false, user, onReaderOpenChange }
 // ──────────────────────────────────────────────────────────────────────────────
 type McqCommunityDraft = { question: string; options: [string,string,string,string]; correctAnswer: number; explanation: string };
 
-function McqCard({ mcq, accent, onSendToMcqCommunity, user }: { mcq: CoachingMcq; accent: string; onSendToMcqCommunity?: (draft: McqCommunityDraft) => void; user?: any }) {
+function McqCard({ mcq, accent, onSendToMcqCommunity, user, onAnswered }: { mcq: CoachingMcq; accent: string; onSendToMcqCommunity?: (draft: McqCommunityDraft) => void; user?: any; onAnswered?: (id: string) => void }) {
   const correctSet = getCorrectSet(mcq);
   const isMultiple = correctSet.size > 1;
 
@@ -271,6 +366,7 @@ function McqCard({ mcq, accent, onSendToMcqCommunity, user }: { mcq: CoachingMcq
     hapticMedium();
     setSelected(i);
     awardMcqXp(correctSet.has(i));
+    onAnswered?.(mcq.id);
   };
 
   const handleMultiToggle = (i: number) => {
@@ -293,6 +389,7 @@ function McqCard({ mcq, accent, onSendToMcqCommunity, user }: { mcq: CoachingMcq
       const noWrongPicked    = [...multiSelected].every(i => correctSet.has(i));
       awardMcqXp(allCorrectPicked && noWrongPicked);
     }
+    onAnswered?.(mcq.id);
   };
 
   const isAnswered = isMultiple ? submitted : selected !== null;
@@ -303,7 +400,7 @@ function McqCard({ mcq, accent, onSendToMcqCommunity, user }: { mcq: CoachingMcq
         <div className="flex items-start gap-2 mb-2">
           <HelpCircle size={13} style={{ color: accent }} className="shrink-0 mt-0.5" />
           <div className="flex-1">
-            <p className="text-[12px] font-bold text-slate-800 leading-snug">{mcq.question}</p>
+            <QuestionText question={mcq.question} accent={accent} statements={mcq.statements} />
             {isMultiple && (
               <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full mt-0.5 inline-block"
                 style={{ background: `${accent}20`, color: accent }}>
@@ -363,7 +460,7 @@ function McqCard({ mcq, accent, onSendToMcqCommunity, user }: { mcq: CoachingMcq
                       </svg>
                     )}
                   </span>
-                  <span><span className="font-black">{String.fromCharCode(65 + i)}.</span> {opt}</span>
+                  <span><span className="font-black">{String.fromCharCode(65 + i)}.</span> <span dangerouslySetInnerHTML={{ __html: renderMathInHtml(opt) }} /></span>
                 </button>
               );
             } else {
@@ -380,7 +477,7 @@ function McqCard({ mcq, accent, onSendToMcqCommunity, user }: { mcq: CoachingMcq
                   onClick={() => handleSingleSelect(i)}
                   className={`w-full text-left px-2.5 py-1.5 rounded-lg border text-[11px] font-medium transition-all ${bg}`}
                 >
-                  <span className="font-black mr-1">{String.fromCharCode(65 + i)}.</span> {opt}
+                  <span className="font-black mr-1">{String.fromCharCode(65 + i)}.</span> <span dangerouslySetInnerHTML={{ __html: renderMathInHtml(opt) }} />
                 </button>
               );
             }
@@ -401,7 +498,7 @@ function McqCard({ mcq, accent, onSendToMcqCommunity, user }: { mcq: CoachingMcq
 
         {/* Explanation */}
         {isAnswered && mcq.explanation && (
-          <p className="mt-2 text-[10px] text-slate-500 italic leading-relaxed">{mcq.explanation}</p>
+          <div className="mt-2 text-[10px] text-slate-500 leading-relaxed" dangerouslySetInnerHTML={{ __html: formatExplanationHtml(mcq.explanation) }} />
         )}
 
         {/* Score feedback for multi-answer */}
@@ -420,6 +517,46 @@ function McqCard({ mcq, accent, onSendToMcqCommunity, user }: { mcq: CoachingMcq
 }
 
 function McqFullPage({ mcqs, accent, label, onClose, onSendToMcqCommunity, user }: { mcqs: CoachingMcq[]; accent: string; label: string; onClose: () => void; onSendToMcqCommunity?: (draft: McqCommunityDraft) => void; user?: any }) {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [answeredIds, setAnsweredIds] = useState<Set<string>>(new Set());
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const currentMcq = mcqs[currentIndex];
+  const isCurrentAnswered = !!currentMcq && answeredIds.has(currentMcq.id);
+
+  const markAnswered = (id: string) => {
+    setAnsweredIds(prev => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  };
+
+  const goNext = () => {
+    if (!isCurrentAnswered) return;
+    hapticMedium();
+    if (currentIndex >= mcqs.length - 1) {
+      onClose();
+    } else {
+      setCurrentIndex(index => index + 1);
+    }
+  };
+
+  const skipQuestion = () => {
+    hapticMedium();
+    if (currentIndex >= mcqs.length - 1) {
+      onClose();
+    } else {
+      setCurrentIndex(index => index + 1);
+    }
+  };
+
+  const goBack = () => {
+    if (currentIndex === 0) return;
+    hapticMedium();
+    setCurrentIndex(index => index - 1);
+  };
+
   return createPortal(
     <div className="fixed inset-0 flex flex-col" style={{ zIndex: 9999, background: '#f8fafc' }}>
       <div className="shrink-0 flex items-center gap-3 px-4 py-3 shadow-sm" style={{ background: accent }}>
@@ -427,10 +564,79 @@ function McqFullPage({ mcqs, accent, label, onClose, onSendToMcqCommunity, user 
           <ArrowLeft size={18} className="text-white" />
         </button>
         <span className="text-white font-black text-base flex-1">🧠 {label}</span>
-        <span className="text-white/70 text-[11px] font-bold">{mcqs.length} MCQ</span>
+        <div className="flex items-center gap-1 rounded-lg p-0.5" style={{ background: 'rgba(255,255,255,0.16)' }}>
+          <button
+            onClick={() => { hapticMedium(); setZoomLevel(level => Math.max(0.85, Number((level - 0.1).toFixed(2)))); }}
+            disabled={zoomLevel <= 0.85}
+            aria-label="Text chhota karein"
+            title="Text chhota karein"
+            className="w-7 h-7 flex items-center justify-center rounded-md text-white disabled:opacity-35 active:scale-90 transition-all"
+          >
+            <ZoomOut size={15} />
+          </button>
+          <span className="min-w-[34px] text-center text-[10px] font-black text-white">{Math.round(zoomLevel * 100)}%</span>
+          <button
+            onClick={() => { hapticMedium(); setZoomLevel(level => Math.min(1.5, Number((level + 0.1).toFixed(2)))); }}
+            disabled={zoomLevel >= 1.5}
+            aria-label="Text bada karein"
+            title="Text bada karein"
+            className="w-7 h-7 flex items-center justify-center rounded-md text-white disabled:opacity-35 active:scale-90 transition-all"
+          >
+            <ZoomIn size={15} />
+          </button>
+        </div>
+        <span className="text-white/90 text-[11px] font-black">{currentIndex + 1} / {mcqs.length}</span>
       </div>
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3" style={{ paddingBottom: 100 }}>
-        {mcqs.map(m => <McqCard key={m.id} mcq={m} accent={accent} onSendToMcqCommunity={onSendToMcqCommunity} user={user} />)}
+      <div className="shrink-0 px-4 pt-3">
+        <div className="h-1.5 rounded-full overflow-hidden bg-slate-200">
+          <div
+            className="h-full rounded-full transition-all duration-300"
+            style={{ width: `${((currentIndex + 1) / Math.max(mcqs.length, 1)) * 100}%`, background: accent }}
+          />
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto px-4 py-3" style={{ paddingBottom: 112 }}>
+        {mcqs.map((m, index) => (
+          <div key={m.id} style={{ display: index === currentIndex ? 'block' : 'none', zoom: zoomLevel }}>
+            <McqCard
+              mcq={m}
+              accent={accent}
+              onSendToMcqCommunity={onSendToMcqCommunity}
+              user={user}
+              onAnswered={markAnswered}
+            />
+          </div>
+        ))}
+      </div>
+      <div
+        className="shrink-0 grid grid-cols-3 gap-2 px-4 pt-3 bg-white border-t border-slate-200"
+        style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom))' }}
+      >
+        <button
+          onClick={goBack}
+          disabled={currentIndex === 0}
+          className="flex items-center justify-center gap-1.5 py-3 rounded-xl border border-slate-200 bg-white text-slate-700 text-xs font-black disabled:opacity-35 active:scale-[0.98] transition-all"
+        >
+          <ChevronLeft size={15} />
+          Back
+        </button>
+        <button
+          onClick={skipQuestion}
+          className="flex items-center justify-center gap-1.5 py-3 rounded-xl border text-xs font-black active:scale-[0.98] transition-all"
+          style={{ borderColor: `${accent}45`, color: accent, background: `${accent}08` }}
+        >
+          <SkipForward size={14} />
+          Skip
+        </button>
+        <button
+          onClick={goNext}
+          disabled={!isCurrentAnswered}
+          className="flex items-center justify-center gap-1.5 py-3 rounded-xl text-white text-xs font-black disabled:opacity-40 active:scale-[0.98] transition-all"
+          style={{ background: accent }}
+        >
+          {currentIndex === mcqs.length - 1 ? 'Finish' : 'Next'}
+          <ChevronRight size={15} />
+        </button>
       </div>
     </div>,
     document.body
@@ -447,8 +653,10 @@ function CategorySection({ catKey, data, accent, onSendToMcqCommunity, user, onR
   const total = notes.length + mcqs.length + pdfs.length;
   if (total === 0) return null;
 
-  // MCQ category — tap opens full-page overlay
-  if (catKey === 'mcq' && mcqs.length > 0) {
+  // Any coaching book that contains only MCQs opens the one-question viewer.
+  // This is intentionally not limited to the legacy `mcq` category because
+  // Speedy Science, Lucent, Sar Sangrah, etc. can also contain MCQs.
+  if (mcqs.length > 0 && notes.length === 0 && pdfs.length === 0) {
     return (
       <div className="mb-3">
         <button
@@ -483,7 +691,20 @@ function CategorySection({ catKey, data, accent, onSendToMcqCommunity, user, onR
       {open && (
         <div className="space-y-2 pl-1">
           {notes.map(n => <NoteCard key={n.id} note={n} accent={meta.color} directOpen={catKey !== 'lucent'} user={user} onReaderOpenChange={onReaderOpenChange} />)}
-          {mcqs.map(m => <McqCard key={m.id} mcq={m} accent={meta.color} onSendToMcqCommunity={onSendToMcqCommunity} user={user} />)}
+          {mcqs.length > 0 && (
+            <button
+              className="w-full flex items-center gap-2 px-3 py-3 rounded-xl border active:scale-[0.99] transition-all"
+              style={{ borderColor: `${meta.color}35`, background: `${meta.color}08` }}
+              onClick={() => { hapticMedium(); setMcqPageOpen(true); }}
+            >
+              <HelpCircle size={15} style={{ color: meta.color }} />
+              <span className="flex-1 text-left">
+                <span className="block text-[12px] font-black text-slate-800">MCQ Viewer mein kholen</span>
+                <span className="block text-[10px] font-medium text-slate-500">Ek baar mein ek question · {mcqs.length} MCQs</span>
+              </span>
+              <ChevronRight size={16} style={{ color: meta.color }} />
+            </button>
+          )}
           {pdfs.map(p => (
             <a key={p.id} href={p.url} target="_blank" rel="noopener noreferrer"
               className="flex items-center gap-2 px-3 py-2 rounded-xl border active:scale-[0.99] transition-all"
@@ -495,6 +716,9 @@ function CategorySection({ catKey, data, accent, onSendToMcqCommunity, user, onR
               <span className="text-[10px] font-bold" style={{ color: meta.color }}>Open →</span>
             </a>
           ))}
+          {mcqPageOpen && mcqs.length > 0 && (
+            <McqFullPage mcqs={mcqs} accent={meta.color} label={meta.label} onClose={() => setMcqPageOpen(false)} onSendToMcqCommunity={onSendToMcqCommunity} user={user} />
+          )}
         </div>
       )}
     </div>
@@ -697,26 +921,30 @@ export function CoachingHomeworkSection({
   }
 
   // Agar RTDB mein nahi hai par Firestore mein hai — empty card dikhao
+  const _coachBg  = (settings as any)?.homeCoachingCardBg  || tierTheme?.profileCardBg || tierTheme?.cardBg || '#ffffff';
+  const _coachBdr = (settings as any)?.homeCoachingCardBorder || accent;
+
   if (visibleCoachings.length === 0 && firestoreCoaching) {
-    const bg = tierTheme?.profileCardBg || tierTheme?.cardBg || '#ffffff';
+    const bg = _coachBg;
+    const borderAccent = _coachBdr;
     return (
       <>
         <div className="flex items-center gap-2 mb-2">
-          <span className="flex-1 h-px" style={{ background: `${accent}30` }} />
-          <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: accent }}>Coaching Homework</span>
-          <span className="flex-1 h-px" style={{ background: `${accent}30` }} />
+          <span className="flex-1 h-px" style={{ background: `${borderAccent}30` }} />
+          <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: borderAccent }}>Coaching Homework</span>
+          <span className="flex-1 h-px" style={{ background: `${borderAccent}30` }} />
         </div>
         <div className="rounded-2xl overflow-hidden text-left"
           style={card3D
-            ? { background: bg, border: `2px solid ${accent}`, boxShadow: `0 1px 0 rgba(255,255,255,0.85) inset, 0 4px 0 ${accent}bb, 0 7px 18px ${accent}28`, transform: 'translateY(-1px)' }
-            : { background: bg, border: `2px solid ${accent}`, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }
+            ? { background: bg, border: `2px solid ${borderAccent}`, boxShadow: `0 1px 0 rgba(255,255,255,0.85) inset, 0 4px 0 ${borderAccent}bb, 0 7px 18px ${borderAccent}28`, transform: 'translateY(-1px)' }
+            : { background: bg, border: `2px solid ${borderAccent}`, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }
           }>
           <div className="flex items-center gap-3 px-4 py-3.5">
-            <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shrink-0" style={{ background: `${accent}15` }}>
+            <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shrink-0" style={{ background: `${borderAccent}15` }}>
               {firestoreCoaching.emoji || '🏫'}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-[10px] font-black uppercase tracking-wider mb-0.5" style={{ color: accent }}>Coaching Homework</p>
+              <p className="text-[10px] font-black uppercase tracking-wider mb-0.5" style={{ color: borderAccent }}>Coaching Homework</p>
               <p className="font-black text-slate-800 text-sm leading-tight truncate">{firestoreCoaching.name}</p>
               <p className="text-[10px] text-slate-400 font-medium mt-0.5">Abhi koi homework nahi hai</p>
             </div>
@@ -751,8 +979,8 @@ export function CoachingHomeworkSection({
         {visibleCoachings.map(coaching => {
           const latestDate = getLatestDate(coaching);
           const entryCount = countEntries(coaching);
-          const borderColor = accent;
-          const bg = tierTheme?.profileCardBg || tierTheme?.cardBg || '#ffffff';
+          const borderColor = _coachBdr;
+          const bg = _coachBg;
 
           return (
             <button

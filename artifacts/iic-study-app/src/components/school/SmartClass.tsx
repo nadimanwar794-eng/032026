@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { saveLesson, deleteLesson } from "../../school-firebase";
 import type { LessonMCQ } from "../../school-types";
+import McqQuestionDisplay from "../McqQuestionDisplay";
 
 type Mode = "reading" | "writing" | "pdf" | "mcq";
 type NightMode = "normal" | "night" | "sepia";
@@ -799,7 +800,10 @@ export const SmartClass: React.FC<Props> = ({
                         <div className="flex items-start gap-2 mb-2">
                           <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 shrink-0">Q {qi + 1}</span>
                         </div>
-                        <p className="text-sm font-black text-slate-800 leading-snug mb-2">{q.question}</p>
+                        <McqQuestionDisplay
+                          q={{ ...q, correctAnswer: q.correctIndex } as any}
+                          questionClassName="text-sm font-black text-slate-800 leading-snug mb-2"
+                        />
                         {!isRevealed ? (
                           <button
                             onClick={() => setMcqRevealed(prev => Math.max(prev, qi + 1))}
@@ -891,7 +895,9 @@ export const SmartClass: React.FC<Props> = ({
                               <span className={`text-[10px] font-black px-2 py-0.5 rounded-full shrink-0 ${isQ2Correct ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>
                                 Q{qi + 1} {isQ2Correct ? "✅" : "❌"}
                               </span>
-                              <p className="text-xs font-bold text-slate-800 leading-snug flex-1">{q2.question}</p>
+                              <div className="text-xs font-bold text-slate-800 leading-snug flex-1">
+                                <McqQuestionDisplay q={{ ...q2, correctAnswer: q2.correctIndex } as any} questionClassName="text-xs font-bold text-slate-800 leading-snug" />
+                              </div>
                             </div>
                             <div className="space-y-1 ml-1">
                               {(q2.options || []).map((opt, oi) => {
@@ -975,7 +981,9 @@ export const SmartClass: React.FC<Props> = ({
                     <div className="flex items-start gap-2 mb-2">
                       <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 shrink-0">Q {ci + 1}</span>
                     </div>
-                    <p className="text-sm font-black text-slate-800 leading-snug mb-3">{cq.question}</p>
+                    <div className="text-sm font-black text-slate-800 leading-snug mb-3">
+                      <McqQuestionDisplay q={{ ...cq, correctAnswer: cq.correctIndex } as any} questionClassName="text-sm font-black text-slate-800 leading-snug" />
+                    </div>
                     <div className="space-y-2">
                       {(cq.options || []).map((opt, oi) => {
                         const isCorrectOpt = oi === cq.correctIndex;

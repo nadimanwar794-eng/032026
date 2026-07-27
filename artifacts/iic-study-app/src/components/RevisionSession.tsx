@@ -65,6 +65,10 @@ export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, su
         qaSessionCreditsRef.current = 0;
     }, [subjectName, chapterTitle, subTopic]);
 
+    // Review screen state — declared here so the useEffect below can reference showReview in its dep array
+    const [showReview, setShowReview] = useState(false);
+    const [sessionResult, setSessionResult] = useState<any>(null);
+
     // Reset Q&A session start time when review opens
     useEffect(() => {
         if (showReview) {
@@ -135,10 +139,6 @@ export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, su
     const [selectedOption, setSelectedOption] = useState<number | null>(null);
     const [userAnswers, setUserAnswers] = useState<Record<number, number>>({}); // All selected answers
     const [notesRead, setNotesRead] = useState(false); // Track if user read notes
-
-    // Review screen state
-    const [showReview, setShowReview] = useState(false);
-    const [sessionResult, setSessionResult] = useState<any>(null);
 
     // Start Q&A credit session when review screen opens, stop when it closes
     useEffect(() => {
@@ -516,9 +516,9 @@ export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, su
 
                                         {/* QUESTION CARD */}
                                         <div className="bg-white p-6 rounded-2xl shadow-lg border border-slate-100 flex-1 flex flex-col">
-                                            <h3 className="text-lg font-bold text-slate-800 mb-6 leading-relaxed">
-                                                {mcqData[currentQIndex].question}
-                                            </h3>
+                                            <h3 className="text-lg font-bold text-slate-800 mb-6 leading-relaxed"
+                                                dangerouslySetInnerHTML={{ __html: renderMathInHtml(mcqData[currentQIndex].question) }}
+                                            />
 
                                             <div className="space-y-3 flex-1">
                                                 {mcqData[currentQIndex].options.map((opt, idx) => {
@@ -543,7 +543,7 @@ export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, su
                                                             }`}>
                                                                 {['A','B','C','D'][idx]}
                                                             </div>
-                                                            <span className="flex-1 text-sm">{opt}</span>
+                                                            <span className="flex-1 text-sm" dangerouslySetInnerHTML={{ __html: renderMathInHtml(opt) }} />
                                                         </button>
                                                     );
                                                 })}
@@ -651,7 +651,7 @@ export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, su
                                     </span>
                                 </div>
                                 <div className="p-4">
-                                    <p className="text-sm font-bold text-slate-800 mb-3 leading-relaxed">{item.question}</p>
+                                    <p className="text-sm font-bold text-slate-800 mb-3 leading-relaxed" dangerouslySetInnerHTML={{ __html: renderMathInHtml(item.question) }} />
                                     <div className="space-y-1.5">
                                         {item.options.map((opt: string, oi: number) => {
                                             const isUserAns = item.userAnswerIdx === oi;
@@ -663,7 +663,7 @@ export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, su
                                                     'bg-slate-50 text-slate-500'
                                                 }`}>
                                                     <span className="font-black text-[11px] shrink-0">{['A','B','C','D'][oi]}</span>
-                                                    <span className="flex-1">{opt}</span>
+                                                    <span className="flex-1" dangerouslySetInnerHTML={{ __html: renderMathInHtml(opt) }} />
                                                     {isCorrectAns && <Check size={13} className="text-emerald-600 shrink-0" />}
                                                     {isUserAns && !item.isCorrect && <X size={13} className="text-rose-600 shrink-0" />}
                                                 </div>

@@ -24,6 +24,8 @@ function normalizeMcqPaste(raw: string): string {
   txt = txt.replace(/\r\n/g, '\n');
   txt = txt.replace(/^---+\s*$/gm, '');
   txt = txt.replace(/^###\s+.+$/gm, '');
+  // Remove duplicate / orphan "**सही उत्तर:" lines (those with no answer value on same line)
+  txt = txt.replace(/^[ \t]*(?:\*{1,2})?\s*सही\s*उत्तर\s*:\s*(?:\*{1,2})?\s*$/gm, '');
   txt = txt.replace(/\*\*\s*(?:सही\s*उत्तर|Ans(?:wer)?)\s*[:：]\s*\n+\s*(?=\*\*\s*(?:सही\s*उत्तर|Ans(?:wer)?))/gi, '');
   txt = txt.replace(/^\s*\[(?:[⚡🔥💡🎯⭐✨🏆⚠️🌟][^\]]*?|[^\]]{1,10})\]\s*/gm, '');
   txt = txt.replace(/^\*\*\s*कूट\s*:?\s*\*?\*?\s*$/gm, '');
@@ -154,6 +156,7 @@ export const AdminClassMcqManager: React.FC<Props> = ({ settings, onSave }) => {
         question: (q.question || '').replace(/<br\/?>/g, '\n').replace(/^Q?\s*\d+[.)]\s*/i, '').trim(),
         options: (q.options || ['', '', '', '']).slice(0, 4),
         correctAnswer: q.correctAnswer ?? 0,
+        statements: (q.statements && q.statements.length > 0) ? q.statements : undefined,
         topic: (q.topic || '').trim() || undefined,
         explanation: (q.explanation || '').trim() || undefined,
         concept: (q.concept || '').trim() || undefined,
@@ -639,6 +642,35 @@ Answer: B) H2O`}</pre>
   );
 };
 
+// ── Helper: extract statements from question text (fallback for old MCQs) ─────
+const ADMIN_STMT_RE = /^(?:\d+[.)]\s+|(?:Statement|कथन|Assertion|Reason)\s*\d*\s*[:.\-)]\s*|[IVX]+[.)]\s+).+/i;
+
+function extractAdminStatements(q: any): { stem: string; stmts: string[]; suffix: string } {
+  // If statements already stored, use them
+  if (q.statements && q.statements.length > 0) {
+    return { stem: (q.question || '').replace(/<br\/?>/g, ' ').trim(), stmts: q.statements, suffix: '' };
+  }
+  // Auto-extract from question text (for old MCQs)
+  const raw = (q.question || '').replace(/<br\s*\/?>/gi, '\n');
+  const lines = raw.split('\n').map((l: string) => l.trim()).filter(Boolean);
+  const preLines: string[] = [], stmtLines: string[] = [], suffixLines: string[] = [];
+  let phase: 'pre' | 'stmts' | 'suffix' = 'pre';
+  for (const line of lines) {
+    if (phase === 'pre') {
+      if (ADMIN_STMT_RE.test(line)) { phase = 'stmts'; stmtLines.push(line); }
+      else preLines.push(line);
+    } else if (phase === 'stmts') {
+      if (ADMIN_STMT_RE.test(line)) stmtLines.push(line);
+      else { phase = 'suffix'; suffixLines.push(line); }
+    } else suffixLines.push(line);
+  }
+  return {
+    stem: stmtLines.length > 0 ? preLines.join(' ') : lines.join(' '),
+    stmts: stmtLines,
+    suffix: suffixLines.join(' '),
+  };
+}
+
 // ── Lesson Card component ─────────────────────────────────────────────────────
 function LessonCard({ lesson, onEdit, onDelete, onDeleteMcq, onMove, onCopy }: {
   lesson: any;
@@ -705,7 +737,9 @@ function LessonCard({ lesson, onEdit, onDelete, onDeleteMcq, onMove, onCopy }: {
       {/* Expanded MCQ list */}
       {expanded && (
         <div className="border-t border-slate-100 bg-slate-50 px-3 py-2 max-h-72 overflow-y-auto">
-          {(lesson.mcqs || []).map((q: any, qi: number) => (
+          {(lesson.mcqs || []).map((q: any, qi: number) => {
+            const { stem, stmts, suffix } = extractAdminStatements(q);
+            return (
             <div key={qi} className="flex items-start gap-2 py-2 border-b border-slate-100 last:border-0">
               <span className="text-[9px] font-black text-slate-400 shrink-0 mt-0.5">Q{qi + 1}</span>
               <div className="flex-1 min-w-0">
@@ -713,8 +747,20 @@ function LessonCard({ lesson, onEdit, onDelete, onDeleteMcq, onMove, onCopy }: {
                   <span className="text-[8px] font-bold bg-indigo-100 text-indigo-600 px-1 py-0.5 rounded mr-1">{q.topic}</span>
                 )}
                 <p className="text-[10px] text-slate-700 font-medium leading-relaxed line-clamp-2">
-                  {(q.question || '').replace(/<br\/?>/g, ' ')}
+                  {stem || (q.question || '').replace(/<br\/?>/g, ' ')}
                 </p>
+                {stmts.length > 0 && (
+                  <div className="mt-1 flex flex-col gap-0.5">
+                    {stmts.map((s: string, si: number) => (
+                      <div key={si} className="text-[9px] text-indigo-700 bg-indigo-50 border-l-2 border-indigo-300 px-1.5 py-0.5 rounded-r font-medium">
+                        {s}
+                      </div>
+                    ))}
+                    {suffix && (
+                      <p className="text-[9px] text-slate-600 font-medium mt-0.5">{suffix}</p>
+                    )}
+                  </div>
+                )}
                 <p className="text-[9px] text-emerald-700 font-bold mt-0.5">
                   ✓ {String.fromCharCode(65 + q.correctAnswer)}. {q.options?.[q.correctAnswer] || ''}
                 </p>
@@ -723,7 +769,7 @@ function LessonCard({ lesson, onEdit, onDelete, onDeleteMcq, onMove, onCopy }: {
                 <X size={11} />
               </button>
             </div>
-          ))}
+          ); })}
         </div>
       )}
     </div>

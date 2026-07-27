@@ -15,6 +15,7 @@
 
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { renderMathInHtml, formatExplanationHtml } from '../utils/mathUtils';
 import { VirtualList } from './VirtualList';
 import { RevisionSession } from './RevisionSession';
 import { TodayAllNotesModal } from './TodayAllNotesModal';
@@ -29,10 +30,11 @@ import { TodayMcqSession } from './TodayMcqSession';
 import { setMcqNotifSuppressed } from '../utils/creditNotify';
 import {
   getDueItems, getUpcomingItems, markNotesReviewed, markMcqDone,
-  clearTracker, getAllBuckets, bucketKey, keywordsForBucket,
+  clearTracker, getAllBuckets, getTrackerMap, bucketKey, keywordsForBucket,
   getTopicNote,
   type WeakBucket
 } from '../utils/revisionTrackerV2';
+import { syncAllRevisionBuckets } from '../utils/revisionFirebase';
 import { searchNotesByWords, type NoteSearchResult } from '../utils/noteSearcher';
 
 interface Props {
@@ -198,6 +200,21 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
     setSelfRateKey(null);
   }, []);
 
+  const syncRevisionProgress = useCallback(() => {
+    if (user?.id) syncAllRevisionBuckets(user.id, getTrackerMap());
+  }, [user?.id]);
+
+  // Firebase hydration happens at app login. Refresh this mounted screen when
+  // that async restore completes after the screen has already rendered.
+  useEffect(() => {
+    const onHydrated = (event: Event) => {
+      const detail = (event as CustomEvent<{ userId?: string }>).detail;
+      if (!detail?.userId || detail.userId === user?.id) reload();
+    };
+    window.addEventListener('iic-revision-tracker-hydrated', onHydrated);
+    return () => window.removeEventListener('iic-revision-tracker-hydrated', onHydrated);
+  }, [reload, user?.id]);
+
   // Every second: update clock + auto-reload when any upcoming topic becomes due
   useEffect(() => {
     const id = setInterval(() => {
@@ -263,6 +280,7 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
   const handleNotesRead = (b: WeakBucket, noteResult?: NoteSearchResult) => {
     const k = bucketKey(b.subjectId, b.chapterId, b.pageKey, b.topic);
     markNotesReviewed(k, revisionConfig);
+    syncRevisionProgress();
     // ── +5 pts notes padhne ke liye ──────────────────────────────────────
     if (onUpdateUser) {
       const updated = { ...user, totalScore: (user.totalScore || 0) + 5 };
@@ -373,6 +391,7 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
         markMcqDone(bk, acc, revisionConfig);
       }
     });
+    syncRevisionProgress();
     setPracticeActive(false);
     setPracticeDone(false);
     reload();
@@ -411,6 +430,7 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
     const strongMid  = (thr.strong + thr.mastery - 1) / 2 / 100;             // midpoint in strong range
     const acc = score === 'strong' ? strongMid : score === 'average' ? averageMid : weakMid;
     markMcqDone(key, acc, revisionConfig);
+    syncRevisionProgress();
     // ── Pts based on self-rating: weak=+3, average=+5, strong=+10 ────────
     if (onUpdateUser) {
       const ratePts = score === 'strong' ? 10 : score === 'average' ? 5 : 3;
@@ -483,9 +503,9 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
           <div className="mt-2 space-y-1.5">
             {b.wrongQuestions.slice(0, 2).map((q, i) => (
               <div key={i} className="rounded-lg bg-rose-50 border border-rose-100 px-3 py-2">
-                <p className="text-[11px] text-slate-700">{q.question}</p>
+                <p className="text-[11px] text-slate-700" dangerouslySetInnerHTML={{ __html: renderMathInHtml(q.question) }} />
                 {q.correctOption && (
-                  <p className="text-[10px] text-emerald-700 font-bold mt-0.5">✓ {q.correctOption}</p>
+                  <p className="text-[10px] text-emerald-700 font-bold mt-0.5">✓ <span dangerouslySetInnerHTML={{ __html: renderMathInHtml(q.correctOption) }} /></p>
                 )}
               </div>
             ))}
@@ -665,7 +685,7 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
 
                   {/* Question card */}
                   <div className="bg-white rounded-2xl border-2 border-slate-200 shadow-sm p-5">
-                    <p className="font-bold text-slate-800 text-sm leading-relaxed">{q.question}</p>
+                    <p className="font-bold text-slate-800 text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: renderMathInHtml(q.question) }} />
                   </div>
 
                   {/* Options — A/B/C/D if available, else reveal-only */}
@@ -698,7 +718,7 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
                                 : !showResult && isSelected ? 'border-indigo-500 bg-indigo-500 text-white'
                                 : 'border-slate-300 bg-slate-100 text-slate-600'
                               }`}>{letter}</span>
-                              <span className="font-semibold text-sm leading-relaxed pt-0.5">{opt}</span>
+                              <span className="font-semibold text-sm leading-relaxed pt-0.5" dangerouslySetInnerHTML={{ __html: renderMathInHtml(opt) }} />
                               {showResult && isCorrect && <CheckCircle size={18} className="shrink-0 ml-auto text-emerald-500 mt-0.5" />}
                               {showResult && isSelected && !isCorrect && <XCircle size={18} className="shrink-0 ml-auto text-rose-500 mt-0.5" />}
                             </button>
@@ -715,7 +735,7 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
                             )}
                             {q.explanation && (
                               <div className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-600 leading-relaxed">
-                                📖 {q.explanation}
+                                📖 <span dangerouslySetInnerHTML={{ __html: formatExplanationHtml(q.explanation) }} />
                               </div>
                             )}
                             <div className="flex gap-3 pt-1">
@@ -760,7 +780,7 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
                         </div>
                         {q.explanation && (
                           <div className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-600 leading-relaxed">
-                            📖 {q.explanation}
+                            📖 <span dangerouslySetInnerHTML={{ __html: formatExplanationHtml(q.explanation) }} />
                           </div>
                         )}
                         <div className="flex gap-3 pt-1">

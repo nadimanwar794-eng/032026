@@ -283,6 +283,25 @@
 
   body {
     @apply font-sans antialiased bg-background text-foreground;
+    /* Prevent Chrome's "Contextual Search" bottom sheet and iOS callout menu
+       from appearing when the user long-presses UI elements.
+       Content areas that need text selection (notes, reading) opt back in
+       via the .selectable-text utility below. */
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* Re-enable text selection inside actual reading/notes content */
+  .selectable-text,
+  .notes-html-content,
+  .prose,
+  input,
+  textarea,
+  [contenteditable] {
+    -webkit-touch-callout: default;
+    -webkit-user-select: text;
+    user-select: text;
   }
 }
 

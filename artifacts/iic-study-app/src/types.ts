@@ -248,6 +248,7 @@ export interface User {
   unlockedContent?: string[];
   timedUnlocks?: { contentId: string; expiresAt: string }[];
   dailyRoutine?: DailyRoutine;
+  subjectFreeLesson?: Record<string, string>; // subjectId → chapterId (first free lesson per subject)
 }
 
 export interface ActiveSubscription {
@@ -672,7 +673,7 @@ export interface SystemSettings {
   mcqAnalysisCost?: number;
   appShortName?: string; // e.g. "IIC"
   appShortNameSize?: number; // Font size in pixels for loading-screen short name (admin slider, 24-120). Default 30.
-  developerName?: string; // Shown as "Developed by …" on the loading screen and profile page. Default "Shivangi Singh".
+  developerName?: string; // Shown as "Developed by …" on the loading screen and profile page. Default "Nadim Anwar".
   /** Admin-defined extra "books" (Sar Sangrah / Speedy ki tarah). Each entry becomes:
    *   - a target-subject option in the Homework form (admin)
    *   - a subject card on the student dashboard, opening a flat page-wise list of notes/MCQs
@@ -737,6 +738,17 @@ export interface SystemSettings {
   homeQuickAccessCard3D?: boolean;
   homeQuickAccessCardBg?: string;
   homeQuickAccessCardBorder?: string;
+  // ── School & Coaching Home Cards ──────────────────────────────────────────
+  homeSchoolCardBg?: string;
+  homeSchoolCardBorder?: string;
+  homeSchoolCard3D?: boolean;
+  homeCoachingCardBg?: string;
+  homeCoachingCardBorder?: string;
+  homeCoachingCard3D?: boolean;
+  homeCoachingHomeworkCard3D?: boolean;
+  // ── Content List Cards (Book / Lesson / Page list) — same color everywhere ─
+  contentListCardBg?: string;
+  contentListCardBorder?: string;
   statusBarColor?: string;
   darkThemeColor?: string;
   lightThemeColor?: string;
@@ -988,6 +1000,7 @@ export interface SystemSettings {
     mode: 'AUTO' | 'MANUAL';
     rewardPercentage: number;
     selectedChapterIds?: string[];
+    autoChallengeEnabled?: boolean; // true = popup auto-triggers daily; false = admin ne band kar diya
   };
   themeConfig?: {
     freeTheme: 'BASIC' | 'ULTRA' | 'DARK' | 'LIGHT';
@@ -1389,6 +1402,7 @@ export interface LeaderboardEntry {
     total: number;
     date: string;
     topic: string;
+    challengeId?: string; // Shared challenge ID for fair leaderboard comparison
 }
 
 export interface ActivityLogEntry {

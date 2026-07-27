@@ -26,6 +26,7 @@ interface Props {
   renderEarnContent?: React.ReactNode;
   onBack?: () => void;
   themeColor?: string;
+  tierTheme?: any;
 }
 
 /* ─── Fixed color palette ─── */
@@ -474,7 +475,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, renderEar
   /* ── Store locked ── */
   if (settings?.isPaymentEnabled === false) {
     return (
-      <div className="min-h-screen flex items-center justify-center px-6" style={{ background: C.bg }}>
+      <div className="min-h-[100dvh] flex items-center justify-center px-6" style={{ background: C.bg }}>
         <div className="rounded-3xl p-10 text-center max-w-sm w-full" style={{ background: C.surface, border: `1px solid ${C.border}` }}>
           <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-5" style={{ background: C.surfaceHigh }}>
             <Lock size={30} color={C.textMuted} />
@@ -489,7 +490,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, renderEar
   }
 
   return (
-    <div className="min-h-screen pb-32 animate-in fade-in duration-300" style={{ background: C.bg }}>
+    <div className="min-h-[100dvh] pb-32 animate-in fade-in duration-300" style={{ background: C.bg }}>
 
       {/* ── SUPPORT MODAL ── */}
       {showSupportModal && (
@@ -739,27 +740,22 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, renderEar
                   const isActive = tierType === tab.id;
                   return (
                     <button key={tab.id} onClick={() => setTierType(tab.id)}
-                      className="py-3 rounded-2xl font-black transition-all flex flex-col items-center gap-1 relative overflow-hidden"
+                      className="py-1.5 rounded-xl font-black transition-all flex items-center justify-center gap-1 relative overflow-hidden"
                       style={isActive
-                        ? { background: tab.bg, border: `2px solid ${tab.border}`, boxShadow: `0 0 14px ${tab.glow}, inset 0 1px 0 rgba(255,255,255,0.08)` }
+                        ? { background: tab.bg, border: `2px solid ${tab.border}` }
                         : { background: C.surfaceHigh, border: `1.5px solid ${C.border}` }}>
-                      {isActive && (
-                        <div className="absolute inset-0 pointer-events-none"
-                          style={{ background: `radial-gradient(ellipse at 50% 0%, ${tab.glow} 0%, transparent 70%)` }} />
-                      )}
-                      <span className="text-lg leading-none relative z-10">{tab.emoji}</span>
-                      <span className="text-[11px] relative z-10" style={{ color: isActive ? tab.color : C.textMuted }}>{tab.label}</span>
+                      <span className="text-sm leading-none relative z-10">{tab.emoji}</span>
+                      <span className="text-[10px] relative z-10" style={{ color: isActive ? tab.color : C.textMuted }}>{tab.label}</span>
                     </button>
                   );
                 })}
-                {/* History tab */}
+                {/* History tab — slim, no icon */}
                 <button onClick={() => setTierType('HISTORY')}
-                  className="py-3 rounded-2xl font-black transition-all flex flex-col items-center gap-1 relative overflow-hidden"
+                  className="py-1.5 rounded-xl font-black transition-all flex items-center justify-center"
                   style={tierType === 'HISTORY'
-                    ? { background: 'rgba(251,191,36,0.10)', border: `2px solid rgba(251,191,36,0.35)`, boxShadow: '0 0 14px rgba(251,191,36,0.18)' }
+                    ? { background: 'rgba(251,191,36,0.10)', border: `2px solid rgba(251,191,36,0.35)` }
                     : { background: C.surfaceHigh, border: `1.5px solid ${C.border}` }}>
-                  <span className="text-lg leading-none">📋</span>
-                  <span className="text-[11px]" style={{ color: tierType === 'HISTORY' ? C.gold : C.textMuted }}>History</span>
+                  <span className="text-[10px]" style={{ color: tierType === 'HISTORY' ? C.gold : C.textMuted }}>History</span>
                 </button>
               </div>
             );
@@ -938,7 +934,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, renderEar
 
                   const ffGold = '#FFD700';
                   const ffGoldDim = 'rgba(255,215,0,0.65)';
-                  const ffCardBg = '#0c0d10';
+                  const ffCardBg = C.surface;
                   const ffBorder = isPro ? '#22d3ee' : '#c084fc';
                   const ffStripe = isPro ? 'rgba(34,211,238,0.18)' : 'rgba(192,132,252,0.18)';
 
@@ -971,10 +967,11 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, renderEar
 
                       {/* ── MAIN CARD ── */}
                       <div className="mb-5 rounded-2xl overflow-hidden relative"
-                        style={{ background: ffCardBg, border: `2px solid ${ffBorder}`, boxShadow: `0 0 0 1px rgba(0,0,0,0.6), 0 8px 32px rgba(0,0,0,0.6), 0 0 24px ${ffStripe}` }}>
+                        style={{ background: ffCardBg, border: `2px solid ${ffBorder}`, boxShadow: `0 0 0 1px ${ffStripe}, 0 8px 32px ${ffStripe}, 0 0 24px ${ffStripe}` }}>
 
                         {/* ▌▌ FF-style header bar ▌▌ */}
-                        <div className="relative overflow-hidden" style={{ background: isPro ? 'rgba(14,40,50,0.95)' : 'rgba(22,14,50,0.95)', borderBottom: `2px solid ${ffBorder}` }}>
+                        <div className="relative overflow-hidden"
+                          style={{ background: isPro ? 'rgba(8,145,178,0.35)' : 'rgba(124,58,237,0.35)', borderBottom: `2px solid ${ffBorder}` }}>
                           {/* Diagonal hazard stripes */}
                           <div className="absolute inset-0 pointer-events-none"
                             style={{ backgroundImage: `repeating-linear-gradient(60deg,transparent,transparent 10px,rgba(255,255,255,0.025) 10px,rgba(255,255,255,0.025) 12px)` }} />
@@ -1023,7 +1020,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, renderEar
                           const mcqLimit = ld?.mcq?.[isPro ? 'basic' : 'ultra'] ?? (isPro ? 70 : 100);
                           const pdfLimit = ld?.pdf?.[isPro ? 'basic' : 'ultra'] ?? (isPro ? 5 : 10);
                           const videoLimit = ld?.video?.[isPro ? 'basic' : 'ultra'] ?? (isPro ? 4 : 7);
-                          const flashLimit = ld?.flashcard?.[isPro ? 'basic' : 'ultra'] ?? (isPro ? 15 : 20);
+                          const flashLimit = ld?.flashcard?.['ultra'] ?? 20;
                           const fmtLim = (v: number) => v === UNLIMITED ? '∞' : v.toLocaleString('en-IN');
 
                           const topStats = [
@@ -1192,8 +1189,8 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, renderEar
                         </div>
                       </div>
 
-                      {/* ── Plan cards — FF card style ── */}
-                      <div className="space-y-3 mb-5">
+                      {/* ── Plan cards — glass morphism, background-adaptive ── */}
+                      <div className="space-y-2.5 mb-5">
                         {subscriptionPlans.map((plan, idx) => {
                           const isSelected = selectedPlanId === plan.id;
                           const original = isPro ? plan.basicOriginalPrice : plan.ultraOriginalPrice;
@@ -1206,54 +1203,67 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, renderEar
                           const perMonth = getPerMonthPrice(plan, price);
                           const isPopular = plan.name.toLowerCase().includes('monthly') || (subscriptionPlans.length > 1 && idx === 1);
 
+                          // Per-card accent — adapts to active tier
+                          const cardAccentColor  = isSelected ? ffBorder : 'rgba(255,255,255,0.55)';
+                          const cardBg           = isSelected
+                            ? (isPro ? 'rgba(34,211,238,0.09)' : 'rgba(192,132,252,0.09)')
+                            : 'rgba(255,255,255,0.04)';
+                          const cardBorder       = isSelected
+                            ? `2px solid ${ffBorder}`
+                            : '1.5px solid rgba(255,255,255,0.10)';
+                          const cardShadow       = isSelected
+                            ? `0 0 22px ${ffStripe}, 0 2px 12px rgba(0,0,0,0.35)`
+                            : '0 1px 4px rgba(0,0,0,0.20)';
+
                           return (
                             <button key={plan.id} onClick={() => { setSelectedPlanId(plan.id); setShowPaymentChooser(true); }}
-                              className="w-full block text-left transition-all relative overflow-hidden rounded-2xl"
-                              style={isSelected
-                                ? { background: 'rgba(14,25,30,0.95)', border: `2px solid ${ffBorder}`, boxShadow: `0 0 20px ${ffStripe}, 0 4px 16px rgba(0,0,0,0.5)` }
-                                : { background: '#0e0f14', border: `1.5px solid rgba(255,255,255,0.08)` }}>
+                              className="w-full block text-left active:scale-[0.985] transition-all relative overflow-hidden rounded-2xl"
+                              style={{ background: cardBg, border: cardBorder, boxShadow: cardShadow, backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)' }}>
+
+                              {/* Selected: subtle left accent stripe */}
+                              {isSelected && (
+                                <div className="absolute left-0 top-3 bottom-3 w-[3px] rounded-r-full"
+                                  style={{ background: `linear-gradient(180deg,${ffBorder},transparent)` }} />
+                              )}
 
                               {/* Popular corner ribbon */}
                               {isPopular && (
-                                <div className="absolute top-0 right-0 overflow-hidden w-16 h-16 pointer-events-none">
-                                  <div className="absolute top-3 -right-5 rotate-45 text-[8px] font-black px-6 py-0.5 text-center"
-                                    style={{ background: '#f97316', color: '#fff' }}>
-                                    🔥
+                                <div className="absolute top-0 right-0 pointer-events-none">
+                                  <div className="text-[8px] font-black px-2.5 py-1 rounded-bl-xl rounded-tr-2xl"
+                                    style={{ background: 'linear-gradient(135deg,#f97316,#fb923c)', color: '#fff', letterSpacing: '0.05em' }}>
+                                    Popular
                                   </div>
                                 </div>
                               )}
 
-                              <div className="px-4 py-3 flex justify-between items-center relative z-10">
+                              <div className="px-4 py-3.5 flex justify-between items-center relative z-10">
                                 <div className="flex-1 pr-3">
-                                  <div className="flex items-center gap-2 mb-1">
-                                    <p className="text-sm font-black" style={{ color: isSelected ? ffBorder : '#e2e8f0' }}>{plan.name}</p>
-                                    {isPopular && (
-                                      <span className="text-[9px] font-black px-1.5 py-0.5 rounded"
-                                        style={{ background: 'rgba(249,115,22,0.18)', color: '#fb923c', border: '1px solid rgba(249,115,22,0.35)' }}>
-                                        Popular
-                                      </span>
-                                    )}
+                                  {/* Plan name row */}
+                                  <div className="flex items-center gap-2 mb-1.5">
+                                    <p className="text-sm font-black" style={{ color: cardAccentColor }}>{plan.name}</p>
                                   </div>
+                                  {/* Price row */}
                                   <div className="flex items-baseline gap-2">
-                                    <span className="text-2xl font-black" style={{ color: '#fff' }}>₹{price.toLocaleString('en-IN')}</span>
+                                    <span className="text-[26px] font-black leading-none" style={{ color: '#fff' }}>₹{price.toLocaleString('en-IN')}</span>
                                     {original > price && (
-                                      <span className="text-sm line-through" style={{ color: 'rgba(255,255,255,0.22)' }}>₹{original.toLocaleString('en-IN')}</span>
+                                      <span className="text-sm line-through" style={{ color: 'rgba(255,255,255,0.25)' }}>₹{original.toLocaleString('en-IN')}</span>
                                     )}
                                   </div>
                                   {perMonth && (
-                                    <p className="text-[10px] mt-0.5 font-medium" style={{ color: 'rgba(255,255,255,0.32)' }}>≈ ₹{perMonth}/month</p>
+                                    <p className="text-[10px] mt-0.5 font-medium" style={{ color: 'rgba(255,255,255,0.35)' }}>≈ ₹{perMonth}/month</p>
                                   )}
                                 </div>
                                 <div className="flex flex-col items-end gap-2 shrink-0">
                                   {totalDiscount > 0 && (
                                     <span className="text-[10px] font-black px-2 py-0.5 rounded-lg"
-                                      style={{ background: 'rgba(255,215,0,0.12)', color: ffGold, border: `1px solid rgba(255,215,0,0.35)` }}>
+                                      style={{ background: 'rgba(255,215,0,0.13)', color: ffGold, border: `1px solid rgba(255,215,0,0.30)` }}>
                                       {totalDiscount}% OFF
                                     </span>
                                   )}
-                                  <div className="w-6 h-6 rounded-full flex items-center justify-center"
-                                    style={{ background: isSelected ? ffStripe : 'rgba(255,255,255,0.05)', border: `2px solid ${isSelected ? ffBorder : 'rgba(255,255,255,0.15)'}` }}>
-                                    {isSelected && <div className="w-2.5 h-2.5 rounded-full" style={{ background: ffBorder }} />}
+                                  {/* Radio circle */}
+                                  <div className="w-5 h-5 rounded-full flex items-center justify-center"
+                                    style={{ border: `2px solid ${isSelected ? ffBorder : 'rgba(255,255,255,0.20)'}`, background: isSelected ? ffStripe : 'transparent' }}>
+                                    {isSelected && <div className="w-2 h-2 rounded-full" style={{ background: ffBorder }} />}
                                   </div>
                                 </div>
                               </div>

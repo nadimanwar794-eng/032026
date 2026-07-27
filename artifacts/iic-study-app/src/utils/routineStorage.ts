@@ -106,12 +106,16 @@ export interface RoutineData {
   revisionUnlockedLessons: Record<string, boolean>; // lessonId → true
   // ── Routine track selection ──────────────────────────────────────────────
   routineMode: 'SCHOOL' | 'COMPETITION' | null;
+  selectedBoard: string | null;   // school: 'CBSE' | 'BSEB' | 'UP Board' | etc.
   selectedClass: string | null;   // school: '6'–'12'
   selectedBook: string | null;    // competition: single book (legacy)
   selectedBooks: string[];        // competition: multiple books (primary)
   // ── Multi-category slot system ───────────────────────────────────────────────
   routineSlots: RoutineSlot[];          // legacy — kept for migration only
-  routineCategories: RoutineCategory[]; // primary: one entry per named category
+  routineCategories: RoutineCategory[]; // primary: one entry per named category (active class)
+  // Per-class/book category snapshots — keyed by "SCHOOL_<classLevel>" or "COMPETITION_<book1+book2>"
+  // Saved automatically when user switches class/books so state is fully restored on switch-back.
+  routineCategoriesByClass: Record<string, RoutineCategory[]>;
   unlockedTierSlot: boolean;            // paid with coins (tier-price)
   unlockedLevel5Slot: boolean;          // legacy flag — level bonus now computed from level directly
   unlockedLevel8Slot: boolean;          // legacy flag — level bonus now computed from level directly
@@ -166,11 +170,13 @@ export function loadRoutineData(userId: string): RoutineData {
         ...parsed,
         revisionUnlockedLessons: parsed.revisionUnlockedLessons || {},
         routineMode: parsed.routineMode ?? null,
+        selectedBoard: parsed.selectedBoard ?? null,
         selectedClass: parsed.selectedClass ?? null,
         selectedBook: parsed.selectedBook ?? null,
         selectedBooks: parsed.selectedBooks ?? [],
         routineSlots: slots,
         routineCategories: cats,
+        routineCategoriesByClass: parsed.routineCategoriesByClass ?? {},
         unlockedTierSlot: parsed.unlockedTierSlot ?? false,
         unlockedLevel5Slot: parsed.unlockedLevel5Slot ?? false,
         unlockedLevel8Slot: parsed.unlockedLevel8Slot ?? false,
@@ -189,11 +195,13 @@ export function loadRoutineData(userId: string): RoutineData {
     trackingHistory: [],
     revisionUnlockedLessons: {},
     routineMode: null,
+    selectedBoard: null,
     selectedClass: null,
     selectedBook: null,
     selectedBooks: [],
     routineSlots: [],
     routineCategories: [],
+    routineCategoriesByClass: {},
     unlockedTierSlot: false,
     unlockedLevel5Slot: false,
     unlockedLevel8Slot: false,

@@ -25,18 +25,24 @@ export const RulesPage: React.FC<Props> = ({ onBack, settings }) => {
         credits: {
           title: "Credits & Economy",
           points: [
-            "Simple Notes (Free): Basic text notes are always free.",
-            "Premium Notes (1 Credit): Includes AI-generated images, color-coded explanations, and deeper content.",
-            "MCQ Analysis (1 Credit): Generates 20 unique questions with detailed explanations.",
-            "How to get Credits? Use 'Gift Codes' provided by the Admin or maintain a daily streak."
+            "Free Notes (PDF): Basic chapter PDFs are always free for all students.",
+            "Deep Dive / Write Mode: AI-styled HTML notes (admin-set cost, ~15 CR). Basic: 5 free/day. Ultra: 10 free/day.",
+            "Premium Notes (PDF): Typically 2–5 CR per unlock. Basic/Ultra may get free daily views.",
+            "Video Lectures: Usually 5 CR (admin-configurable). Basic/Ultra get free daily views.",
+            "MCQ Test Mode (Mock Test): ~10 CR per test attempt.",
+            "AI Chat Tutor: ~1 CR per message (admin-configurable). Ultra users get higher limits.",
+            "Custom Theme Creator: 200 CR (one-time, permanent unlock).",
+            "How to earn Credits: Daily Login Bonus (claim from Mail tab), Study Goal Timer, Login Streak, Spin Wheel, Gift Codes, Level-up bonuses, MCQ milestones, Referral."
           ]
         },
         chat: {
-          title: "Chat Rules",
+          title: "Chat & Community Rules",
           points: [
-            "Cost: Non-premium users pay 1 Credit per message.",
-            "Cooldown: You can only send 1 message every 6 hours unless you are Premium.",
-            "Admin Power: Admins can edit or delete any user message. Be respectful."
+            "Global Chat: Open to all students — share study tips, ask questions, discuss topics.",
+            "AI Chat cost: ~1 CR per message (admin-set). Ultra users enjoy higher daily message limits.",
+            "Support Chat: Private 1-on-1 channel with admin. Use for payment, content, or account issues.",
+            "Community MCQ: Share any MCQ to chat for group discussion and peer explanation.",
+            "Admin Power: Admins can edit or delete any user message. Use respectful language — violations may result in ban."
           ]
         },
         language: {
@@ -44,7 +50,10 @@ export const RulesPage: React.FC<Props> = ({ onBack, settings }) => {
           points: [
             "BSEB Board: Content is generated strictly in Hindi.",
             "CBSE Board: Content is generated strictly in English.",
-            "Audio Studio: Convert notes to speech. Detects Hindi/English automatically."
+            "Language Toggle: Switch UI and AI responses between Hindi/English from the top bar (🌐 button).",
+            "Audio Studio: Paste any text and have it read aloud in Hindi or English using device TTS.",
+            "TTS (Read button): Available on all note pages — tap any line to start reading from there.",
+            "Competition Mode: Lucent GK, NCERT, Speedy, Sar Sangrah — structured page reader for competitive exams. Ultra: unlimited. Free: limited/day."
           ]
         },
         levelSystem: {
@@ -119,18 +128,24 @@ export const RulesPage: React.FC<Props> = ({ onBack, settings }) => {
         credits: {
           title: "क्रेडिट और इकोनॉमी",
           points: [
-            "साधारण नोट्स (मुफ्त): बेसिक टेक्स्ट नोट्स हमेशा मुफ्त होते हैं।",
-            "प्रीमियम नोट्स (1 क्रेडिट): इसमें AI द्वारा बनाए गए चित्र, रंगीन व्याख्या और गहरी जानकारी होती है।",
-            "MCQ विश्लेषण (1 क्रेडिट): 20 नए प्रश्न और उनके विस्तृत उत्तर बनाता है।",
-            "क्रेडिट कैसे प्राप्त करें? एडमिन से 'गिफ्ट कोड' मांगें या रोज़ ऐप खोलें (Streak)।"
+            "Free Notes (PDF): सभी students के लिए हमेशा मुफ्त।",
+            "Deep Dive / Write Mode: AI-styled HTML notes (~15 CR, admin-set)। Basic: 5 free/day, Ultra: 10 free/day।",
+            "Premium Notes (PDF): आमतौर पर 2–5 CR। Basic/Ultra users को free daily views मिल सकते हैं।",
+            "Video Lectures: लगभग 5 CR (admin-configurable)। Basic/Ultra users को free daily views।",
+            "MCQ Test Mode (Mock Test): ~10 CR प्रति attempt।",
+            "AI Chat: ~1 CR प्रति message। Ultra users को ज़्यादा daily limit।",
+            "Custom Theme Creator: 200 CR (एक बार — permanent unlock)।",
+            "Coins कैसे कमाएं: Daily Login Bonus (Mail tab से claim करें), Study Goal Timer, Login Streak, Spin Wheel, Gift Codes, Level-up bonus, Referral, MCQ milestones।"
           ]
         },
         chat: {
-          title: "चैट नियम",
+          title: "Chat और Community नियम",
           points: [
-            "कीमत: साधारण यूज़र को 1 मैसेज के लिए 1 क्रेडिट देना होगा।",
-            "समय सीमा: आप हर 6 घंटे में केवल 1 मैसेज भेज सकते हैं (प्रीमियम के लिए अनलिमिटेड)।",
-            "एडमिन पावर: एडमिन किसी भी मैसेज को हटा सकता है। कृपया सम्मानजनक भाषा का प्रयोग करें।"
+            "Global Chat: सभी students के लिए open — tips share करें, doubts पूछें।",
+            "AI Chat cost: ~1 CR प्रति message (admin-set)। Ultra users को ज़्यादा limits।",
+            "Support Chat: Admin से private 1-on-1 chat। Payment, content, account issues यहाँ report करें।",
+            "Community MCQ: कोई भी MCQ chat में share करके group में discuss कर सकते हो।",
+            "एडमिन पावर: एडमिन किसी भी message को delete/edit कर सकता है। अपशब्द का use करने पर ban हो सकता है।"
           ]
         },
         language: {
@@ -138,7 +153,10 @@ export const RulesPage: React.FC<Props> = ({ onBack, settings }) => {
           points: [
             "BSEB बोर्ड: सारी पढ़ाई हिंदी में होगी।",
             "CBSE बोर्ड: सारी पढ़ाई अंग्रेजी में होगी।",
-            "ऑडियो स्टूडियो: अपने नोट्स को आवाज़ में बदलें। हिंदी और अंग्रेजी दोनों काम करता है।"
+            "Language Toggle: Top bar (🌐 button) से UI और AI responses Hindi/English में switch करें।",
+            "Audio Studio: अपना कोई भी text paste करो — device TTS से Hindi या English में पढ़ा जाएगा।",
+            "TTS (Read button): सभी notes pages पर available — किसी भी line पर tap करके वहीं से reading शुरू।",
+            "Competition Mode: Lucent GK, NCERT, Speedy — structured reader। Ultra: unlimited। Free: limited chapters/day।"
           ]
         },
         levelSystem: {
