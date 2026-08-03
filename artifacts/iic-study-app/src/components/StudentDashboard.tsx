@@ -4899,14 +4899,12 @@ export const StudentDashboard: React.FC<Props> = ({
   // social-proof counts (Firebase de-dupes by userId so count won't inflate).
   const toggleStarNote = (noteKey: string, topicText: string, source?: StarredNoteSource) => {
     let didStar = false;
-        let didUnstar = false;
     setStarredNotes(prev => {
       const alreadySaved = prev.some(n => n.noteKey === noteKey && n.topicText === topicText);
       if (alreadySaved) {
-              const updated = prev.filter(n => !(n.noteKey === noteKey && n.topicText === topicText));
-        didUnstar = true;
-        try { localStorage.setItem('nst_starred_notes_v1', JSON.stringify(updated)); } catch {}
-        return updated;
+        // Already saved → show a soft message and return prev unchanged.
+        try { showAlert('This note is already saved. Swipe to remove it in the Saved Notes page.', 'INFO'); } catch {}
+        return prev;
       }
       const updated = [
         ...prev,
@@ -4955,7 +4953,7 @@ export const StudentDashboard: React.FC<Props> = ({
       source ? { lessonTitle: source.lessonTitle, subject: source.subject, pageNo: source.pageNo as any, pageIndex: source.pageIndex as any } : undefined
     ).catch(() => {});
     try { if (navigator.vibrate) navigator.vibrate(alreadyMarked ? 20 : 60); } catch {}
-    showAlert(alreadyMarked ? '❌ Important mark hataya' : '⭐ Sab students ko Important dikhega!', alreadyMarked ? 'INFO' : 'SUCCESS');
+    
   };
 
   // Helper: for any ChunkedNotesReader — returns whether topic is admin-globally-important.
