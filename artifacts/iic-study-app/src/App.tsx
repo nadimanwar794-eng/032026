@@ -13,8 +13,8 @@ import { recalculateSubscriptionStatus, addSubscription } from './utils/subscrip
 import { getLevelInfo, getLevelLimitBonus, getEffectiveDailyLimit, UNLIMITED } from './utils/levelSystem';
 import { fireCreditNotify, setHomeTabActive } from './utils/creditNotify';
 import { onSessionComplete, queueSession, consumeSessionQueue, SessionCompletePayload } from './utils/sessionNotify';
-import { SessionSummaryBanner } from './components/SessionSummaryBanner';
-import { GroupedSessionBanner } from './components/GroupedSessionBanner';
+import { HomeToastNotification, type HomeToastData } from './components/HomeToastNotification';
+import { recordActivityEntry } from './utils/loginHistory';
 import { loadRoutineData } from './utils/routineStorage';
 import { hydrateRevisionTracker } from './utils/revisionFirebase';
 import { setRevisionTrackerUser } from './utils/revisionTrackerV2';
@@ -433,12 +433,7 @@ const App: React.FC = () => {
       const updatedUser = { ...user, credits: (user.credits || 0) + deferredStudyCoins };
       setState(prev => ({ ...prev, user: updatedUser }));
       saveUserToLive(updatedUser);
-      fireCreditNotify({
-        type: 'EARN',
-        amount: deferredStudyCoins,
-        remaining: updatedUser.credits || 0,
-        source: 'reading',
-      });
+      // Notification HomeToastNotification me combined dikhayi jaayegi — alag EARN toast nahi
     }
 
     // ── Step 1: Keep the legacy score-sync marker current ───────────────────
@@ -447,6 +442,7 @@ const App: React.FC = () => {
     const syncKey = `nst_credit_sync_score_${user.id}`;
     const raw = localStorage.getItem(syncKey);
     const currentScore = user.totalScore || 0;
+    let xpDeltaFromSync = 0;
 
     if (raw === null) {
       localStorage.setItem(syncKey, String(currentScore));
@@ -454,6 +450,7 @@ const App: React.FC = () => {
       const lastSynced = parseInt(raw, 10);
       const delta = currentScore - lastSynced;
       if (delta > 0) {
+        xpDeltaFromSync = delta;
         localStorage.setItem(syncKey, String(currentScore));
       }
     }
@@ -469,6 +466,7 @@ const App: React.FC = () => {
         timeSecs: 0,
         activityType: 'Study',
         coinsEarned: deferredStudyCoins,
+        sessionScore: xpDeltaFromSync > 0 ? xpDeltaFromSync : undefined,
       }];
     } else if (deferredStudyCoins > 0) {
       // Flashcard and older study payloads may not carry coin metadata even
@@ -509,8 +507,41 @@ const App: React.FC = () => {
       return { ...sess, bonusPts };
     });
 
-    // Banner dikhao — merge with any already-displaying sessions
+    // ── Save to Activity History ────────────────────────────────────────────
+    const totalPtsEarned   = augmentedQueue.reduce((a, s) => a + (s.sessionScore  ?? 0), 0);
+    const totalBonusEarned = augmentedQueue.reduce((a, s) => a + (s.bonusPts      ?? 0), 0);
+    const totalCredEarned  = deferredStudyCoins > 0
+      ? deferredStudyCoins
+      : augmentedQueue.reduce((a, s) => a + (s.coinsEarned ?? 0) + (s.creditsEarned ?? 0), 0);
+    const xpAfter          = user.totalScore || 0;
+    const xpBefore         = Math.max(0, xpAfter - totalPtsEarned - totalBonusEarned);
+    const creditsBefore    = user.credits || 0;
+    const creditsAfter     = creditsBefore + totalCredEarned;
+
+    if ((totalPtsEarned + totalBonusEarned > 0 || totalCredEarned > 0) && user.id) {
+      recordActivityEntry(user.id, {
+        activities: [...new Set(augmentedQueue.map(s => s.activityType || s.type || 'Study'))],
+        chapter:   augmentedQueue.length === 1 ? augmentedQueue[0].chapter : undefined,
+        subject:   augmentedQueue.length === 1 ? augmentedQueue[0].subject : undefined,
+        ptsEarned:     totalPtsEarned,
+        bonusPts:      totalBonusEarned,
+        creditsEarned: totalCredEarned,
+        xpBefore, xpAfter,
+        creditsBefore, creditsAfter,
+        timeSecs: augmentedQueue.reduce((a, s) => a + (s.timeSecs ?? 0), 0),
+      });
+
+      // Show small top-bar toast instead of big popup
+      setHomeToastData({
+        xpBefore, xpEarned: totalPtsEarned + totalBonusEarned, xpAfter,
+        creditsBefore, creditsEarned: totalCredEarned, creditsAfter,
+      });
+    }
+
+    // Sessions still tracked internally (for any remaining listeners), but no big banner shown
     applySessionQueue(augmentedQueue);
+
+    // XP HomeToastNotification me already dikh raha hai — alag POINTS toast nahi
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [studentTab, state.user?.id]);
 
@@ -565,6 +596,23 @@ const App: React.FC = () => {
     if (homeTabActiveRef.current) {
       const queue = consumeSessionQueue();
       applySessionQueue(queue);
+      // XP + CR toast bhi turant dikhao (studentTab useEffect tab fire nahi hota jab tab same ho)
+      const _u = state.user;
+      if (_u) {
+        const _discount = getLevelInfo(_u.totalScore || 0).discount;
+        const _bonusPts = earned > 0 ? Math.round(earned * _discount / 100) : 0;
+        const _xpEarned = earned + _bonusPts;
+        if (_xpEarned > 0 || finalCoins > 0) {
+          const _xpAfter = _u.totalScore || 0;
+          const _xpBefore = Math.max(0, _xpAfter - _xpEarned);
+          const _creditsAfter = _u.credits || 0;
+          const _creditsBefore = Math.max(0, _creditsAfter - finalCoins);
+          setHomeToastData({
+            xpBefore: _xpBefore, xpEarned: _xpEarned, xpAfter: _xpAfter,
+            creditsBefore: _creditsBefore, creditsEarned: finalCoins, creditsAfter: _creditsAfter,
+          });
+        }
+      }
     }
     // Agar HOME pe nahi — queue mein rahega, HOME tab pe aane pe dikhega
   };
@@ -716,14 +764,16 @@ const App: React.FC = () => {
   const [lastTestQuestions, setLastTestQuestions] = useState<MCQItem[] | null>(null); // NEW: For granular analysis
   const [showDailyRankCard, setShowDailyRankCard] = useState(false);
   const [pendingSessionSummary, setPendingSessionSummary] = useState<SessionCompletePayload | null>(null);
-  // Grouped sessions — 2+ activities ek saath HOME pe aane pe
+  // Grouped sessions — kept for queue merging logic
   const [groupedSessions, setGroupedSessions] = useState<SessionCompletePayload[]>([]);
+  // New: small top-bar toast data
+  const [homeToastData, setHomeToastData] = useState<HomeToastData | null>(null);
 
   // Track currently displaying sessions so new ones can be MERGED (not replaced)
   const displayedSessionsRef = useRef<SessionCompletePayload[]>([]);
 
   // Safely show sessions — merges with any already-displaying banner
-  // Always uses GroupedSessionBanner (works for 1+ sessions)
+  // Always uses HomeToastNotification (replaces old GroupedSessionBanner)
   const applySessionQueue = useCallback((newQueue: SessionCompletePayload[]) => {
     if (newQueue.length === 0) return;
     const merged = [...displayedSessionsRef.current, ...newQueue];
@@ -741,6 +791,24 @@ const App: React.FC = () => {
       if (homeTabActiveRef.current) {
         const queue = consumeSessionQueue();
         applySessionQueue(queue);
+        // XP + CR toast bhi turant dikhao (studentTab useEffect tab fire nahi hota jab tab same ho)
+        const _score = payload.sessionScore ?? 0;
+        const _creds = (payload.coinsEarned ?? 0) + (payload.creditsEarned ?? 0);
+        const _totalScore = userTotalScoreRef.current;
+        const _credits = userCreditsRef.current;
+        const _discount = getLevelInfo(_totalScore).discount;
+        const _bonusPts = _score > 0 ? Math.round(_score * _discount / 100) : 0;
+        const _xpEarned = _score + _bonusPts;
+        if (_xpEarned > 0 || _creds > 0) {
+          const _xpAfter = _totalScore;
+          const _xpBefore = Math.max(0, _xpAfter - _xpEarned);
+          const _creditsAfter = _credits;
+          const _creditsBefore = Math.max(0, _creditsAfter - _creds);
+          setHomeToastData({
+            xpBefore: _xpBefore, xpEarned: _xpEarned, xpAfter: _xpAfter,
+            creditsBefore: _creditsBefore, creditsEarned: _creds, creditsAfter: _creditsAfter,
+          });
+        }
       }
     });
     return unsub;
@@ -1919,6 +1987,14 @@ const App: React.FC = () => {
   ];
 
   const handleLogin = async (user: User) => {
+    // ── Account switch detection — naye account ka data purane se mix na ho ──
+    const lastUserId = localStorage.getItem('nst_last_user_id');
+    if (lastUserId && lastUserId !== user.id) {
+      // Different account — clear all previous user's local cache first
+      clearUserCache();
+    }
+    localStorage.setItem('nst_last_user_id', user.id);
+
     // ── Login pe session tracking reset — spurious home toast na aaye ────
     awaitingPostMcqDataRef.current = false;
     sessionStartTimeRef.current = 0;
@@ -1938,22 +2014,21 @@ const App: React.FC = () => {
       return;
     }
 
-    try {
-      const schoolProfile = await getSchoolUserProfile(user.id);
-      if (schoolProfile) {
-        setState(prev => ({ ...prev, user, view: 'SCHOOL_ECOSYSTEM' as any }));
-        return;
-      }
-    } catch (_) { /* not a school user, continue normal flow */ }
+    // School + Coaching profile checks parallel mein chalao — slow network pe time bachta hai
+    const [schoolProfile, coachingProfile] = await Promise.all([
+      getSchoolUserProfile(user.id).catch(() => null),
+      getCoachingUserProfile(user.id).catch(() => null),
+    ]);
 
-    // Check if this user is a Coaching Ecosystem user
-    try {
-      const coachingProfile = await getCoachingUserProfile(user.id);
-      if (coachingProfile) {
-        setState(prev => ({ ...prev, user, view: 'COACHING_ECOSYSTEM' as any }));
-        return;
-      }
-    } catch (_) { /* not a coaching user, continue normal flow */ }
+    if (schoolProfile) {
+      setState(prev => ({ ...prev, user, view: 'SCHOOL_ECOSYSTEM' as any }));
+      return;
+    }
+
+    if (coachingProfile) {
+      setState(prev => ({ ...prev, user, view: 'COACHING_ECOSYSTEM' as any }));
+      return;
+    }
 
     // Check if onboarding is needed
     if ((user.role === 'STUDENT' || user.role === 'TEACHER') && !user.profileCompleted) {
@@ -1987,10 +2062,46 @@ const App: React.FC = () => {
   const [cloudUser, setCloudUser] = useState<User | null>(null);
   const [showCloudRecoveryModal, setShowCloudRecoveryModal] = useState(false);
 
+  // ── User-specific local cache keys — cleared on logout / account switch ─────
+  // Device-level settings (dark mode, voice, zoom, haptic, etc.) are kept.
+  const USER_CACHE_KEYS = [
+    'nst_current_user', 'nst_user_history', 'nst_users',
+    'nst_activity_log', 'nst_board_notes', 'nst_claimed_notifs_v1',
+    'nst_daily_study_seconds', 'nst_hidden_notifs', 'nst_display_level',
+    'nst_last_daily_challenge_completed', 'nst_last_daily_challenge_date',
+    'nst_last_daily_tracker_date', 'nst_last_read_update',
+    'nst_last_refresh_ts', 'nst_last_reload_at', 'nst_last_weekly_auto_date',
+    'nst_leaderboard', 'nst_morning_banner', 'nst_pending_sync_results',
+    'nst_recycle_bin', 'nst_revision_tracker_v2', 'nst_seen_notif_ids',
+    'nst_seen_notifs_v1', 'nst_starred_notes_v1', 'nst_store_last_visit',
+    'nst_streak_popup_date', 'nst_timer_date', 'nst_universal_analysis_logs',
+  ];
+  const clearUserCache = () => {
+    USER_CACHE_KEYS.forEach(k => localStorage.removeItem(k));
+    // Also clear any per-user prefixed keys left from this session
+    const allKeys = Object.keys(localStorage);
+    allKeys.forEach(k => {
+      if (
+        // nst_credit_sync_score_<uid> is intentionally kept — it's already per-user
+        // (UID is in the key), so no cross-account bleed. Clearing it resets XP
+        // delta tracking and causes "0 XP" notifications after re-login.
+        k.startsWith('nst_deferred_study_coins_') ||
+        k.startsWith('nst_routine_') ||
+        k.startsWith('nst_score_log_') ||
+        k.startsWith('nst_credit_history_') ||
+        k.startsWith('nst_activity_history_') ||
+        k.startsWith('nst_board_choice_')
+      ) localStorage.removeItem(k);
+    });
+    // localforage (async — best-effort)
+    storage.removeItem('nst_active_student_tab').catch(() => {});
+    storage.removeItem('nst_user_history').catch(() => {});
+  };
+
   const performLogout = () => {
     logActivity("LOGOUT", "User Logged Out");
-    localStorage.removeItem('nst_current_user');
-    localStorage.removeItem('nst_user_history'); // Clear Saved Notes on logout to prevent bleeding across accounts
+    clearUserCache();
+    localStorage.removeItem('nst_last_user_id'); // reset account tracker
     setState(prev => ({ ...prev, user: null, originalAdmin: null, view: 'BOARDS', selectedBoard: null, selectedClass: null, selectedStream: null, selectedSubject: null, lessonContent: null, language: 'English' }));
     setDailyStudySeconds(0);
   };
@@ -4038,34 +4149,15 @@ const App: React.FC = () => {
           </div>
       )}
     </div>
-    {/* ── Session Notification System ────────────────────────────────────────
-        HOME tab pe aane pe dikhta hai:
-        • 1 activity → SessionSummaryBanner (single card)
-        • 2+ activities → GroupedSessionBanner (total + More button)
+    {/* ── Session Notification — small top-bar toast (3s auto-hide) ─────────
+        Home pe aane pe XP + Credits dono ek chote banner mein dikhta hai.
+        Bada popup ab nahi aata — Activity History mein save hota hai.
     ────────────────────────────────────────────────────────────────────── */}
-
-    {/* Single activity banner */}
-    {pendingSessionSummary && !groupedSessions.length && (
-      <div className="fixed inset-x-0 top-0 z-[9990] pointer-events-none">
-        <div className="pointer-events-auto">
-          <SessionSummaryBanner
-            summary={pendingSessionSummary}
-            onDismiss={() => { setPendingSessionSummary(null); displayedSessionsRef.current = []; }}
-          />
-        </div>
-      </div>
-    )}
-
-    {/* Session banner — 1+ activities (always uses GroupedSessionBanner) */}
-    {groupedSessions.length >= 1 && (
-      <div className="fixed inset-x-0 top-0 z-[9990] pointer-events-none">
-        <div className="pointer-events-auto">
-          <GroupedSessionBanner
-            sessions={groupedSessions}
-            onDismiss={() => { setGroupedSessions([]); setPendingSessionSummary(null); displayedSessionsRef.current = []; }}
-          />
-        </div>
-      </div>
+    {homeToastData && (
+      <HomeToastNotification
+        data={homeToastData}
+        onDismiss={() => { setHomeToastData(null); setGroupedSessions([]); setPendingSessionSummary(null); displayedSessionsRef.current = []; }}
+      />
     )}
     </ErrorBoundary>
   );

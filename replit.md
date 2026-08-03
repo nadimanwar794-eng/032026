@@ -1,60 +1,44 @@
 # IIC Study App
 
-A student exam-prep platform (school boards + competitive/government exams) with subject-wise notes, MCQ practice, revision tracking, subscriptions, and an admin content dashboard.
+A student study platform with daily routine tracking, spaced-repetition revision hub, mistake bank practice, and AI-generated lesson content.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/iic-study-app run dev` — run the web app (main artifact)
-- `pnpm --filter @workspace/iic-study-app run typecheck` — typecheck the app
-- `pnpm --filter @workspace/api-server run dev` — run the API server (currently unused by the app, see below)
+- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
+- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
+- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
+- Required env: `DATABASE_URL` — Postgres connection string
 
 ## Stack
 
 - pnpm workspaces, Node.js 24, TypeScript 5.9
-- Main app: React 18 + Vite (`artifacts/iic-study-app`), Tailwind v4, Framer Motion, `wouter`
-- Backend/data: **Firebase** (Firestore, Realtime Database, Auth) — config is hardcoded in `artifacts/iic-study-app/src/firebase.ts`, not via env vars (this mirrors how the app was originally built)
-- PWA via `vite-plugin-pwa`
-- Routing is state-based (a `view`/tab field drives rendering), not URL-based — there is no client-side router for app navigation
+- API: Express 5
+- DB: PostgreSQL + Drizzle ORM
+- Validation: Zod (`zod/v4`), `drizzle-zod`
+- API codegen: Orval (from OpenAPI spec)
+- Build: esbuild (CJS bundle)
 
 ## Where things live
 
-- `artifacts/iic-study-app/src/components/StudentDashboard.tsx` — main student experience (huge file, most student-facing flows live here)
-- `artifacts/iic-study-app/src/components/AdminDashboard.tsx` — admin content/user management
-- `artifacts/iic-study-app/src/components/RevisionHubScreen.tsx` / `RevisionHubV2.tsx` — Revision Hub (MCQ practice + spaced-repetition revision + performance tabs)
-- `artifacts/iic-study-app/src/constants.ts` — `getSubjectsList()`, the static subject catalog used across notes/admin/challenge flows
-- `artifacts/iic-study-app/src/firebase.ts` — Firebase config + data access helpers
+_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
 
 ## Architecture decisions
 
-- The app is **frontend-only against Firebase** — the scaffolded `artifacts/api-server` and its DB/OpenAPI codegen pipeline are pre-existing workspace boilerplate, not used by this app. Don't wire new features to `api-server` unless explicitly asked to migrate off Firebase.
-- Revision Hub's MCQ subject list (`RevisionHubScreen.tsx`) is derived dynamically from real `mcq_lessons` data in Firebase (subjects only appear once content exists) — this intentionally does NOT use `constants.ts`'s static `getSubjectsList()`, unlike the rest of the app (notes browsing, admin dashboard, challenge generator), which still uses the static catalog by design.
+_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
 
 ## Product
 
-- Students pick a class/board/stream, browse subject notes and video lectures, practice MCQs, and track revision via spaced repetition and performance analytics.
-- Subscription tiers gate premium notes/videos; a credit system charges for certain actions (starting MCQ sessions, opening lessons).
-- Admins manage content (notes, MCQs, videos), users, subscriptions, and app settings from a separate Admin Dashboard.
+_Describe the high-level user-facing capabilities of this app once they exist._
 
 ## User preferences
 
-- Coaching ke har section (Speedy Science, Social Science, Sar Sangrah, Lucent, Current Affairs, custom books, aur MCQ Practice) mein MCQs ek-ek karke Lucent-style viewer mein dikhne chahiye; ek saath list nahi.
-
-## Smart Crash Protection System
-
-Files: `src/utils/maintenanceManager.ts`, `src/components/MaintenanceScreen.tsx`
-
-- When **Student Dashboard crashes** → user sees a professional maintenance screen (not React error), crash is auto-logged to Firebase RTDB at `admin_maintenance/crashes/studentDashboard`
-- When **Admin Dashboard crashes** → admin is silently redirected to Student Dashboard, a popup appears showing crash details + "Mark as Fixed" button
-- **Admin control** (in Admin Dashboard → DASHBOARD tab → "Emergency Maintenance Announcement" section): write title/message/retry time, activate/deactivate maintenance, mark crashes fixed
-- **Maintenance banner** shown on Student Dashboard home when maintenance is active (for non-admin users)
-- Firebase RTDB path: `admin_maintenance/` → `config` (message/timer/active) + `crashes/{studentDashboard,adminDashboard}`
+_Populate as you build — explicit user instructions worth remembering across sessions._
 
 ## Gotchas
 
-- Firestore permission-denied errors in the browser console when not logged in / in anonymous mode are expected — the app still renders the auth screen correctly.
-- `artifacts/api-server` and `artifacts/mockup-sandbox` workflows don't need to run for this app to work; only `artifacts/iic-study-app: web` matters.
+_Populate as you build — sharp edges, "always run X before Y" rules._
 
 ## Pointers
 

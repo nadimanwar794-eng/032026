@@ -556,16 +556,17 @@ export const speakText = async (
 
         lastUtterance = u;
         try {
+            // Chrome Android bug: after cancel(), synthesis can stay in a paused/stuck
+            // state where speak() silently enqueues but never fires onstart.
+            // Calling resume() immediately before speak() un-sticks it.
+            try { window.speechSynthesis.resume(); } catch (_) {}
             window.speechSynthesis.speak(u);
             // On some Android WebViews the utterance can silently queue but not start.
-            // If onstart hasn't fired within 3s, trigger watchdog early.
+            // If onstart hasn't fired within 3s, try resume() again as a fallback.
             setTimeout(() => {
                 if (mySessionId !== activeTtsSessionId) return;
                 if (!firstStartFired) {
-                    // Force resume in case synthesis is paused
-                    try {
-                        if (window.speechSynthesis.paused) window.speechSynthesis.resume();
-                    } catch (_) {}
+                    try { window.speechSynthesis.resume(); } catch (_) {}
                 }
             }, 3000);
         } catch (e) {

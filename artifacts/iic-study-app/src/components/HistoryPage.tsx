@@ -28,7 +28,7 @@ import {
     type FlashcardSession, type NotesReadSession,
 } from '../utils/flashcardHistory';
 import { Layers, Clock } from 'lucide-react';
-import { getLoginHistory, formatLoginTime, formatDuration as formatLoginDuration, type LoginSession } from '../utils/loginHistory';
+import { getLoginHistory, getActivityHistory, formatLoginTime, formatDuration as formatLoginDuration, type LoginSession, type ActivityEntry } from '../utils/loginHistory';
 import { getLevelInfo } from '../utils/levelSystem';
 import { getCreditHistory, clearCreditHistory, type CreditTxEntry } from '../utils/creditHistory';
 
@@ -49,6 +49,7 @@ interface Props {
 export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, initialTab, onBack, onResumeRecentChapter, onResumeRecentHw, onResumeRecentLucent }) => {
   const [activeTab, setActiveTab] = useState<'READING' | 'MISTAKE' | 'OFFLINE' | 'STARRED' | 'FLASHCARDS' | 'LOGIN_HISTORY' | 'CREDIT_HISTORY'>(initialTab || 'READING');
   const [loginSessions, setLoginSessions] = useState<LoginSession[]>([]);
+  const [activityEntries, setActivityEntries] = useState<ActivityEntry[]>([]);
   const _lvl = getLevelInfo((user.role === 'ADMIN' || user.role === 'SUB_ADMIN') ? 9999999 : (user.totalScore || 0));
 
   // ── MY MISTAKE STATE ─────────────────────────────────────────────
@@ -97,6 +98,7 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
   useEffect(() => {
     if (activeTab === 'LOGIN_HISTORY') {
       setLoginSessions(getLoginHistory(user.id).slice(0, 30));
+      setActivityEntries(getActivityHistory(user.id));
     }
   }, [activeTab, user.id]);
 
@@ -477,7 +479,7 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
                 MISTAKE:       { label: 'My Mistakes',       icon: <Target className="text-rose-500" /> },
                 OFFLINE:       { label: 'Downloads',         icon: <Download className="text-blue-600" /> },
                 STARRED:       { label: 'Important Notes',   icon: <Star className="text-amber-500" fill="currentColor" /> },
-                LOGIN_HISTORY: { label: 'Login History',     icon: <LogIn className="text-indigo-500" /> },
+                LOGIN_HISTORY: { label: 'Activity History',  icon: <LogIn className="text-indigo-500" /> },
                 CREDIT_HISTORY:{ label: 'Credit History',    icon: <CreditCard className="text-orange-500" /> },
             };
             const meta = tabMeta[activeTab] ?? { label: 'Downloads & History', icon: <FileText className="text-blue-600" /> };
@@ -675,65 +677,79 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
             const levelColor = _lvl.color;
             const levelBg = levelColor + '15';
             const levelBorder = levelColor + '35';
+            const MODE_EMOJI: Record<string, string> = {
+                MCQ: '📝', Reading: '📖', Writing: '✍️', LESSON: '📚',
+                PDF: '📄', Video: '🎬', Audio: '🎧', QA: '💬', Flashcard: '🃏', Study: '🌟',
+            };
             return (
-            <div className="space-y-2">
-                {/* Header */}
-                <div className="rounded-2xl px-4 py-3 flex items-center gap-3 mb-1" style={{ background: levelBg, border: `1px solid ${levelBorder}` }}>
-                    <span className="text-xl">{_lvl.icon}</span>
+            <div className="space-y-3">
+                {/* Activity History Section */}
+                <div className="rounded-2xl px-4 py-3 flex items-center gap-3" style={{ background: levelBg, border: `1px solid ${levelBorder}` }}>
+                    <span className="text-xl">📊</span>
                     <div>
-                        <p className="text-sm font-black" style={{ color: levelColor }}>Login History</p>
-                        <p className="text-[11px] text-slate-500">Aapki recent {loginSessions.length} login sessions</p>
+                        <p className="text-sm font-black" style={{ color: levelColor }}>Activity History</p>
+                        <p className="text-[11px] text-slate-500">Home pe aane pe milne wale XP aur Credits</p>
                     </div>
                 </div>
-                {loginSessions.length === 0 ? (
-                    <div className="text-center py-10 text-slate-400">
-                        <p className="text-2xl mb-2">🕐</p>
-                        <p className="font-bold text-sm">No login history found</p>
+
+                {activityEntries.length === 0 ? (
+                    <div className="text-center py-8 text-slate-400">
+                        <p className="text-3xl mb-2">📭</p>
+                        <p className="font-bold text-sm">Koi activity abhi nahi</p>
+                        <p className="text-xs mt-1">Padhai karo — phir Home pe aao, yahan dikhega</p>
                     </div>
-                ) : loginSessions.map((s, i) => {
-                    const isCurrent = i === 0;
-                    const cardBg = isCurrent ? levelBg : (i % 2 === 0 ? 'rgba(248,250,252,1)' : 'white');
-                    const cardBorder = isCurrent ? levelBorder : '#e2e8f0';
-                    const loginDate = new Date(s.loginAt);
-                    const isValid = !isNaN(loginDate.getTime());
+                ) : activityEntries.map((entry, i) => {
+                    const ts = new Date(entry.timestamp);
+                    const isValid = !isNaN(ts.getTime());
+                    const actLabel = entry.activities?.join(', ') || 'Study';
+                    const emoji = MODE_EMOJI[entry.activities?.[0]] || '📚';
                     return (
-                        <div key={s.id} className="nst-card p-3.5 transition-all"
-                            style={{ background: cardBg, borderColor: cardBorder }}>
-                            <div className="flex items-center justify-between gap-2">
+                        <div key={entry.id} className="rounded-2xl p-3.5 border border-slate-100 bg-white shadow-sm">
+                            <div className="flex items-start justify-between gap-2 mb-2">
                                 <div className="flex items-center gap-2.5">
-                                    <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 text-sm font-black"
-                                        style={{ background: isCurrent ? levelColor + '25' : '#f1f5f9', color: isCurrent ? levelColor : '#64748b' }}>
-                                        {isCurrent ? '🟢' : `#${i + 1}`}
-                                    </div>
+                                    <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center text-lg shrink-0">{emoji}</div>
                                     <div>
-                                        <div className="flex items-center gap-1.5">
-                                            {isCurrent && (
-                                                <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full" style={{ background: levelColor + '20', color: levelColor }}>CURRENT</span>
-                                            )}
-                                            <p className="text-xs font-black text-slate-800">{isValid ? formatLoginTime(s.loginAt) : 'Unknown Time'}</p>
-                                        </div>
-                                        {s.logoutAt && (
-                                            <p className="text-[10px] text-slate-500 mt-0.5">Logout: {formatLoginTime(s.logoutAt)}</p>
-                                        )}
-                                        <p className="text-[10px] text-slate-400">
-                                            {isValid ? loginDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
-                                        </p>
+                                        <p className="text-xs font-black text-slate-800">{actLabel}</p>
+                                        {entry.chapter && <p className="text-[10px] text-slate-400 truncate max-w-[160px]">{entry.chapter}</p>}
+                                        <p className="text-[10px] text-slate-400">{isValid ? formatLoginTime(entry.timestamp) : '—'}</p>
                                     </div>
                                 </div>
-                                <div className="text-right shrink-0">
-                                    {s.durationSec !== undefined ? (
-                                        <span className="text-[11px] font-black px-2 py-1 rounded-full" style={{ background: isCurrent ? levelColor + '20' : '#ede9fe', color: isCurrent ? levelColor : '#7c3aed' }}>
-                                            ⏱ {formatLoginDuration(s.durationSec)}
-                                        </span>
-                                    ) : (
-                                        <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">Active</span>
-                                    )}
-                                </div>
+                                {entry.timeSecs > 0 && (
+                                    <span className="text-[10px] font-bold text-slate-500 bg-slate-50 px-2 py-0.5 rounded-full shrink-0">
+                                        ⏱ {formatLoginDuration(entry.timeSecs)}
+                                    </span>
+                                )}
+                            </div>
+                            {/* XP + Credits formula row */}
+                            <div className="flex flex-wrap gap-2 mt-1">
+                                {entry.ptsEarned + entry.bonusPts > 0 && (
+                                    <div className="flex items-center gap-1 text-[11px] font-bold bg-yellow-50 border border-yellow-100 rounded-lg px-2 py-1">
+                                        <span>⭐</span>
+                                        <span className="text-slate-500">{entry.xpBefore.toLocaleString()}</span>
+                                        <span className="text-slate-400">+</span>
+                                        <span className="text-yellow-600">{(entry.ptsEarned + entry.bonusPts).toLocaleString()}</span>
+                                        <span className="text-slate-400">=</span>
+                                        <span className="text-slate-800 font-black">{entry.xpAfter.toLocaleString()}</span>
+                                        <span className="text-slate-400 text-[9px]">XP</span>
+                                    </div>
+                                )}
+                                {entry.creditsEarned > 0 && (
+                                    <div className="flex items-center gap-1 text-[11px] font-bold bg-amber-50 border border-amber-100 rounded-lg px-2 py-1">
+                                        <span>🪙</span>
+                                        <span className="text-slate-500">{entry.creditsBefore.toLocaleString()}</span>
+                                        <span className="text-slate-400">+</span>
+                                        <span className="text-amber-600">{entry.creditsEarned.toLocaleString()}</span>
+                                        <span className="text-slate-400">=</span>
+                                        <span className="text-slate-800 font-black">{entry.creditsAfter.toLocaleString()}</span>
+                                        <span className="text-slate-400 text-[9px]">CR</span>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     );
                 })}
-                <p className="text-center text-[10px] text-slate-400 pt-2">Local device storage • Last {loginSessions.length} sessions</p>
+
+                <p className="text-center text-[10px] text-slate-400 pt-1">Device pe locally saved</p>
             </div>
             );
         })()}

@@ -908,7 +908,7 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
 
                         {/* Input area — hidden in MCQ tab (no text messages allowed) */}
                         {activeTab !== 'MCQ' && (
-                        <div className="p-3 pb-3 border-t border-slate-100 shrink-0 sticky bottom-0" style={{ background: appTheme.profileCardBg || '#ffffff' }}>
+                        <div className="p-3 pb-[calc(env(safe-area-inset-bottom,0px)+88px)] border-t border-slate-100 shrink-0 sticky bottom-0" style={{ background: appTheme.profileCardBg || '#ffffff' }}>
                             {replyTarget && (
                                 <div className="mb-2 rounded-xl bg-blue-50 border border-blue-200 px-3 py-2 text-xs flex items-start justify-between gap-2">
                                     <div className="min-w-0">

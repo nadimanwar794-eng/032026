@@ -3,6 +3,47 @@ const LOGIN_HISTORY_KEY = (userId: string) => `nst_login_history_${userId}`;
 const CURRENT_SESSION_KEY = (userId: string) => `nst_current_session_${userId}`;
 const MAX_HISTORY = 30;
 
+// ── Activity History (session-level rewards) ─────────────────────────────────
+const ACTIVITY_HISTORY_KEY = (userId: string) => `nst_activity_history_${userId}`;
+const MAX_ACTIVITY = 100;
+
+export interface ActivityEntry {
+  id: string;
+  timestamp: string;
+  activities: string[];    // e.g. ['MCQ', 'Reading']
+  chapter?: string;
+  subject?: string;
+  ptsEarned: number;
+  bonusPts: number;
+  creditsEarned: number;
+  xpBefore: number;
+  xpAfter: number;
+  creditsBefore: number;
+  creditsAfter: number;
+  timeSecs: number;
+}
+
+export const recordActivityEntry = (userId: string, entry: Omit<ActivityEntry, 'id' | 'timestamp'>): void => {
+  try {
+    const history = getActivityHistory(userId);
+    const newEntry: ActivityEntry = {
+      ...entry,
+      id: `act_${Date.now()}`,
+      timestamp: new Date().toISOString(),
+    };
+    const updated = [newEntry, ...history].slice(0, MAX_ACTIVITY);
+    localStorage.setItem(ACTIVITY_HISTORY_KEY(userId), JSON.stringify(updated));
+  } catch {}
+};
+
+export const getActivityHistory = (userId: string): ActivityEntry[] => {
+  try {
+    const raw = localStorage.getItem(ACTIVITY_HISTORY_KEY(userId));
+    if (!raw) return [];
+    return JSON.parse(raw);
+  } catch { return []; }
+};
+
 export interface LoginSession {
   id: string;
   loginAt: string;

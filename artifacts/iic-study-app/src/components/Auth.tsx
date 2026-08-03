@@ -87,8 +87,8 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
     if (welcomeTimer1Ref.current) clearTimeout(welcomeTimer1Ref.current);
     if (welcomeTimer2Ref.current) clearTimeout(welcomeTimer2Ref.current);
     setWelcomeUser(user);
-    welcomeTimer1Ref.current = setTimeout(() => setWelcomeFading(true), 2200);
-    welcomeTimer2Ref.current = setTimeout(() => { setWelcomeUser(null); setWelcomeFading(false); onLogin(user); }, 2700);
+    welcomeTimer1Ref.current = setTimeout(() => setWelcomeFading(true), 600);
+    welcomeTimer2Ref.current = setTimeout(() => { setWelcomeUser(null); setWelcomeFading(false); onLogin(user); }, 900);
   };
 
   useEffect(() => {

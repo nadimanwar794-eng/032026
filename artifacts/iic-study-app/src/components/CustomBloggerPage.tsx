@@ -28,74 +28,65 @@ export const CustomBloggerPage: React.FC<Props> = ({ onBack, settings }) => {
   const driveId = extractDriveId(settings?.customBloggerVideoUrl || '');
 
   useEffect(() => {
-    // 1. Try Local First (Instant Load)
     const saved = localStorage.getItem('nst_custom_blogger_page');
-    if (saved) {
-      setContent(saved);
-    }
+    if (saved) setContent(saved);
 
-    // 2. Sync with Firebase (Real-time)
     const contentRef = ref(rtdb, 'custom_blogger_page');
     const unsubscribe = onValue(contentRef, (snapshot) => {
-        const data = snapshot.val();
-        if (data) {
-            setContent(data);
-            localStorage.setItem('nst_custom_blogger_page', data);
-        }
+      const data = snapshot.val();
+      if (data) {
+        setContent(data);
+        localStorage.setItem('nst_custom_blogger_page', data);
+      }
     });
-
     return () => unsubscribe();
   }, []);
 
   return (
-    <div className="min-h-screen bg-white dark-blue-mode-bg">
-        <div className="flex items-center justify-between p-4 border-b border-slate-200 bg-white dark-blue-mode-bg sticky top-0 z-50">
-            <div className="flex items-center gap-4">
-                <button
-                    onClick={onBack}
-                    className="bg-slate-100 p-2 rounded-full hover:bg-slate-200 transition-colors dark:bg-slate-800 dark:hover:bg-slate-700"
-                >
-                    <ArrowLeft size={20} className="text-slate-600" />
-                </button>
-                <h3 className="text-xl font-black text-slate-800 dark-mode-text blue-mode-text">Custom Page</h3>
-            </div>
-            <div className="flex flex-col items-end text-[10px] text-slate-600 font-medium leading-tight">
-                <span>App Version: {APP_VERSION}</span>
-                {settings?.showFooter !== false && (
-                    <span style={{
-                        display: 'inline-flex', alignItems: 'center', gap: '3px',
-                        padding: '1px 6px', borderRadius: '999px',
-                        border: '1px solid rgba(0,0,0,0.12)',
-                        fontSize: '9px', letterSpacing: '0.01em',
-                        color: '#64748b',
-                    }}>
-                        <span style={{ fontWeight: 400 }}>Developed by</span>
-                        <span style={{ fontWeight: 700, color: '#1e293b' }}>Nadim Anwar</span>
-                    </span>
-                )}
-            </div>
-        </div>
-        
-        <div className="px-0 py-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {driveId && (
-                <div className="mb-6">
-                    <div className="rounded-xl overflow-hidden shadow-md bg-black relative" style={{ aspectRatio: '16/9' }}>
-                        <div style={{ position: 'absolute', inset: 0 }}>
-                            <CustomPlayer videoUrl={`https://drive.google.com/file/d/${driveId}/view`} />
-                        </div>
-                    </div>
-                </div>
-            )}
+    <div className="fixed inset-0 flex flex-col bg-white" style={{ height: '100dvh' }}>
 
-             {/* Render Custom HTML Content */}
-             {content ? (
-                 <div className="custom-html-content dark-mode-text blue-mode-text" dangerouslySetInnerHTML={{ __html: renderMathInHtml(content) }} />
-             ) : (
-                 <div className="text-center py-20 text-slate-500">
-                     <p>No content available.</p>
-                 </div>
-             )}
+      {/* ── Compact Header ── */}
+      <div className="flex items-center justify-between px-3 py-2 bg-white border-b border-slate-100 shrink-0 shadow-sm">
+        <button
+          onClick={onBack}
+          className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 active:scale-95 transition-all px-3 py-1.5 rounded-full"
+        >
+          <ArrowLeft size={15} className="text-slate-600" />
+          <span className="text-xs font-bold text-slate-700">Back</span>
+        </button>
+
+        <div className="flex flex-col items-end leading-tight">
+          <span className="text-[9px] text-slate-400 font-medium">v{APP_VERSION}</span>
+          {settings?.showFooter !== false && (
+            <span className="text-[9px] text-slate-400">
+              by <span className="font-bold text-slate-600">Nadim Anwar</span>
+            </span>
+          )}
         </div>
+      </div>
+
+      {/* ── Full-screen scrollable content ── */}
+      <div className="flex-1 overflow-y-auto overflow-x-hidden w-full">
+
+        {/* Video (if any) */}
+        {driveId && (
+          <div className="w-full bg-black" style={{ aspectRatio: '16/9' }}>
+            <CustomPlayer videoUrl={`https://drive.google.com/file/d/${driveId}/view`} />
+          </div>
+        )}
+
+        {/* HTML Content — full width, no side padding */}
+        {content ? (
+          <div
+            className="w-full custom-html-content"
+            dangerouslySetInnerHTML={{ __html: renderMathInHtml(content) }}
+          />
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full py-24 text-slate-400">
+            <p className="text-sm font-medium">No content available.</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAnalytics } from "firebase/analytics";
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, setDoc, getDoc, collection, updateDoc, deleteDoc, onSnapshot, getDocs, query, where, limitToLast, orderBy, increment, arrayUnion, limit } from "firebase/firestore";
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, setDoc, getDoc, collection, updateDoc, deleteDoc, onSnapshot, getDocs, query, where, limitToLast, orderBy, increment, arrayUnion, limit, startAfter, QueryDocumentSnapshot } from "firebase/firestore";
 import { getDatabase, ref, set, get, onValue, update, remove, query as rtdbQuery, limitToLast as rtdbLimitToLast, orderByChild as rtdbOrderByChild, equalTo as rtdbEqualTo, runTransaction } from "firebase/database";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 import { storage } from "./utils/storage";
@@ -932,6 +932,44 @@ export const subscribeToUsers = (callback: (users: any[]) => void) => {
              callback(userList);
           }, { onlyOnce: true });
       }
+  });
+};
+
+// ── Paginated user loading (saves reads for 1000+ user apps) ──────────────
+// Loads users in pages of PAGE_SIZE instead of fetching all at once.
+// Each call costs PAGE_SIZE reads instead of total-users reads.
+const USERS_PAGE_SIZE = 100;
+
+export const getUsersPage = async (
+  afterDoc?: QueryDocumentSnapshot
+): Promise<{ users: any[]; lastDoc: QueryDocumentSnapshot | null; hasMore: boolean }> => {
+  try {
+    const constraints: any[] = [orderBy('createdAt', 'desc'), limit(USERS_PAGE_SIZE)];
+    if (afterDoc) constraints.push(startAfter(afterDoc));
+    const q = query(collection(db, 'users'), ...constraints);
+    const snap = await getDocs(q);
+    const users = snap.docs.map(d => d.data());
+    return {
+      users,
+      lastDoc: snap.docs[snap.docs.length - 1] ?? null,
+      hasMore: snap.docs.length === USERS_PAGE_SIZE,
+    };
+  } catch {
+    // Fallback to RTDB
+    const usersRef = ref(rtdb, 'users');
+    const snap = await get(usersRef);
+    const data = snap.val();
+    const all: any[] = data ? Object.values(data) : [];
+    return { users: all, lastDoc: null, hasMore: false };
+  }
+};
+
+// Watch only the 10 most-recently-created users for new-signup notifications.
+// Costs max 10 reads per change instead of total-users reads.
+export const subscribeToRecentUsers = (callback: (users: any[]) => void) => {
+  const q = query(collection(db, 'users'), orderBy('createdAt', 'desc'), limit(10));
+  return onSnapshot(q, (snap) => {
+    callback(snap.docs.map(d => d.data()));
   });
 };
 

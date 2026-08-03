@@ -524,14 +524,6 @@ export const FlashcardMcqView: React.FC<Props> = ({
       )}
       {/* Top Bar */}
       <div className="shrink-0 px-3 py-2.5 flex items-center gap-2.5 border-b border-white/10">
-        {/* Back button */}
-        <button
-          onClick={handleBack}
-          className="shrink-0 p-2 bg-white/10 hover:bg-white/20 rounded-xl text-white active:scale-95 transition"
-          title="Wapas jao"
-        >
-          <ArrowLeft size={18} />
-        </button>
         <div className="min-w-0 flex-1">
           {hardReviewMode ? (
             <>
@@ -1001,7 +993,17 @@ export const FlashcardMcqView: React.FC<Props> = ({
                 {/* Back button — only when no external tabBar (standalone MCQ set) */}
                 {!tabBar && (
                   <button
-                    onClick={() => { stopSpeech(); setIsProjectorMode(false); setProjectorRotated(false); }}
+                    onClick={() => {
+                      stopSpeech();
+                      // If opened directly in projector mode (e.g. from MCQ Practice Sets),
+                      // back should close the overlay entirely, not drop to flashcard view.
+                      if (startInProjectorMode) {
+                        handleBack();
+                      } else {
+                        setIsProjectorMode(false);
+                        setProjectorRotated(false);
+                      }
+                    }}
                     style={{ flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', width:36, height:36, background:'#f1f5f9', border:'1px solid #e2e8f0', borderRadius:10, color:'#475569', cursor:'pointer' }}>
                     <ChevronLeft size={18} />
                   </button>
@@ -1090,15 +1092,16 @@ export const FlashcardMcqView: React.FC<Props> = ({
                   const answered = projectorSelected !== null;
 
                   let bg = '#f8fafc';
-                  let border = '3px solid #e2e8f0';
+                  let border = '1px solid #e2e8f0';
                   let textColor = '#1e293b';
-                  let dotBg = '#3b82f6';
+                  let radioBorder = '2px solid #94a3b8';
+                  let radioFill = 'transparent';
                   let icon: React.ReactNode = null;
 
                   if (answered) {
-                    if (isSelected && isCorrect) { bg = '#dcfce7'; border = '3px solid #22c55e'; textColor = '#15803d'; dotBg = '#22c55e'; icon = <CheckCircle size={22} color="#22c55e" />; }
-                    else if (isSelected && !isCorrect) { bg = '#fef2f2'; border = '3px solid #ef4444'; textColor = '#991b1b'; dotBg = '#ef4444'; icon = <span style={{ fontSize:20, fontWeight:900, color:'#ef4444' }}>✗</span>; }
-                    else if (isCorrect) { bg = '#dcfce7'; border = '3px solid #22c55e'; textColor = '#15803d'; dotBg = '#22c55e'; icon = <CheckCircle size={22} color="#22c55e" />; }
+                    if (isSelected && isCorrect) { bg = '#dcfce7'; border = '2px solid #22c55e'; textColor = '#15803d'; radioBorder = '2px solid #22c55e'; radioFill = '#22c55e'; icon = <CheckCircle size={20} color="#22c55e" />; }
+                    else if (isSelected && !isCorrect) { bg = '#fef2f2'; border = '2px solid #ef4444'; textColor = '#991b1b'; radioBorder = '2px solid #ef4444'; radioFill = '#ef4444'; icon = <span style={{ fontSize:18, fontWeight:900, color:'#ef4444' }}>✗</span>; }
+                    else if (isCorrect) { bg = '#dcfce7'; border = '2px solid #22c55e'; textColor = '#15803d'; radioBorder = '2px solid #22c55e'; radioFill = '#22c55e'; icon = <CheckCircle size={20} color="#22c55e" />; }
                   }
 
                   return (
@@ -1140,12 +1143,14 @@ export const FlashcardMcqView: React.FC<Props> = ({
                       }}
                       style={{
                         display:'flex', alignItems:'center', gap:12,
-                        background: bg, border, borderRadius:12, padding:'11px 16px',
+                        background: bg, border, borderRadius:14, padding:'12px 16px',
                         cursor: answered ? 'default' : 'pointer',
                         transition:'background 0.2s, border 0.2s'
                       }}>
-                      <span style={{ background: dotBg, color:'#fff', borderRadius:999, width:34, height:34, display:'flex', alignItems:'center', justifyContent:'center', fontSize:16, fontWeight:900, flexShrink:0 }}>{optionLetters[oi]}</span>
-                      <div style={{ fontSize: projectorFontSize, fontWeight:600, color: textColor, lineHeight:1.35, flex:1 }} dangerouslySetInnerHTML={{ __html: renderMathInHtml(opt) }} />
+                      <span style={{ width:22, height:22, borderRadius:'50%', border: radioBorder, background: radioFill, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center' }}>
+                        {radioFill !== 'transparent' && <span style={{ width:10, height:10, borderRadius:'50%', background:'#fff' }} />}
+                      </span>
+                      <div style={{ fontSize: projectorFontSize, fontWeight:500, color: textColor, lineHeight:1.35, flex:1 }} dangerouslySetInnerHTML={{ __html: renderMathInHtml(opt) }} />
                       {icon}
                     </div>
                   );

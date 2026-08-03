@@ -884,34 +884,34 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                 <div className="text-lg font-bold text-slate-800 mb-8 leading-relaxed">
                     <span dangerouslySetInnerHTML={{ __html: renderMathInHtml(question.question) }} />
                     {question.statements && question.statements.length > 0 && (
-                        <div className="mt-4 mb-2 flex flex-col space-y-2">
+                        <div className="mt-3 mb-2 flex flex-col space-y-1">
                             {question.statements.map((stmt: string, sIdx: number) => (
-                                <div key={sIdx} className="bg-slate-50/80 p-3 rounded-lg border-l-4 border-indigo-200 text-slate-700 text-base font-medium" dangerouslySetInnerHTML={{ __html: renderMathInHtml(stmt) }} />
+                                <div key={sIdx} className="text-slate-800 text-base font-medium leading-snug" dangerouslySetInnerHTML={{ __html: renderMathInHtml(stmt) }} />
                             ))}
                         </div>
                     )}
                 </div>
 
-                <div className="space-y-3">
+                <div className="space-y-2">
                     {question.options.map((opt: string, idx: number) => {
                         const isSelected = answers[qIndex] === idx;
-                        let btnClass = "border-slate-200 bg-white text-slate-600 hover:bg-slate-50";
-                        if (answers[qIndex] !== undefined) {
-                            if (isSelected) btnClass = "border-blue-400 bg-blue-50 text-blue-700";
-                            else btnClass = "border-slate-100 opacity-50 text-slate-800";
+                        const answered = answers[qIndex] !== undefined;
+                        let bg = 'bg-slate-50'; let border = 'border-slate-200'; let text = 'text-slate-800';
+                        let radioBorder = 'border-slate-400'; let radioFill = false;
+                        if (answered) {
+                            if (isSelected) { bg = 'bg-blue-50'; border = 'border-blue-400'; text = 'text-blue-800'; radioBorder = 'border-blue-500'; radioFill = true; }
+                            else { bg = 'bg-white'; border = 'border-slate-100'; text = 'text-slate-400'; }
                         }
                         return (
                             <button
                                 key={idx}
                                 onClick={() => handleAnswer(idx)}
-                                disabled={answers[qIndex] !== undefined}
-                                className={`w-full p-4 rounded-xl border-2 text-left font-medium transition-all flex items-center gap-3 ${btnClass}`}
+                                disabled={answered}
+                                className={`w-full px-4 py-3 rounded-xl border text-left font-medium transition-all flex items-center gap-3 ${bg} ${border} ${text}`}
                             >
-                                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold border flex-shrink-0 ${
-                                    answers[qIndex] !== undefined && isSelected ? 'bg-blue-500 border-blue-500 text-white' : 'bg-slate-100 border-slate-300 text-slate-600'
-                                }`}>
-                                    {['A','B','C','D'][idx]}
-                                </div>
+                                <span className={`w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${radioBorder} ${radioFill ? 'bg-blue-500' : 'bg-transparent'}`}>
+                                    {radioFill && <span className="w-2 h-2 rounded-full bg-white" />}
+                                </span>
                                 <span className="flex-1" dangerouslySetInnerHTML={{ __html: renderMathInHtml(opt) }} />
                             </button>
                         );
@@ -985,11 +985,12 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                                     const isCorrect = pq.correctAnswer === oi;
                                     const isSelected = projectorSelected === oi;
                                     const answered = projectorSelected !== null;
-                                    let bg = '#f8fafc'; let border = '#e2e8f0'; let color = '#1e293b';
+                                    let bg = '#f8fafc'; let borderCol = '#e2e8f0'; let color = '#1e293b';
+                                    let radioBorder = '#94a3b8'; let radioFill = 'transparent';
                                     if (answered) {
-                                        if (isCorrect) { bg='#f0fdf4'; border='#4ade80'; color='#166534'; }
-                                        else if (isSelected) { bg='#fef2f2'; border='#f87171'; color='#991b1b'; }
-                                    } else if (isSelected) { bg='#eff6ff'; border='#3b82f6'; }
+                                        if (isCorrect) { bg='#f0fdf4'; borderCol='#4ade80'; color='#166534'; radioBorder='#4ade80'; radioFill='#4ade80'; }
+                                        else if (isSelected) { bg='#fef2f2'; borderCol='#f87171'; color='#991b1b'; radioBorder='#f87171'; radioFill='#f87171'; }
+                                    } else if (isSelected) { bg='#eff6ff'; borderCol='#3b82f6'; radioBorder='#3b82f6'; radioFill='#3b82f6'; }
                                     return (
                                         <button key={oi}
                                             onClick={() => {
@@ -998,8 +999,10 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                                                 const newA = new Set(projectorAnswered); newA.add(projectorQIdx); setProjectorAnswered(newA);
                                                 if (isCorrect) setProjectorCorrect(c => c + 1); else setProjectorWrong(w => w + 1);
                                             }}
-                                            style={{ textAlign:'left', padding:'14px 18px', borderRadius:12, border:`2px solid ${border}`, background:bg, color, fontSize:17, fontWeight:700, cursor: answered ? 'default' : 'pointer', display:'flex', alignItems:'center', gap:12, transition:'all 0.15s' }}>
-                                            <span style={{ width:32, height:32, borderRadius:999, background: answered && isCorrect ? '#4ade80' : answered && isSelected ? '#f87171' : '#e2e8f0', color: answered && (isCorrect || isSelected) ? '#fff' : '#475569', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:900, fontSize:14, flexShrink:0 }}>{optionLetters[oi]}</span>
+                                            style={{ textAlign:'left', padding:'12px 16px', borderRadius:14, border:`1px solid ${borderCol}`, background:bg, color, fontSize:17, fontWeight:500, cursor: answered ? 'default' : 'pointer', display:'flex', alignItems:'center', gap:12, transition:'all 0.15s' }}>
+                                            <span style={{ width:22, height:22, borderRadius:'50%', border:`2px solid ${radioBorder}`, background: radioFill, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center' }}>
+                                                {radioFill !== 'transparent' && <span style={{ width:10, height:10, borderRadius:'50%', background:'#fff' }} />}
+                                            </span>
                                             <span dangerouslySetInnerHTML={{ __html: renderMathInHtml(opt) }} />
                                         </button>
                                     );

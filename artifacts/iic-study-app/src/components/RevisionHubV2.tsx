@@ -36,6 +36,7 @@ import {
 } from '../utils/revisionTrackerV2';
 import { syncAllRevisionBuckets } from '../utils/revisionFirebase';
 import { searchNotesByWords, type NoteSearchResult } from '../utils/noteSearcher';
+import { loadRoutineData } from '../utils/routineStorage';
 
 interface Props {
   user: User;
@@ -1009,45 +1010,101 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
                 <SectionHeader icon={<Target size={14} />} label="MCQ Practice For Today" count={dueMcq.length} color="emerald" />
                 {dueMcq.length === 0
                   ? <EmptyCard msg="No MCQs pending today!" />
-                  : (
-                    <>
-                      {/* Topic list — clicking any topic starts full mixed session */}
-                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                        <div className="px-4 py-2 bg-emerald-50 border-b border-emerald-100">
-                          <p className="text-[10px] font-bold text-emerald-700">Kisi bhi topic pe tap karo — sab topics mixed milenge ⚡</p>
-                        </div>
-                        <div className="overflow-y-auto" style={{ maxHeight: '280px' }}>
-                          {dueMcq.map((b) => (
+                  : (() => {
+                    // Separate buckets: those with actual wrong questions vs routine-scheduled (no questions yet)
+                    const withQs   = dueMcq.filter(b => b.wrongQuestions.length > 0);
+                    const selfRate = dueMcq.filter(b => b.wrongQuestions.length === 0 && (b.cycleCount ?? 0) === 0);
+                    return (
+                      <>
+                        {/* ── Self-rate section: routine-scheduled topics with no wrong questions ── */}
+                        {selfRate.length > 0 && (
+                          <div className="mb-3">
+                            <div className="bg-white rounded-2xl border border-violet-200 shadow-sm overflow-hidden">
+                              <div className="px-4 py-2 bg-violet-50 border-b border-violet-100">
+                                <p className="text-[10px] font-bold text-violet-700">✍️ Pehli revision — apni tayyari rate karo</p>
+                              </div>
+                              <div className="divide-y divide-slate-100">
+                                {selfRate.map(b => {
+                                  const bk = bucketKey(b.subjectId, b.chapterId, b.pageKey, b.topic);
+                                  const isOpen = selfRateKey === bk;
+                                  return (
+                                    <div key={bk} className="px-4 py-3">
+                                      <div className="flex items-center gap-3">
+                                        <div className="w-2 h-2 rounded-full bg-violet-400 shrink-0" />
+                                        <p className="text-sm font-semibold text-slate-800 flex-1 min-w-0 truncate">{b.topic}</p>
+                                        {b.subjectName && (
+                                          <span className="text-[10px] text-slate-400 shrink-0 truncate max-w-[70px]">{b.subjectName}</span>
+                                        )}
+                                        <button
+                                          onClick={() => setSelfRateKey(isOpen ? null : bk)}
+                                          className="shrink-0 text-[10px] font-bold bg-violet-100 text-violet-700 px-2.5 py-1 rounded-full active:scale-95 transition"
+                                        >
+                                          {isOpen ? 'Band karo' : 'Rate karo'}
+                                        </button>
+                                      </div>
+                                      {isOpen && (
+                                        <div className="mt-2.5 flex gap-2">
+                                          <button
+                                            onClick={() => { handleSelfRate(bk, 'weak', b.topic); setSelfRateKey(null); }}
+                                            className="flex-1 py-2 rounded-xl text-[11px] font-black bg-rose-100 text-rose-700 active:scale-95 transition"
+                                          >😕 Weak</button>
+                                          <button
+                                            onClick={() => { handleSelfRate(bk, 'average', b.topic); setSelfRateKey(null); }}
+                                            className="flex-1 py-2 rounded-xl text-[11px] font-black bg-amber-100 text-amber-700 active:scale-95 transition"
+                                          >🙂 Average</button>
+                                          <button
+                                            onClick={() => { handleSelfRate(bk, 'strong', b.topic); setSelfRateKey(null); }}
+                                            className="flex-1 py-2 rounded-xl text-[11px] font-black bg-emerald-100 text-emerald-700 active:scale-95 transition"
+                                          >💪 Strong</button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* ── Practice section: topics with actual wrong questions ── */}
+                        {withQs.length > 0 && (
+                          <>
+                            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                              <div className="px-4 py-2 bg-emerald-50 border-b border-emerald-100">
+                                <p className="text-[10px] font-bold text-emerald-700">Kisi bhi topic pe tap karo — sab topics mixed milenge ⚡</p>
+                              </div>
+                              <div className="overflow-y-auto" style={{ maxHeight: '280px' }}>
+                                {withQs.map((b) => (
+                                  <button
+                                    key={`${b.subjectId}::${b.chapterId}::${b.pageKey}::${b.topic}`}
+                                    onClick={startPracticeAll}
+                                    className="w-full flex items-center gap-3 px-4 py-3 border-b border-slate-100 last:border-b-0 hover:bg-emerald-50 active:bg-emerald-100 transition-colors text-left"
+                                  >
+                                    <div className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
+                                    <p className="text-sm font-semibold text-slate-800 flex-1 min-w-0 truncate">{b.topic}</p>
+                                    <span className="shrink-0 text-[10px] font-bold bg-rose-100 text-rose-600 px-2 py-0.5 rounded-full">
+                                      {b.wrongQuestions.length}Q
+                                    </span>
+                                    {b.subjectName && (
+                                      <span className="text-[10px] text-slate-400 shrink-0 truncate max-w-[70px]">{b.subjectName}</span>
+                                    )}
+                                    <Zap size={13} className="text-emerald-400 shrink-0" />
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
                             <button
-                              key={`${b.subjectId}::${b.chapterId}::${b.pageKey}::${b.topic}`}
                               onClick={startPracticeAll}
-                              className="w-full flex items-center gap-3 px-4 py-3 border-b border-slate-100 last:border-b-0 hover:bg-emerald-50 active:bg-emerald-100 transition-colors text-left"
+                              className="mt-3 w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-sm font-black py-3.5 rounded-2xl shadow-lg shadow-emerald-200 transition-all"
                             >
-                              <div className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
-                              <p className="text-sm font-semibold text-slate-800 flex-1 min-w-0 truncate">{b.topic}</p>
-                              {b.wrongQuestions.length > 0 && (
-                                <span className="shrink-0 text-[10px] font-bold bg-rose-100 text-rose-600 px-2 py-0.5 rounded-full">
-                                  {b.wrongQuestions.length}Q
-                                </span>
-                              )}
-                              {b.subjectName && (
-                                <span className="text-[10px] text-slate-400 shrink-0 truncate max-w-[70px]">{b.subjectName}</span>
-                              )}
-                              <Zap size={13} className="text-emerald-400 shrink-0" />
+                              <Zap size={16} />
+                              ⚡ Saare MCQ Ek Saath Practice Karo ({withQs.length} topic)
                             </button>
-                          ))}
-                        </div>
-                      </div>
-                      {/* ── "Saare MCQ Ek Saath" bottom button ── */}
-                      <button
-                        onClick={startPracticeAll}
-                        className="mt-3 w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-sm font-black py-3.5 rounded-2xl shadow-lg shadow-emerald-200 transition-all"
-                      >
-                        <Zap size={16} />
-                        ⚡ Saare MCQ Ek Saath Practice Karo ({dueMcq.length} topic)
-                      </button>
-                    </>
-                  )
+                          </>
+                        )}
+                      </>
+                    );
+                  })()
                 }
               </div>
             )}

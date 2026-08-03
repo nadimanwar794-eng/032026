@@ -19,7 +19,7 @@ import type { User } from '../types';
 import type { WeakBucket } from '../utils/revisionTrackerV2';
 import { getTopicNote, keywordsForBucket } from '../utils/revisionTrackerV2';
 import { searchNotesByWords } from '../utils/noteSearcher';
-import { speakText, stopSpeech } from '../utils/textToSpeech';
+import { speakText, stopSpeech, stripHtml } from '../utils/textToSpeech';
 import { saveSuggestion, fetchMcqLesson, fetchTopicNoteFromChapters } from '../firebase';
 import { saveTopicNotes } from '../utils/revisionTrackerV2';
 
@@ -96,7 +96,7 @@ export const TodayAllNotesModal: React.FC<Props> = ({ dueNotes, user, onClose, o
                 const updated = [...prev];
                 updated[i] = {
                   ...updated[i],
-                  content: r.noteFullContent || r.noteContent || '',
+                  content: stripHtml(r.noteFullContent || r.noteContent || ''),
                   title: r.noteTitle || b.topic,
                   loading: false,
                 };
@@ -124,7 +124,7 @@ export const TodayAllNotesModal: React.FC<Props> = ({ dueNotes, user, onClose, o
                       const updated = [...prev];
                       updated[i] = {
                         ...updated[i],
-                        content: note.content,
+                        content: stripHtml(note.content),
                         title: note.title || b.topic,
                         loading: false,
                       };
@@ -150,7 +150,7 @@ export const TodayAllNotesModal: React.FC<Props> = ({ dueNotes, user, onClose, o
                       const updated = [...prev];
                       updated[i] = {
                         ...updated[i],
-                        content: note.content,
+                        content: stripHtml(note.content),
                         title: note.title || b.topic,
                         loading: false,
                       };

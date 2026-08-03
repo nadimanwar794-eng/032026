@@ -31,6 +31,12 @@ export const TodayRevisionView: React.FC<Props> = ({ user, topics, onClose, onCo
     const [showExitConfirm, setShowExitConfirm] = useState(false);
     const [completedTopicIds, setCompletedTopicIds] = useState<Set<string>>(new Set());
 
+    // ── Per-topic 60-second minimum reading enforcement ───────────────────────
+    const MIN_READ_SECS = 60;
+    const [topicTimers, setTopicTimers]   = useState<Record<string, number>>({});
+    const [activeTopicId, setActiveTopicId] = useState<string | null>(null);
+    const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
     // ── Level-based Notes Daily Limit ─────────────────────────────────────────
     const _getNotesLimit = () => {
         const _subValid = SubscriptionEngine.isPremium(user);
@@ -281,6 +287,48 @@ export const TodayRevisionView: React.FC<Props> = ({ user, topics, onClose, onCo
         topicRefs.current = topicRefs.current.slice(0, displayList.length);
     }, [displayList]);
 
+    // IntersectionObserver: whichever topic is most visible becomes the active timer target
+    useEffect(() => {
+        if (!displayList.length) return;
+        const obs = new IntersectionObserver(
+            (entries) => {
+                // Pick the entry with the largest intersection ratio
+                let best: string | null = null;
+                let bestRatio = 0;
+                entries.forEach(entry => {
+                    if (entry.isIntersecting && entry.intersectionRatio > bestRatio) {
+                        bestRatio = entry.intersectionRatio;
+                        best = entry.target.getAttribute('data-topic-id');
+                    }
+                });
+                if (best) setActiveTopicId(best);
+            },
+            { threshold: [0.2, 0.5, 0.8] }
+        );
+        displayList.forEach((topic, idx) => {
+            const el = topicRefs.current[idx];
+            if (el) {
+                el.setAttribute('data-topic-id', topic.id);
+                obs.observe(el);
+            }
+        });
+        return () => obs.disconnect();
+    }, [displayList]);
+
+    // Per-second timer: increment whichever topic is currently active (capped at MIN_READ_SECS)
+    useEffect(() => {
+        if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+        if (!activeTopicId) return;
+        timerIntervalRef.current = setInterval(() => {
+            setTopicTimers(prev => {
+                const cur = prev[activeTopicId] || 0;
+                if (cur >= MIN_READ_SECS) return prev; // already done, no re-render
+                return { ...prev, [activeTopicId]: cur + 1 };
+            });
+        }, 1000);
+        return () => { if (timerIntervalRef.current) clearInterval(timerIntervalRef.current); };
+    }, [activeTopicId]);
+
 
     // Limit reached screen
     if (limitReached) {
@@ -329,24 +377,41 @@ export const TodayRevisionView: React.FC<Props> = ({ user, topics, onClose, onCo
                          </p>
 
                          <div className="flex-1 min-h-0 overflow-y-auto mb-6 pr-2 space-y-2 overscroll-contain">
-                             {topics.map(topic => (
+                             {topics.map(topic => {
+                                 const secs = topicTimers[topic.id] || 0;
+                                 const ready = secs >= MIN_READ_SECS;
+                                 const secsLeft = Math.max(0, MIN_READ_SECS - secs);
+                                 return (
                                  <label
                                     key={topic.id}
-                                    className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${completedTopicIds.has(topic.id) ? 'bg-indigo-50 border-indigo-200' : 'bg-slate-50 border-slate-200 hover:bg-slate-100'}`}
+                                    className={`flex items-start gap-3 p-3 rounded-xl border transition-all ${
+                                        !ready
+                                            ? 'bg-orange-50 border-orange-200 opacity-60 cursor-not-allowed'
+                                            : completedTopicIds.has(topic.id)
+                                                ? 'bg-indigo-50 border-indigo-200 cursor-pointer'
+                                                : 'bg-slate-50 border-slate-200 hover:bg-slate-100 cursor-pointer'
+                                    }`}
                                     onClick={(e) => {
                                         e.preventDefault();
-                                        toggleTopicComplete(topic.id);
+                                        if (ready) toggleTopicComplete(topic.id);
                                     }}
                                 >
-                                     <div className={`mt-0.5 w-5 h-5 rounded flex items-center justify-center border shrink-0 transition-colors ${completedTopicIds.has(topic.id) ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-300'}`}>
+                                     <div className={`mt-0.5 w-5 h-5 rounded flex items-center justify-center border shrink-0 transition-colors ${
+                                         !ready ? 'bg-orange-100 border-orange-300' :
+                                         completedTopicIds.has(topic.id) ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-300'
+                                     }`}>
                                          {completedTopicIds.has(topic.id) && <CheckCircle size={14} className="stroke-[3]" />}
                                      </div>
                                      <div className="flex-1">
-                                         <p className={`text-sm font-bold ${completedTopicIds.has(topic.id) ? 'text-indigo-900' : 'text-slate-700'}`}>{topic.name}</p>
+                                         <p className={`text-sm font-bold ${completedTopicIds.has(topic.id) ? 'text-indigo-900' : ready ? 'text-slate-700' : 'text-orange-700'}`}>{topic.name}</p>
                                          <p className="text-[10px] text-slate-500 font-medium uppercase mt-0.5">{topic.subjectName} • {topic.chapterName}</p>
+                                         {!ready && (
+                                             <p className="text-[10px] font-black text-orange-500 mt-0.5">⏱️ {secsLeft}s aur padhna hai</p>
+                                         )}
                                      </div>
                                  </label>
-                             ))}
+                                 );
+                             })}
                          </div>
 
                          <div className="flex flex-col gap-2 shrink-0">
@@ -484,6 +549,11 @@ export const TodayRevisionView: React.FC<Props> = ({ user, topics, onClose, onCo
                                 badgeClass = "bg-blue-100 text-blue-700";
                             }
 
+                            const topicSecs    = topicTimers[topic.id] || 0;
+                            const topicReady   = topicSecs >= MIN_READ_SECS;
+                            const secsLeft     = Math.max(0, MIN_READ_SECS - topicSecs);
+                            const timerPct     = Math.min(100, Math.round((topicSecs / MIN_READ_SECS) * 100));
+
                             return (
                                 <div
                                     key={index}
@@ -514,14 +584,47 @@ export const TodayRevisionView: React.FC<Props> = ({ user, topics, onClose, onCo
                                                 {chunkTopics.has(topic.id) ? <><FileText size={15} /> Notes</> : <><Volume2 size={15} /> TTS</>}
                                             </button>
                                             <button
-                                                onClick={() => toggleTopicComplete(topic.id)}
-                                                className={`p-2 rounded-full transition-all flex items-center gap-1 ${completedTopicIds.has(topic.id) ? 'bg-green-100 text-green-700 ring-2 ring-green-500' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-                                                title={completedTopicIds.has(topic.id) ? "Marked as Completed" : "Mark as Complete"}
+                                                onClick={() => topicReady && toggleTopicComplete(topic.id)}
+                                                disabled={!topicReady}
+                                                className={`p-2 rounded-full transition-all flex items-center gap-1 ${
+                                                    completedTopicIds.has(topic.id)
+                                                        ? 'bg-green-100 text-green-700 ring-2 ring-green-500'
+                                                        : topicReady
+                                                            ? 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                                                            : 'bg-slate-50 text-slate-300 cursor-not-allowed'
+                                                }`}
+                                                title={topicReady ? (completedTopicIds.has(topic.id) ? 'Marked as Completed' : 'Mark as Complete') : `${secsLeft}s aur padhna hai`}
                                             >
                                                 <CheckCircle size={20} />
                                             </button>
                                         </div>
                                     </div>
+
+                                    {/* ── Reading timer bar ─────────────────────────────── */}
+                                    {!topicReady && (
+                                        <div className="mb-4">
+                                            <div className="flex items-center justify-between mb-1">
+                                                <p className="text-[10px] font-black text-orange-600 uppercase tracking-widest">
+                                                    ⏱️ Padhte raho — {secsLeft}s aur baaki
+                                                </p>
+                                                <p className="text-[10px] font-bold text-orange-400">{timerPct}%</p>
+                                            </div>
+                                            <div className="h-1.5 bg-orange-100 rounded-full overflow-hidden">
+                                                <div
+                                                    className="h-full bg-orange-400 rounded-full transition-all duration-1000"
+                                                    style={{ width: `${timerPct}%` }}
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+                                    {topicReady && !completedTopicIds.has(topic.id) && (
+                                        <div className="mb-3">
+                                            <div className="h-1.5 bg-emerald-100 rounded-full overflow-hidden">
+                                                <div className="h-full bg-emerald-400 rounded-full w-full" />
+                                            </div>
+                                            <p className="text-[10px] font-black text-emerald-600 mt-1">✅ 60s complete — ab mark kar sakte ho!</p>
+                                        </div>
+                                    )}
 
                                     {/* CONTENT CONTAINER — styled HTML or ChunkedNotesReader */}
                                     {chunkTopics.has(topic.id) ? (
@@ -570,13 +673,24 @@ export const TodayRevisionView: React.FC<Props> = ({ user, topics, onClose, onCo
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-2 w-full sm:w-auto">
-                                            {/* Generate Notes button removed to show notes inline by default */}
-                                            <button
-                                                onClick={() => toggleTopicComplete(t.id)}
-                                                className={`flex-1 sm:flex-none px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider border rounded-lg transition-colors active:scale-95 text-center ${completedTopicIds.has(t.id) ? 'bg-green-100 text-green-700 border-green-200' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}`}
-                                            >
-                                                {completedTopicIds.has(t.id) ? "Done ✓" : "Mark as Done"}
-                                            </button>
+                                            {(() => {
+                                                const sSecs  = topicTimers[t.id] || 0;
+                                                const sReady = sSecs >= MIN_READ_SECS;
+                                                const sLeft  = Math.max(0, MIN_READ_SECS - sSecs);
+                                                return (
+                                                    <button
+                                                        onClick={() => sReady && toggleTopicComplete(t.id)}
+                                                        disabled={!sReady}
+                                                        className={`flex-1 sm:flex-none px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider border rounded-lg transition-colors active:scale-95 text-center ${
+                                                            completedTopicIds.has(t.id) ? 'bg-green-100 text-green-700 border-green-200' :
+                                                            sReady ? 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100' :
+                                                            'bg-orange-50 text-orange-400 border-orange-200 cursor-not-allowed'
+                                                        }`}
+                                                    >
+                                                        {completedTopicIds.has(t.id) ? 'Done ✓' : sReady ? 'Mark as Done' : `⏱️ ${sLeft}s aur`}
+                                                    </button>
+                                                );
+                                            })()}
                                         </div>
                                     </div>
                                     {/* MODIFIED: Always show notes instead of hiding them behind expanded state */}

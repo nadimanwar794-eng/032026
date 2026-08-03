@@ -1,9 +1,65 @@
 // @ts-nocheck
 import { User, ActiveSubscription, SystemSettings } from '../types';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SECURITY: Subscription Sanitizer
+// Tampered ya malformed activeSubscriptions entries ko reject karta hai.
+// Defense-in-depth layer — Firestore Rules ke saath milke kaam karta hai.
+// ─────────────────────────────────────────────────────────────────────────────
+const VALID_TIERS   = new Set(['LIFETIME','YEARLY','3_MONTHLY','MONTHLY','WEEKLY','CUSTOM']);
+const VALID_LEVELS  = new Set(['ULTRA','BASIC']);
+const VALID_SOURCES = new Set(['ADMIN','PURCHASE','ENGAGEMENT_REWARD','LEGACY']);
+const MAX_SUBS      = 20;       // 20 se zyada subscriptions suspicious hain
+const MAX_END_YEAR  = 2200;     // 2200 ke baad ki dates invalid manenge
+
+function sanitizeActiveSubscriptions(subs: any[]): ActiveSubscription[] {
+    if (!Array.isArray(subs)) return [];
+
+    const seen = new Set<string>();
+    const valid: ActiveSubscription[] = [];
+
+    for (const sub of subs.slice(0, MAX_SUBS)) {
+        // 1. Object hona chahiye
+        if (!sub || typeof sub !== 'object') continue;
+
+        // 2. Required fields hone chahiye
+        const { id, tier, level, startDate, endDate, source } = sub;
+        if (!id || !tier || !level || !startDate || !endDate) continue;
+
+        // 3. Duplicate id skip karo
+        if (seen.has(String(id))) continue;
+        seen.add(String(id));
+
+        // 4. Allowed values check
+        if (!VALID_TIERS.has(tier))   continue;
+        if (!VALID_LEVELS.has(level)) continue;
+        // source optional hai (legacy mein nahi tha) — agar hai toh validate karo
+        if (source && !VALID_SOURCES.has(source)) continue;
+
+        // 5. Valid dates check
+        const start = new Date(startDate).getTime();
+        const end   = new Date(endDate).getTime();
+        if (isNaN(start) || isNaN(end)) continue;
+        if (end <= start) continue; // end pehle nahi ho sakta
+        if (new Date(endDate).getFullYear() > MAX_END_YEAR) continue; // 2200+ invalid
+
+        // 6. String fields type check
+        if (typeof tier !== 'string' || typeof level !== 'string') continue;
+
+        valid.push(sub as ActiveSubscription);
+    }
+
+    return valid;
+}
+
 export const recalculateSubscriptionStatus = (user: User, settings?: SystemSettings): User => {
     const now = new Date();
     let updatedUser = { ...user };
+
+    // SECURITY: activeSubscriptions sanitize karo — tampered entries nikalo
+    if (Array.isArray(updatedUser.activeSubscriptions)) {
+        updatedUser.activeSubscriptions = sanitizeActiveSubscriptions(updatedUser.activeSubscriptions);
+    }
 
     // 0. Check Free Access Override (Admin Config)
     if (settings?.freeAccessConfig) {

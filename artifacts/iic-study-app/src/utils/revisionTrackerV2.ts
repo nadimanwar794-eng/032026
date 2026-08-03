@@ -295,7 +295,15 @@ export function getWeakBuckets(opts?: { minAttempts?: number; maxAccuracy?: numb
 /** A bucket counts as "trackable" if it has wrong questions OR is in the
  *  long-spacing maintenance window (notes/MCQ rerun queued). */
 function isTrackable(b: TopicBucket) {
-  return b.wrongQuestions.length > 0 || !!b.longSpacingNotesAt || !!b.longSpacingMcqAt;
+  // Always track: topics with wrong answers, long-spacing maintenance, OR
+  // freshly scheduled routine lessons (NOTES OR MCQ stage, never cycled yet).
+  return (
+    b.wrongQuestions.length > 0 ||
+    !!b.longSpacingNotesAt ||
+    !!b.longSpacingMcqAt ||
+    (b.stage === 'NOTES' && (b.cycleCount ?? 0) === 0) ||
+    (b.stage === 'MCQ'   && (b.cycleCount ?? 0) === 0)
+  );
 }
 
 /** Midnight at the START of today (00:00:00.000). */
@@ -357,6 +365,8 @@ export function markNotesReviewed(key: string, config?: RevisionConfig) {
   b.updatedAt = Date.now();
   map[key] = b;
   safeWrite(map);
+  // Notify RoutineRevisionBadge (and any other listeners) that revision state changed.
+  try { window.dispatchEvent(new CustomEvent('iic-revision-updated')); } catch {}
 }
 
 /** Mark an MCQ session done. accuracy = 0..1. Schedules next revision based on performance. */
@@ -415,6 +425,8 @@ export function markMcqDone(key: string, accuracy: number, config?: RevisionConf
   b.updatedAt = Date.now();
   map[key] = b;
   safeWrite(map);
+  // Notify RoutineRevisionBadge (and any other listeners) that revision state changed.
+  try { window.dispatchEvent(new CustomEvent('iic-revision-updated')); } catch {}
 }
 
 export function clearTracker() {
@@ -550,6 +562,96 @@ export function applyInitialSchedule(
   b.updatedAt = Date.now();
   map[key] = b;
   safeWrite(map);
+}
+
+/**
+ * Schedule a routine-completed lesson for Revision Hub review.
+ * Called when a student finishes a routine lesson — creates a NOTES-stage
+ * bucket that becomes due tomorrow so it appears in the Revision Hub the
+ * next day.  Skips silently if the lesson is already tracked.
+ */
+export function scheduleRoutineLessonForRevision(opts: {
+  lessonId: string;
+  subjectId: string;
+  subjectName?: string;
+  lessonTitle?: string;
+}): void {
+  try {
+    const map = safeRead();
+    const { lessonId, subjectId, subjectName, lessonTitle } = opts;
+    const k = bucketKey(subjectId, lessonId, lessonId, lessonTitle || lessonId);
+    // Don't overwrite an existing bucket that has real MCQ history
+    if (map[k] && (map[k].total > 0 || map[k].cycleCount)) return;
+    const now = Date.now();
+    map[k] = {
+      ...(map[k] || {}),
+      subjectId,
+      subjectName: subjectName || subjectId,
+      chapterId: lessonId,
+      chapterTitle: lessonTitle || lessonId,
+      pageKey: lessonId,
+      pageLabel: lessonTitle || lessonId,
+      topic: lessonTitle || lessonId,
+      total: map[k]?.total ?? 0,
+      correct: map[k]?.correct ?? 0,
+      lastAttemptAt: now,
+      wrongQuestions: map[k]?.wrongQuestions ?? [],
+      stage: 'NOTES',
+      // due immediately so it shows up in today's routine revision badge
+      nextDueAt: Date.now(),
+      cycleCount: map[k]?.cycleCount ?? 0,
+      lastTier: map[k]?.lastTier ?? 'average',
+      updatedAt: now,
+    };
+    safeWrite(map);
+  } catch { /* storage failure — ignore */ }
+}
+
+// ── Routine ↔ Revision Hub link ─────────────────────────────────────────────
+
+export interface LessonRevisionStatus {
+  key: string;
+  /** Current revision stage for this lesson */
+  stage: 'NOTES' | 'MCQ';
+  /** Due today or overdue → user should go to Revision Hub now */
+  isDueToday: boolean;
+  /** Revision done for this cycle — next due date is in the future */
+  isDoneForNow: boolean;
+  /** Number of completed revision cycles */
+  cycleCount: number;
+  /** 0–1 accuracy across all attempts */
+  accuracy: number;
+  topic: string;
+  nextDueAt?: number;
+}
+
+/**
+ * Returns the revision status for a lesson that was scheduled via
+ * scheduleRoutineLessonForRevision.  Returns null if no bucket exists yet
+ * (lesson not yet completed in Routine).
+ */
+export function getRevisionStatusForLesson(lessonId: string): LessonRevisionStatus | null {
+  const map = safeRead();
+  const todayStart = startOfToday();
+  // Buckets created by scheduleRoutineLessonForRevision always have
+  // chapterId === pageKey === lessonId.
+  const entry = Object.entries(map).find(([, b]) => b.chapterId === lessonId && b.pageKey === lessonId);
+  if (!entry) return null;
+  const [key, b] = entry;
+  const dueDay = b.nextDueAt ? startOfDay(b.nextDueAt) : 0;
+  const isDueToday = !b.nextDueAt || dueDay <= todayStart;
+  // "done for now" = at least one full cycle done AND next due is in the future
+  const isDoneForNow = (b.cycleCount ?? 0) > 0 && !!(b.nextDueAt && dueDay > todayStart);
+  return {
+    key,
+    stage: b.stage || 'NOTES',
+    isDueToday,
+    isDoneForNow,
+    cycleCount: b.cycleCount ?? 0,
+    accuracy: b.total > 0 ? b.correct / b.total : 0,
+    topic: b.topic || lessonId,
+    nextDueAt: b.nextDueAt,
+  };
 }
 
 // Build a list of search keywords for a weak bucket — topic name plus salient

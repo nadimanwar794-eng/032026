@@ -82,7 +82,7 @@ export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, su
     // Average (AVERAGE) -> 5 days after revision
     // Strong (STRONG) -> 10 days after revision
     const [isMcqAvailable, setIsMcqAvailable] = useState(false);
-    const [readingTimer, setReadingTimer] = useState(10); // 10s Mandatory Reading
+    const [readingTimer, setReadingTimer] = useState(60); // 60s Mandatory Reading
 
     // Timer Logic
     useEffect(() => {

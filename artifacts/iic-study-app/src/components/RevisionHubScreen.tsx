@@ -37,6 +37,8 @@ interface Props {
   onUpdateUser?: (user: User) => void;
   onMcqAnswer?: (isCorrect: boolean) => boolean;
   onSendToMcqCommunity?: (draft: { question: string; options: [string,string,string,string]; correctAnswer: number; explanation: string }) => void;
+  /** If set, auto-navigate to this lesson's MCQ on open — matched by lessonTitle (Routine / Daily Event shortcut, coins already paid by caller) */
+  initialLessonTitle?: string | null;
 }
 
 const TABS: { id: HubTab; label: string; icon: React.ReactNode }[] = [
@@ -80,6 +82,7 @@ const TIER_STYLES: Record<string, { bg: string; text: string; label: string }> =
 
 export const RevisionHubScreen: React.FC<Props> = ({
   user, settings, onBack, onTabChange, onNavigateContent, onUpdateUser, onMcqAnswer, onSendToMcqCommunity,
+  initialLessonTitle,
 }) => {
   const theme = useAppTheme();
   const primary = theme.primary || '#6366f1';
@@ -105,6 +108,24 @@ export const RevisionHubScreen: React.FC<Props> = ({
     const unsub = subscribeMcqLessons((lessons) => setAllLessons(lessons));
     return unsub;
   }, []);
+
+  // Auto-navigate: when opened from Routine/DailyEvent with a lessonTitle,
+  // coins are already paid by the caller — just select the lesson directly.
+  const autoNavigatedRef = React.useRef(false);
+  useEffect(() => {
+    if (!initialLessonTitle || autoNavigatedRef.current || allLessons.length === 0) return;
+    const titleLower = initialLessonTitle.trim().toLowerCase();
+    const lesson = allLessons.find(l =>
+      String(l.lessonTitle || '').trim().toLowerCase() === titleLower
+    );
+    if (!lesson) return;
+    autoNavigatedRef.current = true;
+    setActiveTab('MCQ');
+    setMcqSelectedClass(lesson.classLevel || null);
+    setMcqSelectedSubject(lesson.subject || null);
+    setMcqSelectedLesson(lesson); // coins already paid — go directly
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialLessonTitle, allLessons]);
 
   // Helper: returns true if this MCQ has a real topic (non-empty, non-"General").
   // "General" is the default label mcqParser assigns to MCQs pasted without

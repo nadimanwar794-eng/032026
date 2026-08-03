@@ -6,7 +6,7 @@ import {
   FlaskConical, Landmark, BarChart3, Plus, Minus,
   Check, ChevronDown, ChevronUp, Sparkles, RefreshCw,
   ListChecks, LayoutGrid, HelpCircle, X, CheckCircle2, XCircle,
-  Lock, Trash2,
+  Lock, Trash2, Settings,
 } from 'lucide-react';
 import {
   loadRoutineData, saveRoutineData, checkAndResetDaily,
@@ -30,6 +30,12 @@ import {
   getLessonPageAvgPercent, getLessonBestPageAvgPercent,
   getPageTime,
 } from '../utils/routineAutoTrack';
+import { scheduleRoutineLessonForRevision } from '../utils/revisionTrackerV2';
+import { RoutineRevisionBadge } from './RoutineRevisionBadge';
+import { tryEarnScore, getActiveBoost } from '../utils/scoreSystem';
+import { DailyEventPage } from './DailyEventPage';
+
+const TASK_COMPLETE_PTS = 100; // pts awarded per routine task completion
 
 
 
@@ -189,14 +195,26 @@ function formatTime(secs: number): string {
   return s > 0 ? `${m}m ${s}s` : `${m}m`;
 }
 
+const TASK_PTS_CLAIMED_PREFIX = 'iic_task_pts_claimed_';
+const isTaskPtsClaimed = (lessonId: string) => {
+  try { return !!localStorage.getItem(`${TASK_PTS_CLAIMED_PREFIX}${lessonId}`); } catch { return false; }
+};
+const markTaskPtsClaimed = (lessonId: string) => {
+  try { localStorage.setItem(`${TASK_PTS_CLAIMED_PREFIX}${lessonId}`, '1'); } catch {}
+};
+
 function TaskLessonCard({
-  label, subjectName, lessonTitle, lessonId, totalPages, meta, mcqHistory, onLessonComplete,
+  label, subjectName, lessonTitle, lessonId, totalPages, meta, mcqHistory, onLessonComplete, onClaimPts, onGoToRevision,
 }: {
   label: string; subjectName: string; lessonTitle: string; lessonId: string;
   totalPages: number; meta: typeof DEFAULT_META; mcqHistory: any[];
   onLessonComplete?: (lessonId: string) => void;
+  onClaimPts?: (lessonId: string) => void;
+  onGoToRevision?: (lessonId: string, lessonTitle?: string) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
+  const [ptsClaimed, setPtsClaimed] = useState(() => isTaskPtsClaimed(lessonId));
+  const [claimAnim, setClaimAnim] = useState(false);
   const mcqDone = isRoutineMcqDone(lessonId);
   const snapshot = getAutoTrackSnapshot();
   const pageStates = Array.from({ length: totalPages }, (_, i) => {
@@ -286,14 +304,40 @@ function TaskLessonCard({
               </div>
             ) : null; })()}
           </div>
-          <div className={`rounded-xl p-3 text-xs font-medium ${allDone ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-50 text-slate-500'}`}>
-            {allDone
-              ? <p className="font-black">🎉 Lesson complete! +{LESSON_COMPLETE_REWARD}🪙 reward milega</p>
-              : pageMcqDoneCount === 0
-              ? <p>🧠 Pages par MCQ karo → page complete hoga (read + MCQ). Reward: +{LESSON_COMPLETE_REWARD}🪙</p>
-              : <p>📖 {totalPages - doneCount} aur pages padho + MCQ karo → auto-track hoga</p>
-            }
-          </div>
+          {/* Progress hint */}
+          {allDone ? (
+            <div className="rounded-xl p-3 text-xs bg-emerald-100 text-emerald-700">
+              <p className="font-black">✅ Lesson complete! Daily Event Page mein pts claim karo</p>
+            </div>
+          ) : (
+            <div className="rounded-xl p-3 text-xs font-medium bg-slate-50 text-slate-500">
+              {pageMcqDoneCount === 0
+                ? <p>🧠 Pages par MCQ karo → page complete hoga (read + MCQ)</p>
+                : <p>📖 {totalPages - doneCount} aur pages padho + MCQ karo → auto-track hoga</p>
+              }
+            </div>
+          )}
+
+          {/* Revision Hub button — locked until today's lesson is complete */}
+          {isLessonRewarded(lessonId) ? (
+            <RoutineRevisionBadge
+              lessonId={lessonId}
+              lessonTitle={lessonTitle}
+              onGoToRevision={onGoToRevision}
+            />
+          ) : (
+            <div className="mt-3 rounded-xl bg-slate-100 border border-slate-200 p-3 flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-slate-200 flex items-center justify-center shrink-0">
+                <Lock size={15} className="text-slate-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] font-black text-slate-500">🔒 Revision Hub</p>
+                <p className="text-[10px] text-slate-400 mt-0.5 truncate">
+                  Aaj ka lesson complete karo → <span className="font-bold">"{lessonTitle}"</span> unlock hoga
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1155,7 +1199,7 @@ function AddCategorySheet({ allNotes, existingCategories, routineMode, selectedC
           <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Subjects Chuno</p>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-4 pb-4">
+        <div className="flex-1 overflow-y-auto px-4 pb-[72px]">
           {filtered.length === 0 ? (
             <div className="text-center py-10">
               <p className="text-sm font-bold text-slate-400">
@@ -1360,7 +1404,7 @@ function CategoryEditSheet({ category, allNotes, existingCategories, routineMode
           <button onClick={onClose} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center active:scale-90"><X size={16} /></button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-5">
+        <div className="flex-1 overflow-y-auto px-4 py-4 pb-[72px] space-y-5">
 
           {/* Current subjects */}
           <div>
@@ -1473,7 +1517,7 @@ function CategoryManagerSheet({ categories, tier, level, userCredits, data, onRe
           <button onClick={onClose} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center active:scale-90"><X size={16} /></button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+        <div className="flex-1 overflow-y-auto px-4 py-4 pb-[72px] space-y-4">
           {usedCount < actualMax ? (
             <button onClick={onAddOpen}
               className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-blue-600 text-white font-black text-sm active:scale-[0.98] transition shadow-sm">
@@ -1552,9 +1596,14 @@ interface MyRoutineProps {
   lucentNotes?: any[];
   onBack: () => void;
   onUserUpdate?: (u: any) => void;
+  /** Navigate to Revision Hub tab — receives lessonId so caller can apply 50-coin discount */
+  onGoToRevision?: (lessonId: string, lessonTitle?: string) => void;
+  settings?: any;
+  onOpenRevisionHub?: (lessonId?: string, lessonTitle?: string) => void;
+  onPracticeMistakes?: (mistakes: any[]) => void;
 }
 
-export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], onBack, onUserUpdate }) => {
+export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], onBack, onUserUpdate, onGoToRevision, settings, onOpenRevisionHub, onPracticeMistakes }) => {
   const userId = user?.id || 'guest';
   const mcqHistory: any[] = user?.mcqHistory || [];
   const subTier: UserSubTier = getUserSubTier(user);
@@ -1583,6 +1632,7 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
   const [editingCatId, setEditingCatId] = useState<string | null>(null);
   const [showRoutineSetup, setShowRoutineSetup] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
+  const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [activeView, setActiveView] = useState<'home' | 'subjects' | 'tracking'>('home');
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' | 'info' | 'coin' } | null>(null);
   const [tick, setTick] = useState(0);
@@ -1742,13 +1792,23 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
       return next;
     });
     const note = allNotes.find(n => n.id === lessonId);
+
+    // ── Schedule completed lesson for Revision Hub review (due tomorrow) ──
+    try {
+      scheduleRoutineLessonForRevision({
+        lessonId,
+        subjectId: (note as any)?.subject || 'routine',
+        subjectName: (note as any)?.subject,
+        lessonTitle: (note as any)?.lessonTitle || lessonId,
+      });
+    } catch { /* ignore — revision scheduling is non-critical */ }
     import('../utils/sessionNotify').then(({ fireSessionComplete }) => {
       const noteContentType = (note as any)?.contentType as string | undefined;
       const activityType = noteContentType === 'NOTES'
         ? 'Reading'
         : noteContentType === 'MCQ'
           ? 'MCQ'
-          : 'Reading'; // default lesson = Reading
+          : 'Reading';
       fireSessionComplete({
         type: 'LESSON',
         subject: (note as any)?.subject || 'Routine',
@@ -1756,7 +1816,7 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
         timeSecs: 0,
         coinsEarned: LESSON_COMPLETE_REWARD,
         activityType,
-        sessionScore: 0, // lessons earn coins only, not pts
+        sessionScore: ptsEarned,
       });
     }).catch(() => {});
   }, [allNotes]);
@@ -1932,46 +1992,89 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
       )}
 
       {/* Header */}
-      <div className="sticky top-0 z-10 bg-white border-b border-slate-100 px-4 py-3 flex items-center gap-3 shrink-0">
-        <button onClick={onBack} className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center active:scale-90 transition">
-          <ChevronLeft size={20} className="text-slate-700" />
-        </button>
-        <div className="flex-1 min-w-0">
-          <h1 className="font-black text-slate-900 text-base flex items-center gap-1.5">
-            <CalendarCheck size={18} className="text-blue-600 shrink-0" /> My Routine
-          </h1>
-          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-            {/* Class/mode chip — tap to change */}
-            {data.routineMode === 'SCHOOL' && data.selectedClass ? (
-              <button onClick={() => setShowRoutineSetup(true)}
-                className="flex items-center gap-1 bg-blue-100 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded-full active:opacity-70 transition">
-                🏫 {data.selectedBoard ? `${data.selectedBoard} · ` : ''}Class {data.selectedClass} <span className="text-blue-400">✎</span>
-              </button>
-            ) : data.routineMode === 'COMPETITION' && (data.selectedBooks?.length || data.selectedBook) ? (
-              <button onClick={() => setShowRoutineSetup(true)}
-                className="flex items-center gap-1 bg-orange-100 text-orange-700 text-[10px] font-black px-2 py-0.5 rounded-full active:opacity-70 transition">
-                🏆 {data.selectedBooks?.length ? `${data.selectedBooks.length} book${data.selectedBooks.length > 1 ? 's' : ''}` : data.selectedBook} <span className="text-orange-400">✎</span>
-              </button>
-            ) : (
-              <button onClick={() => setShowRoutineSetup(true)}
-                className="flex items-center gap-1 bg-slate-100 text-slate-500 text-[10px] font-black px-2 py-0.5 rounded-full active:opacity-70 transition">
-                ⚙️ Setup karo
-              </button>
-            )}
-            <button onClick={() => setShowCatManager(true)} className="text-[10px] font-bold text-blue-500 active:opacity-70">
-              {categories.length === 0 ? '+ Category add karo' : `${categories.length} categories`}
+      <div className="sticky top-0 z-10 bg-white border-b border-slate-100 shrink-0">
+        {/* Row 1: back · title · actions */}
+        <div className="px-4 pt-3 pb-2 flex items-center gap-2">
+          <button onClick={onBack} className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center active:scale-90 transition shrink-0">
+            <ChevronLeft size={20} className="text-slate-700" />
+          </button>
+          <div className="flex-1 min-w-0">
+            <h1 className="font-black text-slate-900 text-sm flex items-center gap-1">
+              <CalendarCheck size={15} className="text-blue-600 shrink-0" /> My Routine
+            </h1>
+          </div>
+          {/* Routine ON/OFF toggle — compact */}
+          <button onClick={toggleRoutine}
+            className={`relative w-12 h-6 rounded-full transition-all duration-300 shrink-0 ${data.enabled ? 'bg-blue-600' : 'bg-slate-200'}`}
+            title={data.enabled ? 'Routine ON' : 'Routine OFF'}>
+            <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-all duration-300 ${data.enabled ? 'left-6' : 'left-0.5'}`} />
+          </button>
+          <button onClick={() => setShowInfo(true)} className="w-8 h-8 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center active:scale-90 shrink-0">
+            <HelpCircle size={15} className="text-indigo-500" />
+          </button>
+          {/* Settings button — Class & Category */}
+          <div className="relative shrink-0">
+            <button
+              onClick={() => setShowSettingsMenu(s => !s)}
+              className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center active:scale-90 transition"
+            >
+              <Settings size={15} className="text-slate-600" />
             </button>
+            {showSettingsMenu && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowSettingsMenu(false)} />
+                <div className="absolute right-0 top-10 z-50 bg-white rounded-2xl shadow-xl border border-slate-200 w-52 overflow-hidden">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest px-4 pt-3 pb-1">Settings</p>
+                  <button
+                    onClick={() => { setShowSettingsMenu(false); setShowRoutineSetup(true); }}
+                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 active:bg-slate-100 transition text-left"
+                  >
+                    <span className="text-base">🏫</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[12px] font-black text-slate-800">Class / Mode</p>
+                      <p className="text-[10px] text-slate-400 truncate">
+                        {data.routineMode === 'SCHOOL' && data.selectedClass
+                          ? `Class ${data.selectedClass}`
+                          : data.routineMode === 'COMPETITION' && (data.selectedBooks?.length || data.selectedBook)
+                          ? `${data.selectedBooks?.length ? `${data.selectedBooks.length} books` : data.selectedBook}`
+                          : 'Setup nahi hai'}
+                      </p>
+                    </div>
+                    <span className="text-slate-400 text-xs">✎</span>
+                  </button>
+                  <div className="h-px bg-slate-100 mx-4" />
+                  <button
+                    onClick={() => { setShowSettingsMenu(false); setShowCatManager(true); }}
+                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 active:bg-slate-100 transition text-left"
+                  >
+                    <span className="text-base">📂</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[12px] font-black text-slate-800">Categories</p>
+                      <p className="text-[10px] text-slate-400">
+                        {categories.length === 0 ? 'Koi category nahi' : `${categories.length} categories`}
+                      </p>
+                    </div>
+                    <span className="text-slate-400 text-xs">✎</span>
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
-        <button onClick={() => setShowInfo(true)} className="w-8 h-8 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center active:scale-90">
-          <HelpCircle size={16} className="text-indigo-500" />
-        </button>
-        <button onClick={() => setTick(t => t + 1)} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center active:scale-90">
-          <RefreshCw size={14} className="text-slate-500" />
-        </button>
-        <div className="flex items-center gap-1 bg-amber-50 border border-amber-200 px-2.5 py-1.5 rounded-full shrink-0">
-          <span className="text-sm leading-none">🪙</span>
-          <span className="text-sm font-black text-amber-700">{userCredits.toLocaleString('en-IN')}</span>
+        {/* Row 2: tab bar — always visible */}
+        <div className="mx-4 mb-2 flex bg-slate-100 rounded-2xl p-1 gap-1">
+          <button onClick={() => setActiveView('home')}
+            className={`flex-1 flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-black transition-all ${activeView === 'home' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>
+            🎯 Daily Hub
+          </button>
+          <button onClick={() => setActiveView('subjects')}
+            className={`flex-1 flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-black transition-all ${activeView === 'subjects' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>
+            📚 Subjects
+          </button>
+          <button onClick={() => setActiveView('tracking')}
+            className={`flex-1 flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-black transition-all ${activeView === 'tracking' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>
+            📊 Tracking
+          </button>
         </div>
       </div>
 
@@ -1985,35 +2088,6 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
       )}
 
       <div className="flex-1 overflow-y-auto overscroll-contain pb-24">
-        {/* ON/OFF */}
-        <div className="mx-4 mt-4 space-y-3">
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex items-center gap-4">
-            <div className="flex-1">
-              <p className="font-black text-slate-800 text-sm">Routine {data.enabled ? 'ON 🟢' : 'OFF ⚫'}</p>
-              <p className="text-xs text-slate-500 font-medium mt-0.5">
-                {data.enabled ? `${categories.length} categories · 1 lesson/day each` : 'Routine band hai'}
-              </p>
-            </div>
-            <button onClick={toggleRoutine}
-              className={`relative w-14 h-7 rounded-full transition-all duration-300 ${data.enabled ? 'bg-blue-600' : 'bg-slate-200'}`}>
-              <span className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow-md transition-all duration-300 ${data.enabled ? 'left-7' : 'left-0.5'}`} />
-            </button>
-          </div>
-        </div>
-
-        {/* Tabs */}
-        <div className="mx-4 mt-4 flex bg-slate-100 rounded-2xl p-1 gap-1">
-          {([
-            ['home', 'Today', <Target size={13} />],
-            ['subjects', 'Subjects', <LayoutGrid size={13} />],
-            ['tracking', 'Tracking', <ListChecks size={13} />],
-          ] as const).map(([id, label, icon]) => (
-            <button key={id} onClick={() => setActiveView(id)}
-              className={`flex-1 flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-black transition-all ${activeView === id ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>
-              {icon} {label}
-            </button>
-          ))}
-        </div>
 
         {/* TODAY */}
         {activeView === 'home' && (
@@ -2036,66 +2110,16 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
                 </button>
               </div>
             ) : (
-              <>
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-black text-slate-600 uppercase tracking-widest">📅 Aaj Ka Task</p>
-                  <button onClick={() => setShowCatManager(true)}
-                    className="text-[11px] font-black text-blue-600 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-lg active:scale-95 transition flex items-center gap-1">
-                    <Plus size={11} /> Edit
-                  </button>
-                </div>
-                {categories.map(cat => {
-                  const si = cat.currentSubjectIndex % cat.subjects.length;
-                  const sub = cat.subjects[si];
-                  const subNotes = getNotesForSubject(sub, routineNotes);
-                  const safeIdx = subNotes.length > 0 ? Math.min(sub.currentLessonIndex, subNotes.length - 1) : -1;
-                  const lesson = safeIdx >= 0 ? subNotes[safeIdx] : null;
-                  const meta = SUBJECT_META[sub.subjectId] || DEFAULT_META;
-                  const subLabel = cat.subjects.length > 1
-                    ? `${capitalise(sub.subjectId)} (${si + 1}/${cat.subjects.length})`
-                    : capitalise(sub.subjectId);
-
-                  if (!lesson) return (
-                    <div key={cat.id} className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-                      <div className="p-4 text-center">
-                        <span className="text-2xl">{cat.emoji}</span>
-                        <p className="text-sm font-black text-slate-700 mt-1">{cat.categoryName}</p>
-                        <p className="text-[10px] text-slate-400 mt-0.5">{subLabel} — notes load ho rahe hain...</p>
-                      </div>
-                    </div>
-                  );
-                  return (
-                    <div key={`${cat.id}-${lesson.id}`} className="space-y-2">
-                      <TaskLessonCard
-                        label={`${cat.emoji} ${cat.categoryName}`}
-                        subjectName={subLabel}
-                        lessonTitle={lesson.lessonTitle || `Lesson ${safeIdx + 1}`}
-                        lessonId={lesson.id}
-                        totalPages={lesson.pages?.length || 0}
-                        meta={meta}
-                        mcqHistory={mcqHistory}
-                        onLessonComplete={(lid) => handleCategoryLessonComplete(cat.id, lid)}
-                      />
-                    </div>
-                  );
-                })}
-                <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
-                  <p className="text-xs font-black text-amber-700 mb-3">🪙 Summary</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {[
-                      { label: 'Balance', value: `${userCredits.toLocaleString('en-IN')}🪙` },
-                      { label: 'Per Lesson', value: `+${LESSON_COMPLETE_REWARD}🪙` },
-                      { label: 'Daily Claim', value: subTier !== 'NONE' ? `${dailyAmount}🪙/day` : 'No plan' },
-                      { label: 'Categories', value: `${categories.length}/${actualMaxSlots}` },
-                    ].map(item => (
-                      <div key={item.label} className="bg-white rounded-xl p-2.5 border border-amber-100">
-                        <p className="text-[9px] text-slate-400 font-medium">{item.label}</p>
-                        <p className="font-black text-slate-800 text-sm">{item.value}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </>
+              <DailyEventPage
+                user={user as any}
+                settings={settings}
+                onBack={onBack}
+                onOpenRoutine={() => setActiveView('subjects')}
+                onOpenRevisionHub={onOpenRevisionHub || (() => {})}
+                onPracticeMistakes={onPracticeMistakes || (() => {})}
+                onOpenSubjects={() => setActiveView('subjects')}
+                onOpenTracking={() => setActiveView('tracking')}
+              />
             )}
           </div>
         )}
@@ -2106,7 +2130,7 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
             <p className="text-xs font-black text-slate-500 uppercase tracking-widest">{subjects.length} Subjects</p>
             {subjects.length === 0 ? (
               <div className="bg-white rounded-2xl border border-slate-200 p-6 text-center">
-                <p className="text-sm text-slate-400">Today tab mein categories add karo pehle</p>
+                <p className="text-sm text-slate-400">Daily Hub mein categories add karo pehle</p>
               </div>
             ) : subjects.map(sub => (
               <SubjectCard key={sub.id} sub={sub} lessons={subjectGroups[sub.id] || []} mcqHistory={mcqHistory}
@@ -2120,7 +2144,6 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
         {/* TRACKING */}
         {activeView === 'tracking' && (
           <div className="mx-4 mt-4">
-            <p className="text-xs font-black text-slate-500 uppercase tracking-widest mb-3">📊 Pura Syllabus Progress</p>
             <TrackingView subjectGroups={subjectGroups} subjects={subjects} mcqHistory={mcqHistory} />
           </div>
         )}
