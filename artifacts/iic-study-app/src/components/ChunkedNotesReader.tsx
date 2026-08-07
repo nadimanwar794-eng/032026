@@ -6,7 +6,6 @@ import { rotateScreen, isDesktopModeOn, setDesktopMode } from '../utils/displayP
 import { saveSuggestion, auth, findDuplicateSuggestionByPoint, incrementSuggestionReportCount, updateSuggestionLeaderboard } from '../firebase';
 import { speakText, stopSpeech } from '../utils/textToSpeech';
 import { splitIntoTopics, splitNoteSections, NotesTopic as Topic } from '../utils/notesSplitter';
-import { isFreeStarLocked } from '../utils/levelSystem';
 import { READING_FONTS, TOP_10_READING_FONTS, ensureReadingFontLoaded, getReadingFontById, ReadingFont } from '../utils/notesFonts';
 import { ReadingStylePopover } from './ReadingStylePopover';
 import { ReadingScoreSession, ReadingScoreState, ReadingScoreConfig } from '../utils/readingScoreEngine';
@@ -747,8 +746,7 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
   // Basic/Ultra/Admin users always have star access.
   // Fallback order: explicit userLevel prop → readingScoreConfig.userLevel → 5 (safe/unlocked).
   const _effectiveUserLevel = userLevel ?? readingScoreConfig?.userLevel ?? 5;
-  const freeStarLocked = !isUltraUser && !isBasicUser && !isAdmin
-    && isFreeStarLocked(_effectiveUserLevel);
+  const freeStarLocked = false;
   const lastScrollY = useRef(0);
   const [toolbarHidden, setToolbarHidden] = useState(false);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);

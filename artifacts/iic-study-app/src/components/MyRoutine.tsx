@@ -1623,10 +1623,19 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
   // classLevel filter of their own.
   const routineNotes = useMemo(() => {
     if (data.routineMode === 'SCHOOL') {
-      return allNotes.filter(n => (n as any).classLevel !== 'COMPETITION');
+      return allNotes.filter(n => {
+        if ((n as any).classLevel === 'COMPETITION') return false;
+
+        // Filter by user's selected board
+        if (data.selectedBoard && data.selectedBoard !== 'ALL_BOARDS' && data.selectedBoard !== '') {
+           const noteBoard = (n as any).board;
+           if (noteBoard && noteBoard !== data.selectedBoard && noteBoard !== 'ALL_BOARDS') return false;
+        }
+        return true;
+      });
     }
     return allNotes;
-  }, [allNotes, data.routineMode]);
+  }, [allNotes, data.routineMode, data.selectedBoard]);
   const [showCatManager, setShowCatManager] = useState(false);
   const [showAddCat, setShowAddCat] = useState(false);
   const [editingCatId, setEditingCatId] = useState<string | null>(null);

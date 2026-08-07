@@ -182,7 +182,7 @@ const _MCQ_ULTRA = [ 75, 120, 150, 180, 225, 270, 300, 330, 375, 420, 450, 525, 
 
 // ── Star lock: Free users cannot bookmark at L1–L4; unlocks at L5 ────────────
 /** Returns true when a Free-tier user at this level has the star/bookmark feature locked. */
-export const isFreeStarLocked = (level: number): boolean => level < 5;
+export const isFreeStarLocked = (level: number): boolean => false;
 
 const buildTable = (): Record<number, LevelDailyLimits> => {
   const tbl: Record<number, LevelDailyLimits> = {};

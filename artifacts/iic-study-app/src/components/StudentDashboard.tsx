@@ -4891,20 +4891,19 @@ export const StudentDashboard: React.FC<Props> = ({
   );
   const unreadNotifCount = allNotifications.filter(n => !seenNotifIds.includes(n.id)).length;
 
-  // Star a note topic — ONE-WAY ONLY. Once saved, the user cannot un-save it
-  // from the source location (lesson / homework / book viewer). Removal is
-  // possible only from the dedicated "Saved Notes" page via swipe-to-delete.
-  // This prevents accidental tap-to-unstar and double-saves of the same note.
-  // Also syncs to Firebase so we can show global "X students saved this"
-  // social-proof counts (Firebase de-dupes by userId so count won't inflate).
+  // Star a note topic — Also syncs to Firebase so we can show global
+  // "X students saved this" social-proof counts.
   const toggleStarNote = (noteKey: string, topicText: string, source?: StarredNoteSource) => {
     let didStar = false;
+    let didUnstar = false;
     setStarredNotes(prev => {
       const alreadySaved = prev.some(n => n.noteKey === noteKey && n.topicText === topicText);
       if (alreadySaved) {
-        // Already saved → show a soft message and return prev unchanged.
-        try { showAlert('This note is already saved. Swipe to remove it in the Saved Notes page.', 'INFO'); } catch {}
-        return prev;
+        // Already saved → remove it.
+        const updated = prev.filter(n => !(n.noteKey === noteKey && n.topicText === topicText));
+        didUnstar = true;
+        try { localStorage.setItem('nst_starred_notes_v1', JSON.stringify(updated)); } catch {}
+        return updated;
       }
       const updated = [
         ...prev,
@@ -4931,6 +4930,13 @@ export const StudentDashboard: React.FC<Props> = ({
             pageNo: source.pageNo as any,
             pageIndex: source.pageIndex as any,
           } : undefined);
+        }
+      } catch {}
+    } else if (didUnstar) {
+      try { if (navigator.vibrate) navigator.vibrate(20); } catch {}
+      try {
+        if (user?.id) {
+          import('../services/noteStars').then(m => m.recordNoteUnstar(user.id, topicText)).catch(()=>{});
         }
       } catch {}
     }

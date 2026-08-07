@@ -828,6 +828,9 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   const [bnBoardMoveWorking, setBnBoardMoveWorking] = useState(false);
   const [cn612FilterBook, setCn612FilterBook] = useState<string>('ALL');
   const [cn612FilterSubject, setCn612FilterSubject] = useState<string>('ALL');
+  const [cn612SelectedIds, setCn612SelectedIds] = useState<string[]>([]);
+  const [isBulkMoving, setIsBulkMoving] = useState(false);
+  const [bulkMoveTargetBoard, setBulkMoveTargetBoard] = useState<string>('');
 
   // Homework History UI: subject filter + per-entry expanded state. Collapsed entries
   // render only a small header so the page stays snappy when there are many entries.
@@ -2244,6 +2247,44 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
     }
   };
 
+  const handleBulkMoveNotes = async () => {
+    if (cn612SelectedIds.length === 0) return;
+    if (!bulkMoveTargetBoard) {
+        alert("Please select a target board for the bulk move.");
+        return;
+    }
+    if (!confirm(`Are you sure you want to move ${cn612SelectedIds.length} lesson(s) to ${bulkMoveTargetBoard === 'NCERT_EN' ? 'NCERT English' : bulkMoveTargetBoard === 'NCERT_HI' ? 'NCERT Hindi' : bulkMoveTargetBoard === 'BSEB' ? 'BSEB' : 'Sab Boards'}?`)) return;
+
+    setIsBulkMoving(true);
+    try {
+        const currentNotes = [...(localSettings.lucentNotes || [])];
+        let moveCount = 0;
+
+        const updatedNotes = currentNotes.map((note: any) => {
+            if (cn612SelectedIds.includes(note.id)) {
+                moveCount++;
+                const newNote = bulkMoveTargetBoard === 'ALL_BOARDS'
+                  ? (() => { const n = { ...note }; delete n.board; return n; })()
+                  : { ...note, board: bulkMoveTargetBoard };
+
+                // Keep MCQ sync in sync with board changes
+                const subjectName = getSubjectNameSafe(newNote.classLevel, newNote.subject);
+                syncClassNotesMcqsToRevisionHub(newNote, subjectName).catch(console.error);
+
+                return newNote;
+            }
+            return note;
+        });
+
+        await saveLucentEntryDirectly(updatedNotes, `✅ ${moveCount} lesson(s) successfully moved!`);
+        setCn612SelectedIds([]); // Clear selection on success
+    } catch (e: any) {
+        setAlertConfig({ isOpen: true, message: `❌ Bulk Move Error: ${e?.message || 'Failed'}` });
+    } finally {
+        setIsBulkMoving(false);
+    }
+  };
+
   const saveLucentEntryDirectly = async (updatedNotes: LucentNoteEntry[], successMsg: string, updatedNotifs?: any[]) => {
       if (isSavingLucent) return;
       setIsSavingLucent(true);
@@ -2281,9 +2322,13 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
           const currentNotes: any[] = [...(localSettings.lucentNotes || [])];
           if (mode === 'move') {
               currentNotes.splice(origIdx, 1, newEntry);
+              const subjName = getSubjectNameSafe(newEntry.classLevel, newEntry.subject);
+              syncClassNotesMcqsToRevisionHub(newEntry, subjName).catch(console.error);
               await saveLucentEntryDirectly(currentNotes, `✅ "${entry.lessonTitle}" move ho gaya → Class ${bnMcTargetClass} / ${bnMcTargetSubject}`);
           } else {
               currentNotes.push(newEntry);
+              const subjName = getSubjectNameSafe(newEntry.classLevel, newEntry.subject);
+              syncClassNotesMcqsToRevisionHub(newEntry, subjName).catch(console.error);
               await saveLucentEntryDirectly(currentNotes, `✅ "${entry.lessonTitle}" copy ho gaya → Class ${bnMcTargetClass} / ${bnMcTargetSubject}`);
           }
           setBnMoveCopyModal(null);
@@ -9589,6 +9634,8 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           const updatedNotifs = [newNotif, ...currentNotifs].slice(0, 30);
 
                                           const target = LUCENT_CLASS_TARGETS.find(t => t.id === newLucent.classLevel)?.label || newLucent.classLevel;
+                                          const subjName = getSubjectNameSafe(newLucent.classLevel, newLucent.subject);
+                                          syncClassNotesMcqsToRevisionHub(entry, subjName).catch(console.error);
                                           setNewLucent({ subject: newLucent.subject, bookName: '', classLevel: newLucent.classLevel, board: newLucent.board, lessonTitle: '', mcqOnly: false, pages: [{ id: Date.now().toString(), pageNo: '1', content: '', chunkNotes: '', htmlNotes: '' }] });
                                           saveLucentEntryDirectly(updated, `✅ Lesson saved → ${target}!`, updatedNotifs);
                                       }} disabled={isSavingLucent} className="w-full bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg hover:bg-indigo-700 flex items-center justify-center gap-2 transition-colors disabled:opacity-60">
@@ -10599,7 +10646,15 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                       })}
                                                   </div>
                                                   <button onClick={() => {
-                                                      saveLucentEntryDirectly(localSettings.lucentNotes || [], '✅ Lucent Lesson Updated!');
+
+                                                      const currentNotes = localSettings.lucentNotes || [];
+                                                      const updatedNote = currentNotes.find((n: any) => n.id === bnModalEntry.id);
+                                                      if (updatedNote) {
+                                                          const subjName = getSubjectNameSafe(updatedNote.classLevel, updatedNote.subject);
+                                                          syncClassNotesMcqsToRevisionHub(updatedNote, subjName).catch(console.error);
+                                                      }
+                                                      saveLucentEntryDirectly(currentNotes, '✅ Lucent Lesson Updated!');
+
                                                   }} disabled={isSavingLucent} className="w-full bg-indigo-600 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-indigo-700 flex items-center justify-center gap-1 disabled:opacity-60">
                                                       <Save size={12} /> {isSavingLucent ? 'Saving…' : 'Save Changes'}
                                                   </button>
@@ -13031,6 +13086,8 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                               const entry: LucentNoteEntry = { id: Date.now().toString(), subject: newLucent.subject, bookName: cbn || undefined, classLevel: newLucent.classLevel, board: newLucent.board || undefined, lessonTitle: newLucent.lessonTitle.trim(), pages: validPages, mcqOnly: newLucent.mcqOnly || undefined, createdAt: new Date().toISOString() };
                                               const updated = [...(localSettings.lucentNotes || []), entry];
                                               const target3 = LUCENT_CLASS_TARGETS.find(t => t.id === newLucent.classLevel)?.label || newLucent.classLevel;
+                                              const subjName = getSubjectNameSafe(newLucent.classLevel, newLucent.subject);
+                                              syncClassNotesMcqsToRevisionHub(entry, subjName).catch(console.error);
                                               setNewLucent({ subject: newLucent.subject, bookName: '', classLevel: newLucent.classLevel, board: newLucent.board, lessonTitle: '', mcqOnly: false, pages: [{ id: Date.now().toString(), pageNo: '1', content: '', chunkNotes: '', htmlNotes: '' }] });
                                               saveLucentEntryDirectly(updated, `✅ Multi-page lesson saved → ${cbn} (${target3})!`);
                                           }} disabled={isSavingLucent} className="w-full bg-indigo-600 text-white py-3 rounded-xl font-black text-sm hover:bg-indigo-700 flex items-center justify-center gap-2 disabled:opacity-60">
@@ -13389,19 +13446,22 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           let bnLucentUpdated: LucentNoteEntry[];
                                           let bnSaveMsg: string;
                                           let bnUpdatedNotifs: any[] | undefined;
+                                          let finalEntryToSync: LucentNoteEntry;
                                           if (cn612EditingId) {
-                                              const updatedEntry: LucentNoteEntry = { id: cn612EditingId, subject: newLucent.subject, bookName: newLucent.bookName.trim() || undefined, classLevel: newLucent.classLevel, lessonTitle: newLucent.lessonTitle.trim(), pages: validPages, mcqOnly: newLucent.mcqOnly || undefined, createdAt: new Date().toISOString() };
-                                              bnLucentUpdated = (localSettings.lucentNotes || []).map((n: LucentNoteEntry) => n.id === cn612EditingId ? updatedEntry : n);
+                                              finalEntryToSync = { id: cn612EditingId, subject: newLucent.subject, bookName: newLucent.bookName.trim() || undefined, classLevel: newLucent.classLevel, lessonTitle: newLucent.lessonTitle.trim(), pages: validPages, mcqOnly: newLucent.mcqOnly || undefined, createdAt: new Date().toISOString() };
+                                              bnLucentUpdated = (localSettings.lucentNotes || []).map((n: LucentNoteEntry) => n.id === cn612EditingId ? finalEntryToSync : n);
                                               bnSaveMsg = `✅ Lesson Updated!`;
                                               setCn612EditingId(null);
                                           } else {
-                                              const newEntry: LucentNoteEntry = { id: Date.now().toString(), subject: newLucent.subject, bookName: newLucent.bookName.trim() || undefined, classLevel: newLucent.classLevel, lessonTitle: newLucent.lessonTitle.trim(), pages: validPages, mcqOnly: newLucent.mcqOnly || undefined, createdAt: new Date().toISOString() };
-                                              bnLucentUpdated = [...(localSettings.lucentNotes || []), newEntry];
+                                              finalEntryToSync = { id: Date.now().toString(), subject: newLucent.subject, bookName: newLucent.bookName.trim() || undefined, classLevel: newLucent.classLevel, lessonTitle: newLucent.lessonTitle.trim(), pages: validPages, mcqOnly: newLucent.mcqOnly || undefined, createdAt: new Date().toISOString() };
+                                              bnLucentUpdated = [...(localSettings.lucentNotes || []), finalEntryToSync];
                                               const newNotif = { id: `lucent-${Date.now()}`, title: `📚 New Lucent Entry: ${newLucent.lessonTitle.trim()}`, body: `Naya Lucent lesson add ho gaya hai. Abhi padho!`, type: 'CONTENT', createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString() };
                                               const currentNotifs = localSettings.notifications || [];
                                               bnUpdatedNotifs = [newNotif, ...currentNotifs].slice(0, 30);
                                               bnSaveMsg = `✅ Lesson saved → ${target2}!`;
                                           }
+                                          const subjName = LUCENT_SUBJECT_OPTIONS_BASE.find(o => o.id === newLucent.subject)?.name || newLucent.subject;
+                                          syncClassNotesMcqsToRevisionHub(finalEntryToSync, subjName).catch(console.error);
                                           setNewLucent({ subject: newLucent.subject, bookName: '', classLevel: newLucent.classLevel, board: newLucent.board, lessonTitle: '', mcqOnly: false, pages: [{ id: Date.now().toString(), pageNo: '1', content: '', chunkNotes: '', htmlNotes: '' }] });
                                           saveLucentEntryDirectly(bnLucentUpdated, bnSaveMsg, bnUpdatedNotifs);
                                       }} disabled={isSavingLucent} className={`w-full mt-2 text-white px-6 py-3 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 disabled:opacity-60 ${cn612EditingId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}>
@@ -14623,11 +14683,71 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                   <p className="text-[10px] font-black text-slate-500 uppercase mb-2">
                                       Class Notes History ({classNotesList.length}{allClassNotes.length !== classNotesList.length ? ` of ${allClassNotes.length} total` : ''})
                                   </p>
+
+                                  {/* Bulk Actions UI */}
+                                  {classNotesList.length > 0 && (
+                                      <div className="mb-3 p-3 bg-indigo-50 border border-indigo-100 rounded-xl flex flex-col sm:flex-row items-center gap-3 justify-between">
+                                          <div className="flex items-center gap-2">
+                                              <input
+                                                  type="checkbox"
+                                                  className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300"
+                                                  checked={cn612SelectedIds.length > 0 && cn612SelectedIds.length === classNotesList.length}
+                                                  onChange={(e) => {
+                                                      if (e.target.checked) {
+                                                          setCn612SelectedIds(classNotesList.map((n: any) => n.id));
+                                                      } else {
+                                                          setCn612SelectedIds([]);
+                                                      }
+                                                  }}
+                                              />
+                                              <span className="text-xs font-bold text-indigo-800">
+                                                  {cn612SelectedIds.length} Selected
+                                              </span>
+                                          </div>
+                                          {cn612SelectedIds.length > 0 && (
+                                              <div className="flex items-center gap-2">
+                                                  <select
+                                                      value={bulkMoveTargetBoard}
+                                                      onChange={(e) => setBulkMoveTargetBoard(e.target.value)}
+                                                      className="text-xs p-2 border border-indigo-200 rounded-lg bg-white text-slate-700"
+                                                  >
+                                                      <option value="">Move to Board...</option>
+                                                      <option value="ALL_BOARDS">Sab Boards (Global)</option>
+                                                      <option value="NCERT_EN">NCERT English</option>
+                                                      <option value="NCERT_HI">NCERT Hindi</option>
+                                                      <option value="BSEB">BSEB (Bihar Board)</option>
+                                                  </select>
+                                                  <button
+                                                      onClick={handleBulkMoveNotes}
+                                                      disabled={isBulkMoving || !bulkMoveTargetBoard}
+                                                      className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-xs font-bold shadow-sm disabled:opacity-50 flex items-center gap-1"
+                                                  >
+                                                      {isBulkMoving ? 'Moving...' : 'Move'}
+                                                  </button>
+                                              </div>
+                                          )}
+                                      </div>
+                                  )}
+
                                   <div className="space-y-2 max-h-[350px] overflow-y-auto">
                                       {classNotesList.length === 0 ? (
                                           <p className="text-xs text-slate-400 text-center py-6 bg-slate-50 rounded-xl border border-slate-100">Koi notes nahi mili is filter se.</p>
                                       ) : classNotesList.map((entry: LucentNoteEntry) => (
-                                          <div key={entry.id} className={`border rounded-xl p-3 flex items-start justify-between gap-2 ${cn612EditingId === entry.id ? 'bg-amber-50 border-amber-300' : 'bg-green-50 border-green-100'}`}>
+                                          <div key={entry.id} className={`border rounded-xl p-3 flex items-start justify-between gap-3 ${cn612EditingId === entry.id ? 'bg-amber-50 border-amber-300' : cn612SelectedIds.includes(entry.id) ? 'bg-indigo-50 border-indigo-200' : 'bg-green-50 border-green-100'}`}>
+                                              <div className="pt-1">
+                                                  <input
+                                                      type="checkbox"
+                                                      className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300"
+                                                      checked={cn612SelectedIds.includes(entry.id)}
+                                                      onChange={(e) => {
+                                                          if (e.target.checked) {
+                                                              setCn612SelectedIds(prev => [...prev, entry.id]);
+                                                          } else {
+                                                              setCn612SelectedIds(prev => prev.filter(id => id !== entry.id));
+                                                          }
+                                                      }}
+                                                  />
+                                              </div>
                                               <div className="flex-1 min-w-0">
                                                   <div className="flex items-center gap-1.5 flex-wrap">
                                                       <p className="text-xs font-black text-slate-800 truncate">{entry.lessonTitle}</p>

@@ -166,10 +166,10 @@ const SubHistory: React.FC<{ user: User; onBack: () => void }> = ({ user, onBack
 function getCreditPrice(planDuration: string, isUltra: boolean): number {
   const d = (planDuration || '').toLowerCase();
   let base = 3500;
-  if (d.includes('year') || d.includes('365') || d.includes('annual') || d.includes('1 yr')) base = 35000;
-  else if (d.includes('3 month') || d.includes('90') || d.includes('quarter') || d.includes('tri')) base = 10000;
-  else if (d.includes('month') || d.includes('30')) base = 3500;
-  else if (d.includes('week') || d.includes('7')) base = 1000;
+  if (d.includes('year') || d.includes('365') || d.includes('annual') || d.includes('1 yr')) base = 100000;
+  else if (d.includes('3 month') || d.includes('90') || d.includes('quarter') || d.includes('tri')) base = 30000;
+  else if (d.includes('month') || d.includes('30')) base = 12000;
+  else if (d.includes('week') || d.includes('7')) base = 4000;
   return isUltra ? base : Math.round(base * 0.75);
 }
 

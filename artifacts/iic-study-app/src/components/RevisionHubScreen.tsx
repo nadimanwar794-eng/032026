@@ -201,7 +201,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
   const revCfg = (settings as any)?.revisionConfig;
 
   const MCQ_START_COST = 40;
-  const LESSON_OPEN_COST = 100;
+  const LESSON_OPEN_COST = 50;
 
   function doStartSession() {
     // ── Session tracking: App.tsx ko batao session shuru hua ─────────────
