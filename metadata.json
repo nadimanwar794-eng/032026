@@ -1,6 +1,0 @@
-{
-  "name": "Lesson Notebook DB",
-  "description": "Unlimited IndexedDB powered lesson-wise notebook app with structured lessons, date-time tracking, tags, markdown editor, and search.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

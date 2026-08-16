@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "IIC Study App"
+version = "1.0.0"
+id = "artifacts/iic-study-app"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22698
+
+[services.development]
+run = "pnpm --filter @workspace/iic-study-app run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/iic-study-app", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/iic-study-app/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22698"
+BASE_PATH = "/"
