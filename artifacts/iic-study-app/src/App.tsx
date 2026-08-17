@@ -3739,7 +3739,7 @@ const App: React.FC = () => {
                 )}
                 {state.view === 'SUBJECTS' && state.selectedClass && (
                   <ErrorBoundary fallbackLabel="Subject Selection" compact>
-                    <SubjectSelection classLevel={state.selectedClass} stream={state.selectedStream} board={state.selectedBoard || undefined} onSelect={handleSubjectSelect} onBack={goBack} settings={state.settings} />
+                    <SubjectSelection classLevel={state.selectedClass} stream={state.selectedStream} board={state.selectedBoard || undefined} onSelect={handleSubjectSelect} onBack={goBack} settings={state.settings} lucentNotes={(state.settings?.lucentNotes || []) as any[]} />
                   </ErrorBoundary>
                 )}
                 {state.view === 'LESSON' && state.lessonContent && (
@@ -3768,10 +3768,6 @@ const App: React.FC = () => {
                           ['NOTES_HTML_FREE','NOTES_HTML_PREMIUM','NOTES_IMAGE_AI','NOTES_SIMPLE','NOTES_PREMIUM'].includes(state.lessonContent.type) ||
                           (!_lcIsUrl && !['VIDEO_LECTURE','MCQ_ANALYSIS','MCQ_SIMPLE','WEEKLY_TEST','PDF_FREE','PDF_PREMIUM','PDF_ULTRA','PDF_VIEWER'].includes(state.lessonContent.type))
                         );
-                        const _handleNextPdf = (_isPdfContent && _nextChapter) ? () => onChapterClick(_nextChapter, _pdfContentType) : undefined;
-                        const _handleNextVideo = (_isVideoContent && _nextChapter) ? () => onChapterClick(_nextChapter, state.lessonContent!.type as any) : undefined;
-                        const _handleNextNotes = (_isNotesContent && _nextChapter) ? () => onChapterClick(_nextChapter, state.lessonContent!.type as any) : undefined;
-                        const _handleNext = _handleNextVideo || _handleNextPdf || _handleNextNotes;
                         const _isFirstChapter = state.selectedClass !== 'COMPETITION' && _curIdx === 0;
                         return (
                           <LessonView
@@ -3788,7 +3784,6 @@ const App: React.FC = () => {
                               onLaunchContent={(c: any) => handleContentGeneration(c.isPremium ? 'NOTES_PREMIUM' : 'NOTES_HTML_FREE', undefined, false, c)}
                               onToggleAutoTts={handleToggleAutoTts}
                               onImmersiveChange={setIsLessonImmersive}
-                              onNext={_handleNext}
                               nextTitle={_nextChapter?.title}
                               isFirstChapter={_isFirstChapter}
                               onAdminBoard={(state.user?.role === 'ADMIN' || state.user?.role === 'SUB_ADMIN') ? () => setState(prev => ({...prev, view: 'ADMIN'})) : undefined}

@@ -28,6 +28,7 @@ import {
 import type { SystemSettings, User, StudentTab, TopicItem } from '../types';
 import { TodayMcqSession } from './TodayMcqSession';
 import { setMcqNotifSuppressed } from '../utils/creditNotify';
+import { toast } from 'sonner';
 import {
   getDueItems, getUpcomingItems, markNotesReviewed, markMcqDone,
   clearTracker, getAllBuckets, getTrackerMap, bucketKey, keywordsForBucket,
@@ -51,6 +52,7 @@ interface Props {
   onMcqAnswer?: (isCorrect: boolean) => boolean;
   /** Called before starting a Revision Hub MCQ session; call confirm() to proceed */
   onBeforeMcqOpen?: (confirm: () => void) => void;
+  autoStartMcq?: boolean;
 }
 
 type ActiveTab = 'daily' | 'results';
@@ -133,7 +135,7 @@ function groupBySubjectChapter(items: WeakBucket[]): SubjectGroup[] {
 // ─────────────────────────────────────────────────────────────
 
 export const RevisionHubV2: React.FC<Props> = (props) => {
-  const { user, settings, onBack, onOpenChapter, onOpenMcq, onTabChange, onNavigateContent, onUpdateUser, hideHeader = false, onMcqAnswer } = props;
+  const { user, settings, onBack, onOpenChapter, onOpenMcq, onTabChange, onNavigateContent, onUpdateUser, hideHeader = false, onMcqAnswer, autoStartMcq } = props;
   const revisionConfig = settings?.revisionConfig;
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('daily');
@@ -233,11 +235,14 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
   const dueNotes = useMemo(() => dueItems.filter(b => !b.stage || b.stage === 'NOTES'), [dueItems]);
   const dueMcq   = useMemo(() => dueItems.filter(b => b.stage === 'MCQ'),               [dueItems]);
 
+  const autoStartedRef = React.useRef(false);
+
   const notesGroups    = useMemo(() => groupBySubjectChapter(dueNotes),    [dueNotes]);
   const mcqGroups      = useMemo(() => groupBySubjectChapter(dueMcq),      [dueMcq]);
 
   const toggleChapter = (key: string) =>
     setExpandedChapters(p => ({ ...p, [key]: !p[key] }));
+
 
   // ── Load matching notes for a bucket from local storage (no AI) ──────────
   const loadNotesForBucket = useCallback(async (b: WeakBucket) => {
@@ -364,6 +369,17 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
     setPracticeDone(false);
     setPracticeActive(true);
   };
+
+  useEffect(() => {
+    if (autoStartMcq && !autoStartedRef.current && dueMcq.length > 0) {
+      const withQs = dueMcq.filter(b => b.wrongQuestions && b.wrongQuestions.length > 0);
+      if (withQs.length > 0) {
+        autoStartedRef.current = true;
+        startPracticeAll();
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStartMcq, dueMcq]);
 
   const handlePracticeRate = (got: boolean) => {
     // Award XP for school revision hub MCQ answer; respect gate (returns false if daily limit hit)
@@ -581,18 +597,28 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
           user={user}
           onClose={() => setShowAllNotesModal(false)}
           onTopicsMarked={(markedBuckets) => {
-            markedBuckets.forEach(b => {
-              const k = bucketKey(b.subjectId, b.chapterId, b.pageKey, b.topic);
-              markNotesReviewed(k, revisionConfig);
-            });
-            // ── +5 pts per topic notes padha ──────────────────────────────
-            if (onUpdateUser && markedBuckets.length > 0) {
-              const notesPts = markedBuckets.length * 5;
-              const updated = { ...user, totalScore: (user.totalScore || 0) + notesPts };
-              onUpdateUser(updated);
+            try {
+              markedBuckets.forEach(b => {
+                const k = bucketKey(b.subjectId, b.chapterId, b.pageKey, b.topic);
+                markNotesReviewed(k, revisionConfig);
+              });
+              // ── +5 pts per topic notes padha ──────────────────────────────
+              if (onUpdateUser && markedBuckets.length > 0) {
+                const notesPts = markedBuckets.length * 5;
+                const updated = { ...user, totalScore: (user.totalScore || 0) + notesPts };
+                onUpdateUser(updated);
+                setTimeout(() => {
+                  toast.success("Reading Task Completed!", {
+                    description: `${markedBuckets.length} topics marked as read.`
+                  });
+                }, 500);
+              }
+            } catch (err) {
+              console.error("Error marking topics as read:", err);
+            } finally {
+              setShowAllNotesModal(false);
+              reload();
             }
-            setShowAllNotesModal(false);
-            reload();
           }}
         />
       )}

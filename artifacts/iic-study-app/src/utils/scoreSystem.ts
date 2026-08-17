@@ -1,17 +1,17 @@
 /**
  * Score System — daily limits, subscription multipliers, activity milestones
- * Daily score limit: 5000 pts (Free) / 7000 pts (Basic) / 10000 pts (Ultra)
+ * Daily score limit: 1500 pts (Free) / 2500 pts (Basic) / 3500 pts (Ultra)
  * Milestones: 20%=5, 40%=10, 60%=15, 80%=20, 100%=25 base pts
  * Multipliers: Free=1x, Basic=1.2x (+20%), Ultra=1.5x (+50%)
  */
 
-export const DAILY_SCORE_LIMIT = 5000;
+export const DAILY_SCORE_LIMIT = 1500;
 
-/** Fixed daily score limits by tier (Free=5000, Basic=7000, Ultra=10000) */
+/** Fixed daily score limits by tier (Free=1500, Basic=25000, Ultra=3500) */
 const DAILY_TIER_LIMITS: Record<string, number> = {
-  FREE:  5000,
-  BASIC: 7000,
-  ULTRA: 10000,
+  FREE:  1500,
+  BASIC: 2500,
+  ULTRA: 3500,
 };
 
 /** Dynamic daily score limit based on subscription + optional temporary limit boost (from redeem code or event) */
@@ -21,7 +21,7 @@ export const getDailyScoreLimit = (
   scoreLimitBoostPercent?: number,
   scoreLimitBoostExpiry?: string,
 ): number => {
-  const base = isPremium ? (DAILY_TIER_LIMITS[subscriptionLevel ?? 'FREE'] ?? 5000) : 5000;
+  const base = isPremium ? (DAILY_TIER_LIMITS[subscriptionLevel ?? 'FREE'] ?? 1500) : 1500;
   // Only apply boost if it hasn't expired
   const boostActive = scoreLimitBoostPercent && scoreLimitBoostPercent > 0
     && (!scoreLimitBoostExpiry || new Date(scoreLimitBoostExpiry).getTime() > Date.now());

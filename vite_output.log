@@ -1,0 +1,13 @@
+
+> @workspace/iic-study-app@0.0.0 dev /app/artifacts/iic-study-app
+> vite --config vite.config.ts --host 0.0.0.0
+
+
+  VITE v7.3.6  ready in 914 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: http://192.168.0.2:5173/
+[BABEL] Note: The code generator has deoptimised the styling of /app/artifacts/iic-study-app/src/components/StudentDashboard.tsx as it exceeds the max of 500KB.
+6:34:30 AM [vite] (client) ✨ new dependencies optimized: sonner
+6:34:30 AM [vite] (client) ✨ optimized dependencies changed. reloading
+[BABEL] Note: The code generator has deoptimised the styling of /app/artifacts/iic-study-app/src/components/StudentDashboard.tsx as it exceeds the max of 500KB.

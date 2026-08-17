@@ -251,17 +251,26 @@ export const TodayAllNotesModal: React.FC<Props> = ({ dueNotes, user, onClose, o
   };
 
   const handleConfirmExit = () => {
-    const markedBuckets = dueNotes.filter((_, i) => checkedIdxs.has(i));
-    if (onTopicsMarked && markedBuckets.length > 0) {
-      onTopicsMarked(markedBuckets);
+    try {
+      const markedBuckets = dueNotes.filter((_, i) => checkedIdxs.has(i));
+      if (onTopicsMarked && markedBuckets.length > 0) {
+        onTopicsMarked(markedBuckets);
+      }
+    } catch (err) {
+      console.error("Error in onTopicsMarked", err);
+    } finally {
+      setShowExitPopup(false);
+      onClose();
     }
-    setShowExitPopup(false);
-    onClose();
   };
 
   const handleSkipExit = () => {
-    setShowExitPopup(false);
-    onClose();
+    try {
+      // Intentionally left empty, nothing to do before close
+    } finally {
+      setShowExitPopup(false);
+      onClose();
+    }
   };
 
   return (

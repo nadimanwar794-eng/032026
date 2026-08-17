@@ -257,10 +257,16 @@ function TaskLessonCard({
           <p className="text-xs text-slate-500 font-medium truncate">{lessonTitle}</p>
           {/* Mini progress bar */}
           <div className="flex items-center gap-2 mt-1.5">
-            <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-              <div className={`h-full rounded-full transition-all ${allDone ? 'bg-emerald-500' : 'bg-blue-500'}`} style={{ width: `${pct}%` }} />
-            </div>
-            <span className="text-[10px] font-bold text-slate-400 shrink-0">{readCount}/{totalPages}p</span>
+            {totalPages > 0 ? (
+                <>
+                    <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full transition-all ${allDone ? 'bg-emerald-500' : 'bg-blue-500'}`} style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className="text-[10px] font-bold text-slate-400 shrink-0">{readCount}/{totalPages}p</span>
+                </>
+            ) : (
+                <span className="text-[10px] font-bold text-slate-400 shrink-0">0 pages</span>
+            )}
           </div>
         </div>
         <div className="flex flex-col items-end gap-1 shrink-0">
@@ -425,6 +431,86 @@ function LessonDetailRow({ lesson, idx, isCurrent, mcqHistory }: {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+
+// ── Category Subject Card (Subjects tab) ──────────────────────────────────────
+function CatSubjectCard({
+  catId, sub, lessons, mcqHistory, coins, onChangeStart, onCoinFlash,
+}: {
+  catId: string; sub: RoutineCategorySubject; lessons: LucentEntry[]; mcqHistory: any[];
+  coins: number; onChangeStart: (catId: string, subjectId: string, idx: number) => void;
+  onCoinFlash: (msg: string) => void;
+}) {
+  const [targetStart, setTargetStart] = useState(sub.currentLessonIndex);
+
+  // Sync if external updates happen
+  useEffect(() => { setTargetStart(sub.currentLessonIndex); }, [sub.currentLessonIndex]);
+
+  const meta = SUBJECT_META[sub.subjectId] || DEFAULT_META;
+  const skipCost = getSkipCost(sub.currentLessonIndex, targetStart);
+
+  return (
+    <div className={`rounded-2xl border overflow-hidden transition-all shadow-sm ${meta.border} bg-white`}>
+      {/* Header: subject name */}
+      <div className="flex items-center gap-3 px-4 py-3 bg-slate-50/50">
+        <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${meta.bg} ${meta.color}`}>
+          {sub.emoji || meta.icon}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="font-black text-slate-800 text-sm truncate">{sub.displayName || capitalise(sub.subjectId)}</p>
+          <p className="text-[10px] text-slate-500 font-medium">{sub.bookName || (`Class ${sub.classLevel}`)}</p>
+        </div>
+      </div>
+
+      {/* Lesson navigator */}
+      <div className="border-t border-slate-100 px-4 pb-3.5 pt-3">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              const next = Math.max(0, targetStart - 1);
+              setTargetStart(next);
+            }}
+            className="w-9 h-9 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center active:bg-slate-200 transition shrink-0"
+          >
+            <Minus size={14} className="text-slate-600" />
+          </button>
+
+          <div className="flex-1 text-center bg-slate-50 rounded-xl border border-slate-100 py-2 px-2">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider leading-none mb-0.5">Lesson {targetStart + 1}</p>
+            <p className="text-[13px] font-bold text-slate-800 leading-tight truncate">
+              {lessons[targetStart]?.lessonTitle || `Lesson ${targetStart + 1}`}
+            </p>
+            {skipCost > 0 && <p className="text-[9px] text-amber-600 font-black mt-0.5">−{skipCost}🪙</p>}
+            {skipCost === 0 && targetStart !== sub.currentLessonIndex && <p className="text-[9px] text-emerald-600 font-black mt-0.5">Free!</p>}
+          </div>
+
+          <button
+            onClick={() => {
+              const next = Math.min(lessons.length - 1, targetStart + 1);
+              setTargetStart(next);
+            }}
+            className="w-9 h-9 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center active:bg-slate-200 transition shrink-0"
+          >
+            <Plus size={14} className="text-slate-600" />
+          </button>
+        </div>
+
+        {targetStart !== sub.currentLessonIndex && (
+          <button
+            onClick={() => {
+              if (skipCost > coins) { onCoinFlash(`Coins kam hain! Chahiye: ${skipCost}🪙`); return; }
+              onChangeStart(catId, sub.subjectId, targetStart);
+              onCoinFlash(skipCost > 0 ? `Start changed! −${skipCost}🪙` : 'Start point changed! Free 🎉');
+            }}
+            className="mt-2.5 w-full py-2 rounded-xl bg-blue-600 text-white text-xs font-black active:scale-95 transition shadow-sm"
+          >
+            {skipCost > 0 ? `✓ Apply (−${skipCost}🪙 deduct hoga)` : '✓ Apply (Free)'}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -948,12 +1034,28 @@ function RoutineSetupSheet({ allNotes, currentMode, currentBoard, currentClass, 
 
   const availableBooks = useMemo(() => {
     const s = new Set<string>();
-    allNotes.forEach(n => { const bk = (n as any).bookName?.trim(); if (bk) s.add(bk); });
+    allNotes.forEach(n => {
+      const bk = (n as any).bookName?.trim();
+      if (bk) {
+          const bkLower = bk.toLowerCase();
+          if (bkLower !== 'speedy science' && bkLower !== 'speedy social science' && bkLower !== 'sar sangrah' && bkLower !== 'mcq practice') {
+              s.add(bk);
+          }
+      } else if ((n as any).classLevel === 'COMPETITION') {
+          s.add('Lucent');
+      }
+    });
+
+    // Ensure Lucent is included if there's any competition note, as fallback
+    if (allNotes.some(n => (n as any).classLevel === 'COMPETITION')) {
+       s.add('Lucent');
+    }
+
     return Array.from(s).sort();
   }, [allNotes]);
 
   const selectedBook = Array.from(selectedBooks)[0] || '';
-  const canSave = mode === 'SCHOOL' ? !!classLevel : mode === 'COMPETITION' ? !!selectedBook : false;
+  const canSave = mode === 'SCHOOL' ? !!classLevel : mode === 'COMPETITION' ? selectedBooks.size > 0 : false;
 
   return (
     <div className="fixed inset-0 z-[600] flex items-end bg-slate-900/60 backdrop-blur-sm" onClick={onClose}>
@@ -1018,23 +1120,35 @@ function RoutineSetupSheet({ allNotes, currentMode, currentBoard, currentClass, 
           )}
 
           {mode === 'COMPETITION' && (
-            <label className="block">
-              <span className="block text-xs font-black text-slate-600 mb-1.5">Book name</span>
-              <div className="relative">
-                <select
-                  value={selectedBook}
-                  onChange={e => setSelectedBooks(e.target.value ? new Set([e.target.value]) : new Set())}
-                  className="w-full appearance-none rounded-xl border-2 border-orange-200 bg-orange-50 px-4 py-3 pr-10 text-sm font-black text-orange-800 outline-none focus:border-orange-500"
-                >
-                  <option value="">Book name chuno</option>
-                  {availableBooks.map(book => <option key={book} value={book}>{book}</option>)}
-                </select>
-                <ChevronDown size={16} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-orange-400" />
+            <div className="block">
+              <span className="block text-xs font-black text-slate-600 mb-1.5">Select Books (Multiple possible)</span>
+              <div className="flex flex-col gap-2 max-h-48 overflow-y-auto p-1">
+                {availableBooks.map(book => (
+                  <label key={book} className="flex items-center gap-3 p-3 rounded-xl border border-orange-100 bg-orange-50/50 cursor-pointer active:bg-orange-100 transition-colors">
+                    <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 ${selectedBooks.has(book) ? 'border-orange-500 bg-orange-500' : 'border-slate-300 bg-white'}`}>
+                      {selectedBooks.has(book) && <span className="text-white text-xs font-bold">✓</span>}
+                    </div>
+                    <span className="text-sm font-black text-orange-800 flex-1">{book}</span>
+                    <input
+                      type="checkbox"
+                      className="hidden"
+                      checked={selectedBooks.has(book)}
+                      onChange={(e) => {
+                        setSelectedBooks(prev => {
+                          const next = new Set(prev);
+                          if (e.target.checked) next.add(book);
+                          else next.delete(book);
+                          return next;
+                        });
+                      }}
+                    />
+                  </label>
+                ))}
               </div>
               {availableBooks.length === 0 && (
                 <span className="block text-xs text-slate-400 font-medium mt-2">Koi book notes nahi mili — pehle notes add karo.</span>
               )}
-            </label>
+            </div>
           )}
         </div>
         <div className="px-5 pb-8 pt-3 border-t border-slate-100 shrink-0 space-y-2.5">
@@ -1042,11 +1156,11 @@ function RoutineSetupSheet({ allNotes, currentMode, currentBoard, currentClass, 
             onClick={() => {
               if (!canSave) return;
               if (mode === 'SCHOOL') onSave('SCHOOL', board, classLevel, []);
-              if (mode === 'COMPETITION') onSave('COMPETITION', null, null, [selectedBook]);
+              if (mode === 'COMPETITION') onSave('COMPETITION', null, null, Array.from(selectedBooks));
             }}
             disabled={!canSave}
             className={`w-full py-3.5 rounded-2xl font-black text-sm transition active:scale-[0.98] ${canSave ? mode === 'COMPETITION' ? 'bg-orange-500 text-white shadow-sm' : 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-400'}`}>
-            {!mode ? 'Pehle option chuno' : !canSave ? mode === 'SCHOOL' ? 'Class chuno' : 'Book name chuno' : 'Save Karo ✓'}
+            {!mode ? 'Pehle option chuno' : !canSave ? mode === 'SCHOOL' ? 'Class chuno' : 'Kam se kam 1 book chuno' : 'Save Karo ✓'}
           </button>
           {/* Destination hint — tells user where they'll land after saving */}
           <div className="flex items-center justify-center gap-1.5">
@@ -1409,7 +1523,7 @@ function CategoryEditSheet({ category, allNotes, existingCategories, routineMode
           {/* Current subjects */}
           <div>
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Is Category Ke Subjects</p>
-            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+            <div className="bg-[#f5f2eb] rounded-3xl border border-[#e8e4db] overflow-hidden shadow-sm">
               {subjects.map((sub, i) => {
                 const key = `${sub.bookName}||${sub.classLevel || ''}||${sub.subjectId}`;
                 const canRemove = subjects.length > 1;
@@ -1530,7 +1644,7 @@ function CategoryManagerSheet({ categories, tier, level, userCredits, data, onRe
           )}
 
           {categories.length > 0 ? (
-            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+            <div className="bg-[#f5f2eb] rounded-3xl border border-[#e8e4db] overflow-hidden shadow-sm">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-4 pt-3 pb-1">Active Categories</p>
               {categories.map((cat, i) => (
                 <div key={cat.id} className={`flex items-center gap-3 px-4 py-3 ${i < categories.length - 1 ? 'border-b border-slate-100' : ''}`}>
@@ -1599,11 +1713,12 @@ interface MyRoutineProps {
   /** Navigate to Revision Hub tab — receives lessonId so caller can apply 50-coin discount */
   onGoToRevision?: (lessonId: string, lessonTitle?: string) => void;
   settings?: any;
-  onOpenRevisionHub?: (lessonId?: string, lessonTitle?: string) => void;
+  onOpenRevisionHub?: (lessonId?: string, lessonTitle?: string, autoStartMcq?: boolean) => void;
   onPracticeMistakes?: (mistakes: any[]) => void;
+  onOpenLesson?: (lessonId: string) => void;
 }
 
-export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], onBack, onUserUpdate, onGoToRevision, settings, onOpenRevisionHub, onPracticeMistakes }) => {
+export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], onBack, onUserUpdate, onGoToRevision, settings, onOpenRevisionHub, onPracticeMistakes, onOpenLesson }) => {
   const userId = user?.id || 'guest';
   const mcqHistory: any[] = user?.mcqHistory || [];
   const subTier: UserSubTier = getUserSubTier(user);
@@ -1834,6 +1949,42 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
   const handleToggleApply = (subId: string) => {
     setData(prev => ({ ...prev, subjects: prev.subjects.map(s => s.id === subId ? { ...s, routineApplied: !s.routineApplied } : s) }));
   };
+  const handleCatChangeStart = (catId: string, subjectId: string, newIdx: number) => {
+    setData(prev => {
+      const cats = [...(prev.routineCategories || [])];
+      const ci = cats.findIndex(c => c.id === catId);
+      if (ci === -1) return prev;
+
+      const cat = { ...cats[ci] };
+      const subjects = [...cat.subjects];
+      const si = subjects.findIndex(s => s.subjectId === subjectId);
+      if (si === -1) return prev;
+
+      const sub = subjects[si];
+      const cost = getSkipCost(sub.currentLessonIndex, newIdx);
+      const userCredits = (user.credits || 0) + (user.bonusCredits || 0);
+
+      if (cost > userCredits) {
+        showToast(`Coins kam hain! Chahiye: ${cost}🪙`, 'error');
+        return prev;
+      }
+
+      if (cost > 0 && onUserUpdate) {
+        const u = { ...user, credits: Math.max(0, (user.credits || 0) - cost) };
+        onUserUpdate(u);
+        try { saveUserToLive(u); } catch (_) {}
+      }
+
+      subjects[si] = { ...sub, currentLessonIndex: newIdx };
+      cat.subjects = subjects;
+      cats[ci] = cat;
+
+      const next = { ...prev, routineCategories: cats };
+      syncRoutineNow(userId, next);
+      return next;
+    });
+  };
+
   const handleChangeStart = (subId: string, newIdx: number) => {
     const sub = data.subjects.find(s => s.id === subId);
     if (!sub) return;
@@ -2102,14 +2253,14 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
         {activeView === 'home' && (
           <div className="mx-4 mt-4 space-y-3">
             {!data.enabled ? (
-              <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center">
+              <div className="bg-[#f5f2eb] rounded-3xl border border-[#e8e4db] p-8 text-center">
                 <CalendarCheck size={44} className="text-slate-200 mx-auto mb-3" />
                 <p className="font-black text-slate-700 mb-1">Routine OFF Hai</p>
                 <p className="text-sm text-slate-500 mb-4">ON karo daily tasks dekhne ke liye</p>
                 <button onClick={toggleRoutine} className="px-6 py-2.5 rounded-xl bg-blue-600 text-white font-black text-sm active:scale-95 transition">Routine ON Karo</button>
               </div>
             ) : categories.length === 0 ? (
-              <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center">
+              <div className="bg-[#f5f2eb] rounded-3xl border border-[#e8e4db] p-8 text-center">
                 <span className="text-5xl mb-3 block">📚</span>
                 <p className="font-black text-slate-700 mb-1">Koi Category Nahi</p>
                 <p className="text-sm text-slate-500 mb-4">Pehle ek category add karo — phir daily task shuru hoga</p>
@@ -2128,6 +2279,7 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
                 onPracticeMistakes={onPracticeMistakes || (() => {})}
                 onOpenSubjects={() => setActiveView('subjects')}
                 onOpenTracking={() => setActiveView('tracking')}
+                onOpenLesson={onOpenLesson}
               />
             )}
           </div>
@@ -2135,17 +2287,36 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
 
         {/* SUBJECTS */}
         {activeView === 'subjects' && (
-          <div className="mx-4 mt-4 space-y-3">
-            <p className="text-xs font-black text-slate-500 uppercase tracking-widest">{subjects.length} Subjects</p>
-            {subjects.length === 0 ? (
-              <div className="bg-white rounded-2xl border border-slate-200 p-6 text-center">
+          <div className="mx-4 mt-4 space-y-5">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-black text-slate-500 uppercase tracking-widest">{categories.length} Categories</p>
+            </div>
+
+            {categories.length === 0 ? (
+              <div className="bg-[#f5f2eb] rounded-3xl border border-[#e8e4db] p-6 text-center">
                 <p className="text-sm text-slate-400">Daily Hub mein categories add karo pehle</p>
               </div>
-            ) : subjects.map(sub => (
-              <SubjectCard key={sub.id} sub={sub} lessons={subjectGroups[sub.id] || []} mcqHistory={mcqHistory}
-                coins={userCredits} onToggleApply={() => handleToggleApply(sub.id)}
-                onChangeStart={(idx) => handleChangeStart(sub.id, idx)}
-                onCoinFlash={(msg) => showToast(msg, msg.includes('kam') ? 'error' : msg.includes('−') ? 'coin' : 'success')} />
+            ) : categories.map(cat => (
+              <div key={cat.id} className="bg-slate-50 rounded-2xl border border-slate-200 p-3 shadow-sm space-y-3">
+                <div className="flex items-center gap-2 px-1">
+                  <span className="text-xl">{cat.emoji}</span>
+                  <h3 className="font-black text-slate-800 text-sm">{cat.categoryName}</h3>
+                </div>
+                <div className="space-y-3">
+                  {cat.subjects.map(sub => (
+                    <CatSubjectCard
+                      key={`${cat.id}-${sub.subjectId}`}
+                      catId={cat.id}
+                      sub={sub}
+                      lessons={getNotesForSubject(sub, routineNotes)}
+                      mcqHistory={mcqHistory}
+                      coins={userCredits}
+                      onChangeStart={handleCatChangeStart}
+                      onCoinFlash={(msg) => showToast(msg, msg.includes('kam') ? 'error' : msg.includes('−') ? 'coin' : 'success')}
+                    />
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         )}

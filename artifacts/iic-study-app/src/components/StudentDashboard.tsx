@@ -69,7 +69,7 @@ import { downloadAsMHTML, downloadAsHTML, downloadElementAsHTML } from "../utils
 import { renderMathInHtml, formatExplanationHtml } from "../utils/mathUtils";
 import { recordLogin, updateSessionDuration, getLoginHistory, formatDuration, formatLoginTime, type LoginSession } from "../utils/loginHistory";
 import { getNewContentItems, markContentItemSeen, markAllContentItemsSeen, formatContentDate, type ContentNotifItem } from "../utils/contentNotifications";
-import { saveRecentHomework, getRecentHomeworks, removeRecentHomework, getRecentChapters, removeRecentChapter, saveRecentLucent, getRecentLucent, removeRecentLucent, markNoteFullyRead, getFullyReadMap, markReadToday, getReadingStreak, getReadDates, getBestReadingDay, getTodayItemCount, type RecentChapterEntry, type RecentHwEntry, type RecentLucentEntry, type StreakInfo, type BestDay } from "../utils/recentReads";
+import { clearAllRecentReads, saveRecentHomework, getRecentHomeworks, removeRecentHomework, getRecentChapters, removeRecentChapter, saveRecentLucent, getRecentLucent, removeRecentLucent, markNoteFullyRead, getFullyReadMap, markReadToday, getReadingStreak, getReadDates, getBestReadingDay, getTodayItemCount, type RecentChapterEntry, type RecentHwEntry, type RecentLucentEntry, type StreakInfo, type BestDay } from "../utils/recentReads";
 import { markRoutinePageRead, markRoutineMcqDone, isRoutinePageRead, isRoutineMcqDone, updateRoutineMcqScore, recordMistake, addPageTime, isLessonAutoComplete, isLessonRewarded, markLessonRewarded, markRoutinePageMcqDone, updateRoutinePageMcqScore, isRoutinePageMcqDone, getRoutinePageMcqScore, getAutoPageBoxState, getPageTime, getLessonStats, getMultiLessonStats, getProgressColor5, getProgressTicks } from "../utils/routineAutoTrack";
 import { loadRoutineData, saveRoutineData, checkAndResetDaily, generateDailyTask, advanceLessonInCycle, getDiscountFactor, hasActiveDiscount, getPageReadReward, LESSON_COMPLETE_REWARD, unlockRevisionLesson } from "../utils/routineStorage";
 import { SubscriptionEngine } from "../utils/engines/subscriptionEngine";
@@ -2110,7 +2110,7 @@ export const StudentDashboard: React.FC<Props> = ({
       const tasks: Promise<void>[] = [];
 
       classes.forEach((cls) => {
-        const subs = getSubjectsList(cls, stream, board).filter(
+        const subs = getSubjectsList(cls, stream, board, settings).filter(
           (s) => !(settings?.hiddenSubjects || []).includes(s.id),
         );
         subs.forEach((sub) => {
@@ -2920,10 +2920,8 @@ export const StudentDashboard: React.FC<Props> = ({
           deferStudyCoins(freshU.id, _coinEarned);
           handleUserUpdate({ ...freshU, totalScore: _newXP });
           // Always show top banner for timer coin earn (guaranteed, doesn't rely on handleUserUpdate diff)
-          if (creditToastTimerRef.current) clearTimeout(creditToastTimerRef.current);
-          setCreditDeductToast({ visible: true, previous: _prevCR, deducted: _coinEarned, current: _newCR, type: 'ADD', xpPrevious: _prevXP, xpEarned: earned, xpCurrent: _newXP });
-          creditToastTimerRef.current = setTimeout(() => setCreditDeductToast(null), 2000);
-          triggerRewardEffect(earned, `+${earned} pts ${tabEmoji} ${rewardReason}`);
+          // Muted timer rewards: accumulated via deferStudyCoins for Home payout.
+          // Removed setCreditDeductToast & triggerRewardEffect here.
         }
       }
     }, 1000);
@@ -3219,10 +3217,8 @@ export const StudentDashboard: React.FC<Props> = ({
           handleUserUpdate({ ...freshU, totalScore: _newScore });
           // Update credit-sync key so HOME-tab sync does NOT double-convert these pts to credits
           try { localStorage.setItem(`nst_credit_sync_score_${freshU.id}`, String(_newScore)); } catch {}
-          if (creditToastTimerRef.current) clearTimeout(creditToastTimerRef.current);
-          setCreditDeductToast({ visible: true, previous: _prevCR, deducted: _coinEarned, current: _newCR, type: 'ADD', xpPrevious: _prevXP2, xpEarned: earned, xpCurrent: _newScore });
-          creditToastTimerRef.current = setTimeout(() => setCreditDeductToast(null), 2000);
-          triggerRewardEffect(earned, `+${earned} pts ${tabEmoji} ${rewardReason}!`);
+          // Muted timer rewards: accumulated via deferStudyCoins for Home payout.
+          // Removed setCreditDeductToast & triggerRewardEffect here.
         }
       }
     }, 1000);
@@ -3331,6 +3327,7 @@ export const StudentDashboard: React.FC<Props> = ({
   });
   const [showStarredPage, setShowStarredPage] = useState(false);
   const [showRevisionHubScreen, setShowRevisionHubScreen] = useState(false);
+  const [initialRevisionAutoStartMcq, setInitialRevisionAutoStartMcq] = useState(false);
   const [showMyRoutine, setShowMyRoutine] = useState(false);
   const [showDailyEventPage, setShowDailyEventPage] = useState(false);
   // XP badge useEffect — yahan rakhna zaroori hai (showRevisionHubScreen/showMyRoutine/showChat ke baad)
@@ -3785,18 +3782,43 @@ export const StudentDashboard: React.FC<Props> = ({
     return () => { try { __routineTimeFlushRef.current(); } catch {} };
   }, [hwActiveHwId]);
 
-  // ── My Routine: mark page read only after MIN reading time ──────────────────
-  // Formula: READING_REWARD_BASE(5) × 5 × 60% = 15 seconds
-  // Page tab "read" count hogi jab user ne us page pe kam se kam 15 second padha ho.
-  const ROUTINE_PAGE_READ_MIN_SEC = Math.round(5 * 5 * 0.60); // 15 seconds
+  // ── My Routine: mark page read only after MIN reading time (Dynamic Word Count) ──────────────────
+  const [readingProgressInfo, setReadingProgressInfo] = useState<{pct: number, leftSec: number, reqSec: number} | null>(null);
+
   useEffect(() => {
-    if (!lucentNoteViewer?.id) return;
+    if (!lucentNoteViewer?.id) {
+      setReadingProgressInfo(null);
+      return;
+    }
     const _lid = lucentNoteViewer.id;
     const _pi  = lucentPageIndex;
-    if (isRoutinePageRead(_lid, _pi)) return; // already marked — skip
+
+    // 1. Get current page content and calculate required time
+    const pageObj = lucentNoteViewer.pages?.[_pi];
+    const htmlContent = pageObj?.text || '';
+
+    // Strip HTML to count pure words
+    const tmp = document.createElement('div');
+    tmp.innerHTML = htmlContent;
+    const textOnly = tmp.textContent || tmp.innerText || '';
+    const wordCount = textOnly.trim().split(/\s+/).filter(Boolean).length;
+
+    // Calculate required time: 150 words per minute (WPM) = 2.5 words per second
+    // Min 10 seconds, Max 300 seconds (5 mins)
+    let dynamicReqSec = Math.round(wordCount / 2.5);
+    if (dynamicReqSec < 10) dynamicReqSec = 10;
+    if (dynamicReqSec > 300) dynamicReqSec = 300;
+
+    if (isRoutinePageRead(_lid, _pi)) {
+      setReadingProgressInfo({ pct: 100, leftSec: 0, reqSec: dynamicReqSec });
+      return; // already marked — skip
+    }
 
     const checkAndMark = () => {
-      if (isRoutinePageRead(_lid, _pi)) return true; // already done
+      if (isRoutinePageRead(_lid, _pi)) {
+        setReadingProgressInfo({ pct: 100, leftSec: 0, reqSec: dynamicReqSec });
+        return true; // already done
+      }
       // Stored time from previous visits on this page
       const storedSecs = getPageTime(_lid, _pi);
       // Live time in current session (since page opened)
@@ -3805,8 +3827,15 @@ export const StudentDashboard: React.FC<Props> = ({
         ? Math.round((Date.now() - enterTs) / 1000)
         : 0;
       const totalSecs = storedSecs + liveSecs;
-      if (totalSecs >= ROUTINE_PAGE_READ_MIN_SEC) {
+
+      const pct = Math.min(100, Math.round((totalSecs / dynamicReqSec) * 100));
+      const leftSec = Math.max(0, dynamicReqSec - totalSecs);
+
+      setReadingProgressInfo({ pct, leftSec, reqSec: dynamicReqSec });
+
+      if (totalSecs >= dynamicReqSec) {
         markRoutinePageRead(_lid, _pi);
+        setReadingProgressInfo({ pct: 100, leftSec: 0, reqSec: dynamicReqSec });
         return true;
       }
       return false;
@@ -3822,7 +3851,7 @@ export const StudentDashboard: React.FC<Props> = ({
 
     return () => clearInterval(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lucentPageIndex, lucentNoteViewer?.id]);
+  }, [lucentPageIndex, lucentNoteViewer?.id, lucentNoteViewer?.pages]);
 
   // ── My Routine: midnight reset + lesson-complete reward ───────────────────────
   useEffect(() => {
@@ -3835,6 +3864,65 @@ export const StudentDashboard: React.FC<Props> = ({
 
         // Midnight reset
         if (_rd.lastResetDate !== _today) {
+          // --- Mailbox Integration for Unclaimed Task Rewards ---
+          // Before resetting, check if yesterday's task was completed but the 100 points reward was unclaimed.
+          const _yesterday = new Date();
+          _yesterday.setDate(_yesterday.getDate() - 1);
+          const _yesterdayStr = _yesterday.toISOString().split('T')[0];
+          const _yTask = _rd.dailyTasks[_yesterdayStr];
+
+          if (_yTask) {
+             const TASK_CLAIMED_KEY = `iic_task_pts_claimed_${_fu.id}_${_yesterdayStr}`;
+             let _claimed = false;
+             try {
+                const arr = JSON.parse(localStorage.getItem(TASK_CLAIMED_KEY) || '[]');
+                _claimed = arr.length > 0;
+             } catch { }
+
+             // Check if all lessons in yesterday's task were complete
+             let _allDone = false;
+             const _yLucentNotes = (settings?.lucentNotes || []) as any[];
+
+             // Get lessons for yesterday
+             const yLessons = [];
+             if (_yTask.scienceLessonId) yLessons.push(_yTask.scienceLessonId);
+             if (_yTask.socialScienceLessonId) yLessons.push(_yTask.socialScienceLessonId);
+             (_yTask.otherTasks || []).forEach((t: any) => { if (t.lessonId) yLessons.push(t.lessonId); });
+
+             if (yLessons.length > 0) {
+               _allDone = yLessons.every((lid: string) => {
+                 const _note = _yLucentNotes.find((n: any) => n.id === lid);
+                 const _totalPages = _note?.pages?.length || 0;
+                 return _totalPages > 0 && isLessonAutoComplete(lid, _totalPages);
+               });
+             }
+
+             if (_allDone && !_claimed) {
+                // Task was fully completed but user forgot to claim! Send reward to Mailbox.
+                const inboxMsg = {
+                  id: `auto-task-gift-${_yesterdayStr}-${Date.now()}`,
+                  text: 'You completed all your Routine tasks yesterday but forgot to claim your reward. Here is your bonus!',
+                  type: 'GIFT',
+                  date: new Date().toISOString(),
+                  read: false,
+                  isClaimed: false,
+                  gift: { type: 'CREDITS', value: 100 }
+                };
+
+                // Add to user's inbox immediately
+                handleUserUpdate({
+                  ..._fu,
+                  inbox: [inboxMsg, ...(_fu.inbox || [])]
+                });
+
+                // Mark as claimed so we don't send it again
+                try {
+                  localStorage.setItem(TASK_CLAIMED_KEY, JSON.stringify(['auto-claimed']));
+                } catch {}
+             }
+          }
+          // --------------------------------------------------------
+
           _rd = checkAndResetDaily(_rd);
           // Generate fresh daily task with real lesson IDs
           const _lucentNotes = (settings?.lucentNotes || []) as any[];
@@ -4424,7 +4512,7 @@ export const StudentDashboard: React.FC<Props> = ({
       const stream = (user.stream || 'Science') as any;
       // Resolve subject by name. Try exact (case-insensitive) match first,
       // then a normalised match that ignores hyphens / extra whitespace.
-      const subs = getSubjectsList(cls, stream, board);
+      const subs = getSubjectsList(cls, stream, board, settings);
       const wanted = (hit.subjectName || '').toLowerCase().replace(/[-\s]+/g, ' ').trim();
       let subj = subs.find(s => s.name.toLowerCase() === hit.subjectName?.toLowerCase());
       if (!subj) {
@@ -4468,7 +4556,7 @@ export const StudentDashboard: React.FC<Props> = ({
       const board = (hit.board === 'BSEB' ? 'BSEB' : hit.board === 'NCERT_HI' ? 'NCERT_HI' : 'NCERT_EN') as 'BSEB' | 'NCERT_EN' | 'NCERT_HI';
       const cls = hit.classLevel;
       const stream = (user.stream || 'Science') as any;
-      const subs = getSubjectsList(cls, stream, board);
+      const subs = getSubjectsList(cls, stream, board, settings);
       const wanted = (hit.subjectName || '').toLowerCase().replace(/[-\s]+/g, ' ').trim();
       let subj = subs.find(s => s.name.toLowerCase() === hit.subjectName?.toLowerCase());
       if (!subj) subj = subs.find(s => s.name.toLowerCase().replace(/[-\s]+/g, ' ').trim() === wanted);
@@ -4536,21 +4624,37 @@ export const StudentDashboard: React.FC<Props> = ({
     if (!entry) return;
     entry = _withSortedPages(entry);
     const isAdmin = user.role === 'ADMIN' || user.role === 'SUB_ADMIN';
-    if (isAdmin || extraOpts?.force) {
-      setLucentNoteViewer(entry);
-      setLucentPageIndex(pageIdx);
+
+    // Always show page list if it is not mcqOnly, force bypasses the admin "always list" mode.
+    if (!extraOpts?.force && !entry.mcqOnly) {
+      setLucentPageListViewer(entry);
       return;
     }
+    if (!extraOpts?.force && entry.mcqOnly) {
+       setLucentNoteViewer(entry);
+       setLucentPageIndex(pageIdx);
+       return;
+    }
+    if (extraOpts?.force) {
+       setLucentNoteViewer(entry);
+       setLucentPageIndex(pageIdx);
+       return;
+    }
+
     // Check content lock — requires valid redeem code
     if (_lucentIsLocked(entry)) {
       showAlert('🔒 This lesson is locked! Get a Redeem Code from your Admin and enter it in Profile → Redeem tab.', 'INFO');
       return;
     }
     // Sample lesson — permanently free for everyone, no daily limit
-    if (entry.isSampleLesson) {
-      setLucentNoteViewer(entry);
-      setLucentPageIndex(pageIdx);
+    if (entry.isSampleLesson && !entry.mcqOnly) {
+      setLucentPageListViewer(entry);
       return;
+    }
+    if (entry.isSampleLesson && entry.mcqOnly) {
+       setLucentNoteViewer(entry);
+       setLucentPageIndex(pageIdx);
+       return;
     }
 
     // ── My Routine gate ────────────────────────────────────────────────────────
@@ -4563,7 +4667,7 @@ export const StudentDashboard: React.FC<Props> = ({
       if (_rg.enabled) {
         const _subjectId = (entry.subject || '').toLowerCase().trim();
         const _subConf = (_rg.subjects || []).find((s: any) => s.id === _subjectId);
-        if (_subConf?.routineApplied && !routineIgnoredEntryIds.has(entry.id)) {
+        if ((!_subConf || _subConf.routineApplied !== false) && !routineIgnoredEntryIds.has(entry.id)) {
           const _todayStr = new Date().toISOString().split('T')[0];
           const _todayTask = _rg.dailyTasks?.[_todayStr];
           // Check all buckets: science, socialScience, and otherTasks (custom/OTHER subjects)
@@ -4759,6 +4863,13 @@ export const StudentDashboard: React.FC<Props> = ({
   const dismissRecentHw = (id: string) => {
     removeRecentHomework(id);
     setRecentHw(getRecentHomeworks());
+  };
+
+  const clearAllResumes = () => {
+    clearAllRecentReads();
+    setRecentChapters([]);
+    setRecentHw([]);
+    setRecentLucent([]);
   };
 
   // Open a competition homework lesson with a Reading Mode coin gate (20 CR, once per lesson).
@@ -6653,24 +6764,22 @@ export const StudentDashboard: React.FC<Props> = ({
                     if (!_rg.enabled) return false; // routine OFF → no lock
                     const _sid = (entry.subject || '').toLowerCase().trim();
                     const _sc = (_rg.subjects || []).find((s: any) => s.id === _sid);
-                    // Only skip if subject is explicitly disabled (routineApplied === false)
-                    // If subject not found at all, still apply lock (handles Hindi/custom subject names)
+
                     if (_sc && _sc.routineApplied === false) return false;
-                    // Lock if this lesson is NOT today's assigned lesson
-                    const _todayStr = new Date().toISOString().split('T')[0];
+                  const _todayStr = new Date().toISOString().split('T')[0];
                     const _tt = _rg.dailyTasks?.[_todayStr];
                     const _todayIds = new Set([
                       _tt?.scienceLessonId,
                       _tt?.socialScienceLessonId,
                       ...(_tt?.otherTasks || []).map((t: any) => t.lessonId),
                     ].filter(Boolean));
-                    // Also check routineCategories (new system) — today's active lesson per category
-                    const _allNotes = (settings?.lucentNotes || []) as any[];
-                    const _isCatToday = (_rg.routineCategories || []).some((cat: any) => {
+
+                    const _eAllNotes = (settings?.lucentNotes || []) as any[];
+                    const _eIsCatToday = (_rg.routineCategories || []).some((cat: any) => {
                       const si = (cat.currentSubjectIndex || 0) % Math.max((cat.subjects || []).length, 1);
                       const sub = cat.subjects?.[si];
                       if (!sub) return false;
-                      const subNotes = _allNotes.filter((n: any) =>
+                      const subNotes = _eAllNotes.filter((n: any) =>
                         (n.subject || '').toLowerCase().trim() === sub.subjectId &&
                         (!sub.bookName || (n.bookName || '').trim() === sub.bookName) &&
                         (!sub.classLevel || (n.classLevel || '') === sub.classLevel)
@@ -6678,7 +6787,8 @@ export const StudentDashboard: React.FC<Props> = ({
                       const lesson = subNotes[Math.min(sub.currentLessonIndex || 0, subNotes.length - 1)];
                       return lesson?.id === entry.id;
                     });
-                    if (_isCatToday) return false;
+
+                    if (_eIsCatToday) return false;
                     return !_todayIds.has(entry.id);
                   } catch { return false; }
                 })();
@@ -6688,21 +6798,22 @@ export const StudentDashboard: React.FC<Props> = ({
                     if (!_rg.enabled) return false;
                     const _sid = (entry.subject || '').toLowerCase().trim();
                     const _sc = (_rg.subjects || []).find((s: any) => s.id === _sid);
+
                     if (_sc && _sc.routineApplied === false) return false;
-                    const _todayStr = new Date().toISOString().split('T')[0];
+                  const _todayStr = new Date().toISOString().split('T')[0];
                     const _tt = _rg.dailyTasks?.[_todayStr];
                     const _todayIds = new Set([
                       _tt?.scienceLessonId,
                       _tt?.socialScienceLessonId,
                       ...(_tt?.otherTasks || []).map((t: any) => t.lessonId),
                     ].filter(Boolean));
-                    // Also check routineCategories (new system)
-                    const _allNotes = (settings?.lucentNotes || []) as any[];
-                    const _isCatToday = (_rg.routineCategories || []).some((cat: any) => {
+
+                    const _eAllNotes = (settings?.lucentNotes || []) as any[];
+                    const _eIsCatToday = (_rg.routineCategories || []).some((cat: any) => {
                       const si = (cat.currentSubjectIndex || 0) % Math.max((cat.subjects || []).length, 1);
                       const sub = cat.subjects?.[si];
                       if (!sub) return false;
-                      const subNotes = _allNotes.filter((n: any) =>
+                      const subNotes = _eAllNotes.filter((n: any) =>
                         (n.subject || '').toLowerCase().trim() === sub.subjectId &&
                         (!sub.bookName || (n.bookName || '').trim() === sub.bookName) &&
                         (!sub.classLevel || (n.classLevel || '') === sub.classLevel)
@@ -6710,7 +6821,8 @@ export const StudentDashboard: React.FC<Props> = ({
                       const lesson = subNotes[Math.min(sub.currentLessonIndex || 0, subNotes.length - 1)];
                       return lesson?.id === entry.id;
                     });
-                    return _todayIds.has(entry.id) || _isCatToday;
+
+                    return _todayIds.has(entry.id) || _eIsCatToday;
                   } catch { return false; }
                 })();
                 const isAdmin = user.role === 'ADMIN' || user.role === 'SUB_ADMIN';
@@ -6774,7 +6886,11 @@ export const StudentDashboard: React.FC<Props> = ({
                         )}
                         {!entry.mcqOnly && entry.pages.length > 0 && (() => {
                           const _ls = getLessonStats(entry.id, entry.pages.length);
-                          if (_ls.pagesRead === 0 && _ls.totalTime === 0) return null;
+                          if (_ls.pagesRead === 0 && _ls.totalTime === 0) {
+                             return (
+                               <div className="mt-1.5"><span className="text-[9px] font-bold text-slate-400">0/{entry.pages.length}pg</span></div>
+                             );
+                          }
                           const _lc = getProgressColor5(_ls.pct);
                           return (
                             <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
@@ -6975,7 +7091,8 @@ export const StudentDashboard: React.FC<Props> = ({
                   if (!_rg.enabled) return false; // routine OFF → no lock
                   const _sid = (entry.subject || '').toLowerCase().trim();
                   const _sc = (_rg.subjects || []).find((s: any) => s.id === _sid);
-                  if (!(_sc?.routineApplied)) return false;
+
+                  if (_sc && _sc.routineApplied === false) return false;
                   // Only show lock if NOT today's assigned lesson
                   const _todayStr = new Date().toISOString().split('T')[0];
                   const _tt = _rg.dailyTasks?.[_todayStr];
@@ -7005,7 +7122,8 @@ export const StudentDashboard: React.FC<Props> = ({
                   if (!_rg.enabled) return false;
                   const _sid = (entry.subject || '').toLowerCase().trim();
                   const _sc = (_rg.subjects || []).find((s: any) => s.id === _sid);
-                  if (!(_sc?.routineApplied)) return false;
+
+                  if (_sc && _sc.routineApplied === false) return false;
                   const _todayStr = new Date().toISOString().split('T')[0];
                   const _tt = _rg.dailyTasks?.[_todayStr];
                   // Also check routineCategories (new system)
@@ -7080,7 +7198,11 @@ export const StudentDashboard: React.FC<Props> = ({
                       </p>
                       {!entry.mcqOnly && entry.pages.length > 0 && (() => {
                         const _ls = getLessonStats(entry.id, entry.pages.length);
-                        if (_ls.pagesRead === 0 && _ls.totalTime === 0) return null;
+                        if (_ls.pagesRead === 0 && _ls.totalTime === 0) {
+                           return (
+                               <div className="mt-1.5"><span className="text-[9px] font-bold text-slate-400">0/{entry.pages.length}pg</span></div>
+                           );
+                        }
                         const _lc = getProgressColor5(_ls.pct);
                         return (
                           <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
@@ -7880,7 +8002,8 @@ export const StudentDashboard: React.FC<Props> = ({
             {effectiveMode !== 'choose' && effectiveMode !== 'video' && effectiveMode !== 'audio' && effectiveMode !== 'pdf' && (
             <div
               ref={hwScrollContainerRef}
-              className={`flex-1 overflow-y-auto ${!hwImmersive && !isLandscape ? 'pb-[72px]' : ''}`}
+          className={`flex-1 min-h-0 overflow-y-auto ${!hwImmersive && !isLandscape ? 'pb-[72px]' : ''}`}
+
               onScroll={(e) => {
                 const t = e.currentTarget;
                 const max = t.scrollHeight - t.clientHeight;
@@ -9171,7 +9294,11 @@ export const StudentDashboard: React.FC<Props> = ({
                       {(() => {
                         const _be = competitionNotes.filter(n => (n.bookName?.trim() || 'Lucent') === bookName);
                         const _bms = getMultiLessonStats(_be.map(n => ({ id: n.id, pageCount: n.pages.length })));
-                        if (_bms.pagesRead === 0 && _bms.totalTime === 0) return null;
+                        if (_bms.pagesRead === 0 && _bms.totalTime === 0) {
+                          return (
+                             <div className="mt-1.5"><span className="text-[9px] font-bold text-slate-400">0/{_bms.totalPages}pg</span></div>
+                          );
+                        }
                         const _bc = getProgressColor5(_bms.pct);
                         return (
                           <div className="flex items-center gap-1.5 mt-1 flex-wrap">
@@ -9357,48 +9484,124 @@ export const StudentDashboard: React.FC<Props> = ({
               const topicNames = [...new Set((entry.pages || []).map(page => (page.topicName || '').trim()).filter(Boolean))];
               const hasMcqs = (entry.pages || []).some(page => page.mcqs && page.mcqs.length > 0);
               const isLocked = _lucentIsLocked(entry);
+              const _isEntryRoutineGated = (() => {
+                try {
+                  const _rg = loadRoutineData(user.id);
+                  if (!_rg.enabled) return false; // routine OFF → no lock
+                  const _sid = (entry.subject || '').toLowerCase().trim();
+                  const _sc = (_rg.subjects || []).find((s: any) => s.id === _sid);
+
+                  if (_sc && _sc.routineApplied === false) return false;
+                  // Only show lock if NOT today's assigned lesson
+                  const _todayStr = new Date().toISOString().split('T')[0];
+                  const _tt = _rg.dailyTasks?.[_todayStr];
+                  // Check all buckets: science, socialScience, and otherTasks (custom/OTHER subjects)
+                  const _otherMatch = (_tt?.otherTasks || []).some((t: any) => t.lessonId === entry.id);
+                  // Also check routineCategories (new system)
+                  const _eAllNotes = (settings?.lucentNotes || []) as any[];
+                  const _eIsCatToday = (_rg.routineCategories || []).some((cat: any) => {
+                    const si = (cat.currentSubjectIndex || 0) % Math.max((cat.subjects || []).length, 1);
+                    const sub = cat.subjects?.[si];
+                    if (!sub) return false;
+                    const subNotes = _eAllNotes.filter((n: any) =>
+                      (n.subject || '').toLowerCase().trim() === sub.subjectId &&
+                      (!sub.bookName || (n.bookName || '').trim() === sub.bookName) &&
+                      (!sub.classLevel || (n.classLevel || '') === sub.classLevel)
+                    );
+                    const lesson = subNotes[Math.min(sub.currentLessonIndex || 0, subNotes.length - 1)];
+                    return lesson?.id === entry.id;
+                  });
+                  if (_eIsCatToday) return false;
+                  return !(_tt?.scienceLessonId === entry.id || _tt?.socialScienceLessonId === entry.id || _otherMatch);
+                } catch { return false; }
+              })();
+              const _isEntryTodayRoutine = (() => {
+                try {
+                  const _rg = loadRoutineData(user.id);
+                  if (!_rg.enabled) return false;
+                  const _sid = (entry.subject || '').toLowerCase().trim();
+                  const _sc = (_rg.subjects || []).find((s: any) => s.id === _sid);
+
+                  if (_sc && _sc.routineApplied === false) return false;
+                  const _todayStr = new Date().toISOString().split('T')[0];
+                  const _tt = _rg.dailyTasks?.[_todayStr];
+                  // Also check routineCategories (new system)
+                  const _etAllNotes = (settings?.lucentNotes || []) as any[];
+                  const _etIsCatToday = (_rg.routineCategories || []).some((cat: any) => {
+                    const si = (cat.currentSubjectIndex || 0) % Math.max((cat.subjects || []).length, 1);
+                    const sub = cat.subjects?.[si];
+                    if (!sub) return false;
+                    const subNotes = _etAllNotes.filter((n: any) =>
+                      (n.subject || '').toLowerCase().trim() === sub.subjectId &&
+                      (!sub.bookName || (n.bookName || '').trim() === sub.bookName) &&
+                      (!sub.classLevel || (n.classLevel || '') === sub.classLevel)
+                    );
+                    const lesson = subNotes[Math.min(sub.currentLessonIndex || 0, subNotes.length - 1)];
+                    return lesson?.id === entry.id;
+                  });
+                  return !!(_tt?.scienceLessonId === entry.id || _tt?.socialScienceLessonId === entry.id) || _etIsCatToday;
+                } catch { return false; }
+              })();
+              const _isAdminUser = user.role === 'ADMIN' || user.role === 'SUB_ADMIN';
+              const _showEntryRoutineLock = _isEntryRoutineGated && !_isAdminUser;
 
               return (
-                <button
-                  key={entry.id}
-                  onClick={() => {
-                    if (isLocked) {
-                      showAlert('🔒 This lesson is locked! Get a Redeem Code from your Admin and enter it in Profile → Redeem tab.', 'INFO');
-                      return;
-                    }
-                    if (entry.mcqOnly) {
-                      lucentInitialTabRef.current = { tab: 'MCQS' };
-                      tryOpenLucentNote(entry, 0);
-                    } else {
-                      setLucentPageListViewer(_withSortedPages(entry));
-                    }
-                  }}
-                  className={`w-full rounded-2xl p-3 text-left flex items-center gap-3 border-2 transition-all hover:shadow-md active:scale-[0.98] ${isLocked ? 'opacity-75' : ''}`}
-                  style={{
-                    background: settings?.contentListCardBg || (isDarkMode ? '#1e293b' : '#ffffff'),
-                    borderColor: isLocked ? '#ef4444' : (settings?.contentListCardBorder || `${tierTheme.primary}55`),
-                  }}
-                >
-                  <div
-                    className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${isLocked ? 'bg-red-100 text-red-500' : ''}`}
-                    style={isLocked ? undefined : { background: `${tierTheme.primary}18`, color: tierTheme.primary }}
+                <div key={entry.id} className={`nst-lesson-card border-2 rounded-2xl overflow-hidden hover:shadow-md transition-all ${isLocked ? 'opacity-75' : ''}`} style={{
+                  background: _isEntryTodayRoutine ? (isDarkMode ? '#292524' : '#fffbeb') : (settings?.contentListCardBg || (isDarkMode ? '#1e293b' : '#ffffff')),
+                  borderColor: isLocked ? '#ef4444' : _isEntryTodayRoutine ? '#f59e0b' : _showEntryRoutineLock ? '#f59e0b' : (settings?.contentListCardBorder || `${tierTheme.primary}55`)
+                }}>
+                  {_isEntryTodayRoutine && (
+                    <div className="bg-amber-500 px-3 py-1 flex items-center gap-1.5">
+                      <span className="text-[10px] font-black text-white uppercase tracking-wider">📅 Aaj Ka Task</span>
+                    </div>
+                  )}
+                  <button
+                    onClick={() => {
+                      if (isLocked) {
+                        showAlert('🔒 This lesson is locked! Get a Redeem Code from your Admin and enter it in Profile → Redeem tab.', 'INFO');
+                        return;
+                      }
+                      if (_showEntryRoutineLock) {
+                        setRoutineGate({ entry, pageIdx: 0 });
+                        return;
+                      }
+                      if (entry.mcqOnly) {
+                        lucentInitialTabRef.current = { tab: 'MCQS' };
+                        tryOpenLucentNote(entry, 0);
+                      } else {
+                        setLucentPageListViewer(_withSortedPages(entry));
+                      }
+                    }}
+                    className="w-full p-3 text-left flex items-center gap-3 active:scale-[0.98]"
                   >
-                    {isLocked ? <span className="text-xl">🔒</span> : entry.mcqOnly ? <span className="text-xl">🎯</span> : <BookOpen size={20} />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-sm font-black truncate ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{entry.lessonTitle}</p>
-                    {isLocked ? (
-                      <p className="text-[11px] text-red-500 font-black mt-0.5">🔒 Locked — Unlock with Redeem Code</p>
-                    ) : (
-                      <p className={`text-[11px] font-bold mt-0.5 flex flex-wrap gap-1.5 items-center ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                        {entry.mcqOnly ? <span className="text-emerald-600 font-black">🎯 MCQ Only</span> : <span>{entry.pages.length} page{entry.pages.length !== 1 ? 's' : ''}</span>}
-                        {topicNames.length > 0 && <span>• {topicNames.length} topic{topicNames.length !== 1 ? 's' : ''}</span>}
-                        {hasMcqs && <span className="px-1.5 py-0.5 rounded text-[9px] font-black" style={{ background: `${tierTheme.primary}18`, color: tierTheme.primary }}>MCQ</span>}
-                      </p>
-                    )}
+                    <div
+                      className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${isLocked ? 'bg-red-100 text-red-500' : _showEntryRoutineLock ? 'bg-amber-50 text-amber-500' : _isEntryTodayRoutine ? 'bg-amber-100' : ''}`}
+                      style={(isLocked || _showEntryRoutineLock || _isEntryTodayRoutine) ? undefined : { background: `${tierTheme.primary}18`, color: tierTheme.primary }}
+                    >
+                      {isLocked ? <span className="text-xl">🔒</span> : _showEntryRoutineLock ? <span className="text-xl">🔒</span> : _isEntryTodayRoutine ? <span className="text-xl" style={{ color: '#d97706' }}>📅</span> : entry.mcqOnly ? <span className="text-xl">🎯</span> : <BookOpen size={20} />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-black truncate ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{entry.lessonTitle}</p>
+                      {isLocked ? (
+                        <p className="text-[11px] text-red-500 font-black mt-0.5">🔒 Locked — Unlock with Redeem Code</p>
+                      ) : _showEntryRoutineLock ? (
+                        <p className="text-[11px] text-amber-600 font-black mt-0.5">🔒 Complete Today's Routine to unlock</p>
+                      ) : _isEntryTodayRoutine ? (
+                        <p className="text-[11px] text-amber-700 font-black mt-0.5">✅ Aaj ka lesson — tap to open</p>
+                      ) : (
+                        <p className={`text-[11px] font-bold mt-0.5 flex flex-wrap gap-1.5 items-center ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                          {entry.mcqOnly ? <span className="text-emerald-600 font-black">🎯 MCQ Only</span> : <span>{entry.pages.length} page{entry.pages.length !== 1 ? 's' : ''}</span>}
+                          {topicNames.length > 0 && <span>• {topicNames.length} topic{topicNames.length !== 1 ? 's' : ''}</span>}
+                          {hasMcqs && <span className="px-1.5 py-0.5 rounded text-[9px] font-black" style={{ background: `${tierTheme.primary}18`, color: tierTheme.primary }}>MCQ</span>}
+                        </p>
+                      )}
                     {!entry.mcqOnly && entry.pages.length > 0 && (() => {
                       const _ls = getLessonStats(entry.id, entry.pages.length);
-                      if (_ls.pagesRead === 0 && _ls.totalTime === 0) return null;
+                      if (_ls.pagesRead === 0 && _ls.totalTime === 0) {
+                          return (
+                               <div className="mt-1.5"><span className="text-[9px] font-bold text-slate-400">0/{entry.pages.length}pg</span></div>
+                          );
+                      }
                       const _lc = getProgressColor5(_ls.pct);
                       return (
                         <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
@@ -9410,7 +9613,8 @@ export const StudentDashboard: React.FC<Props> = ({
                     })()}
                   </div>
                   <ChevronRight size={18} className="shrink-0 text-slate-400" />
-                </button>
+                  </button>
+                </div>
               );
             })}
           </div>
@@ -9842,9 +10046,12 @@ export const StudentDashboard: React.FC<Props> = ({
                     </div>
                     <p className="text-[10px] font-black uppercase tracking-[0.12em]" style={{ color: tierTheme.primary }}>Continue Reading</p>
                   </div>
-                  <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full" style={{ color: tierTheme.primary, background: `${tierTheme.primary}10` }}>
-                    {allMerged.length}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => clearAllResumes()} className="text-[9px] font-bold px-2 py-0.5 rounded-full text-white bg-rose-500 hover:bg-rose-600 active:scale-95 transition-all">Clear All</button>
+                    <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full" style={{ color: tierTheme.primary, background: `${tierTheme.primary}10` }}>
+                      {allMerged.length}
+                    </span>
+                  </div>
                 </div>
                 {/* Filter chips */}
                 {showFilterChips && FILTER_CHIPS.length > 1 && (
@@ -9960,7 +10167,7 @@ export const StudentDashboard: React.FC<Props> = ({
               const _sc3D    = _masterAll3D || (settings?.homeSchoolCard3D ?? false);
 
               const ClassBtn = ({ c }: { c: string }) => {
-                const subjectCount = getSubjectsList(c, _stream, _board).length;
+                const subjectCount = getSubjectsList(c, _stream, _board, settings).length;
                 const isBoard = boardClasses.includes(c);
                 const cardStyle3D = _card3D ? {
                   background: _c612Bg,
@@ -10185,7 +10392,7 @@ export const StudentDashboard: React.FC<Props> = ({
               const subjects = getSubjectsList(
                 (activeSessionClass as any) || user.classLevel || "10",
                 user.stream || "Science",
-                activeSessionBoard || user.board,
+                activeSessionBoard || user.board, settings
               ).filter(s => !(settings?.hiddenSubjects || []).includes(s.id));
               const targetSubject = subjects.find(s => s.id === subjectId) || subjects[0];
               if (targetSubject) {
@@ -10230,7 +10437,7 @@ export const StudentDashboard: React.FC<Props> = ({
             const subjects = getSubjectsList(
               (activeSessionClass as any) || user.classLevel || "10",
               user.stream || "Science",
-              activeSessionBoard || user.board,
+              activeSessionBoard || user.board, settings
             ).filter((s) => !(settings?.hiddenSubjects || []).includes(s.id));
             let targetSubject = selectedSubject;
 
@@ -19173,7 +19380,7 @@ export const StudentDashboard: React.FC<Props> = ({
                   >
                     {/* ── Main tap area (students + admin) ── */}
                     <button
-                      onClick={() => { lucentInitialTabRef.current = { tab: 'NOTES', viewMode: 'chunk' }; tryOpenLucentNote(plEntry, idx); }}
+                      onClick={() => { lucentInitialTabRef.current = { tab: "NOTES", viewMode: "chunk" }; tryOpenLucentNote(plEntry, idx, { force: true }); }}
                       className="w-full text-left px-4 py-3 flex items-center gap-3 active:scale-[0.98] transition-all"
                       style={{ background: settings?.contentListCardBg || '#ffffff' }}
                     >
@@ -19314,11 +19521,6 @@ export const StudentDashboard: React.FC<Props> = ({
         const goPrev = () => {
           if (safeIndex > 0) {
             setLucentPageIndex(safeIndex - 1);
-          } else if (prevLesson) {
-            // Hop to last page of previous lesson
-            stopSpeech();
-            setLucentNoteViewer(prevLesson);
-            setLucentPageIndex(Math.max(0, (prevLesson.pages?.length || 1) - 1));
           }
         };
         const goNext = () => {
@@ -19342,16 +19544,10 @@ export const StudentDashboard: React.FC<Props> = ({
                 } : undefined
               );
             }
-          } else if (nextLesson) {
-            if (_isAdm2 || isPgReadUnlocked(nextLesson.id, 0)) {
-              stopSpeech(); setLucentNoteViewer(nextLesson); setLucentPageIndex(0);
-            } else {
-              showCoinGate(20, 'Next Chapter', () => { markPgReadUnlocked(nextLesson.id, 0); stopSpeech(); setLucentNoteViewer(nextLesson); setLucentPageIndex(0); });
-            }
           }
         };
-        const canGoPrev = safeIndex > 0 || !!prevLesson;
-        const canGoNext = safeIndex < totalPages - 1 || !!nextLesson;
+        const canGoPrev = safeIndex > 0;
+        const canGoNext = safeIndex < totalPages - 1;
         const autoSyncOn = lucentAutoSync;
 
         // ── Lucent Topic Continuation: merge consecutive pages with same topicName ──
@@ -20156,8 +20352,6 @@ export const StudentDashboard: React.FC<Props> = ({
                           : safeIndex + 1;
                         if (nextIdx < totalPages) {
                           setTimeout(() => setLucentPageIndex(nextIdx), 400);
-                        } else if (nextLesson) {
-                          setTimeout(() => { stopSpeech(); setLucentNoteViewer(nextLesson); setLucentPageIndex(0); }, 600);
                         }
                       }
                     }}
@@ -20243,21 +20437,6 @@ export const StudentDashboard: React.FC<Props> = ({
                             </p>
                           </div>
                           <ChevronRight size={17} className="text-slate-500 shrink-0 group-hover:text-indigo-400 transition-colors" />
-                        </button>
-                      ) : nextLesson ? (
-                        /* End of lesson — next lesson */
-                        <button
-                          onClick={() => { stopSpeech(); setLucentNoteViewer(nextLesson); setLucentPageIndex(0); }}
-                          className="w-full flex items-center gap-3.5 px-4 py-3.5 rounded-2xl bg-slate-900 border border-slate-700/70 active:scale-[0.98] transition-all group shadow-lg"
-                        >
-                          <div className="w-9 h-9 rounded-xl bg-violet-500/20 flex items-center justify-center shrink-0 group-hover:bg-violet-500/30 transition-colors">
-                            <BookOpen size={16} className="text-violet-400" />
-                          </div>
-                          <div className="flex-1 text-left min-w-0">
-                            <p className="text-[9px] font-semibold text-slate-400 uppercase tracking-[0.14em]">Agla Chapter</p>
-                            <p className="text-sm font-semibold text-white truncate mt-0.5">{nextLesson.lessonTitle}</p>
-                          </div>
-                          <ChevronRight size={17} className="text-slate-500 shrink-0 group-hover:text-violet-400 transition-colors" />
                         </button>
                       ) : null}
                     </div>
@@ -21368,12 +21547,18 @@ RULES:
         <DailyEventPage
           user={user}
           settings={settings}
+          onUpdateUser={handleUserUpdate}
           onBack={() => setShowDailyEventPage(false)}
           onOpenRoutine={() => {
             setShowDailyEventPage(false);
             setShowMyRoutine(true);
           }}
-          onOpenRevisionHub={(lessonId?: string, lessonTitle?: string) => {
+          onOpenRevisionHub={(lessonId?: string, lessonTitle?: string, autoStartMcq?: boolean) => {
+            if (autoStartMcq) {
+              setInitialRevisionAutoStartMcq(true);
+            } else {
+              setInitialRevisionAutoStartMcq(false);
+            }
             if (lessonTitle) {
               const _isAdm = user.role === 'ADMIN' || user.role === 'SUB_ADMIN';
               if (_isAdm) {
@@ -21412,7 +21597,8 @@ RULES:
           user={user}
           settings={settings}
           initialLessonTitle={initialRevisionLessonTitle}
-          onBack={() => { setShowRevisionHubScreen(false); setInitialRevisionLessonTitle(null); }}
+          autoStartMcq={initialRevisionAutoStartMcq}
+          onBack={() => { setShowRevisionHubScreen(false); setInitialRevisionLessonTitle(null); setInitialRevisionAutoStartMcq(false); }}
           onTabChange={onTabChange}
           onNavigateContent={(type, chapterId, topicName, subjectName) => {
             setShowRevisionHubScreen(false);
@@ -21446,10 +21632,28 @@ RULES:
           }
           return null;
         })();
-        const _todayLesson = (_isScience ? (_sciLesson || _socLesson) : (_socLesson || _sciLesson)) ?? _otherTaskLesson ?? null;
+        const _catLesson = (() => {
+          const _eAllNotes = (settings?.lucentNotes || []) as any[];
+          for (const cat of (_rg.routineCategories || [])) {
+            const si = (cat.currentSubjectIndex || 0) % Math.max((cat.subjects || []).length, 1);
+            const sub = cat.subjects?.[si];
+            if (!sub) continue;
+            const subNotes = _eAllNotes.filter((n: any) =>
+              (n.subject || '').toLowerCase().trim() === sub.subjectId &&
+              (!sub.bookName || (n.bookName || '').trim() === sub.bookName) &&
+              (!sub.classLevel || (n.classLevel || '') === sub.classLevel)
+            );
+            const lesson = subNotes[Math.min(sub.currentLessonIndex || 0, subNotes.length - 1)];
+            if (lesson) return lesson;
+          }
+          return null;
+        })();
+        const _todayLesson = (_isScience ? (_sciLesson || _socLesson) : (_socLesson || _sciLesson)) ?? _otherTaskLesson ?? _catLesson ?? null;
         // Whether any lesson ID is set at all (regardless of lucentNotes lookup)
+        // Whether any lesson ID is set at all (regardless of lucentNotes lookup)
+        const _isCatActive = (_rg.routineCategories || []).some((cat: any) => (cat.subjects || []).length > 0);
         const _hasAnyTaskId = !!((_todayTask?.scienceLessonId) || (_todayTask?.socialScienceLessonId) ||
-          (_todayTask?.otherTasks || []).some((t: any) => t.lessonId));
+          (_todayTask?.otherTasks || []).some((t: any) => t.lessonId)) || _isCatActive;
 
         // Yesterday partial completion for discount calculation
         const _yestD = new Date(); _yestD.setDate(_yestD.getDate() - 1);
@@ -21472,12 +21676,28 @@ RULES:
             return;
           }
           const isAdm = user.role === 'ADMIN' || user.role === 'SUB_ADMIN';
-          if (isAdm) { tryOpenLucentNote(_todayLesson, 0); return; }
+          if (isAdm) {
+            if (_todayLesson.mcqOnly) {
+              lucentInitialTabRef.current = { tab: 'MCQS' };
+              tryOpenLucentNote(_todayLesson, 0);
+            } else {
+              setLucentPageListViewer(_withSortedPages(_todayLesson));
+            }
+            return;
+          }
           // Routine task bhi coins kaatega — discount based on yesterday's completion
           const _entry = _todayLesson;
           const _pi    = 0;
           const _pgKey = `nst_pg_r_${user.id}_${_entry.id}_${_pi}`;
-          if (localStorage.getItem(_pgKey) === '1') { tryOpenLucentNote(_entry, _pi); return; }
+          if (localStorage.getItem(_pgKey) === '1') {
+            if (_entry.mcqOnly) {
+              lucentInitialTabRef.current = { tab: 'MCQS' };
+              tryOpenLucentNote(_entry, _pi);
+            } else {
+              setLucentPageListViewer(_withSortedPages(_entry));
+            }
+            return;
+          }
           const balance = getTotalCredits(user);
           if (balance < _routineCost) {
             showAlert(`⚠️ Coins kam hain! ${_routineCost} CR chahiye, aapke paas sirf ${balance} CR hai.`, 'INFO');
@@ -21490,7 +21710,12 @@ RULES:
             reason: 'Routine Task',
             action: () => {
               try { localStorage.setItem(_pgKey, '1'); } catch {}
-              tryOpenLucentNote(_entry, _pi);
+              if (_entry.mcqOnly) {
+                lucentInitialTabRef.current = { tab: 'MCQS' };
+                tryOpenLucentNote(_entry, _pi);
+              } else {
+                setLucentPageListViewer(_withSortedPages(_entry));
+              }
             },
           });
         };
@@ -21504,8 +21729,6 @@ RULES:
           const _entry = routineGate.entry;
           setRoutineGate(null);
           setRoutineIgnoredEntryIds(prev => new Set(prev).add(_entry.id));
-          const isAdm = user.role === 'ADMIN' || user.role === 'SUB_ADMIN';
-          if (isAdm) { setLucentNoteViewer(_withSortedPages(_entry)); setLucentPageIndex(routineGate.pageIdx); return; }
           if (_entry.mcqOnly) {
             lucentInitialTabRef.current = { tab: 'MCQS' };
             tryOpenLucentNote(_entry, 0);
@@ -21661,7 +21884,19 @@ RULES:
           onBack={() => setShowMyRoutine(false)}
           onUserUpdate={handleUserUpdate}
           settings={settings}
-          onOpenRevisionHub={(lessonId?: string, lessonTitle?: string) => {
+          onOpenLesson={(lessonId: string) => {
+            const lesson = (settings?.lucentNotes || []).find((l: any) => l.id === lessonId);
+            if (lesson) {
+              setLucentPageListViewer(_withSortedPages(lesson));
+              setShowMyRoutine(false);
+            }
+          }}
+          onOpenRevisionHub={(lessonId?: string, lessonTitle?: string, autoStartMcq?: boolean) => {
+            if (autoStartMcq) {
+              setInitialRevisionAutoStartMcq(true);
+            } else {
+              setInitialRevisionAutoStartMcq(false);
+            }
             if (lessonTitle) {
               const _isAdm = user.role === 'ADMIN' || user.role === 'SUB_ADMIN';
               if (_isAdm) {

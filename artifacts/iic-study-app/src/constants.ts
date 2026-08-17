@@ -167,7 +167,7 @@ export const getClassSubjectOptions = (classLevel: string): { id: string; name: 
   }
 };
 
-export const getSubjectsList = (classLevel: string, stream: string | null, board?: string): Subject[] => {
+export const getSubjectsList = (classLevel: string, stream: string | null, board?: string, settingsObj?: any): Subject[] => {
   const isSenior = ['11', '12'].includes(classLevel);
   let pool = { ...DEFAULT_SUBJECTS };
   try {
@@ -184,8 +184,9 @@ export const getSubjectsList = (classLevel: string, stream: string | null, board
   let adminRevisionSubjects: Array<{ id: string; name: string; icon: string; classLevels: string[]; streams: string[] }> = [];
   try {
       const settingsRaw = localStorage.getItem('nst_system_settings');
-      if (settingsRaw) {
-          const s = JSON.parse(settingsRaw);
+          const s = settingsObj || (settingsRaw ? JSON.parse(settingsRaw) : null);
+      if (s) {
+          // const s = JSON.parse(settingsRaw);
           hiddenDefaultSubjects = Array.isArray(s.hiddenDefaultSubjects) ? s.hiddenDefaultSubjects : [];
           adminRevisionSubjects = Array.isArray(s.revisionSubjects) ? s.revisionSubjects : [];
       }
@@ -213,9 +214,10 @@ export const getSubjectsList = (classLevel: string, stream: string | null, board
       // page-wise list of notes/MCQs in StudentDashboard.
       try {
           const settingsRaw = localStorage.getItem('nst_system_settings');
-          const settingsObj = settingsRaw ? JSON.parse(settingsRaw) : null;
-          const customBooks: Array<{ id: string; name: string }> = Array.isArray(settingsObj?.customBooks)
-              ? settingsObj.customBooks
+          const s = settingsObj || (settingsRaw ? JSON.parse(settingsRaw) : null);
+          const finalSettingsObj = settingsObj || (settingsRaw ? JSON.parse(settingsRaw) : null);
+          const customBooks: Array<{ id: string; name: string }> = Array.isArray(finalSettingsObj?.customBooks)
+              ? finalSettingsObj.customBooks
               : [];
           const palette = ['bg-white text-slate-700', 'bg-white text-slate-700', 'bg-white text-slate-700', 'bg-white text-slate-700', 'bg-white text-slate-700'];
           customBooks.forEach((b, i) => {

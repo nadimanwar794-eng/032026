@@ -33,10 +33,13 @@ service cloud.firestore {
       // Use .get('role', '') to prevent throwing an error if role is absent
       allow create: if isSignedIn() && request.auth.uid == userId
                     && request.resource.data.get('role', '') != 'ADMIN'
-                    && request.resource.data.get('role', '') != 'SUB_ADMIN';
+                    && request.resource.data.get('role', '') != 'SUB_ADMIN'
+                    && request.resource.data.get('totalScore', 0) <= 1000000;
       allow update: if isSignedIn() && request.auth.uid == userId
                     && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role'])
-                        || (request.resource.data.get('role', '') != 'ADMIN' && request.resource.data.get('role', '') != 'SUB_ADMIN'));
+                        || (request.resource.data.get('role', '') != 'ADMIN' && request.resource.data.get('role', '') != 'SUB_ADMIN'))
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['totalScore'])
+                        || (request.resource.data.get('totalScore', 0) <= resource.data.get('totalScore', 0) + 1000000));
       allow delete: if isAdminOrSubAdmin();
 
       // Allow writing to nested user history and test_results collections

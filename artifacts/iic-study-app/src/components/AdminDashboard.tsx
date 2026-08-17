@@ -414,6 +414,26 @@ const MODELS = [
     "mixtral-8x7b-32768"
 ];
 
+// Safe helper to get subject name for any class/competition to prevent ReferenceError
+const getSubjectNameSafe = (classLevel: string, subjectId: string, localSettings: any): string => {
+    if (classLevel === 'COMPETITION') {
+        return LUCENT_SUBJECT_OPTIONS_BASE.find(o => o.id === subjectId)?.name || subjectId;
+    }
+    try {
+        const cn612Level = classLevel as any;
+        const seen = new Set<string>();
+        let name = subjectId;
+        (['Science', 'Commerce', 'Arts', null] as any[]).forEach((stream: string | null) => {
+            getSubjectsList(cn612Level, stream, undefined, localSettings).forEach(s => {
+                if (s.id === subjectId) name = s.name;
+            });
+        });
+        return name;
+    } catch {
+        return subjectId;
+    }
+};
+
 const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSettings, onImpersonate, logActivity, isDarkMode, onToggleDarkMode, user }) => {
 
   const [activeTab, setActiveTab] = useState<AdminTab>('DASHBOARD');
@@ -1078,7 +1098,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
       const seen = new Set<string>();
       const results: { id: string; name: string }[] = [];
       (['Science', 'Commerce', 'Arts', null] as any[]).forEach((stream: string | null) => {
-        getSubjectsList(newLucent.classLevel, stream).forEach(s => {
+        getSubjectsList(newLucent.classLevel, stream, undefined, localSettings).forEach(s => {
           if (!seen.has(s.id)) { seen.add(s.id); results.push({ id: s.id, name: s.name }); }
         });
       });
@@ -2268,7 +2288,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                   : { ...note, board: bulkMoveTargetBoard };
 
                 // Keep MCQ sync in sync with board changes
-                const subjectName = getSubjectNameSafe(newNote.classLevel, newNote.subject);
+                const subjectName = getSubjectNameSafe(newNote.classLevel, newNote.subject, localSettings);
                 syncClassNotesMcqsToRevisionHub(newNote, subjectName).catch(console.error);
 
                 return newNote;
@@ -2322,12 +2342,12 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
           const currentNotes: any[] = [...(localSettings.lucentNotes || [])];
           if (mode === 'move') {
               currentNotes.splice(origIdx, 1, newEntry);
-              const subjName = getSubjectNameSafe(newEntry.classLevel, newEntry.subject);
+              const subjName = getSubjectNameSafe(newEntry.classLevel, newEntry.subject, localSettings);
               syncClassNotesMcqsToRevisionHub(newEntry, subjName).catch(console.error);
               await saveLucentEntryDirectly(currentNotes, `✅ "${entry.lessonTitle}" move ho gaya → Class ${bnMcTargetClass} / ${bnMcTargetSubject}`);
           } else {
               currentNotes.push(newEntry);
-              const subjName = getSubjectNameSafe(newEntry.classLevel, newEntry.subject);
+              const subjName = getSubjectNameSafe(newEntry.classLevel, newEntry.subject, localSettings);
               syncClassNotesMcqsToRevisionHub(newEntry, subjName).catch(console.error);
               await saveLucentEntryDirectly(currentNotes, `✅ "${entry.lessonTitle}" copy ho gaya → Class ${bnMcTargetClass} / ${bnMcTargetSubject}`);
           }
@@ -4179,7 +4199,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
           <div className="mb-4">
               <p className="text-[10px] font-bold text-slate-500 uppercase mb-2">Select Subject</p>
               <div className="flex flex-wrap gap-2">
-                  {getSubjectsList(selClass, selStream, selBoard).map(s => {
+                  {getSubjectsList(selClass, selStream, selBoard, localSettings).map(s => {
                       const isHidden = (localSettings.hiddenSubjects || []).includes(s.id);
                       return (
                       <div key={s.id} className="relative">
@@ -9222,7 +9242,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">🎯 Class / Mode</label>
                                           <select value={newLucent.classLevel} onChange={e => {
                                               const cl = e.target.value as any;
-                                              const firstSubj = cl === 'COMPETITION' ? 'biology' : (getSubjectsList(cl, 'Science')[0]?.id || getSubjectsList(cl, null)[0]?.id || 'science');
+                                              const firstSubj = cl === 'COMPETITION' ? 'biology' : (getSubjectsList(cl, 'Science', undefined, localSettings)[0]?.id || getSubjectsList(cl, null, undefined, localSettings)[0]?.id || 'science');
                                               setNewLucent({...newLucent, classLevel: cl, subject: firstSubj});
                                           }} className="w-full p-2 border border-indigo-200 rounded text-sm outline-none focus:border-indigo-500 bg-white font-bold">
                                               <option value="COMPETITION">🏆 Competition Mode</option>
@@ -9634,7 +9654,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           const updatedNotifs = [newNotif, ...currentNotifs].slice(0, 30);
 
                                           const target = LUCENT_CLASS_TARGETS.find(t => t.id === newLucent.classLevel)?.label || newLucent.classLevel;
-                                          const subjName = getSubjectNameSafe(newLucent.classLevel, newLucent.subject);
+                                          const subjName = getSubjectNameSafe(newLucent.classLevel, newLucent.subject, localSettings);
                                           syncClassNotesMcqsToRevisionHub(entry, subjName).catch(console.error);
                                           setNewLucent({ subject: newLucent.subject, bookName: '', classLevel: newLucent.classLevel, board: newLucent.board, lessonTitle: '', mcqOnly: false, pages: [{ id: Date.now().toString(), pageNo: '1', content: '', chunkNotes: '', htmlNotes: '' }] });
                                           saveLucentEntryDirectly(updated, `✅ Lesson saved → ${target}!`, updatedNotifs);
@@ -10650,7 +10670,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                       const currentNotes = localSettings.lucentNotes || [];
                                                       const updatedNote = currentNotes.find((n: any) => n.id === bnModalEntry.id);
                                                       if (updatedNote) {
-                                                          const subjName = getSubjectNameSafe(updatedNote.classLevel, updatedNote.subject);
+                                                          const subjName = getSubjectNameSafe(updatedNote.classLevel, updatedNote.subject, localSettings);
                                                           syncClassNotesMcqsToRevisionHub(updatedNote, subjName).catch(console.error);
                                                       }
                                                       saveLucentEntryDirectly(currentNotes, '✅ Lucent Lesson Updated!');
@@ -12912,7 +12932,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                   <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">🎯 Class / Mode</label>
                                                   <select value={newLucent.classLevel} onChange={e => {
                                                       const cl = e.target.value as any;
-                                                      const firstSubj = cl === 'COMPETITION' ? 'biology' : (getSubjectsList(cl, 'Science')[0]?.id || getSubjectsList(cl, null)[0]?.id || 'science');
+                                                      const firstSubj = cl === 'COMPETITION' ? 'biology' : (getSubjectsList(cl, 'Science', undefined, localSettings)[0]?.id || getSubjectsList(cl, null, undefined, localSettings)[0]?.id || 'science');
                                                       setNewLucent({...newLucent, classLevel: cl, subject: firstSubj});
                                                   }} className="w-full p-2 border border-indigo-200 rounded text-sm outline-none focus:border-indigo-500 bg-white font-bold">
                                                       <option value="COMPETITION">🏆 Competition Mode</option>
@@ -13086,7 +13106,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                               const entry: LucentNoteEntry = { id: Date.now().toString(), subject: newLucent.subject, bookName: cbn || undefined, classLevel: newLucent.classLevel, board: newLucent.board || undefined, lessonTitle: newLucent.lessonTitle.trim(), pages: validPages, mcqOnly: newLucent.mcqOnly || undefined, createdAt: new Date().toISOString() };
                                               const updated = [...(localSettings.lucentNotes || []), entry];
                                               const target3 = LUCENT_CLASS_TARGETS.find(t => t.id === newLucent.classLevel)?.label || newLucent.classLevel;
-                                              const subjName = getSubjectNameSafe(newLucent.classLevel, newLucent.subject);
+                                              const subjName = getSubjectNameSafe(newLucent.classLevel, newLucent.subject, localSettings);
                                               syncClassNotesMcqsToRevisionHub(entry, subjName).catch(console.error);
                                               setNewLucent({ subject: newLucent.subject, bookName: '', classLevel: newLucent.classLevel, board: newLucent.board, lessonTitle: '', mcqOnly: false, pages: [{ id: Date.now().toString(), pageNo: '1', content: '', chunkNotes: '', htmlNotes: '' }] });
                                               saveLucentEntryDirectly(updated, `✅ Multi-page lesson saved → ${cbn} (${target3})!`);
@@ -13114,7 +13134,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                               <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">🎯 Class / Mode</label>
                                               <select value={newLucent.classLevel} onChange={e => {
                                               const cl = e.target.value as any;
-                                              const firstSubj = cl === 'COMPETITION' ? 'biology' : (getSubjectsList(cl, 'Science')[0]?.id || getSubjectsList(cl, null)[0]?.id || 'science');
+                                              const firstSubj = cl === 'COMPETITION' ? 'biology' : (getSubjectsList(cl, 'Science', undefined, localSettings)[0]?.id || getSubjectsList(cl, null, undefined, localSettings)[0]?.id || 'science');
                                               setNewLucent({...newLucent, classLevel: cl, subject: firstSubj});
                                           }} className="w-full p-2 border border-indigo-200 rounded text-sm outline-none focus:border-indigo-500 bg-white font-bold">
                                                   <option value="COMPETITION">🏆 Competition Mode</option>
@@ -14395,7 +14415,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                   const seen = new Set<string>();
                   const results: { id: string; name: string }[] = [];
                   (['Science', 'Commerce', 'Arts', null] as any[]).forEach((stream: string | null) => {
-                      getSubjectsList(cn612Level, stream).forEach(s => {
+                      getSubjectsList(cn612Level, stream, undefined, localSettings).forEach(s => {
                           if (!seen.has(s.id)) { seen.add(s.id); results.push({ id: s.id, name: s.name }); }
                       });
                   });
@@ -14441,7 +14461,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                   value={cn612Level}
                                   onChange={e => {
                                       const cl = e.target.value as any;
-                                      const firstSubj = getSubjectsList(cl, 'Science')[0]?.id || getSubjectsList(cl, null)[0]?.id || 'science';
+                                      const firstSubj = getSubjectsList(cl, 'Science', undefined, localSettings)[0]?.id || getSubjectsList(cl, null, undefined, localSettings)[0]?.id || 'science';
                                       setNewLucent({...newLucent, classLevel: cl, subject: firstSubj});
                                   }}
                                   className="w-full p-2 border border-green-300 rounded-lg text-sm outline-none focus:border-green-500 bg-white font-bold"
@@ -16641,13 +16661,13 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                   <label className="text-xs font-bold text-pink-700 uppercase block mb-1">Subject</label>
                                   <select value={newCodeContentSubject} onChange={e => {
                                       setNewCodeContentSubject(e.target.value);
-                                      const s = getSubjectsList(newCodeContentClass, 'Science', newCodeContentBoard).find(sub => sub.name === e.target.value);
+                                      const s = getSubjectsList(newCodeContentClass, 'Science', newCodeContentBoard, localSettings).find(sub => sub.name === e.target.value);
                                       if (s) {
                                           fetchChapters(newCodeContentBoard, newCodeContentClass, 'Science', s, 'English').then(ch => setNewCodeContentChaptersList(ch));
                                       }
                                   }} className="p-3 rounded-xl border border-pink-200 bg-white font-bold w-32 truncate">
                                       <option value="">Select</option>
-                                      {getSubjectsList(newCodeContentClass, 'Science', newCodeContentBoard).map(s => (
+                                      {getSubjectsList(newCodeContentClass, 'Science', newCodeContentBoard, localSettings).map(s => (
                                           <option key={s.id} value={s.name}>{s.name}</option>
                                       ))}
                                   </select>
@@ -18797,7 +18817,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                   <div className="flex gap-2 mb-5">
                       <button
                           type="button"
-                          onClick={() => { setMoveTargetClass('10'); const list = getSubjectsList(moveTargetBoard, '10', moveTargetStream); setMoveTargetSubject(list[0] || null); }}
+                          onClick={() => { setMoveTargetClass('10'); const list = getSubjectsList(moveTargetBoard, '10', moveTargetStream, localSettings); setMoveTargetSubject(list[0] || null); }}
                           className={`flex-1 py-2.5 rounded-xl text-[12px] font-black transition-all border-2 ${moveTargetClass !== 'COMPETITION' ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-400'}`}
                       >🏫 School Mode</button>
                       <button
@@ -18819,7 +18839,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                       onClick={() => {
                                           setMoveTargetBoard(val);
                                           if (moveTargetClass !== 'COMPETITION') {
-                                              const list = getSubjectsList(val, moveTargetClass, moveTargetStream);
+                                              const list = getSubjectsList(val, moveTargetClass, moveTargetStream, localSettings);
                                               setMoveTargetSubject(list[0] || null);
                                           }
                                       }}
@@ -18834,7 +18854,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                           <>
                               <div>
                                   <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Target Class</label>
-                                  <select value={moveTargetClass} onChange={e => { const cl = e.target.value as ClassLevel; setMoveTargetClass(cl); const list = getSubjectsList(moveTargetBoard, cl, moveTargetStream); setMoveTargetSubject(list[0] || null); }} className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 bg-slate-50">
+                                  <select value={moveTargetClass} onChange={e => { const cl = e.target.value as ClassLevel; setMoveTargetClass(cl); const list = getSubjectsList(moveTargetBoard, cl, moveTargetStream, localSettings); setMoveTargetSubject(list[0] || null); }} className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 bg-slate-50">
                                       {['6','7','8','9','10','11','12'].map(c => <option key={c} value={c}>Class {c}</option>)}
                                   </select>
                               </div>
@@ -18874,12 +18894,12 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                               </select>
                           ) : (
                               <select value={moveTargetSubject?.name || ''} onChange={e => {
-                                  const list = getSubjectsList(moveTargetBoard, moveTargetClass, moveTargetStream);
+                                  const list = getSubjectsList(moveTargetBoard, moveTargetClass, moveTargetStream, localSettings);
                                   const sub = list.find(s => s.name === e.target.value) || list[0];
                                   setMoveTargetSubject(sub);
                               }} className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 bg-slate-50">
                                   <option value="">-- Select Subject --</option>
-                                  {getSubjectsList(moveTargetBoard, moveTargetClass, moveTargetStream).map(s => (
+                                  {getSubjectsList(moveTargetBoard, moveTargetClass, moveTargetStream, localSettings).map(s => (
                                       <option key={s.name} value={s.name}>{s.name}</option>
                                   ))}
                               </select>

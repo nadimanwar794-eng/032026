@@ -562,7 +562,7 @@ export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, su
                                             )}
                                             {(() => {
                                                 const answered = Object.keys(userAnswers).length;
-                                                const minRequired = Math.min(30, mcqData.length);
+                                                const minRequired = Math.min(100, mcqData.length);
                                                 const ready = answered >= minRequired;
                                                 return (
                                                     <button

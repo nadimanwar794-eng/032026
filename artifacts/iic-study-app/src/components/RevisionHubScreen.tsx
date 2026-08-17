@@ -39,6 +39,7 @@ interface Props {
   onSendToMcqCommunity?: (draft: { question: string; options: [string,string,string,string]; correctAnswer: number; explanation: string }) => void;
   /** If set, auto-navigate to this lesson's MCQ on open — matched by lessonTitle (Routine / Daily Event shortcut, coins already paid by caller) */
   initialLessonTitle?: string | null;
+  autoStartMcq?: boolean;
 }
 
 const TABS: { id: HubTab; label: string; icon: React.ReactNode }[] = [
@@ -82,11 +83,11 @@ const TIER_STYLES: Record<string, { bg: string; text: string; label: string }> =
 
 export const RevisionHubScreen: React.FC<Props> = ({
   user, settings, onBack, onTabChange, onNavigateContent, onUpdateUser, onMcqAnswer, onSendToMcqCommunity,
-  initialLessonTitle,
+  initialLessonTitle, autoStartMcq
 }) => {
   const theme = useAppTheme();
   const primary = theme.primary || '#6366f1';
-  const [activeTab, setActiveTab]           = useState<HubTab>('MCQ');
+  const [activeTab, setActiveTab]           = useState<HubTab>(autoStartMcq ? 'REVISION' : 'MCQ');
   const [mcqSelectedClass, setMcqSelectedClass]     = useState<string | null>(null);
   const [mcqSelectedSubject, setMcqSelectedSubject] = useState<string | null>(null);
   const [mcqSelectedLesson, setMcqSelectedLesson]   = useState<any | null>(null);
@@ -201,7 +202,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
   const revCfg = (settings as any)?.revisionConfig;
 
   const MCQ_START_COST = 40;
-  const LESSON_OPEN_COST = 50;
+  const LESSON_OPEN_COST = 100;
 
   function doStartSession() {
     // ── Session tracking: App.tsx ko batao session shuru hua ─────────────
@@ -509,7 +510,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
           const correct    = sessionAnswers.filter((a, i) => a !== null && a !== undefined && a === sessionMcqs[i]?.correctAnswer).length;
           const wrong      = answered - correct;
           const isAnswered = sessionAnswers[sessionQIndex] !== null && sessionAnswers[sessionQIndex] !== undefined;
-          const minRequired = Math.min(30, sessionMcqs.length);
+          const minRequired = Math.min(100, sessionMcqs.length);
           const ready      = answered >= minRequired;
 
           return (
@@ -971,6 +972,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
             onUpdateUser={onUpdateUser}
             hideHeader={true}
             onMcqAnswer={onMcqAnswer}
+            autoStartMcq={autoStartMcq}
           />
         )}
 

@@ -174,7 +174,7 @@ export const SubjectSelection: React.FC<Props> = ({
   listCardBg, listCardBorder,
 }) => {
   const appTheme = useAppTheme();
-  const subjects = getSubjectsList(classLevel, stream, board).filter(
+  const subjects = getSubjectsList(classLevel, stream, board, settings).filter(
     sub => !(settings?.hiddenSubjects || []).includes(sub.id)
   );
   const currentBoard = board || 'CBSE';

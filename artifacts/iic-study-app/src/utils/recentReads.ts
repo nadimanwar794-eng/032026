@@ -138,6 +138,14 @@ export const removeRecentLucent = (id: string) => {
   } catch {}
 };
 
+export const clearAllRecentReads = () => {
+  try {
+    localStorage.removeItem(RECENT_CHAPTERS_KEY);
+    localStorage.removeItem(RECENT_HW_KEY);
+    localStorage.removeItem(RECENT_LUCENT_KEY);
+  } catch {}
+};
+
 // === FULLY-READ TRACKING ===
 // When a TTS "Read All" finishes the LAST topic of a note, that note is marked
 // as fully read. Used by the History page to show a green "Done" check.

@@ -7,13 +7,13 @@ import { storage } from "./utils/storage";
 
 // --- FIREBASE CONFIGURATION ---
 const firebaseConfig = {
-  apiKey: "AIzaSyDyYNuSJr72nC52MinT0rt6jbDae8HLCts",
-  authDomain: "project-1959318394445181665.firebaseapp.com",
-  databaseURL: "https://project-1959318394445181665-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "project-1959318394445181665",
-  storageBucket: "project-1959318394445181665.firebasestorage.app",
-  messagingSenderId: "130030264192",
-  appId: "1:130030264192:web:1b8a53d694b15c8ef1eb65"
+apiKey: "AIzaSyC7N3IOa7GRETNRBo8P-QKVFzg2bLqoEco",
+authDomain: "students-app-deae5.firebaseapp.com",
+databaseURL: "https://students-app-deae5-default-rtdb.asia-southeast1.firebasedatabase.app",
+projectId: "students-app-deae5",
+storageBucket: "students-app-deae5.firebasestorage.app",
+messagingSenderId: "128267767708",
+appId: "1:128267767708:web:08ed73b1563b2f3eb60259"
 };
 
 // ── Stale IndexedDB guard ──────────────────────────────────────────────────

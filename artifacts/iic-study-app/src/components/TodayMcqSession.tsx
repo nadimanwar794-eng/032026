@@ -950,9 +950,6 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                                             <span style={{ color:'#f87171' }}>✗{projectorWrong}</span>
                                         </span>
                                     )}
-                                    <button onClick={() => setProjectorFocused(true)} title="Focus Mode" style={{ background:'transparent', color:'#a3e635', border:'none', borderRadius:8, padding:'6px', cursor:'pointer', display:'flex', alignItems:'center' }}>
-                                        <Maximize2 size={18} />
-                                    </button>
                                     <button
                                         onClick={async () => {
                                             const result = await rotateScreen();
@@ -969,11 +966,6 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                                     </button>
                                 </div>
                             </div>
-                        )}
-                        {projectorFocused && (
-                            <button onClick={() => setProjectorFocused(false)} style={{ position:'absolute', top:10, right:10, zIndex:10, background:'rgba(0,0,0,0.4)', color:'#fff', border:'none', borderRadius:8, padding:'6px', cursor:'pointer', display:'flex', alignItems:'center' }}>
-                                <Minimize2 size={16} />
-                            </button>
                         )}
                         <div style={{ flex:1, overflowY:'auto', padding: projectorFocused ? '24px' : '18px 24px 12px', display:'flex', flexDirection:'column', gap:14, minHeight:0 }}>
                             <div style={{ display:'flex', alignItems:'flex-start', gap:12 }}>
@@ -1014,22 +1006,59 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                         </div>
                         {/* Nav footer */}
                         {!projectorFocused && (
-                            <div style={{ display:'flex', gap:12, padding:'12px 20px', borderTop:'2px solid #e2e8f0', background:'#f8fafc', flexShrink:0 }}>
+                            <div style={{ display:'flex', gap:12, padding:'12px 20px', borderTop:'2px solid #e2e8f0', background:'#f8fafc', flexShrink:0, alignItems: 'center' }}>
                                 <button onClick={() => { setProjectorQIdx(i => Math.max(0, i-1)); setProjectorSelected(null); }} disabled={projectorQIdx === 0}
-                                    style={{ flex:1, padding:'12px', borderRadius:12, border:'2px solid #e2e8f0', background:'#fff', fontWeight:800, fontSize:15, cursor: projectorQIdx === 0 ? 'not-allowed' : 'pointer', opacity: projectorQIdx === 0 ? 0.4 : 1 }}>
-                                    ← Pichla
+                                    style={{ flex:1, padding:'12px', borderRadius:12, border:'2px solid #e2e8f0', background:'#fff', fontWeight:800, fontSize:15, cursor: projectorQIdx === 0 ? 'not-allowed' : 'pointer', opacity: projectorQIdx === 0 ? 0.4 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                                    <ChevronLeft size={18} /> Pichla
+                                </button>
+                                <button
+                                    onClick={() => setProjectorFocused(true)}
+                                    title="Focus Mode"
+                                    style={{ background:'#f0fdf4', border:'2px solid #bbf7d0', borderRadius:12, color:'#16a34a', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', padding: '12px 14px', flexShrink: 0 }}>
+                                    <Maximize2 size={20} />
                                 </button>
                                 {projectorQIdx < total - 1 ? (
                                     <button onClick={() => { setProjectorQIdx(i => i+1); setProjectorSelected(null); }}
-                                        style={{ flex:1, padding:'12px', borderRadius:12, border:'none', background:'#1e293b', color:'#fff', fontWeight:800, fontSize:15, cursor:'pointer' }}>
-                                        Agla →
+                                        style={{ flex:1, padding:'12px', borderRadius:12, border:'none', background:'#1e293b', color:'#fff', fontWeight:800, fontSize:15, cursor:'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                                        Agla <ChevronRight size={18} />
                                     </button>
                                 ) : (
                                     <button onClick={closeProjector}
-                                        style={{ flex:1, padding:'12px', borderRadius:12, border:'none', background:'#16a34a', color:'#fff', fontWeight:800, fontSize:15, cursor:'pointer' }}>
-                                        ✓ Khatam
+                                        style={{ flex:1, background:'linear-gradient(135deg,#16a34a,#15803d)', color:'#fff', border:'none', borderRadius:12, padding:'12px', fontSize:15, fontWeight:900, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:8, boxShadow:'0 2px 12px rgba(22,163,74,0.35)' }}>
+                                        <CheckCircle size={18} /> Submit
                                     </button>
                                 )}
+                            </div>
+                        )}
+                        {/* Focus mode floating controls */}
+                        {projectorFocused && (
+                            <div style={{ position:'absolute', bottom:16, left:'50%', transform:'translateX(-50%)', display:'flex', alignItems:'center', gap:12, zIndex:20 }}>
+                                <button
+                                    onClick={() => { setProjectorQIdx(i => Math.max(0, i-1)); setProjectorSelected(null); }}
+                                    disabled={projectorQIdx === 0}
+                                    style={{ background: projectorQIdx===0 ? 'rgba(30,41,59,0.4)' : 'rgba(30,41,59,0.85)', color: projectorQIdx===0 ? 'rgba(255,255,255,0.3)' : '#fff', border:'none', borderRadius:10, padding:'10px 20px', fontSize:15, fontWeight:900, cursor: projectorQIdx===0 ? 'not-allowed' : 'pointer', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', gap:6 }}>
+                                    <ChevronLeft size={18} /> Pichla
+                                </button>
+                                <button
+                                    onClick={() => setProjectorFocused(false)}
+                                    style={{ background:'rgba(239,68,68,0.9)', color:'#fff', border:'2px solid #fca5a5', borderRadius:10, padding:'10px 14px', fontSize:15, fontWeight:900, cursor:'pointer', backdropFilter:'blur(6px)', display:'flex', alignItems:'center' }}>
+                                    <Minimize2 size={16} />
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        if (projectorQIdx < total - 1) {
+                                            setProjectorQIdx(i => i+1); setProjectorSelected(null);
+                                        } else {
+                                            closeProjector();
+                                        }
+                                    }}
+                                    style={{ background: 'rgba(30,41,59,0.85)', color: '#fff', border:'none', borderRadius:10, padding:'10px 20px', fontSize:15, fontWeight:900, cursor: 'pointer', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', gap:6 }}>
+                                    {projectorQIdx < total - 1 ? (
+                                        <>Agla <ChevronRight size={18} /></>
+                                    ) : (
+                                        <><CheckCircle size={18} /> Submit</>
+                                    )}
+                                </button>
                             </div>
                         )}
                     </div>
