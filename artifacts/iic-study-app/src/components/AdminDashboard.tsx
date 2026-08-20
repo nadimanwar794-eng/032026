@@ -11230,6 +11230,29 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                 <p className="text-[10px] text-slate-400 mt-1.5">🏠 Ye background Home, Important Notes, Compare, aur sabhi pages par apply hoga. Default: White (#ffffff)</p>
                               </div>
 
+                              <div className="mt-4 p-3 bg-slate-50 rounded-xl border border-slate-200">
+                                <label className="text-xs font-black text-slate-700 uppercase block mb-2">🖼️ App Background Image URL — Poori App Ka Wallpaper</label>
+                                <input
+                                  type="text"
+                                  value={localSettings.appBackgroundImage || ''}
+                                  onChange={(e) => setLocalSettings({...localSettings, appBackgroundImage: e.target.value})}
+                                  className="w-full p-2 border rounded-xl text-sm mb-2"
+                                  placeholder="https://example.com/wallpaper.jpg"
+                                />
+                                <p className="text-[10px] text-slate-500">Paste an image URL here. It will be shown globally except in Notes/Lesson views.</p>
+                                {localSettings.appBackgroundImage && (
+                                  <div className="mt-2 w-full h-32 rounded-xl border border-slate-200 bg-slate-100 overflow-hidden relative">
+                                    <img src={localSettings.appBackgroundImage} alt="Wallpaper Preview" className="w-full h-full object-cover opacity-80" />
+                                    <button
+                                      onClick={() => setLocalSettings({...localSettings, appBackgroundImage: ''})}
+                                      className="absolute top-2 right-2 bg-red-500/80 hover:bg-red-600 text-white p-1.5 rounded-lg backdrop-blur-sm"
+                                    >
+                                      <Trash2 size={14} />
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+
                               {/* ── PROFILE PAGE BACKGROUND COLOR ── */}
                               <div className="mt-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
                                 <label className="text-xs font-black text-slate-700 uppercase block mb-2">👤 Profile Page Background — Sirf Profile Ka Background</label>

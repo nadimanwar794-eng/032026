@@ -60,7 +60,26 @@ export const RoutineRevisionBadge: React.FC<Props> = ({ lessonId, lessonTitle, o
   }, [refresh]);
 
   // Nothing to show if no bucket yet (lesson completed today — due tomorrow)
-  if (!status) return null;
+  if (!status) {
+    return (
+      <button
+        onClick={() => onGoToRevision?.(lessonId, lessonTitle)}
+        className="mt-3 w-full rounded-xl bg-indigo-50 border border-indigo-200 p-3 flex items-center gap-2.5 active:scale-[0.98] transition text-left"
+      >
+        <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center shrink-0">
+          <Brain size={15} className="text-indigo-600" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-[11px] font-black text-indigo-700">Revision Hub Unlocked!</p>
+          <p className="text-[10px] text-indigo-500 mt-0.5 truncate">
+            "{lessonTitle}" ki revision practice shuru karein
+          </p>
+        </div>
+        <ChevronRight size={14} className="text-indigo-400 shrink-0" />
+      </button>
+    );
+  }
+
 
   /* ── Done for now ── */
   if (status.isDoneForNow) {

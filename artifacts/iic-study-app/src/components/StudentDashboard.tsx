@@ -541,6 +541,147 @@ const stripHtmlForPreview = (html: string): string =>
     .replace(/\s+/g, ' ')
     .trim();
 
+
+// ----- MENISCUS NAV INDICATOR -----
+// ----- MENISCUS NAV INDICATOR -----
+const MeniscusNavIndicator = ({
+  activeIndex,
+  totalTabs,
+  navBg,
+  navBorderColor,
+  activeColor,
+  ActiveIcon,
+}: {
+  activeIndex: number;
+  totalTabs: number;
+  navBg: string;
+  navBorderColor: string;
+  activeColor: string;
+  ActiveIcon?: any;
+}) => {
+  const dockPathRef = React.useRef<SVGPathElement | null>(null);
+  const beadRef = React.useRef<HTMLDivElement | null>(null);
+  const containerRef = React.useRef<HTMLDivElement | null>(null);
+
+  const animState = React.useRef({
+    currentX: 0,
+    targetX: 0,
+    velocity: 0,
+    w: 360,
+    h: 64,
+    isAwake: false,
+  });
+
+  const rafRef = React.useRef<number>(0);
+
+  const generatePath = (cx: number, W: number, H: number) => {
+    const sw = 36;
+    const depth = 26;
+    const p1 = Math.max(0, cx - sw);
+    const p2 = cx - 18;
+    const p3 = cx;
+    const p4 = cx + 18;
+    const p5 = Math.min(W, cx + sw);
+
+    return `M 0,0 L ${p1},0 C ${p1 + 12},0 ${p2},${depth} ${p3},${depth} C ${p4},${depth} ${p5 - 12},0 ${p5},0 L ${W},0 L ${W},${H} L 0,${H} Z`;
+  };
+
+  const wakeUp = React.useCallback(() => {
+    if (animState.current.isAwake) return;
+    animState.current.isAwake = true;
+
+    const loop = () => {
+      const spring = 0.16;
+      const damping = 0.68;
+      const state = animState.current;
+
+      const force = (state.targetX - state.currentX) * spring;
+      state.velocity = (state.velocity + force) * damping;
+      state.currentX += state.velocity;
+
+      if (dockPathRef.current) {
+        dockPathRef.current.setAttribute("d", generatePath(state.currentX, state.w, state.h));
+      }
+
+      if (beadRef.current) {
+        beadRef.current.style.transform = `translateX(${state.currentX - 24}px)`;
+      }
+
+      if (Math.abs(state.velocity) < 0.05 && Math.abs(state.targetX - state.currentX) < 0.05) {
+        state.currentX = state.targetX;
+        state.velocity = 0;
+        state.isAwake = false;
+        return;
+      }
+
+      rafRef.current = requestAnimationFrame(loop);
+    };
+
+    rafRef.current = requestAnimationFrame(loop);
+  }, []);
+
+  React.useEffect(() => {
+    return () => cancelAnimationFrame(rafRef.current);
+  }, []);
+
+  React.useEffect(() => {
+    const updateTarget = () => {
+      if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        animState.current.w = rect.width;
+        animState.current.h = rect.height;
+        const tabWidth = rect.width / totalTabs;
+        animState.current.targetX = (activeIndex + 0.5) * tabWidth;
+
+        if (animState.current.currentX === 0) {
+          animState.current.currentX = animState.current.targetX;
+          if (dockPathRef.current) {
+            dockPathRef.current.setAttribute("d", generatePath(animState.current.currentX, rect.width, rect.height));
+          }
+          if (beadRef.current) {
+            beadRef.current.style.transform = `translateX(${animState.current.currentX - 24}px)`;
+          }
+        }
+        wakeUp();
+      }
+    };
+
+    updateTarget();
+    window.addEventListener("resize", updateTarget);
+    return () => window.removeEventListener("resize", updateTarget);
+  }, [activeIndex, totalTabs, wakeUp]);
+
+  return (
+    <div ref={containerRef} className="absolute inset-0 pointer-events-none overflow-visible z-0">
+      <svg className="absolute inset-0 w-full h-full" preserveAspectRatio="none">
+        <path ref={dockPathRef} fill={navBg} stroke={navBorderColor} strokeWidth="1" />
+      </svg>
+      <div
+        ref={beadRef}
+        className="absolute top-[-14px] left-0 w-[48px] h-[48px] rounded-full z-20 flex items-center justify-center pointer-events-none text-white"
+        style={{
+          background: activeColor || "#22c55e",
+          boxShadow: `0 0 25px ${activeColor || "#22c55e"}99`,
+          willChange: "transform",
+        }}
+      >
+        {ActiveIcon && (
+          typeof ActiveIcon === "function" ? (
+            <ActiveIcon className="w-6 h-6 text-white stroke-white stroke-[2.4] fill-none" />
+          ) : (
+            <span className="w-6 h-6 text-white [&>svg]:w-6 [&>svg]:h-6 [&>svg]:stroke-white [&>svg]:stroke-[2.4] [&>svg]:fill-none flex items-center justify-center">
+              {ActiveIcon}
+            </span>
+          )
+        )}
+      </div>
+    </div>
+  );
+};
+
+
+// ────────────────────────────────────────────────────────────────────────
+
 export const StudentDashboard: React.FC<Props> = ({
   user,
   dailyStudySeconds,
@@ -1994,6 +2135,8 @@ export const StudentDashboard: React.FC<Props> = ({
     mobile: (user as any).mobile || "",
     password: (user as any).password || "",
     email: user.email || "",
+    securityQuestion: user.securityQuestion || "Aapka favorite subject kaunsa hai?",
+    securityAnswer: user.securityAnswer || "",
   });
   const [profileData, setProfileData] = useState({
     classLevel: activeSessionClass || user.classLevel || "10",
@@ -11452,6 +11595,8 @@ export const StudentDashboard: React.FC<Props> = ({
                       mobile: (user as any).mobile || '',
                       password: (user as any).password || '',
                       email: user.email || '',
+                      securityQuestion: user.securityQuestion || "Aapka favorite subject kaunsa hai?",
+                      securityAnswer: user.securityAnswer || "",
                     });
                     setShowRecoveryModal(true);
                   }}
@@ -11496,6 +11641,25 @@ export const StudentDashboard: React.FC<Props> = ({
                   color: user.email ? '#16a34a' : '#94a3b8',
                   border: `1px solid ${user.email ? 'rgba(34,197,94,0.28)' : 'rgba(148,163,184,0.2)'}`,
                 }}>{user.email ? '✓ Active' : 'Inactive'}</span>
+              </div>
+              {/* Security Question row */}
+              <div className="flex items-center gap-3 px-4 py-3.5" style={{ borderBottom: `1px solid ${tierTheme.primary}10` }}>
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'rgba(234,88,12,0.12)', border: '1px solid rgba(234,88,12,0.2)' }}>
+                  <span style={{ fontSize: 16 }}>❓</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold uppercase tracking-wider" style={{ fontSize: 9, color: _pTxtSubColor, marginBottom: 2 }}>Security Question</p>
+                  <p className="font-bold truncate" style={{ fontSize: 13, color: _pTxtColor }}>
+                    {user.securityQuestion ? user.securityQuestion : <span style={{ color: _pTxtMutedColor, fontWeight: 500 }}>Set nahi hai</span>}
+                  </p>
+                  <p className="text-xs text-slate-500 font-medium truncate mt-0.5">Ans: {user.securityAnswer ? '••••••••' : 'Not set'}</p>
+                </div>
+                <span className="font-black px-2.5 py-1 rounded-lg" style={{
+                  fontSize: 9,
+                  background: user.securityAnswer ? 'rgba(34,197,94,0.14)' : 'rgba(148,163,184,0.10)',
+                  color: user.securityAnswer ? '#16a34a' : '#94a3b8',
+                  border: `1px solid ${user.securityAnswer ? 'rgba(34,197,94,0.28)' : 'rgba(148,163,184,0.2)'}`,
+                }}>{user.securityAnswer ? '✓ Active' : 'Inactive'}</span>
               </div>
               {/* UID row */}
               <div className="flex items-center gap-3 px-4 py-3.5">
@@ -15014,6 +15178,37 @@ export const StudentDashboard: React.FC<Props> = ({
                   className="w-full p-3 rounded-xl border border-slate-200 font-bold"
                 />
               </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 uppercase block mb-1">
+                  Security Question
+                </label>
+                <select
+                  value={recoveryData.securityQuestion}
+                  onChange={(e) =>
+                    setRecoveryData({ ...recoveryData, securityQuestion: e.target.value })
+                  }
+                  className="w-full p-3 rounded-xl border border-slate-200 font-bold bg-white"
+                >
+                  <option value="Aapka favorite subject kaunsa hai?">Aapka favorite subject kaunsa hai?</option>
+                  <option value="Aapke primary school ka naam kya tha?">Aapke primary school ka naam kya tha?</option>
+                  <option value="Aapka favorite teacher kaun hai?">Aapka favorite teacher kaun hai?</option>
+                  <option value="Aapka birth city / gaon kaunsa hai?">Aapka birth city / gaon kaunsa hai?</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 uppercase block mb-1">
+                  Security Answer
+                </label>
+                <input
+                  type="text"
+                  placeholder="Your Answer"
+                  value={recoveryData.securityAnswer}
+                  onChange={(e) =>
+                    setRecoveryData({ ...recoveryData, securityAnswer: e.target.value })
+                  }
+                  className="w-full p-3 rounded-xl border border-slate-200 font-bold"
+                />
+              </div>
             </div>
 
             <div className="flex gap-3 mt-8">
@@ -15044,6 +15239,8 @@ export const StudentDashboard: React.FC<Props> = ({
                     mobile: recoveryData.mobile,
                     password: recoveryData.password,
                     email: recoveryData.email || user.email,
+                    securityQuestion: recoveryData.securityQuestion,
+                    securityAnswer: recoveryData.securityAnswer.trim().toLowerCase(),
                   });
                   setShowRecoveryModal(false);
                   showAlert("Recovery details saved successfully!", "SUCCESS");
@@ -17798,8 +17995,8 @@ export const StudentDashboard: React.FC<Props> = ({
         data-iic-bottom-nav=""
         className={`fixed bottom-0 left-0 right-0 w-full mx-auto backdrop-blur-md z-[300] pb-safe ${activeExternalApp || isDocFullscreen || (contentViewStep === "PLAYER" && selectedChapter && activeTab !== 'STORE' && activeTab !== 'PROFILE') || isLandscapeUiHidden || isInternalImmersive || !!hwActiveHwId || !!lucentNoteViewer || coachingNotesReaderOpen ? "hidden" : ""}`}
         style={{
-          background: tierTheme.navBg,
-          borderTop: `1px solid ${(tierTheme as any).navBorderColor || tierTheme.primary + '22'}`,
+          background: 'transparent', // Meniscus will draw background
+          borderTop: 'none',
           boxShadow: `0 -4px 20px -8px ${tierTheme.shadowColor}`,
         }}
         aria-label="Primary"
@@ -18154,17 +18351,15 @@ export const StudentDashboard: React.FC<Props> = ({
 
             return (
               <>
-                {/* SLIDING TOP ACCENT — single pill that glides between tabs */}
-                <span
-                  aria-hidden
-                  className="pointer-events-none absolute top-0 h-[3px] rounded-b-full"
-                  style={{
-                    background: tierTheme.pillGrad,
-                    left: `calc(${activeIndex * tabWidthPct}% + ${tabWidthPct / 2}% - 18px)`,
-                    width: '36px',
-                    transition: 'left 380ms cubic-bezier(0.34, 1.56, 0.64, 1)',
-                  }}
-                />
+                <MeniscusNavIndicator
+  activeIndex={activeIndex}
+  totalTabs={totalVisible}
+  navBg={tierTheme.navBg}
+  navBorderColor={(tierTheme as any).navBorderColor || tierTheme.primary + "22"}
+  activeColor="#22c55e"
+  ActiveIcon={visibleTabs[activeIndex]?.icon}
+/>
+
                 {visibleTabs.map((tab) => {
                   const access = tab.featureId
                     ? getFeatureAccess(tab.featureId)
@@ -18220,7 +18415,7 @@ export const StudentDashboard: React.FC<Props> = ({
                       <span
                         key={tab.isActive ? `${tab.id}-on` : `${tab.id}-off`}
                         className={`relative z-10 inline-flex items-center justify-center transition-transform duration-300 [transition-timing-function:cubic-bezier(0.34,1.56,0.64,1)] ${
-                          tab.isActive ? "nav-icon-pop scale-110" : "scale-100"
+                          tab.isActive ? "nav-icon-pop scale-110 -translate-y-2" : "scale-100"
                         }`}
                       >
                         {/* Tap ripple — only renders for non-HOME tabs. The key trick re-mounts
@@ -18259,7 +18454,7 @@ export const StudentDashboard: React.FC<Props> = ({
                       <span
                         className={`relative z-10 text-[10.5px] leading-none tracking-wide transition-all duration-300 ${
                           tab.isActive
-                            ? "font-bold translate-y-0 opacity-100"
+                            ? "font-bold translate-y-[2px] opacity-100"
                             : "font-medium translate-y-0 opacity-100"
                         }`}
                         style={tab.isActive ? { color: _isNavDark ? ((tierTheme as any).navActive || '#7dd3fc') : tierTheme.primary } : { color: _isNavDark ? 'rgba(255,255,255,0.65)' : '#64748b' }}
@@ -21579,6 +21774,8 @@ RULES:
                 },
               });
               return;
+              } else {
+              setInitialRevisionLessonTitle(null);
             }
             setShowDailyEventPage(false);
             setShowRevisionHubScreen(true);
@@ -21917,6 +22114,8 @@ RULES:
                 },
               });
               return;
+              } else {
+              setInitialRevisionLessonTitle(null);
             }
             setShowMyRoutine(false);
             setShowRevisionHubScreen(true);
@@ -21948,6 +22147,8 @@ RULES:
                 },
               });
               return;
+              } else {
+              setInitialRevisionLessonTitle(null);
             }
             setShowMyRoutine(false);
             setShowRevisionHubScreen(true);

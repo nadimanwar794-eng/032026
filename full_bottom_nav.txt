@@ -1,0 +1,499 @@
+      {/* FIXED BOTTOM NAVIGATION */}
+      <nav
+        data-iic-bottom-nav=""
+        className={`fixed bottom-0 left-0 right-0 w-full mx-auto backdrop-blur-md z-[300] pb-safe ${activeExternalApp || isDocFullscreen || (contentViewStep === "PLAYER" && selectedChapter && activeTab !== 'STORE' && activeTab !== 'PROFILE') || isLandscapeUiHidden || isInternalImmersive || !!hwActiveHwId || !!lucentNoteViewer || coachingNotesReaderOpen ? "hidden" : ""}`}
+        style={{
+          background: tierTheme.navBg,
+          borderTop: `1px solid ${(tierTheme as any).navBorderColor || tierTheme.primary + '22'}`,
+          boxShadow: `0 -4px 20px -8px ${tierTheme.shadowColor}`,
+        }}
+        aria-label="Primary"
+      >
+        <div className="relative flex justify-around items-stretch h-[64px] max-w-3xl mx-auto px-1">
+          {(() => {
+            // ---- PER-TAB SNAPSHOT / RESTORE ----
+            // Capture every overlay/position state for the tab the user is leaving,
+            // and restore the snapshot for the tab they tap (or apply tab defaults
+            // on first visit). TTS is stopped on every switch so audio doesn't bleed
+            // between tabs, but ALL navigation/draft/scroll state is preserved.
+            const captureSnapshot = () => ({
+              activeTab,
+              showHomeworkHistory,
+              homeworkSubjectView,
+              hwActiveHwId,
+              hwYear,
+              hwMonth,
+              hwWeek,
+              hwOpenedDirect,
+              hwTodayPickerSub,
+              hwViewMode,
+              homeworkPlayerHwId,
+              showDailyGkHistory,
+              gkExpandedYear,
+              gkExpandedMonth,
+              gkExpandedWeek,
+              showCompMcqHub,
+              compMcqTab,
+              compMcqIndex,
+              compMcqSelected,
+              activeExternalApp,
+              showAllNotesCatalog,
+              viewingUserHistory,
+              selectedSubject,
+              selectedChapter,
+              chapters,
+              contentViewStep,
+              lucentCategoryView,
+            });
+
+            const applySnapshot = (s: any) => {
+              if (s.activeTab !== undefined) onTabChange(s.activeTab);
+              setShowHomeworkHistory(!!s.showHomeworkHistory);
+              setHomeworkSubjectView(s.homeworkSubjectView ?? null);
+              setHwActiveHwId(s.hwActiveHwId ?? null);
+              setHwYear(s.hwYear ?? null);
+              setHwMonth(s.hwMonth ?? null);
+              setHwWeek(s.hwWeek ?? null);
+              setHwOpenedDirect(!!s.hwOpenedDirect);
+              setHwTodayPickerSub(s.hwTodayPickerSub ?? null);
+              setHwViewMode(s.hwViewMode ?? 'notes');
+              setHomeworkPlayerHwId(s.homeworkPlayerHwId ?? null);
+              setShowDailyGkHistory(!!s.showDailyGkHistory);
+              setGkExpandedYear(s.gkExpandedYear ?? null);
+              setGkExpandedMonth(s.gkExpandedMonth ?? null);
+              setGkExpandedWeek(s.gkExpandedWeek ?? null);
+              setShowCompMcqHub(!!s.showCompMcqHub);
+              setCompMcqTab(s.compMcqTab ?? 'PRACTICE');
+              setCompMcqIndex(s.compMcqIndex ?? 0);
+              setCompMcqSelected(s.compMcqSelected ?? null);
+              setActiveExternalApp(s.activeExternalApp ?? null);
+              setShowAllNotesCatalog(false);
+              setViewingUserHistory(s.viewingUserHistory ?? null);
+              setSelectedSubject(s.selectedSubject ?? null);
+              if (s.selectedChapter !== undefined) setSelectedChapter(s.selectedChapter ?? null);
+              if (s.chapters !== undefined && s.chapters.length > 0) setChapters(s.chapters);
+              setContentViewStep(s.contentViewStep ?? 'SUBJECTS');
+              setLucentCategoryView(!!s.lucentCategoryView);
+            };
+
+            // Default state for a tab the user is opening for the first time.
+            const defaultSnapshotForTab = (tab: LogicalTab) => {
+              const empty = {
+                activeTab: 'HOME' as any,
+                showHomeworkHistory: false,
+                homeworkSubjectView: null,
+                hwActiveHwId: null,
+                hwYear: null,
+                hwMonth: null,
+                hwWeek: null,
+                hwOpenedDirect: false,
+                hwTodayPickerSub: null,
+                hwViewMode: 'notes',
+                homeworkPlayerHwId: null,
+                showDailyGkHistory: false,
+                gkExpandedYear: null,
+                gkExpandedMonth: null,
+                gkExpandedWeek: null,
+                showCompMcqHub: false,
+                compMcqTab: 'PRACTICE',
+                compMcqIndex: 0,
+                compMcqSelected: null,
+                activeExternalApp: null,
+                showAllNotesCatalog: null,
+                viewingUserHistory: null,
+                selectedSubject: null,
+                contentViewStep: 'SUBJECTS',
+                lucentCategoryView: false,
+              };
+              switch (tab) {
+                case 'HOME':     return { ...empty, activeTab: 'HOME' };
+                case 'HOMEWORK': return { ...empty, activeTab: 'HOME', showHomeworkHistory: true };
+                case 'REVISION_V2': return { ...empty, activeTab: 'REVISION_V2' };
+                case 'GK':       return { ...empty, activeTab: 'HOME', showDailyGkHistory: true };
+                case 'VIDEO':    return { ...empty, activeTab: 'UNIVERSAL_VIDEO' };
+                case 'PROFILE':  return { ...empty, activeTab: 'PROFILE' };
+                case 'APP_STORE':return { ...empty, activeTab: 'APP_STORE' };
+                case 'HISTORY':  return { ...empty, activeTab: 'HISTORY' };
+                case 'PROGRESS': return { ...empty, activeTab: 'HOME' };
+                default:         return empty;
+              }
+            };
+
+            // activeTab values that "belong" to a logical tab's own sub-navigation.
+            // If the current activeTab is NOT in this set, it means the user
+            // navigated to a "foreign" top-level page (e.g., STORE, PROFILE) via a
+            // direct button tap — we should NOT save that as the logical tab's state.
+            // Only chapter-reading sub-states that the user would want restored
+            // when returning to a logical tab. "Side mode" pages like CUSTOM_PAGE,
+            // STORE, PROFILE, GAME, AI_HUB etc. are treated as foreign so they
+            // are NOT persisted into the snapshot, preventing them from showing
+            // on the wrong tab after navigation.
+            const LOGICAL_TAB_NATIVE_ACTIVE_TABS: Record<LogicalTab, string[]> = {
+              HOME:      ['HOME', 'COURSES', 'PDF', 'VIDEO', 'AUDIO', 'MCQ', 'MCQ_REVIEW'],
+              HOMEWORK:  ['HOME', 'COURSES', 'PDF', 'VIDEO', 'AUDIO', 'MCQ', 'MCQ_REVIEW'],
+              REVISION_V2: ['REVISION_V2'],
+              GK:        ['HOME'],
+              VIDEO:     ['UNIVERSAL_VIDEO'],
+              PROFILE:   ['PROFILE'],
+              APP_STORE: ['APP_STORE'],
+              HISTORY:   ['HISTORY'],
+              PROGRESS:  ['HOME'],
+            };
+
+            const NAV_TAB_INFO: Record<string, {emoji: string; desc: string}> = {
+              HOME:               { emoji: '🏠', desc: 'Notes, Videos, MCQs and full syllabus' },
+              HOMEWORK:           { emoji: '📚', desc: 'Admin assignments and homework' },
+              COMMUNITY_SUPPORT:  { emoji: '💬', desc: 'Community chat and support' },
+              IMPORTANT:          { emoji: '⭐', desc: 'Starred and important notes' },
+              APP_STORE:          { emoji: '📱', desc: 'Admin recommended apps' },
+              PROFILE:            { emoji: '👤', desc: 'Profile, credits and settings' },
+              REVISION_V2:        { emoji: '🔁', desc: 'Spaced revision and weak topics' },
+              PROGRESS:           { emoji: '📊', desc: 'Daily stats, XP, streak aur Revision Hub progress' },
+              COMPRE:             { emoji: '📖', desc: 'Full book comparison tool' },
+              GK:                 { emoji: '🌍', desc: 'Daily GK and current affairs' },
+              VIDEO:              { emoji: '🎬', desc: 'Educational videos' },
+            };
+            const showNavTabTooltip = (id: string, label: string) => {
+              const info = NAV_TAB_INFO[id];
+              if (!info) return;
+              if (navTabTooltipTimerRef.current) clearTimeout(navTabTooltipTimerRef.current);
+              setNavTabTooltip({ label, desc: info.desc, emoji: info.emoji });
+              navTabTooltipTimerRef.current = setTimeout(() => setNavTabTooltip(null), 2500);
+            };
+
+            const switchToLogicalTab = (target: LogicalTab) => {
+              hapticLight();
+              try { stopSpeech(); } catch (_) {}
+              setSpeakingId(null);
+              // Close Community Support chat overlay if open — otherwise the
+              // chat keeps covering the dashboard when user taps other nav tabs.
+              setShowChat(false);
+              // Close word-search Compare View if open.
+              setShowCompareView(false);
+              // Close Revision Hub Screen if open — otherwise it covers all other tabs.
+              setShowRevisionHubScreen(false);
+              // Close My Routine screen if open.
+              setShowMyRoutine(false);
+              // Close Community Stars page if open.
+              if (showCommunityStarsPage) {
+                try { stopProfileStarRead(); } catch (_) {}
+                setShowCommunityStarsPage(false);
+              }
+              // Close Progress Dashboard overlay if open — prevents it bleeding into other tabs.
+              setShowProgressDashboard(false);
+              // Close Daily Event Page overlay if open — it's a top-level overlay and must
+              // be dismissed when the user switches tabs via the bottom nav.
+              setShowDailyEventPage(false);
+              // Close the Important Notes overlay if it's open — otherwise the
+              // overlay (z-[200]) keeps covering the dashboard even after the
+              // user taps Home / Homework / Profile / Revision in bottom nav.
+              if (showStarredPage) {
+                try { stopProfileStarRead(); } catch (_) {}
+                setShowStarredPage(false);
+              }
+              if (target === currentLogicalTab) {
+                // Re-tap of the same logical tab — always go to the default root state
+                // for that tab (not the saved snapshot). This ensures that foreign
+                // sub-pages like CUSTOM_PAGE, STORE, GAME, etc. are always dismissed
+                // when the user taps the active nav icon, even if the snapshot was
+                // previously contaminated.
+                applySnapshot(defaultSnapshotForTab(target));
+                return;
+              }
+              // Before saving the current snapshot, sanitize activeTab so a "foreign"
+              // destination (e.g. user tapped Store from HOME) is not persisted as
+              // HOME's state — it would corrupt the snapshot and show wrong content
+              // on the next HOME visit.
+              const nativeForCurrent = LOGICAL_TAB_NATIVE_ACTIVE_TABS[currentLogicalTab] || [];
+              const sanitizedActiveTab = nativeForCurrent.includes(activeTab)
+                ? activeTab
+                : (defaultSnapshotForTab(currentLogicalTab) as any).activeTab;
+              const snap = { ...captureSnapshot(), activeTab: sanitizedActiveTab };
+              tabSnapshotsRef.current = { ...tabSnapshotsRef.current, [currentLogicalTab]: snap };
+              setTabSnapshots(prev => ({ ...prev, [currentLogicalTab]: snap }));
+              const restore = tabSnapshotsRef.current[target] ?? tabSnapshots[target];
+              applySnapshot(restore ?? defaultSnapshotForTab(target));
+              currentLogicalTabRef.current = target;
+              setCurrentLogicalTab(target);
+            };
+
+            const tabs: Array<{
+              id: LogicalTab;
+              label: string;
+              Icon: any;
+              featureId?: string;
+              filledOnActive?: boolean;
+              isActive: boolean;
+              onClick: () => void;
+            }> = [
+              {
+                id: "HOME",
+                label: "Home",
+                Icon: Home,
+                featureId: "NAV_HOME",
+                filledOnActive: true,
+                // When the Important Notes overlay is open, Home should NOT
+                // appear active — only ONE bottom-nav tab can be active at a
+                // time. Same rule applies to all sibling tabs below.
+                isActive: !showStarredPage && !showChat && !showRevisionHubScreen && !showMyRoutine && !showDailyEventPage && !showProgressDashboard && currentLogicalTab === "HOME",
+                onClick: () => switchToLogicalTab("HOME"),
+              },
+
+              // Revision Hub — quick access to smart learning
+              {
+                id: "REVISION_HUB" as any,
+                label: "Revision",
+                Icon: BrainCircuit,
+                filledOnActive: true,
+                isActive: showRevisionHubScreen,
+                onClick: () => {
+                  setShowChat(false);
+                  setShowStarredPage(false);
+                  setShowMyRoutine(false);
+                  setShowDailyEventPage(false);
+                  if (showCommunityStarsPage) {
+                    try { stopProfileStarRead(); } catch (_) {}
+                    setShowCommunityStarsPage(false);
+                  }
+                  hapticMedium();
+                  setShowRevisionHubScreen(true);
+                },
+              },
+
+              // My Routine
+              (() => {
+                // Compute badge: routine ON + today's task not fully done
+                let _routineBadge = false;
+                try {
+                  const _rbd = loadRoutineData(user.id);
+                  if (_rbd.enabled) {
+                    const _todayStr = new Date().toISOString().split('T')[0];
+                    const _tt = _rbd.dailyTasks?.[_todayStr];
+                    const _sciDone = !!_tt?.scienceComplete;
+                    const _socDone = !!_tt?.socialScienceComplete;
+                    const _hasSci = _rbd.subjects.some(s => s.category === 'SCIENCE' && s.routineApplied);
+                    const _hasSoc = _rbd.subjects.some(s => s.category === 'SOCIAL_SCIENCE' && s.routineApplied);
+                    _routineBadge = (_hasSci && !_sciDone) || (_hasSoc && !_socDone);
+                  }
+                } catch {}
+                return {
+                  id: "MY_ROUTINE" as any,
+                  label: "Routine",
+                  Icon: CalendarCheck,
+                  filledOnActive: true,
+                  isActive: showMyRoutine,
+                  badge: _routineBadge,
+                  onClick: () => {
+                    setShowChat(false);
+                    setShowStarredPage(false);
+                    setShowRevisionHubScreen(false);
+                    setShowDailyEventPage(false);
+                    if (showCommunityStarsPage) {
+                      try { stopProfileStarRead(); } catch (_) {}
+                      setShowCommunityStarsPage(false);
+                    }
+                    hapticMedium();
+                    setShowMyRoutine(true);
+                  },
+                };
+              })(),
+
+              // Community Support
+              {
+                id: "COMMUNITY_SUPPORT" as any,
+                label: "Community",
+                Icon: MessageSquare,
+                filledOnActive: true,
+                isActive: showChat,
+                onClick: () => {
+                  setShowCompareView(false);
+                  setShowRevisionHubScreen(false);
+                  setShowMyRoutine(false);
+                  setShowDailyEventPage(false);
+                  if (showCommunityStarsPage) {
+                    try { stopProfileStarRead(); } catch (_) {}
+                    setShowCommunityStarsPage(false);
+                  }
+                  try { stopProfileStarRead(); } catch (_) {}
+                  setShowStarredPage(false);
+                  setShowChat(true);
+                },
+              },
+
+              // Slot C — Apps store (admin-toggleable)
+              ...(!settings?.appStorePageHidden && !(settings?.hiddenBottomNavButtons || []).includes('APP_STORE')
+                ? [
+                    {
+                      id: "APP_STORE" as const,
+                      label: "Apps",
+                      Icon: ShoppingBag,
+                      filledOnActive: true,
+                      isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showProgressDashboard && !showChat && currentLogicalTab === "APP_STORE",
+                      onClick: () => switchToLogicalTab("APP_STORE"),
+                    },
+                  ]
+                : []),
+
+              // Profile — always visible, pinned to the right of bottom nav
+              {
+                id: "PROFILE" as const,
+                label: "Profile",
+                Icon: UserIcon,
+                filledOnActive: false,
+                isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showProgressDashboard && currentLogicalTab === "PROFILE",
+                onClick: () => switchToLogicalTab("PROFILE"),
+              },
+            ];
+
+            // Filter out hidden tabs first so the sliding indicator math
+            // matches what's actually rendered.
+            const visibleTabs = tabs.filter((t) => {
+              const access = t.featureId
+                ? getFeatureAccess(t.featureId)
+                : { hasAccess: true, isHidden: false };
+              return !access.isHidden;
+            });
+            const totalVisible = Math.max(visibleTabs.length, 1);
+            const activeIndex = Math.max(0, visibleTabs.findIndex((t) => t.isActive));
+            const tabWidthPct = 100 / totalVisible;
+
+            return (
+              <>
+                {/* SLIDING TOP ACCENT — single pill that glides between tabs */}
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute top-0 h-[3px] rounded-b-full"
+                  style={{
+                    background: tierTheme.pillGrad,
+                    left: `calc(${activeIndex * tabWidthPct}% + ${tabWidthPct / 2}% - 18px)`,
+                    width: '36px',
+                    transition: 'left 380ms cubic-bezier(0.34, 1.56, 0.64, 1)',
+                  }}
+                />
+                {visibleTabs.map((tab) => {
+                  const access = tab.featureId
+                    ? getFeatureAccess(tab.featureId)
+                    : { hasAccess: true, isHidden: false };
+                  const isLocked = !access.hasAccess;
+                  const { Icon } = tab;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => {
+                        if (isLocked) {
+                          showAlert("🔒 Locked by Admin.", "ERROR");
+                          return;
+                        }
+                        hapticMedium();
+                        showNavTabTooltip(tab.id, tab.label);
+                        // Trigger ripple burst on every tab EXCEPT Home (Home stays minimal)
+                        if (tab.id !== 'HOME') {
+                          setNavTapKeys(prev => ({ ...prev, [tab.id]: (prev[tab.id] || 0) + 1 }));
+                        }
+                        // Record current tab state BEFORE readers are closed so the
+                        // back button can retrace the full path (including open viewers).
+                        try {
+                          const _ns = navStateRef.current;
+                          if (_ns.activeTab !== tab.id) {
+                            navTabHistory.current.push({
+                              tab: _ns.activeTab,
+                              lucentViewer: lucentViewerRef.current,
+                              lucentPageIdx: _ns.lucentPageIndex,
+                              lucentCat: _ns.lucentCategoryView,
+                            });
+                            // Extra browser history entry so each tab switch
+                            // gives the popstate handler one more "slot" to consume.
+                            window.history.pushState({ __nstTrap: true }, '');
+                          }
+                        } catch {}
+                        // If user is currently inside a notes/MCQ reader (Lucent / HW),
+                        // save their progress to Continue Reading and close the reader
+                        // BEFORE switching tabs. So nav-tap "exits cleanly" and the
+                        // page they were reading shows up under Continue Reading next time.
+                        try { closeReadersBeforeNavSwitch(tab.id); } catch {}
+                        tab.onClick();
+                      }}
+                      aria-label={tab.label}
+                      aria-current={tab.isActive ? "page" : undefined}
+                      className={`group relative flex-1 flex flex-col items-center justify-center gap-1 pt-1.5 pb-1 bg-transparent border-0 outline-none appearance-none transition-[color,transform] duration-150 ease-out active:scale-[0.90] ${
+                        isLocked ? "opacity-50" : ""
+                      }`}
+                      style={{ WebkitTapHighlightColor: 'transparent' }}
+                    >
+                      {/* Icon container — only the icon scales; background pill is the sliding glow above */}
+                      <span
+                        key={tab.isActive ? `${tab.id}-on` : `${tab.id}-off`}
+                        className={`relative z-10 inline-flex items-center justify-center transition-transform duration-300 [transition-timing-function:cubic-bezier(0.34,1.56,0.64,1)] ${
+                          tab.isActive ? "nav-icon-pop scale-110" : "scale-100"
+                        }`}
+                      >
+                        {/* Tap ripple — only renders for non-HOME tabs. The key trick re-mounts
+                            the span on every tap so the CSS animation re-fires from 0. */}
+                        {tab.id !== 'HOME' && (navTapKeys[tab.id] || 0) > 0 && (
+                          <span
+                            key={`ripple-${tab.id}-${navTapKeys[tab.id]}`}
+                            aria-hidden
+                            className="nav-ripple-burst pointer-events-none absolute inset-0 m-auto rounded-full"
+                          />
+                        )}
+                        <Icon
+                            size={22}
+                            strokeWidth={tab.isActive ? 2.4 : 2}
+                            className="transition-colors duration-300"
+                            style={{ color: tab.isActive ? (_isNavDark ? ((tierTheme as any).navActive || '#7dd3fc') : tierTheme.primary) : (_isNavDark ? 'rgba(255,255,255,0.72)' : '#64748b') }}
+                            fill={
+                              tab.filledOnActive && tab.isActive && !isLocked
+                                ? "currentColor"
+                                : "none"
+                            }
+                          />
+                        {isLocked && (
+                          <span className="absolute -top-0.5 -right-0.5 bg-red-500 rounded-full p-[2px] border border-white shadow-sm">
+                            <Lock size={8} className="text-white" />
+                          </span>
+                        )}
+                        {!isLocked && (tab as any).badge && (
+                          <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-red-500 rounded-full border-2 border-white animate-pulse shadow-sm" />
+                        )}
+                        {!isLocked && (tab as any).isBeta && (
+                          <span className="absolute -top-1 -right-1 text-[7px] font-black bg-orange-500 text-white px-1 py-px rounded-full leading-none border border-white shadow-sm">β</span>
+                        )}
+                      </span>
+
+                      <span
+                        className={`relative z-10 text-[10.5px] leading-none tracking-wide transition-all duration-300 ${
+                          tab.isActive
+                            ? "font-bold translate-y-0 opacity-100"
+                            : "font-medium translate-y-0 opacity-100"
+                        }`}
+                        style={tab.isActive ? { color: _isNavDark ? ((tierTheme as any).navActive || '#7dd3fc') : tierTheme.primary } : { color: _isNavDark ? 'rgba(255,255,255,0.65)' : '#64748b' }}
+                      >
+                        {tab.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </>
+            );
+          })()}
+        </div>
+      </nav>
+
+      {/* SIDEBAR POPUP removed — content merged into 3-dot menu */}
+      {false && (() => {
+        const hwAccess = getFeatureAccess('HOMEWORK');
+        const inboxAccess = getFeatureAccess('INBOX');
+        const planAccess = getFeatureAccess('MY_PLAN');
+        const redeemAccess = getFeatureAccess('REDEEM_CODE');
+        const requestAccess = getFeatureAccess('REQUEST_CONTENT');
+        const supportAccess = getFeatureAccess('SUPPORT');
+
+        type SideBtn = { label: string; desc: string; icon: React.ElementType; color: string; action: () => void; locked: boolean; badge?: boolean };
+
+        const essentialItems: SideBtn[] = [
+          {
+            label: 'Score History', desc: 'Points & progress', icon: TrendingUp, color: 'cyan',
+            action: () => { setShowScoreHistoryDirect(true); setShowSidebar(false); },
+            locked: false,
+          },

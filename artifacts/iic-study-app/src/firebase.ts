@@ -6,6 +6,7 @@ import { getAuth, onAuthStateChanged } from "firebase/auth";
 import { storage } from "./utils/storage";
 
 // --- FIREBASE CONFIGURATION ---
+
 const firebaseConfig = {
 apiKey: "AIzaSyC7N3IOa7GRETNRBo8P-QKVFzg2bLqoEco",
 authDomain: "students-app-deae5.firebaseapp.com",
@@ -15,7 +16,6 @@ storageBucket: "students-app-deae5.firebasestorage.app",
 messagingSenderId: "128267767708",
 appId: "1:128267767708:web:08ed73b1563b2f3eb60259"
 };
-
 // ── Stale IndexedDB guard ──────────────────────────────────────────────────
 // When the Firebase project changes the old Firestore IndexedDB cache causes
 // "INTERNAL ASSERTION FAILED" crashes. Detect the switch, delete every

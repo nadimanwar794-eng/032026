@@ -1,5 +1,6 @@
 // @ts-nocheck
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import McqQuestionDisplay from './McqQuestionDisplay';
 import { User, SystemSettings, MCQItem } from '../types';
 import { X, BookOpen, Zap, CheckCircle, AlertCircle, ChevronRight, Check, RotateCcw, Loader2, Volume2, FileText } from 'lucide-react';
 import { getChapterData, saveUserToLive } from '../firebase';
@@ -516,9 +517,12 @@ export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, su
 
                                         {/* QUESTION CARD */}
                                         <div className="bg-white p-6 rounded-2xl shadow-lg border border-slate-100 flex-1 flex flex-col">
-                                            <h3 className="text-lg font-bold text-slate-800 mb-6 leading-relaxed"
-                                                dangerouslySetInnerHTML={{ __html: renderMathInHtml(mcqData[currentQIndex].question) }}
-                                            />
+                                            <div className="mb-6">
+                                                <McqQuestionDisplay
+                                                    q={mcqData[currentQIndex] as any}
+                                                    questionClassName="text-lg font-bold text-slate-800 leading-relaxed"
+                                                />
+                                            </div>
 
                                             <div className="space-y-3 flex-1">
                                                 {mcqData[currentQIndex].options.map((opt, idx) => {
@@ -651,7 +655,9 @@ export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, su
                                     </span>
                                 </div>
                                 <div className="p-4">
-                                    <p className="text-sm font-bold text-slate-800 mb-3 leading-relaxed" dangerouslySetInnerHTML={{ __html: renderMathInHtml(item.question) }} />
+                                    <div className="mb-3">
+                                        <McqQuestionDisplay q={item as any} questionClassName="text-sm font-bold text-slate-800 leading-relaxed" />
+                                    </div>
                                     <div className="space-y-1.5">
                                         {item.options.map((opt: string, oi: number) => {
                                             const isUserAns = item.userAnswerIdx === oi;

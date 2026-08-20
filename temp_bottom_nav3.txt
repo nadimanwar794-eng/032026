@@ -1,0 +1,51 @@
+                onClick: () => {
+                  setShowChat(false);
+                  setShowStarredPage(false);
+                  setShowMyRoutine(false);
+                  setShowDailyEventPage(false);
+                  if (showCommunityStarsPage) {
+                    try { stopProfileStarRead(); } catch (_) {}
+                    setShowCommunityStarsPage(false);
+                  }
+                  hapticMedium();
+                  setShowRevisionHubScreen(true);
+                },
+              },
+
+              // My Routine
+              (() => {
+                // Compute badge: routine ON + today's task not fully done
+                let _routineBadge = false;
+                try {
+                  const _rbd = loadRoutineData(user.id);
+                  if (_rbd.enabled) {
+                    const _todayStr = new Date().toISOString().split('T')[0];
+                    const _tt = _rbd.dailyTasks?.[_todayStr];
+                    const _sciDone = !!_tt?.scienceComplete;
+                    const _socDone = !!_tt?.socialScienceComplete;
+                    const _hasSci = _rbd.subjects.some(s => s.category === 'SCIENCE' && s.routineApplied);
+                    const _hasSoc = _rbd.subjects.some(s => s.category === 'SOCIAL_SCIENCE' && s.routineApplied);
+                    _routineBadge = (_hasSci && !_sciDone) || (_hasSoc && !_socDone);
+                  }
+                } catch {}
+                return {
+                  id: "MY_ROUTINE" as any,
+                  label: "Routine",
+                  Icon: CalendarCheck,
+                  filledOnActive: true,
+                  isActive: showMyRoutine,
+                  badge: _routineBadge,
+                  onClick: () => {
+                    setShowChat(false);
+                    setShowStarredPage(false);
+                    setShowRevisionHubScreen(false);
+                    setShowDailyEventPage(false);
+                    if (showCommunityStarsPage) {
+                      try { stopProfileStarRead(); } catch (_) {}
+                      setShowCommunityStarsPage(false);
+                    }
+                    hapticMedium();
+                    setShowMyRoutine(true);
+                  },
+                };
+              })(),

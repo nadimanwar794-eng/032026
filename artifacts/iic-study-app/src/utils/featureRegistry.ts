@@ -17,7 +17,8 @@ export interface Feature {
     path?: string; // Navigation path for Student Dashboard
     requiredPermission?: string; // Admin Permission ID
     requiresSuperAdmin?: boolean; // Only for Role === 'ADMIN'
-    isDummy?: boolean; // NEW: Explicitly mark as Dummy/Placeholder
+    isDummy?: boolean; // Explicitly mark as Dummy/Placeholder
+    creditCost?: number;
 }
 
 export const ALL_FEATURES: Feature[] = [
@@ -189,7 +190,6 @@ export const ALL_FEATURES: Feature[] = [
         icon: 'Zap',
         description: 'Show active sale banners.'
     },
-
     {
         id: 'NAV_HOME',
         label: 'Home Tab',
@@ -210,7 +210,7 @@ export const ALL_FEATURES: Feature[] = [
         path: 'TOOLS',
         icon: 'Wrench',
         description: 'Calculators, converters, and more.',
-        isDummy: true // Placeholder
+        isDummy: true
     },
     {
         id: 'GAMES',
@@ -284,7 +284,7 @@ export const ALL_FEATURES: Feature[] = [
         isDummy: true
     },
 
-    // --- REVISION SUB-FEATURES (Internal to Revision Hub) ---
+    // --- REVISION SUB-FEATURES ---
     {
         id: 'REVISION_MCQ_MANAGER',
         label: 'Class MCQ Manager',
@@ -292,7 +292,7 @@ export const ALL_FEATURES: Feature[] = [
         adminVisible: true,
         adminTab: 'REVISION_MCQ_MANAGER',
         icon: 'BookOpenCheck',
-        description: 'Revision Hub ke liye class-wise MCQ add karein (6–12 + Competition).',
+        description: 'Revision Hub ke liye class-wise MCQ add karein (6–12 + Competition).'
     },
     {
         id: 'REVISION_AI_PLAN',
@@ -302,7 +302,7 @@ export const ALL_FEATURES: Feature[] = [
         requiredSubscription: 'ULTRA',
         adminVisible: true,
         description: 'Generate AI-based study plans.',
-        isDummy: true // Integrated Logic (Non-Switchable)
+        isDummy: true
     },
     {
         id: 'REVISION_MISTAKES',
@@ -311,7 +311,7 @@ export const ALL_FEATURES: Feature[] = [
         surfaceLevel: 2,
         adminVisible: true,
         description: 'Review your past mistakes.',
-        isDummy: true // Integrated Logic (Non-Switchable)
+        isDummy: true
     },
 
     // --- AI SUB-FEATURES ---
@@ -405,8 +405,7 @@ export const ALL_FEATURES: Feature[] = [
         surfaceLevel: 1,
         requiredSubscription: 'BASIC',
         adminVisible: true,
-        description: 'Control access to Premium (PDF+TTS) notes.',
-        // adminTab removed to hide from Admin Dashboard
+        description: 'Control access to Premium (PDF+TTS) notes.'
     },
     {
         id: 'PREMIUM_VIDEO',
@@ -415,8 +414,7 @@ export const ALL_FEATURES: Feature[] = [
         surfaceLevel: 1,
         requiredSubscription: 'ULTRA',
         adminVisible: true,
-        description: 'Control access to Premium Video Series (Google Drive).',
-        // adminTab removed to hide from Admin Dashboard
+        description: 'Control access to Premium Video Series (Google Drive).'
     },
     {
         id: 'ADDITIONAL_NOTES',
@@ -425,8 +423,7 @@ export const ALL_FEATURES: Feature[] = [
         surfaceLevel: 1,
         requiredSubscription: 'BASIC',
         adminVisible: true,
-        description: 'Control access to Additional Resources tab.',
-        // adminTab removed to hide from Admin Dashboard
+        description: 'Control access to Additional Resources tab.'
     },
 
     // --- APP SOUL (RARE FEATURES) ---
@@ -447,9 +444,7 @@ export const ALL_FEATURES: Feature[] = [
     { id: 'MS_ANALYSIS', label: 'Analysis', group: 'ANALYSIS', surfaceLevel: 2, adminVisible: true, description: 'Control Analysis tab in Marksheet.' },
     { id: 'MS_OFFICIAL', label: 'Official Marksheet', group: 'ANALYSIS', surfaceLevel: 2, adminVisible: true, description: 'Control Official Marksheet tab.' },
 
-
-    // --- ADMIN DASHBOARD FEATURES (Mapped to Admin Tabs) ---
-    // GROUP: CORE ADMIN
+    // --- ADMIN DASHBOARD FEATURES ---
     {
         id: 'ADMIN_USERS',
         label: 'Users',
@@ -479,7 +474,7 @@ export const ALL_FEATURES: Feature[] = [
         surfaceLevel: 3,
         adminVisible: true,
         adminTab: 'TEACHERS',
-        requiredPermission: 'VIEW_USERS', // Adjust as needed
+        requiredPermission: 'VIEW_USERS',
         icon: 'GraduationCap',
         color: 'purple'
     },
@@ -505,8 +500,6 @@ export const ALL_FEATURES: Feature[] = [
         icon: 'ShoppingBag',
         color: 'purple'
     },
-
-    // --- NOTIFICATION & REQUESTS GROUP ---
     {
         id: 'ADMIN_NOTIFY',
         label: 'Notify Users',
@@ -551,9 +544,6 @@ export const ALL_FEATURES: Feature[] = [
         icon: 'Key',
         color: 'purple'
     },
-
-    // GROUP: CONTENT / ANALYSIS
-    // ADMIN_PREMIUM_VIDEO REMOVED from visible list as requested ("Content & Analysis me admin dashbord me ek button hai Premium Video ye hatao")
     {
         id: 'ADMIN_TOPIC_NOTES',
         label: 'Topic Notes',
@@ -615,7 +605,7 @@ export const ALL_FEATURES: Feature[] = [
         label: 'Coaching Centres',
         group: 'CORE',
         surfaceLevel: 3,
-        adminVisible: false, // Pulled out to the header bar (next to School System) instead of the category grid
+        adminVisible: false,
         adminTab: 'COACHING_CENTRES',
         requiresSuperAdmin: true,
         icon: 'Building2',
@@ -627,7 +617,7 @@ export const ALL_FEATURES: Feature[] = [
         label: '🏫 Coaching Manager',
         group: 'CONTENT',
         surfaceLevel: 2,
-        adminVisible: false, // Only accessible to Coaching Admins via CoachingAdminPanel
+        adminVisible: false,
         adminTab: 'COACHING_MANAGER',
         requiredPermission: 'MANAGE_CONTENT',
         icon: 'GraduationCap',
@@ -639,7 +629,7 @@ export const ALL_FEATURES: Feature[] = [
         label: 'Coaching Homework',
         group: 'CONTENT',
         surfaceLevel: 3,
-        adminVisible: false, // Only accessible to Coaching Admins via CoachingAdminPanel
+        adminVisible: false,
         adminTab: 'COACHING_HOMEWORK',
         requiredPermission: 'MANAGE_CONTENT',
         icon: 'School',
@@ -828,7 +818,6 @@ export const ALL_FEATURES: Feature[] = [
         icon: 'Globe',
         color: 'indigo'
     },
-    /* ADMIN_POPUPS / Popup Config — removed (feature deprecated) */
     {
         id: 'ADMIN_CODES',
         label: 'Gift Codes',
@@ -928,25 +917,27 @@ export const ALL_FEATURES: Feature[] = [
     { id: 'UNIVERSAL_VIDEO', label: 'Universal Video', group: 'CONTENT', surfaceLevel: 2, adminVisible: true, description: 'Access to universal videos.' },
     { id: 'PREMIUM_AUDIO', label: 'Premium Audio', group: 'CONTENT', surfaceLevel: 2, adminVisible: true, description: 'Access to premium audio content.' },
     { id: 'AI_TUTOR', label: 'AI Tutor', group: 'AI', surfaceLevel: 2, adminVisible: true, description: 'Access to AI Tutor.' },
+
+    // --- RECOVERY & SECURITY CONTROLS (Updated) ---
     {
-        id: 'SETUP_RECOVERY',
-        label: 'Recovery Set करें',
+        id: 'SETUP_SECURITY_QUESTION',
+        label: 'Security Question & Answer',
         group: 'CORE',
         surfaceLevel: 3,
         adminVisible: true,
-        icon: 'Lock',
-        color: 'orange',
-        description: 'Students ko apna recovery mobile/password set karne ki suvidha.'
+        icon: 'ShieldQuestion',
+        color: 'emerald',
+        description: 'Students ko apna Security Question aur Secret Answer profile me manage karne ka access.'
     },
     {
-        id: 'RECOVERY_LOGIN',
-        label: 'Login via Recovery',
+        id: 'INSTANT_RECOVERY_LOGIN',
+        label: 'Instant 1-Sec Recovery Login',
         group: 'CORE',
         surfaceLevel: 3,
         adminVisible: true,
         icon: 'KeyRound',
         color: 'orange',
-        description: 'Login screen par Recovery se login karne ka option.'
+        description: 'Login screen par Security Question aur 1-Min Auto-Verification se passwordless login option.'
     },
 ];
 

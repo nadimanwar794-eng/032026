@@ -1,7 +1,7 @@
+// @ts-nocheck
 import React, { useState, useEffect, useRef } from 'react';
-import { BookOpen, HelpCircle, Video, Headphones, BrainCircuit, BarChart2, WifiOff, Zap } from 'lucide-react';
+import { Check } from 'lucide-react';
 import { APP_VERSION } from '../constants';
-import { getSplashFontById, ensureGoogleFontLoaded } from '../utils/splashFonts';
 
 interface AppLoadingScreenProps {
   onComplete: () => void;
@@ -9,324 +9,396 @@ interface AppLoadingScreenProps {
   subscriptionLevel?: 'FREE' | 'BASIC' | 'ULTRA';
 }
 
-type ThemeVariant = 'black' | 'blue' | 'light';
-
-function detectTheme(): ThemeVariant {
-  try {
-    const isDark = localStorage.getItem('nst_dark_mode') === 'true';
-    if (!isDark) return 'light';
-    const type = localStorage.getItem('nst_dark_theme_type') || 'black';
-    return type === 'blue' ? 'blue' : 'black';
-  } catch {
-    return 'black';
-  }
+interface BlockItem {
+  id: number;
+  val: number;
+  slot: number;
+  isLifted: boolean;
+  isSorted: boolean;
+  isComparing: boolean;
 }
 
-const THEME_STYLES: Record<ThemeVariant, {
-  bg: string; text: string; subtext: string; boxBg: string; boxBorder: string;
-  trackBg: string; bar: string; badge: string;
-}> = {
-  black: {
-    bg: 'bg-black',
-    text: 'text-white',
-    subtext: 'text-gray-500',
-    boxBg: 'bg-gray-900',
-    boxBorder: 'border-gray-800',
-    trackBg: 'bg-gray-900',
-    bar: 'from-indigo-500 via-violet-500 to-purple-600',
-    badge: 'text-gray-500',
-  },
-  blue: {
-    bg: 'bg-[#000000]',
-   text: 'text-white',
-    subtext: 'text-blue-400/70',
-    boxBg: 'bg-blue-950/60',
-    boxBorder: 'border-blue-900/60',
-    trackBg: 'bg-blue-950',
-    bar: 'from-blue-500 via-indigo-500 to-purple-500',
-    badge: 'text-blue-400/60',
-  },
-  light: {
-    bg: 'bg-white',
-    text: 'text-slate-900',
-    subtext: 'text-slate-500',
-    boxBg: 'bg-slate-50',
-    boxBorder: 'border-slate-200',
-    trackBg: 'bg-slate-200',
-    bar: 'from-blue-500 via-indigo-500 to-purple-500',
-    badge: 'text-slate-400',
-  },
-};
-
-
-export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete, isPremium = false, subscriptionLevel = 'FREE' }) => {
+export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({ onComplete }) => {
   const [progress, setProgress] = useState(0);
-  const [stepPhase1, setStepPhase1] = useState(-1);
-  const [stepPhase2, setStepPhase2] = useState(-1);
-  const [logoTapped, setLogoTapped] = useState(false);
-  const [themeVariant] = useState<ThemeVariant>(detectTheme);
-
   const onCompleteRef = useRef(onComplete);
   useEffect(() => { onCompleteRef.current = onComplete; }, [onComplete]);
 
-  const [appName] = useState(() => {
-    try {
-      const s = localStorage.getItem('nst_system_settings');
-      const o = s ? JSON.parse(s) : null;
-      return o?.appShortName || o?.appName || 'IIC';
-    } catch { return 'IIC'; }
-  });
+  // Initial sequence: [3, 8, 2, 7, 5, 4, 1, 6]
+  const [blocks, setBlocks] = useState<BlockItem[]>([
+    { id: 0, val: 3, slot: 0, isLifted: false, isSorted: false, isComparing: false },
+    { id: 1, val: 8, slot: 1, isLifted: false, isSorted: false, isComparing: false },
+    { id: 2, val: 2, slot: 2, isLifted: false, isSorted: false, isComparing: false },
+    { id: 3, val: 7, slot: 3, isLifted: false, isSorted: false, isComparing: false },
+    { id: 4, val: 5, slot: 4, isLifted: false, isSorted: false, isComparing: false },
+    { id: 5, val: 4, slot: 5, isLifted: false, isSorted: false, isComparing: false },
+    { id: 6, val: 1, slot: 6, isLifted: false, isSorted: false, isComparing: false },
+    { id: 7, val: 6, slot: 7, isLifted: false, isSorted: false, isComparing: false },
+  ]);
+
+  // Crane Mechanics States
+  const [craneSlot, setCraneSlot] = useState<number>(0);
+  const [wireHeight, setWireHeight] = useState<number>(14);
+  const [isClawClosed, setIsClawClosed] = useState<boolean>(false);
+  const [actionPrompt, setActionPrompt] = useState<string>('a[0] > a[1] ?');
+  const [activeCodeLine, setActiveCodeLine] = useState<number>(6);
 
   const developerName = 'Nadim Anwar';
+  const appVersion = APP_VERSION || 'v1.0.1';
 
-  const [showFooter] = useState<boolean>(() => {
-    try {
-      const s = localStorage.getItem('nst_system_settings');
-      const o = s ? JSON.parse(s) : null;
-      return o?.showFooter !== false;
-    } catch { return true; }
-  });
-
-  const [appNameSize] = useState<number>(() => {
-    try {
-      const s = localStorage.getItem('nst_system_settings');
-      const o = s ? JSON.parse(s) : null;
-      const raw = Number(o?.appShortNameSize);
-      return Number.isFinite(raw) && raw > 0 ? Math.min(120, Math.max(24, raw)) : 30;
-    } catch { return 30; }
-  });
-
-  const [splashFontId] = useState<string>(() => {
-    try {
-      const s = localStorage.getItem('nst_system_settings');
-      const o = s ? JSON.parse(s) : null;
-      return o?.splashFontId || localStorage.getItem('nst_splash_font_id') || 'default';
-    } catch { return 'default'; }
-  });
-  const activeFont = getSplashFontById(splashFontId);
-
-  const [splashLogo] = useState<{ enabled: boolean; url: string; size: number }>(() => {
-    try {
-      const s = localStorage.getItem('nst_system_settings');
-      const o = s ? JSON.parse(s) : null;
-      const enabled = o?.splashLogoEnabled !== false;
-      const url = (o?.splashLogoUrl as string) || '/splash-logo.png';
-      const rawSize = Number(o?.splashLogoSize);
-      const size = Number.isFinite(rawSize) && rawSize > 0 ? Math.min(260, Math.max(60, rawSize)) : 140;
-      return { enabled, url, size };
-    } catch { return { enabled: true, url: '/splash-logo.png', size: 140 }; }
-  });
+  const SLOT_WIDTH = 40; 
+  const RIG_LEFT_PAD = 14;
 
   useEffect(() => {
-    if (activeFont.gfontParam) ensureGoogleFontLoaded(activeFont.gfontParam);
-  }, [activeFont.gfontParam]);
+    let isCancelled = false;
+    const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-  // ── Normal loading progress ────────────────────────────────────────────────
-  useEffect(() => {
-    const duration = 2000;
-    const intervalTime = 50;
-    const steps = duration / intervalTime;
-    let currentStep = 0;
+    // 10.0 Seconds Precise Loop
+    const runFastTenSecondSort = async () => {
+      let state = [
+        { id: 0, val: 3 },
+        { id: 1, val: 8 },
+        { id: 2, val: 2 },
+        { id: 3, val: 7 },
+        { id: 4, val: 5 },
+        { id: 5, val: 4 },
+        { id: 6, val: 1 },
+        { id: 7, val: 6 },
+      ];
 
-    const timer = setInterval(() => {
-      currentStep++;
-      const currentProgress = Math.min(Math.floor((currentStep / steps) * 100), 100);
-      setProgress(currentProgress);
+      const n = state.length;
+      const totalComparisons = (n * (n - 1)) / 2;
+      let stepsCompleted = 0;
 
-      if (currentProgress < 50) {
-        if (currentProgress >= 10) setStepPhase1(0);
-        if (currentProgress >= 20) setStepPhase1(1);
-        if (currentProgress >= 30) setStepPhase1(2);
-        if (currentProgress >= 40) setStepPhase1(3);
+      const syncBlocks = (overrides = {}) => {
+        setBlocks(prev =>
+          prev.map(b => {
+            const currentSlot = state.findIndex(s => s.id === b.id);
+            return {
+              ...b,
+              slot: currentSlot,
+              ...overrides[b.id],
+            };
+          })
+        );
+      };
+
+      for (let p = 0; p < n - 1; p++) {
+        let swappedAny = false;
+
+        for (let i = 0; i < n - 1 - p; i++) {
+          if (isCancelled) return;
+
+          const itemA = state[i];
+          const itemB = state[i + 1];
+
+          // ── 1. Crane arrives & compares ──
+          setCraneSlot(i);
+          setWireHeight(14);
+          setIsClawClosed(false);
+          setActiveCodeLine(6);
+          setActionPrompt(`a[${i}] > a[${i + 1}] ?`);
+
+          syncBlocks({
+            [itemA.id]: { isComparing: true, isLifted: false },
+            [itemB.id]: { isComparing: true, isLifted: false },
+          });
+
+          await sleep(75);
+          if (isCancelled) return;
+
+          // ── 2. Swap sequence with visible lift & carry ──
+          if (itemA.val > itemB.val) {
+            setActiveCodeLine(7);
+            setActionPrompt(`swap a[${i}], a[${i + 1}]`);
+
+            // Cable descends over Block A
+            setWireHeight(68);
+            await sleep(60);
+            if (isCancelled) return;
+
+            // Claws grip Block A
+            setIsClawClosed(true);
+            await sleep(45);
+            if (isCancelled) return;
+
+            // Lift Block A up into the air
+            setWireHeight(14);
+            syncBlocks({
+              [itemA.id]: { isLifted: true, isComparing: false },
+              [itemB.id]: { isComparing: false },
+            });
+            await sleep(95);
+            if (isCancelled) return;
+
+            // Crane carries Block A to next slot / Block B slides left
+            setCraneSlot(i + 1);
+
+            const temp = state[i];
+            state[i] = state[i + 1];
+            state[i + 1] = temp;
+
+            syncBlocks({
+              [itemA.id]: { isLifted: true, isComparing: false },
+              [itemB.id]: { isComparing: false, isLifted: false },
+            });
+            await sleep(110);
+            if (isCancelled) return;
+
+            // Cable lowers Block A down
+            setWireHeight(68);
+            await sleep(60);
+            if (isCancelled) return;
+
+            // Release claw
+            setIsClawClosed(false);
+            syncBlocks({
+              [itemA.id]: { isLifted: false, isComparing: false },
+              [itemB.id]: { isComparing: false, isLifted: false },
+            });
+            await sleep(40);
+            if (isCancelled) return;
+
+            setWireHeight(14);
+            swappedAny = true;
+          } else {
+            // No swap needed
+            syncBlocks({
+              [itemA.id]: { isComparing: false },
+              [itemB.id]: { isComparing: false },
+            });
+            await sleep(30);
+          }
+
+          stepsCompleted++;
+          setProgress(Math.min(Math.floor((stepsCompleted / totalComparisons) * 96), 96));
+        }
+
+        // Mark current sorted block as green
+        const sortedId = state[n - 1 - p].id;
+        setBlocks(prev =>
+          prev.map(b => (b.id === sortedId ? { ...b, isSorted: true } : b))
+        );
+
+        if (!swappedAny) break;
       }
-      if (currentProgress >= 50) {
-        setStepPhase1(-1);
-        if (currentProgress >= 50) setStepPhase2(0);
-        if (currentProgress >= 60) setStepPhase2(1);
-        if (currentProgress >= 70) setStepPhase2(2);
-        if (currentProgress >= 80) setStepPhase2(3);
-      }
 
-      if (currentStep >= steps) {
-        clearInterval(timer);
-        try {
-          const utterance = new SpeechSynthesisUtterance('Welcome to ' + appName);
-          utterance.lang = 'en-US';
-          utterance.rate = 1;
-          utterance.pitch = 1;
-          window.speechSynthesis.cancel();
-          window.speechSynthesis.speak(utterance);
-        } catch {}
-        setTimeout(() => onCompleteRef.current(), 300);
-      }
-    }, intervalTime);
+      // ── Finish & Sorted State ──
+      setBlocks(prev => prev.map(b => ({ ...b, isSorted: true, isComparing: false, isLifted: false })));
+      setActionPrompt('sorted!');
+      setActiveCodeLine(10);
+      setCraneSlot(3.5);
+      setWireHeight(14);
+      setProgress(100);
 
-    return () => clearInterval(timer);
-  }, [appName]);
+      // Brief finish pause before transition
+      await sleep(300);
+      if (!isCancelled) onCompleteRef.current();
+    };
 
-  const handleLogoTap = () => {
-    if (logoTapped) return;
-    try { if (navigator.vibrate) navigator.vibrate(40); } catch {}
-    setLogoTapped(true);
-    setTimeout(() => setLogoTapped(false), 600);
-  };
+    runFastTenSecondSort();
+    return () => { isCancelled = true; };
+  }, []);
 
-  const t = THEME_STYLES.black;
-  const iconColor1 = 'text-blue-400';
-  const iconColor2 = 'text-purple-400';
-  const iconColor3 = 'text-rose-400';
-  const iconColor4 = 'text-emerald-400';
-  const iconColor5 = 'text-amber-400';
-  const iconColor6 = 'text-indigo-400';
-  const iconColor7 = 'text-teal-400';
-  const iconColor8 = 'text-orange-400';
+  const codeRows = [
+    { num: 1, kw: 'def', rest: ' bubble_sort(a):' },
+    { num: 2, kw: '    n =', rest: ' len(a)' },
+    { num: 3, kw: '    for', rest: ' p in range(n - 1):' },
+    { num: 4, kw: '        swapped =', rest: ' False' },
+    { num: 5, kw: '        for', rest: ' i in range(n - 1 - p):' },
+    { num: 6, kw: '            if', rest: ' a[i] > a[i + 1]:' },
+    { num: 7, kw: '                a[i], a[i + 1] =', rest: ' a[i + 1], a[i]' },
+    { num: 8, kw: '                swapped =', rest: ' True' },
+    { num: 9, kw: '        if not', rest: ' swapped:' },
+    { num: 10, kw: '            break', rest: '' },
+  ];
 
   return (
-    <div className={`fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-black text-white overflow-hidden w-full mx-auto`}>
+    <div className="fixed inset-0 z-[99999] flex flex-col items-center justify-center bg-[#040813] text-white select-none px-4 py-4 font-sans overflow-hidden">
+      
+      {/* ── ISOMETRIC GRID BACKGROUND ── */}
+      <div 
+        className="absolute inset-0 pointer-events-none opacity-20"
+        style={{
+          backgroundImage: `
+            linear-gradient(to right, rgba(0, 229, 255, 0.1) 1px, transparent 1px),
+            linear-gradient(to bottom, rgba(0, 229, 255, 0.1) 1px, transparent 1px)
+          `,
+          backgroundSize: '24px 24px'
+        }}
+      />
 
-      <div className="relative z-10 flex flex-col items-center w-full px-8">
-        <button
-          type="button"
-          onClick={handleLogoTap}
-          className="relative overflow-hidden mb-12 text-center animate-in slide-in-from-bottom-4 duration-700 fade-in focus:outline-none select-none rounded-2xl"
-          style={{ WebkitTapHighlightColor: 'transparent' }}
-        >
-          {splashLogo.enabled && splashLogo.url ? (
-            <img
-              src={splashLogo.url}
-              alt={appName}
-              draggable={false}
-              onError={(e) => {
-                const img = e.currentTarget as HTMLImageElement;
-                if (img.src.indexOf('/splash-logo.png') === -1) img.src = '/splash-logo.png';
+      {/* ── COMPACT MAIN CARD CONTAINER ── */}
+      <div className="relative z-10 w-full max-w-[360px] flex flex-col items-center gap-3">
+        
+        {/* ── APP NAME LOGO & BADGES ── */}
+        <div className="flex flex-col items-center">
+          {/* IIC 3D Gradient Text Logo */}
+          <h1 className="text-4xl font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-sky-300 to-indigo-400 drop-shadow-[0_0_20px_rgba(6,182,212,0.6)]">
+            IIC
+          </h1>
+
+          {/* Badges */}
+          <div className="flex items-center gap-2 mt-1.5">
+            <div className="px-2.5 py-0.5 rounded-full bg-cyan-950/80 border border-cyan-500/40 text-[10px] font-mono font-bold text-cyan-300 shadow-[0_0_10px_rgba(6,182,212,0.25)]">
+              ⚙ BUBBLE SORT
+            </div>
+            <div className="px-2.5 py-0.5 rounded-full bg-indigo-950/80 border border-indigo-500/40 text-[10px] font-mono font-bold text-indigo-300 shadow-[0_0_10px_rgba(99,102,241,0.25)]">
+              O(n²)
+            </div>
+          </div>
+        </div>
+
+        {/* ── MECHANICAL 3D GANTRY CRANE STAGE ── */}
+        <div className="relative w-full h-[225px] rounded-2xl bg-[#060c1d]/95 border border-cyan-500/35 shadow-[0_0_35px_rgba(2,132,199,0.25)] p-2.5 overflow-hidden">
+          
+          {/* Tech Corner Accents */}
+          <div className="absolute top-1.5 left-1.5 w-3 h-3 border-t-2 border-l-2 border-cyan-400" />
+          <div className="absolute top-1.5 right-1.5 w-3 h-3 border-t-2 border-r-2 border-cyan-400" />
+          <div className="absolute bottom-1.5 left-1.5 w-3 h-3 border-b-2 border-l-2 border-cyan-400" />
+          <div className="absolute bottom-1.5 right-1.5 w-3 h-3 border-b-2 border-r-2 border-cyan-400" />
+
+          {/* Steel Pillars */}
+          <div className="absolute top-3 left-2.5 bottom-5 w-1.5 bg-slate-700 rounded-full border border-slate-600 shadow-md" />
+          <div className="absolute top-3 right-2.5 bottom-5 w-1.5 bg-slate-700 rounded-full border border-slate-600 shadow-md" />
+
+          {/* Top Crane Track */}
+          <div className="absolute top-3.5 left-3 right-3 h-2 bg-slate-800 rounded-full border border-cyan-500/40 shadow-inner flex items-center">
+            
+            {/* LARGE CRANE TROLLEY & CLAW */}
+            <div 
+              className="absolute -top-2 w-11 h-6 rounded-md bg-gradient-to-b from-cyan-400 to-cyan-700 border border-white shadow-[0_0_18px_#06b6d4] transition-all duration-150 ease-out flex flex-col items-center z-40 -ml-1.5"
+              style={{ 
+                transform: `translateX(${RIG_LEFT_PAD + craneSlot * SLOT_WIDTH}px)` 
               }}
-              className={`mb-2 mx-auto object-contain transition-transform duration-300 ease-out drop-shadow-xl ${logoTapped ? 'scale-[2.2]' : 'scale-100'}`}
-              style={{ width: `${splashLogo.size}px`, height: `${splashLogo.size}px`, maxWidth: '70vw' }}
-            />
+            >
+              {/* Dual Heavy Cables */}
+              <div 
+                className="w-4 flex justify-between transition-all duration-100 ease-out"
+                style={{ height: `${wireHeight}px` }}
+              >
+                <div className="w-0.5 bg-cyan-200 shadow-[0_0_8px_#22d3ee] h-full" />
+                <div className="w-0.5 bg-cyan-200 shadow-[0_0_8px_#22d3ee] h-full" />
+              </div>
+
+              {/* HEAVY-DUTY CLAW HEAD */}
+              <div className="relative -mt-1 flex items-center justify-center">
+                <div className={`w-9 h-3 rounded-t-md border-2 ${isClawClosed ? 'bg-amber-400 border-amber-100 scale-95' : 'bg-cyan-500 border-cyan-200'} transition-all flex justify-between px-0.5 shadow-md`}>
+                  {/* Left Grip Arm */}
+                  <div className={`w-1.5 h-7 rounded-b-md ${isClawClosed ? 'bg-amber-300 rotate-[18deg] shadow-[0_0_10px_#fbbf24]' : 'bg-cyan-300 -rotate-[16deg]'} transition-all origin-top-left`} />
+                  {/* Right Grip Arm */}
+                  <div className={`w-1.5 h-7 rounded-b-md ${isClawClosed ? 'bg-amber-300 -rotate-[18deg] shadow-[0_0_10px_#fbbf24]' : 'bg-cyan-300 rotate-[16deg]'} transition-all origin-top-right`} />
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          {/* 3D Platform Floor Shadow */}
+          <div className="absolute bottom-2.5 left-3 right-3 h-3 rounded-full bg-slate-900 border-t border-cyan-950/70 blur-[1px]" />
+
+          {/* ── 3D NUMBERED BLOCKS ── */}
+          <div className="relative w-full h-full pt-12 px-1">
+            {blocks.map((block) => {
+              const barHeight = block.val * 10 + 20;
+              const posX = RIG_LEFT_PAD + block.slot * SLOT_WIDTH;
+
+              let colorClass = 'bg-slate-700/90 border-slate-600 text-slate-300 shadow-md';
+              if (block.isSorted) {
+                colorClass = 'bg-emerald-500 border-emerald-300 text-black font-black shadow-[0_0_20px_rgba(16,185,129,0.95)]';
+              } else if (block.isLifted) {
+                colorClass = 'bg-gradient-to-t from-amber-500 via-amber-400 to-yellow-200 border-yellow-100 text-black font-black shadow-[0_0_30px_rgba(245,158,11,1)] scale-105';
+              } else if (block.isComparing) {
+                colorClass = 'bg-cyan-500 border-cyan-300 text-black font-black shadow-[0_0_16px_rgba(6,182,212,0.9)] -translate-y-1';
+              }
+
+              return (
+                <React.Fragment key={block.id}>
+                  {/* Ground Shadow while lifted */}
+                  {block.isLifted && (
+                    <div 
+                      className="absolute bottom-3.5 w-7 h-2 rounded-full bg-cyan-950/80 border border-cyan-500/40 blur-[1px] transition-all duration-150"
+                      style={{ left: `${posX}px` }}
+                    />
+                  )}
+
+                  {/* 3D Block */}
+                  <div
+                    className={`absolute bottom-3.5 w-7 rounded-t-lg border flex flex-col items-center justify-start pt-1 font-mono text-xs font-bold transition-all duration-150 ease-out ${colorClass}`}
+                    style={{
+                      left: `${posX}px`,
+                      height: `${barHeight}px`,
+                      transform: block.isLifted ? 'translateY(-72px)' : 'translateY(0px)',
+                      zIndex: block.isLifted ? 50 : 10,
+                    }}
+                  >
+                    <span>{block.val}</span>
+                  </div>
+                </React.Fragment>
+              );
+            })}
+          </div>
+
+        </div>
+
+        {/* Dynamic Action Prompt (No Extra Vertical Gap) */}
+        <div className="flex items-center justify-center h-5">
+          {actionPrompt === 'sorted!' ? (
+            <div className="flex items-center gap-1.5 text-emerald-400 font-mono font-bold text-xs tracking-wider animate-pulse">
+              <Check size={14} className="text-emerald-400" />
+              <span>sorted!</span>
+            </div>
           ) : (
-            <h1
-              className={`font-black tracking-tight mb-2 uppercase text-center leading-tight transition-transform duration-300 ease-out bg-clip-text text-transparent ${
-                logoTapped ? 'scale-[2.2]' : 'scale-100'
-              } ${
-                subscriptionLevel === 'ULTRA'
-                  ? 'bg-gradient-to-r from-slate-400 via-slate-300 to-slate-500'
-                  : subscriptionLevel === 'BASIC'
-                    ? 'bg-gradient-to-r from-blue-500 via-indigo-600 to-blue-700'
-                    : themeVariant === 'light'
-                      ? 'bg-gradient-to-r from-sky-500 to-cyan-600'
-                      : 'bg-gradient-to-r from-sky-400 to-cyan-500'
-              }`}
-              style={{
-                fontSize: `${appNameSize}px`,
-                ...(activeFont.family ? { fontFamily: activeFont.family } : {}),
-                ...(activeFont.letterSpacing ? { letterSpacing: activeFont.letterSpacing } : {}),
-              }}
-            >
-              {appName}
-            </h1>
+            <span className="font-mono text-xs text-cyan-300 font-bold tracking-wide">
+              {actionPrompt}
+            </span>
           )}
-          <p className={`text-xs font-bold tracking-widest ${t.subtext} uppercase mt-2 transition-opacity duration-300 ${logoTapped ? 'opacity-0' : 'opacity-100'}`}>
-            Loading your experience...
-          </p>
-        </button>
-
-        {/* Feature boxes */}
-        <div className="relative w-full h-64 perspective-1000 mb-4">
-          <div className={`absolute inset-0 grid grid-cols-2 gap-4 w-full transition-all duration-500 ${progress < 50 ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
-            <div className={`flex flex-col items-center justify-center p-6 rounded-2xl ${t.boxBg} border ${t.boxBorder} shadow-lg transition-all duration-500 transform ${stepPhase1 >= 0 ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8 scale-95'}`}>
-              <BookOpen size={32} className={`${iconColor1} mb-3`} />
-              <span className={`font-bold tracking-wide ${t.text}`}>Notes</span>
-            </div>
-            <div className={`flex flex-col items-center justify-center p-6 rounded-2xl ${t.boxBg} border ${t.boxBorder} shadow-lg transition-all duration-500 transform ${stepPhase1 >= 1 ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8 scale-95'}`}>
-              <HelpCircle size={32} className={`${iconColor2} mb-3`} />
-              <span className={`font-bold tracking-wide ${t.text}`}>MCQ</span>
-            </div>
-            <div className={`flex flex-col items-center justify-center p-6 rounded-2xl ${t.boxBg} border ${t.boxBorder} shadow-lg transition-all duration-500 transform ${stepPhase1 >= 2 ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8 scale-95'}`}>
-              <Video size={32} className={`${iconColor3} mb-3`} />
-              <span className={`font-bold tracking-wide ${t.text}`}>Video</span>
-            </div>
-            <div className={`flex flex-col items-center justify-center p-6 rounded-2xl ${t.boxBg} border ${t.boxBorder} shadow-lg transition-all duration-500 transform ${stepPhase1 >= 3 ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8 scale-95'}`}>
-              <Headphones size={32} className={`${iconColor4} mb-3`} />
-              <span className={`font-bold tracking-wide ${t.text}`}>Audio</span>
-            </div>
-          </div>
-
-          <div className={`absolute inset-0 grid grid-cols-2 gap-4 w-full transition-all duration-500 ${progress >= 50 ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
-            <div className={`flex flex-col items-center justify-center p-6 rounded-2xl ${t.boxBg} border ${t.boxBorder} shadow-lg transition-all duration-500 transform ${stepPhase2 >= 0 ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8 scale-95'}`}>
-              <BrainCircuit size={32} className={`${iconColor5} mb-3`} />
-              <span className={`font-bold tracking-wide text-center leading-tight ${t.text}`}>Smart<br />Revision</span>
-            </div>
-            <div className={`flex flex-col items-center justify-center p-6 rounded-2xl ${t.boxBg} border ${t.boxBorder} shadow-lg transition-all duration-500 transform ${stepPhase2 >= 1 ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8 scale-95'}`}>
-              <BarChart2 size={32} className={`${iconColor6} mb-3`} />
-              <span className={`font-bold tracking-wide text-center leading-tight ${t.text}`}>Leader<br />board</span>
-            </div>
-            <div className={`flex flex-col items-center justify-center p-6 rounded-2xl ${t.boxBg} border ${t.boxBorder} shadow-lg transition-all duration-500 transform ${stepPhase2 >= 2 ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8 scale-95'}`}>
-              <WifiOff size={32} className={`${iconColor7} mb-3`} />
-              <span className={`font-bold tracking-wide text-center leading-tight ${t.text}`}>Offline<br />Mode</span>
-            </div>
-            <div className={`flex flex-col items-center justify-center p-6 rounded-2xl ${t.boxBg} border ${t.boxBorder} shadow-lg transition-all duration-500 transform ${stepPhase2 >= 3 ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8 scale-95'}`}>
-              <Zap size={32} className={`${iconColor8} mb-3`} />
-              <span className={`font-bold tracking-wide text-center leading-tight ${t.text}`}>Level<br />System</span>
-            </div>
-          </div>
         </div>
 
-        {/* Progress section */}
-        <div className="w-full flex flex-col items-center mt-8">
-          {/* Progress bar with shimmer animation */}
-          <div className={`w-full h-[5px] ${t.trackBg} rounded-full overflow-hidden mb-3 shadow-inner`} style={{ position: 'relative' }}>
-            <div
-              className={`h-full bg-gradient-to-r ${t.bar} rounded-full`}
-              style={{ width: `${progress}%`, transition: 'width 0.25s cubic-bezier(0.4,0,0.2,1)', position: 'relative', overflow: 'hidden' }}
-            >
-              {/* shimmer sweep */}
-              <span
-                style={{
-                  position: 'absolute', inset: 0,
-                  background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.45) 50%, transparent 100%)',
-                  animation: 'shimmer 1.4s infinite',
-                  backgroundSize: '200% 100%',
-                }}
-              />
-            </div>
-          </div>
-
-          {/* % + developer line together, small and clean */}
-          <div className="flex items-center justify-center gap-2">
-            <span className={`text-[11px] font-semibold font-mono ${t.badge} opacity-70`}>
-              {progress}%
-            </span>
-            {showFooter && (
-              <>
-                <span className={`${t.badge} opacity-25 text-[10px]`}>·</span>
-                <span
-                  className={`text-[10px] ${t.badge}`}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: '4px',
-                    padding: '2px 8px', borderRadius: '999px',
-                    border: '1px solid rgba(255,255,255,0.12)',
-                    background: 'rgba(255,255,255,0.05)',
-                    letterSpacing: '0.01em',
-                  }}
+        {/* ── PYTHON CODE SNIPPET BOX ── */}
+        <div className="w-full rounded-xl bg-[#02050f]/95 border border-cyan-950/80 p-2.5 shadow-inner">
+          <div className="font-mono text-[10.5px] leading-snug space-y-0.5">
+            {codeRows.map((line) => {
+              const isActive = activeCodeLine === line.num;
+              return (
+                <div 
+                  key={line.num} 
+                  className={`flex items-center gap-3 px-2 py-0.5 rounded transition-all duration-75 ${
+                    isActive 
+                      ? 'bg-cyan-950/90 border border-cyan-500/60 text-cyan-300 font-bold shadow-[0_0_10px_rgba(6,182,212,0.3)]' 
+                      : 'text-slate-500'
+                  }`}
                 >
-                  <span style={{ opacity: 0.45, fontWeight: 400, fontSize: '9px' }}>Developed by</span>
-                  <span style={{ opacity: 0.85, fontWeight: 600, fontSize: '10px' }}>{developerName}</span>
-                </span>
-              </>
-            )}
-            <span className={`text-[11px] ${t.badge} font-mono opacity-50 tracking-widest`}>
-              v{APP_VERSION}
-            </span>
+                  <span className="w-4 text-right text-slate-600 select-none text-[9.5px]">{line.num}</span>
+                  <span className={isActive ? 'text-cyan-200' : 'text-slate-400'}>
+                    <span className="text-pink-400">{line.kw}</span>
+                    <span>{line.rest}</span>
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
 
-        <style>{`
-          @keyframes shimmer {
-            0%   { transform: translateX(-100%); }
-            100% { transform: translateX(200%); }
-          }
-        `}</style>
+        {/* ── FOOTER PROGRESS BAR & METADATA ── */}
+        <div className="w-full mt-1">
+          <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden border border-cyan-950/50 mb-1.5">
+            <div 
+              className="h-full bg-gradient-to-r from-cyan-400 via-blue-500 to-emerald-400 rounded-full transition-all duration-75 shadow-[0_0_10px_#22d3ee]"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          <div className="flex items-center justify-between text-[10.5px] font-mono text-slate-400 px-1">
+            <span className="text-cyan-400 font-bold">{progress}%</span>
+            <span className="text-slate-500">Dev: {developerName}</span>
+            <span className="text-slate-500">{appVersion}</span>
+          </div>
+        </div>
+
       </div>
+
     </div>
   );
 };
+
+export default AppLoadingScreen;
+

@@ -3312,9 +3312,18 @@ const App: React.FC = () => {
       return <AppLoadingScreen isPremium={state.user?.isPremium || false} subscriptionLevel={getUserPlan()} onComplete={() => setIsAppLoading(false)} />;
   }
 
+  const bgImageStyle = (state.settings?.appBackgroundImage && state.view !== 'LESSON') ? `url(${state.settings.appBackgroundImage})` : undefined;
+
   return (
     <ErrorBoundary>
-    <div className="min-h-[100dvh] flex flex-col font-sans relative pt-[env(safe-area-inset-top,24px)] pb-[env(safe-area-inset-bottom,0px)]" style={{ background: `var(--app-bar-color, ${state.settings?.appBackground || '#ffffff'})` }}>
+    <div className="min-h-[100dvh] flex flex-col font-sans relative pt-[env(safe-area-inset-top,24px)] pb-[env(safe-area-inset-bottom,0px)]" style={{
+      background: `var(--app-bar-color, ${state.settings?.appBackground || '#ffffff'})`,
+      backgroundImage: bgImageStyle,
+      backgroundSize: bgImageStyle ? 'cover' : undefined,
+      backgroundPosition: bgImageStyle ? 'center' : undefined,
+      backgroundRepeat: bgImageStyle ? 'no-repeat' : undefined,
+      backgroundAttachment: bgImageStyle ? 'fixed' : undefined
+    }}>
       {/* SKIP TO CONTENT — keyboard/screen-reader accessibility */}
       <a href="#main-content" className="skip-to-content">Skip to content</a>
 
