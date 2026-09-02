@@ -1,7 +1,7 @@
 // @ts-nocheck
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useDebounce } from '../utils/useDebounce';
-import { LessonContent, User, SystemSettings, UsageHistoryEntry } from '../types';
+import { LessonContent, User, SystemSettings, UsageHistoryEntry, MCQResult } from '../types';
 import { BookOpen, Calendar, ChevronDown, ChevronUp, Trash2, Search, FileText, CheckCircle2, Lock, AlertCircle, Folder, Download, ChevronRight, Play, X as XIcon, Star, Volume2, Square, Target, Sparkles, CreditCard, LogIn } from 'lucide-react';
 import { getMistakeBank, removeMistakes, clearMistakeBank, MistakeEntry } from '../utils/mistakeBank';
 import { getMistakeSessions, MistakeSession } from '../utils/mistakeAnalytics';
@@ -44,9 +44,11 @@ interface Props {
     onResumeRecentHw?: (entry: RecentHwEntry) => void;
     /** Resume a Lucent Book page. */
     onResumeRecentLucent?: (entry: RecentLucentEntry) => void;
+    /** Reopen a saved MCQ result in the full marksheet overlay. */
+    onOpenMcqAnalysis?: (result: MCQResult) => void;
 }
 
-export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, initialTab, onBack, onResumeRecentChapter, onResumeRecentHw, onResumeRecentLucent }) => {
+export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, initialTab, onBack, onResumeRecentChapter, onResumeRecentHw, onResumeRecentLucent, onOpenMcqAnalysis }) => {
   const [activeTab, setActiveTab] = useState<'READING' | 'MISTAKE' | 'OFFLINE' | 'STARRED' | 'FLASHCARDS' | 'LOGIN_HISTORY' | 'CREDIT_HISTORY'>(initialTab || 'READING');
   const [loginSessions, setLoginSessions] = useState<LoginSession[]>([]);
   const [activityEntries, setActivityEntries] = useState<ActivityEntry[]>([]);
@@ -96,7 +98,7 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
   }, [activeTab, refreshReading]);
 
   useEffect(() => {
-    if (activeTab === 'LOGIN_HISTORY') {
+    if (activeTab === 'LOGIN_HISTORY' || activeTab === 'CREDIT_HISTORY') {
       setLoginSessions(getLoginHistory(user.id).slice(0, 30));
       setActivityEntries(getActivityHistory(user.id));
     }
@@ -130,6 +132,36 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
       return { ...tx, isEarn, typeIcon, dateStr };
     });
   }, [creditHistory]);
+
+  const mcqAnalysisHistory = useMemo(() => {
+    const byId = new Map<string, MCQResult>();
+    [...(user.mcqHistory || []), ...(user.testResults || [])].forEach((result: MCQResult) => {
+      if (result?.id && !byId.has(result.id)) byId.set(result.id, result);
+    });
+    return Array.from(byId.values()).sort((a, b) => {
+      const timeA = new Date(a.date).getTime();
+      const timeB = new Date(b.date).getTime();
+      return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
+    });
+  }, [user.mcqHistory, user.testResults]);
+
+  const mergedCreditHistoryDisplay = useMemo(() => {
+    const creditRows = creditHistoryDisplay.map(tx => ({
+      rowType: 'credit' as const,
+      sortAt: tx.at,
+      data: tx,
+    }));
+    const activityRows = activityEntries.map(entry => ({
+      rowType: 'activity' as const,
+      sortAt: entry.timestamp,
+      data: entry,
+    }));
+    return [...creditRows, ...activityRows].sort((a, b) => {
+      const timeA = new Date(a.sortAt).getTime();
+      const timeB = new Date(b.sortAt).getTime();
+      return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
+    });
+  }, [creditHistoryDisplay, activityEntries]);
 
   const [creditTotals] = [useMemo(() => {
     let earned = 0, spent = 0;
@@ -279,22 +311,14 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
     }
 
 
-    // Load Activity Log from User Object (filter out MCQ entries) and purge from user
+    // Keep the legacy usage log for the Reading tab. MCQ results are a
+    // separate analysis history and must never be deleted while loading this page.
     if (user.usageHistory) {
-        const cleanedUsage = user.usageHistory.filter(e => (e?.type || '') !== 'MCQ');
-        setUsageLog([...cleanedUsage].sort((a, b) => {
+        setUsageLog([...user.usageHistory].sort((a, b) => {
             const timeA = new Date(a.timestamp).getTime();
             const timeB = new Date(b.timestamp).getTime();
             return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
         }));
-
-        // Persist cleanup so old MCQ entries vanish from user object too
-        if (cleanedUsage.length !== user.usageHistory.length || (user as any).mcqHistory?.length) {
-            const updatedUser: any = { ...user, usageHistory: cleanedUsage, mcqHistory: [] };
-            try { onUpdateUser(updatedUser); } catch {}
-            try { saveUserToLive(updatedUser); } catch {}
-            try { localStorage.setItem('nst_current_user', JSON.stringify(updatedUser)); } catch {}
-        }
     }
   }, [user.usageHistory, user.id]);
 
@@ -677,79 +701,74 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
             const levelColor = _lvl.color;
             const levelBg = levelColor + '15';
             const levelBorder = levelColor + '35';
-            const MODE_EMOJI: Record<string, string> = {
-                MCQ: '📝', Reading: '📖', Writing: '✍️', LESSON: '📚',
-                PDF: '📄', Video: '🎬', Audio: '🎧', QA: '💬', Flashcard: '🃏', Study: '🌟',
-            };
             return (
-            <div className="space-y-3">
-                {/* Activity History Section */}
+            <div className="space-y-3 animate-in fade-in duration-300">
                 <div className="rounded-2xl px-4 py-3 flex items-center gap-3" style={{ background: levelBg, border: `1px solid ${levelBorder}` }}>
                     <span className="text-xl">📊</span>
                     <div>
                         <p className="text-sm font-black" style={{ color: levelColor }}>Activity History</p>
-                        <p className="text-[11px] text-slate-500">Home pe aane pe milne wale XP aur Credits</p>
+                        <p className="text-[11px] text-slate-500">Aapke MCQ attempts aur saved analysis reports</p>
                     </div>
                 </div>
 
-                {activityEntries.length === 0 ? (
-                    <div className="text-center py-8 text-slate-400">
-                        <p className="text-3xl mb-2">📭</p>
-                        <p className="font-bold text-sm">Koi activity abhi nahi</p>
-                        <p className="text-xs mt-1">Padhai karo — phir Home pe aao, yahan dikhega</p>
+                {mcqAnalysisHistory.length === 0 ? (
+                    <div className="text-center py-10 text-slate-400">
+                        <p className="text-3xl mb-2">📝</p>
+                        <p className="font-bold text-sm">Koi MCQ analysis abhi nahi</p>
+                        <p className="text-xs mt-1">MCQ attempt complete karne ke baad analysis yahan save hoga</p>
                     </div>
-                ) : activityEntries.map((entry, i) => {
-                    const ts = new Date(entry.timestamp);
-                    const isValid = !isNaN(ts.getTime());
-                    const actLabel = entry.activities?.join(', ') || 'Study';
-                    const emoji = MODE_EMOJI[entry.activities?.[0]] || '📚';
+                ) : mcqAnalysisHistory.map((result) => {
+                    const percentage = result.totalQuestions > 0
+                        ? Math.round((result.score / result.totalQuestions) * 100)
+                        : 0;
+                    const status = percentage >= 80
+                        ? { label: 'Strong', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' }
+                        : percentage >= 50
+                            ? { label: 'Average', cls: 'bg-amber-50 text-amber-700 border-amber-200' }
+                            : { label: 'Weak', cls: 'bg-rose-50 text-rose-700 border-rose-200' };
+                    const date = new Date(result.date);
+                    const dateLabel = isNaN(date.getTime()) ? '—' : formatLoginTime(result.date);
+                    const createdDate = (result as any).createdAt ? new Date((result as any).createdAt) : null;
+                    const createdLabel = createdDate && !isNaN(createdDate.getTime())
+                        ? formatLoginTime((result as any).createdAt)
+                        : null;
                     return (
-                        <div key={entry.id} className="rounded-2xl p-3.5 border border-slate-100 bg-white shadow-sm">
-                            <div className="flex items-start justify-between gap-2 mb-2">
-                                <div className="flex items-center gap-2.5">
-                                    <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center text-lg shrink-0">{emoji}</div>
-                                    <div>
-                                        <p className="text-xs font-black text-slate-800">{actLabel}</p>
-                                        {entry.chapter && <p className="text-[10px] text-slate-400 truncate max-w-[160px]">{entry.chapter}</p>}
-                                        <p className="text-[10px] text-slate-400">{isValid ? formatLoginTime(entry.timestamp) : '—'}</p>
-                                    </div>
+                        <div key={result.id} className="rounded-2xl p-3.5 border border-slate-100 bg-white shadow-sm">
+                            <div className="flex items-start gap-2.5">
+                                <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center text-lg shrink-0">📝</div>
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-black text-slate-800 truncate">
+                                        {result.chapterTitle || 'MCQ Analysis'}
+                                    </p>
+                                    <p className="text-[10px] text-slate-500 truncate">
+                                        {[result.subjectName, result.topic].filter(Boolean).join(' • ') || 'MCQ Practice'}
+                                    </p>
+                                    <p className="text-[10px] text-slate-400 mt-0.5">
+                                        {createdLabel ? `Created: ${createdLabel} • ` : ''}Attempted: {dateLabel}
+                                    </p>
                                 </div>
-                                {entry.timeSecs > 0 && (
-                                    <span className="text-[10px] font-bold text-slate-500 bg-slate-50 px-2 py-0.5 rounded-full shrink-0">
-                                        ⏱ {formatLoginDuration(entry.timeSecs)}
-                                    </span>
-                                )}
+                                <span className={`text-[10px] font-black px-2 py-1 rounded-full border shrink-0 ${status.cls}`}>
+                                    {status.label}
+                                </span>
                             </div>
-                            {/* XP + Credits formula row */}
-                            <div className="flex flex-wrap gap-2 mt-1">
-                                {entry.ptsEarned + entry.bonusPts > 0 && (
-                                    <div className="flex items-center gap-1 text-[11px] font-bold bg-yellow-50 border border-yellow-100 rounded-lg px-2 py-1">
-                                        <span>⭐</span>
-                                        <span className="text-slate-500">{entry.xpBefore.toLocaleString()}</span>
-                                        <span className="text-slate-400">+</span>
-                                        <span className="text-yellow-600">{(entry.ptsEarned + entry.bonusPts).toLocaleString()}</span>
-                                        <span className="text-slate-400">=</span>
-                                        <span className="text-slate-800 font-black">{entry.xpAfter.toLocaleString()}</span>
-                                        <span className="text-slate-400 text-[9px]">XP</span>
-                                    </div>
-                                )}
-                                {entry.creditsEarned > 0 && (
-                                    <div className="flex items-center gap-1 text-[11px] font-bold bg-amber-50 border border-amber-100 rounded-lg px-2 py-1">
-                                        <span>🪙</span>
-                                        <span className="text-slate-500">{entry.creditsBefore.toLocaleString()}</span>
-                                        <span className="text-slate-400">+</span>
-                                        <span className="text-amber-600">{entry.creditsEarned.toLocaleString()}</span>
-                                        <span className="text-slate-400">=</span>
-                                        <span className="text-slate-800 font-black">{entry.creditsAfter.toLocaleString()}</span>
-                                        <span className="text-slate-400 text-[9px]">CR</span>
-                                    </div>
-                                )}
+                            <div className="flex items-center gap-2 mt-3">
+                                <div className="flex-1 rounded-xl bg-slate-50 border border-slate-100 px-3 py-2">
+                                    <span className="text-[10px] text-slate-400 block">Score</span>
+                                    <span className="text-sm font-black text-slate-800">{result.score}/{result.totalQuestions} <span className="text-indigo-600">({percentage}%)</span></span>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => onOpenMcqAnalysis?.(result)}
+                                    className="rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-black px-3.5 py-3 shadow-sm transition-colors"
+                                >
+                                    Open Analysis
+                                </button>
                             </div>
                         </div>
                     );
                 })}
 
-                <p className="text-center text-[10px] text-slate-400 pt-1">Device pe locally saved</p>
+                <p className="text-center text-[10px] text-slate-400 pt-1">Analysis reports locally saved on this device</p>
             </div>
             );
         })()}
@@ -758,15 +777,16 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
             const levelColor = _lvl.color;
             const levelBg = levelColor + '15';
             const levelBorder = levelColor + '35';
-            const visibleTx = creditHistoryDisplay.slice(0, creditHistoryPage);
-            const hasMore = creditHistoryDisplay.length > creditHistoryPage;
+            const visibleTx = mergedCreditHistoryDisplay.slice(0, creditHistoryPage);
+            const hasMore = mergedCreditHistoryDisplay.length > creditHistoryPage;
+            const hasHistory = mergedCreditHistoryDisplay.length > 0;
             return (
             <div className="space-y-3 animate-in fade-in duration-300">
                 <div className="rounded-2xl px-4 py-3 flex items-center gap-3" style={{ background: levelBg, border: `1px solid ${levelBorder}` }}>
                     <span className="text-xl">💰</span>
                     <div className="flex-1">
                         <p className="text-sm font-black" style={{ color: levelColor }}>Credit History</p>
-                        <p className="text-[11px] text-slate-500">Last {creditHistory.length} transactions (device pe stored)</p>
+                        <p className="text-[11px] text-slate-500">Credits aur study activity — {mergedCreditHistoryDisplay.length} entries</p>
                     </div>
                     {creditHistory.length > 0 && (
                         <button
@@ -795,7 +815,7 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
                     </div>
                 )}
 
-                {creditHistory.length === 0 ? (
+                {!hasHistory ? (
                     <div className="text-center py-12 bg-amber-50 rounded-2xl border border-amber-100">
                         <p className="text-3xl mb-2">💰</p>
                         <p className="font-bold text-slate-600 text-sm">No credit transactions yet</p>
@@ -803,7 +823,48 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
                     </div>
                 ) : (
                     <div className="space-y-2">
-                        {visibleTx.map((tx, i) => {
+                        {visibleTx.map((row, i) => {
+                            if (row.rowType === 'activity') {
+                                const entry = row.data;
+                                const ts = new Date(entry.timestamp);
+                                const isValid = !isNaN(ts.getTime());
+                                const earned = (entry.creditsEarned || 0) > 0;
+                                return (
+                                    <div key={`activity-${entry.id || i}`} className="rounded-2xl p-3.5 border border-indigo-100 bg-indigo-50/30 shadow-sm">
+                                        <div className="flex items-start gap-2.5">
+                                            <div className="w-9 h-9 rounded-xl bg-indigo-100 flex items-center justify-center text-lg shrink-0">📊</div>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-xs font-black text-slate-800 truncate">Study Activity</p>
+                                                <p className="text-[10px] text-slate-500 truncate">
+                                                    {entry.activities?.join(', ') || 'Study session'}{entry.chapter ? ` • ${entry.chapter}` : ''}
+                                                </p>
+                                                <p className="text-[10px] text-slate-400 mt-0.5">{isValid ? formatLoginTime(entry.timestamp) : '—'}</p>
+                                            </div>
+                                            {entry.timeSecs > 0 && (
+                                                <span className="text-[10px] font-bold text-slate-500 bg-white px-2 py-0.5 rounded-full shrink-0">
+                                                    ⏱ {formatLoginDuration(entry.timeSecs)}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="flex flex-wrap gap-2 mt-3">
+                                            <div className="flex items-center gap-1 text-[11px] font-bold bg-white border border-indigo-100 rounded-lg px-2 py-1">
+                                                <span>⭐</span>
+                                                <span className="text-slate-500">{entry.xpBefore || 0}</span>
+                                                <span className="text-slate-400">→</span>
+                                                <span className="text-slate-800">{entry.xpAfter || 0} XP</span>
+                                            </div>
+                                            <div className="flex items-center gap-1 text-[11px] font-bold bg-white border border-amber-100 rounded-lg px-2 py-1">
+                                                <span>🪙</span>
+                                                <span className={earned ? 'text-emerald-600' : 'text-slate-500'}>
+                                                    {earned ? `+${entry.creditsEarned}` : 'No credits'}
+                                                </span>
+                                                <span className="text-slate-500">• Balance {entry.creditsAfter || 0} CR</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            }
+                            const tx = row.data;
                             const isSession = tx.sessionScore !== undefined || tx.sessionSeconds !== undefined;
                             if (isSession) {
                                 // ── Toast-style session card ──────────────────
@@ -899,10 +960,10 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
                                 onClick={() => setCreditHistoryPage(p => p + 30)}
                                 className="w-full py-2.5 rounded-2xl border border-slate-200 text-xs font-bold text-slate-500 hover:bg-slate-50 transition-colors"
                             >
-                                Load more ({creditHistoryDisplay.length - creditHistoryPage} remaining)
+                                 Load more ({mergedCreditHistoryDisplay.length - creditHistoryPage} remaining)
                             </button>
                         )}
-                        <p className="text-center text-[10px] text-slate-400 pt-1">Local device storage • Last {creditHistory.length} transactions</p>
+                         <p className="text-center text-[10px] text-slate-400 pt-1">Credits + activity locally saved • {mergedCreditHistoryDisplay.length} entries</p>
                     </div>
                 )}
             </div>

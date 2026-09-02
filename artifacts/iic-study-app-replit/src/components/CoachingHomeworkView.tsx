@@ -9,7 +9,9 @@ import { hapticMedium, hapticStrong } from '../utils/haptic';
 import { ChunkedNotesReader } from './ChunkedNotesReader';
 import { tryEarnScore, getActiveBoost } from '../utils/scoreSystem';
 import { inlineMd } from '../utils/mcqRender';
+import { getStatementLabel, getStatementText } from '../utils/mcqStructure';
 import { renderMathInHtml, formatExplanationHtml } from '../utils/mathUtils';
+import McqQuestionNavigator from './McqQuestionNavigator';
 
 interface CoachingNote {
   id: string;
@@ -176,8 +178,10 @@ function QuestionText({ question, accent, statements }: { question: string; acce
               className="rounded-lg border px-2.5 py-2 text-[11px] font-medium leading-relaxed text-slate-700"
               style={{ borderColor: `${accent}25`, background: '#fff' }}
             >
-              <span className="mr-1 font-black" style={{ color: accent }}>{index + 1}.</span>
-              <span dangerouslySetInnerHTML={{ __html: render(statement) }} />
+              <span className="mr-1 font-black" style={{ color: accent }}>
+                {getStatementLabel(statement, index)}
+              </span>
+              <span dangerouslySetInnerHTML={{ __html: render(getStatementText(statement)) }} />
             </div>
           ))}
         </div>
@@ -344,55 +348,39 @@ function NoteCard({ note, accent, directOpen = false, user, onReaderOpenChange }
 // ──────────────────────────────────────────────────────────────────────────────
 type McqCommunityDraft = { question: string; options: [string,string,string,string]; correctAnswer: number; explanation: string };
 
-function McqCard({ mcq, accent, onSendToMcqCommunity, user, onAnswered }: { mcq: CoachingMcq; accent: string; onSendToMcqCommunity?: (draft: McqCommunityDraft) => void; user?: any; onAnswered?: (id: string) => void }) {
+function McqCard({ mcq, accent, onSendToMcqCommunity, user, answer, multiAnswers, showResult = false, onAnswerChange, onMultiAnswerChange }: {
+  mcq: CoachingMcq;
+  accent: string;
+  onSendToMcqCommunity?: (draft: McqCommunityDraft) => void;
+  user?: any;
+  answer?: number | null;
+  multiAnswers?: Set<number>;
+  showResult?: boolean;
+  onAnswerChange?: (index: number) => void;
+  onMultiAnswerChange?: (index: number) => void;
+}) {
   const correctSet = getCorrectSet(mcq);
   const isMultiple = correctSet.size > 1;
+  const displayOptions = [...(mcq.options || []), '', '', '', ''].slice(0, 4);
 
-  // For single-answer mode: track one selected index
-  const [selected, setSelected] = useState<number | null>(null);
-  // For multiple-answer mode: track a set of selected indices
-  const [multiSelected, setMultiSelected] = useState<Set<number>>(new Set());
-  const [submitted, setSubmitted] = useState(false);
-
-  const awardMcqXp = (isCorrect: boolean) => {
-    if (!user?.id) return;
-    if (isCorrect) {
-      tryEarnScore(user.id, 2, user.subscriptionLevel, user.isPremium, getActiveBoost(user), 'COACHING_HW_MCQ_CORRECT');
-    }
-  };
+  const selected = answer ?? null;
+  const multiSelected = multiAnswers || new Set<number>();
+  const submitted = showResult;
 
   const handleSingleSelect = (i: number) => {
-    if (selected !== null) return;
+    if (submitted) return;
     hapticMedium();
-    setSelected(i);
-    awardMcqXp(correctSet.has(i));
-    onAnswered?.(mcq.id);
+    onAnswerChange?.(i);
   };
 
   const handleMultiToggle = (i: number) => {
     if (submitted) return;
     hapticMedium();
-    setMultiSelected(prev => {
-      const next = new Set(prev);
-      if (next.has(i)) next.delete(i); else next.add(i);
-      return next;
-    });
+    onMultiAnswerChange?.(i);
   };
 
-  const handleSubmit = () => {
-    if (multiSelected.size === 0) return;
-    hapticMedium();
-    setSubmitted(true);
-    // Award XP only when the selection is fully correct (all correct picked, none wrong)
-    if (user?.id) {
-      const allCorrectPicked = [...correctSet].every(i => multiSelected.has(i));
-      const noWrongPicked    = [...multiSelected].every(i => correctSet.has(i));
-      awardMcqXp(allCorrectPicked && noWrongPicked);
-    }
-    onAnswered?.(mcq.id);
-  };
-
-  const isAnswered = isMultiple ? submitted : selected !== null;
+  const hasSelection = isMultiple ? multiSelected.size > 0 : selected !== null;
+  const isAnswered = submitted && hasSelection;
 
   return (
     <div className="rounded-xl border overflow-hidden" style={{ borderColor: `${accent}30` }}>
@@ -429,7 +417,7 @@ function McqCard({ mcq, accent, onSendToMcqCommunity, user, onAnswered }: { mcq:
         </div>
 
         <div className="space-y-1.5">
-          {mcq.options.map((opt, i) => {
+          {displayOptions.map((opt, i) => {
             const isCorrect = correctSet.has(i);
 
             if (isMultiple) {
@@ -467,14 +455,17 @@ function McqCard({ mcq, accent, onSendToMcqCommunity, user, onAnswered }: { mcq:
               // Single answer
               const isSelected = selected === i;
               let bg = 'bg-white border-slate-200';
-              if (selected !== null) {
+              if (submitted && selected !== null) {
                 if (isCorrect) bg = 'bg-emerald-50 border-emerald-400';
                 else if (isSelected) bg = 'bg-red-50 border-red-400';
+              } else if (isSelected) {
+                bg = 'bg-indigo-50 border-indigo-400';
               }
               return (
                 <button
                   key={i}
                   onClick={() => handleSingleSelect(i)}
+                  disabled={submitted}
                   className={`w-full text-left px-2.5 py-1.5 rounded-lg border text-[11px] font-medium transition-all ${bg}`}
                 >
                   <span className="font-black mr-1">{String.fromCharCode(65 + i)}.</span> <span dangerouslySetInnerHTML={{ __html: renderMathInHtml(opt) }} />
@@ -483,18 +474,6 @@ function McqCard({ mcq, accent, onSendToMcqCommunity, user, onAnswered }: { mcq:
             }
           })}
         </div>
-
-        {/* Submit button for multiple-answer MCQs */}
-        {isMultiple && !submitted && (
-          <button
-            onClick={handleSubmit}
-            disabled={multiSelected.size === 0}
-            className="mt-2 w-full py-1.5 rounded-lg text-[11px] font-black transition-all disabled:opacity-40"
-            style={{ background: accent, color: '#fff' }}
-          >
-            Check Answer
-          </button>
-        )}
 
         {/* Explanation */}
         {isAnswered && mcq.explanation && (
@@ -518,35 +497,28 @@ function McqCard({ mcq, accent, onSendToMcqCommunity, user, onAnswered }: { mcq:
 
 function McqFullPage({ mcqs, accent, label, onClose, onSendToMcqCommunity, user }: { mcqs: CoachingMcq[]; accent: string; label: string; onClose: () => void; onSendToMcqCommunity?: (draft: McqCommunityDraft) => void; user?: any }) {
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [answeredIds, setAnsweredIds] = useState<Set<string>>(new Set());
+  const [answers, setAnswers] = useState<Record<number, number>>({});
+  const [multiAnswers, setMultiAnswers] = useState<Record<number, Set<number>>>({});
+  const [skipped, setSkipped] = useState<Set<number>>(new Set());
+  const [submitted, setSubmitted] = useState(false);
+  const [score, setScore] = useState<number | null>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
-  const currentMcq = mcqs[currentIndex];
-  const isCurrentAnswered = !!currentMcq && answeredIds.has(currentMcq.id);
-
-  const markAnswered = (id: string) => {
-    setAnsweredIds(prev => {
-      if (prev.has(id)) return prev;
-      const next = new Set(prev);
-      next.add(id);
-      return next;
-    });
-  };
 
   const goNext = () => {
-    if (!isCurrentAnswered) return;
     hapticMedium();
-    if (currentIndex >= mcqs.length - 1) {
-      onClose();
-    } else {
+    if (currentIndex < mcqs.length - 1) {
       setCurrentIndex(index => index + 1);
     }
   };
 
   const skipQuestion = () => {
     hapticMedium();
-    if (currentIndex >= mcqs.length - 1) {
-      onClose();
-    } else {
+    if (currentIndex < mcqs.length - 1) {
+      setSkipped(prev => {
+        const next = new Set(prev);
+        if (answers[currentIndex] === undefined && !(multiAnswers[currentIndex]?.size)) next.add(currentIndex);
+        return next;
+      });
       setCurrentIndex(index => index + 1);
     }
   };
@@ -555,6 +527,29 @@ function McqFullPage({ mcqs, accent, label, onClose, onSendToMcqCommunity, user 
     if (currentIndex === 0) return;
     hapticMedium();
     setCurrentIndex(index => index - 1);
+  };
+
+  const navigatorAnswers: Record<number, unknown> = { ...answers };
+  Object.entries(multiAnswers).forEach(([index, value]) => {
+    if (value.size > 0) navigatorAnswers[Number(index)] = value;
+  });
+
+  const submitAll = () => {
+    if (submitted) return;
+    let correct = 0;
+    mcqs.forEach((mcq, index) => {
+      const correctSet = getCorrectSet(mcq);
+      const selectedSet = multiAnswers[index] || new Set<number>();
+      const isCorrect = correctSet.size > 1
+        ? selectedSet.size === correctSet.size && [...selectedSet].every(option => correctSet.has(option))
+        : answers[index] !== undefined && correctSet.has(answers[index]);
+      if (isCorrect) {
+        correct++;
+        if (user?.id) tryEarnScore(user.id, 2, user.subscriptionLevel, user.isPremium, getActiveBoost(user), 'COACHING_HW_MCQ_CORRECT');
+      }
+    });
+    setScore(correct);
+    setSubmitted(true);
   };
 
   return createPortal(
@@ -595,6 +590,15 @@ function McqFullPage({ mcqs, accent, label, onClose, onSendToMcqCommunity, user 
           />
         </div>
       </div>
+      <div className="shrink-0 px-4 pt-3">
+        <McqQuestionNavigator
+          total={mcqs.length}
+          currentIndex={currentIndex}
+          answers={navigatorAnswers}
+          skipped={skipped}
+          onJump={setCurrentIndex}
+        />
+      </div>
       <div className="flex-1 overflow-y-auto px-4 py-3" style={{ paddingBottom: 112 }}>
         {mcqs.map((m, index) => (
           <div key={m.id} style={{ display: index === currentIndex ? 'block' : 'none', zoom: zoomLevel }}>
@@ -603,7 +607,27 @@ function McqFullPage({ mcqs, accent, label, onClose, onSendToMcqCommunity, user 
               accent={accent}
               onSendToMcqCommunity={onSendToMcqCommunity}
               user={user}
-              onAnswered={markAnswered}
+              answer={answers[index] ?? null}
+              multiAnswers={multiAnswers[index]}
+              showResult={submitted}
+              onAnswerChange={(option) => {
+                setAnswers(prev => ({ ...prev, [index]: option }));
+                setSkipped(prev => { const next = new Set(prev); next.delete(index); return next; });
+                // Single-answer homework questions move forward as soon as an
+                // option is chosen. Multiple-correct questions stay manual so
+                // the student can select every correct option.
+                if (getCorrectSet(m).size <= 1 && index < mcqs.length - 1) {
+                  setCurrentIndex(current => current === index ? index + 1 : current);
+                }
+              }}
+              onMultiAnswerChange={(option) => {
+                setMultiAnswers(prev => {
+                  const next = new Set(prev[index] || []);
+                  if (next.has(option)) next.delete(option); else next.add(option);
+                  return { ...prev, [index]: next };
+                });
+                setSkipped(prev => { const next = new Set(prev); next.delete(index); return next; });
+              }}
             />
           </div>
         ))}
@@ -630,13 +654,27 @@ function McqFullPage({ mcqs, accent, label, onClose, onSendToMcqCommunity, user 
         </button>
         <button
           onClick={goNext}
-          disabled={!isCurrentAnswered}
+          disabled={currentIndex === mcqs.length - 1}
           className="flex items-center justify-center gap-1.5 py-3 rounded-xl text-white text-xs font-black disabled:opacity-40 active:scale-[0.98] transition-all"
           style={{ background: accent }}
         >
-          {currentIndex === mcqs.length - 1 ? 'Finish' : 'Next'}
+          Next
           <ChevronRight size={15} />
         </button>
+        {!submitted ? (
+          <button
+            onClick={submitAll}
+            className="col-span-3 flex items-center justify-center gap-1.5 rounded-xl py-3 text-xs font-black text-white active:scale-[0.98] transition-all"
+            style={{ background: accent }}
+          >
+            ✅ Submit & See Result
+          </button>
+        ) : (
+          <div className="col-span-3 flex items-center justify-between rounded-xl bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700">
+            <span>Result: {score}/{mcqs.length} correct</span>
+            <button onClick={onClose} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-white">Close</button>
+          </div>
+        )}
       </div>
     </div>,
     document.body

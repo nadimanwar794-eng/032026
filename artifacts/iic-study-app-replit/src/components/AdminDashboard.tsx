@@ -878,7 +878,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
 
     // ── Step 0: Fix double-answer lines ──────────────────────────────────────
     // Pattern: **सही उत्तर:\n**सही उत्तर:** B) ... → drop the first empty line
-    txt = txt.replace(/\*\*\s*(?:सही\s*उत्तर|Ans(?:wer)?)\s*[:：]\s*\n+\s*(?=\*\*\s*(?:सही\s*उत्तर|Ans(?:wer)?))/gi, '');
+    txt = txt.replace(/\*\*\s*(?:सही\s*उत्तर|उत्तर|Ans(?:wer)?)\s*[:：]\s*\n+\s*(?=\*\*\s*(?:सही\s*उत्तर|उत्तर|Ans(?:wer)?))/gi, '');
 
     // ── Step 1: Strip [⚡], [🔥], [💡] etc. difficulty/category tags ─────────
     // These appear at the start of a question line like: [⚡] question text
@@ -919,10 +919,10 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
 
     // ── Step 6: Answer lines ─────────────────────────────────────────────────
     // **सही उत्तर: B) text** (answer INSIDE bold) → ✅ Correct Answer: B) text.
-    txt = txt.replace(/\*\*\s*(?:सही\s*उत्तर|Ans(?:wer)?)\s*[:：]\s*([^*]+?)\s*\*\*/gi, (_m, val) => `\n✅ Correct Answer: ${String(val).trim()}`);
+    txt = txt.replace(/\*\*\s*(?:सही\s*उत्तर|उत्तर|Ans(?:wer)?)\s*[:：]\s*([^*]+?)\s*\*\*/gi, (_m, val) => `\n✅ Correct Answer: ${String(val).trim()}`);
     // **सही उत्तर:** (empty bold, value follows on same line) → ✅ Correct Answer:
-    txt = txt.replace(/\*\*(?:सही\s*उत्तर|Ans(?:wer)?)\s*[:：]?\*\*\s*/gi, '✅ Correct Answer: ');
-    txt = txt.replace(/(?:^|\n)\s*(?:Ans(?:wer)?|सही\s*उत्तर)\s*[:：]\s*/gi, '\n✅ Correct Answer: ');
+    txt = txt.replace(/\*\*(?:सही\s*उत्तर|उत्तर|Ans(?:wer)?)\s*[:：]?\*\*\s*/gi, '✅ Correct Answer: ');
+    txt = txt.replace(/(?:^|\n)\s*(?:Ans(?:wer)?|सही\s*उत्तर|उत्तर)\s*[:：]\s*/gi, '\n✅ Correct Answer: ');
 
     // ── Step 7: Strip any remaining stray ** bold markers ────────────────────
     txt = txt.replace(/\*\*/g, '');
@@ -2912,14 +2912,12 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
           } : undefined
       };
 
+      // Persist the account grant first. The admin UI and its cache must not
+      // claim success when the user's credits/subscription only exist locally.
+      if (!await saveUserToLive(updatedUser)) throw new Error('User account could not be saved to the backend.');
       const updatedList = users.map(u => u.id === editingUser.id ? updatedUser : u);
       setUsers(updatedList);
       localStorage.setItem('nst_users', JSON.stringify(updatedList));
-
-      // Cloud Sync
-      if (isFirebaseConnected) {
-          await saveUserToLive(updatedUser);
-      }
 
       setEditingUser(null);
       alert(`✅ ${editingUser.name} subscription updated! (${mode} Grant)`);
@@ -2965,14 +2963,12 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
       };
 
       const updatedUser = { ...dmUser, ...userUpdates, inbox: [newMsg, ...(dmUser.inbox || [])] };
+      // The inbox gift and any direct credit/score change are account state.
+      // Save to the backend before updating the admin's local list.
+      if (!await saveUserToLive(updatedUser)) throw new Error('User account could not be saved to the backend.');
       const updatedList = users.map(u => u.id === dmUser.id ? updatedUser : u);
       setUsers(updatedList);
       localStorage.setItem('nst_users', JSON.stringify(updatedList));
-      
-      // Cloud Sync
-      if (isFirebaseConnected) {
-          await saveUserToLive(updatedUser);
-      }
 
       setDmUser(null);
       setDmText('');
@@ -4013,10 +4009,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
       const userToUpdate = users.find(u => u.id === req.id);
       if (userToUpdate) {
           const updatedUser = { ...userToUpdate, isPasswordless: true };
-          // Save to Local & Cloud
-          if (isFirebaseConnected) {
-              await saveUserToLive(updatedUser);
-          }
+          if (!await saveUserToLive(updatedUser)) throw new Error('User account could not be saved to the backend.');
       }
       
       alert(`Access Approved for ${req.name}. They can now login without password.`);
@@ -4038,13 +4031,11 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
           permissions: ['MANAGE_SUBS'] 
       };
       
-      // Update State
+      // Update backend first, then update the admin cache.
+      if (!await saveUserToLive(updatedUser)) throw new Error('User account could not be saved to the backend.');
       const updatedList = users.map(u => u.id === user.id ? updatedUser : u);
       setUsers(updatedList);
       localStorage.setItem('nst_users', JSON.stringify(updatedList));
-      
-      // Update Cloud
-      if (isFirebaseConnected) await saveUserToLive(updatedUser);
       
       alert(`✅ ${user.name} promoted to Sub-Admin!`);
       setNewSubAdminId('');
@@ -4063,11 +4054,10 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
           permissions: [] 
       };
       
+      if (!await saveUserToLive(updatedUser)) throw new Error('User account could not be saved to the backend.');
       const updatedList = users.map(u => u.id === user.id ? updatedUser : u);
       setUsers(updatedList);
       localStorage.setItem('nst_users', JSON.stringify(updatedList));
-      
-      if (isFirebaseConnected) await saveUserToLive(updatedUser);
       
       alert(`ℹ️ ${user.name} is now a Student.`);
   };
@@ -4083,10 +4073,9 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
           
       const updatedUser = { ...user, permissions: newPerms };
       
+      if (!await saveUserToLive(updatedUser)) throw new Error('User account could not be saved to the backend.');
       const updatedList = users.map(u => u.id === user.id ? updatedUser : u);
       setUsers(updatedList);
-      
-      if (isFirebaseConnected) await saveUserToLive(updatedUser);
   };
 
   // --- SUB-COMPONENTS (RENDER HELPERS) ---
@@ -9757,9 +9746,12 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                       }
                                                       const added = parsed.questions.map(q => ({
                                                           id: `mcq_${Date.now()}_${Math.random()}`,
+                                                          questionNumber: q.questionNumber,
                                                           question: (q.question || '').replace(/<br\/?>/g, '\n').trim(),
                                                           options: (q.options || ['', '', '', '']).slice(0, 4),
                                                           correctAnswer: q.correctAnswer ?? 0,
+                                                          statements: q.statements?.length ? q.statements : undefined,
+                                                          explanation: q.explanation?.trim() || undefined,
                                                       }));
                                                       setNewHomeworkMcqs(prev => [...prev, ...added]);
                                                       setNewHomeworkBulk(undefined);
@@ -10980,6 +10972,8 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
 
       {activeTab === 'CHALLENGE_CREATOR_20' && (
           <ChallengeCreator20
+              settings={localSettings}
+              onSaveSettings={handleSaveSettings}
               onBack={() => setActiveTab('DASHBOARD')}
               language={localSettings.aiModel?.includes('Hindi') ? 'Hindi' : 'English'}
               autoChallengeEnabled={localSettings.dailyChallengeConfig?.autoChallengeEnabled !== false}
@@ -14421,7 +14415,10 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
       ══════════════════════════════════════════════ */}
       {activeTab === 'COMPETITION_MCQ_MANAGER' && (
           <ErrorBoundary fallbackLabel="Competition MCQ Practice Manager" compact>
-            <AdminCompetitionMcqManager onBack={() => setActiveTab('DASHBOARD')} />
+            <AdminCompetitionMcqManager
+              settings={localSettings}
+              onBack={() => setActiveTab('DASHBOARD')}
+            />
           </ErrorBoundary>
       )}
 

@@ -13,9 +13,11 @@ function normalizeMcqPaste(raw: string): string {
   let txt = raw.replace(/\r\n/g, "\n");
   txt = txt.replace(/^---+\s*$/gm, "");
   txt = txt.replace(/^###\s+.+$/gm, "");
-  txt = txt.replace(/\*\*\s*(?:सही\s*उत्तर|Ans(?:wer)?)\s*[:：]\s*([^*]+?)\s*\*\*/gi, (_m, v) => `\n✅ Correct Answer: ${v.trim()}`);
-  txt = txt.replace(/\*\*(?:सही\s*उत्तर|Ans(?:wer)?)\s*[:：]?\*\*\s*/gi, "✅ Correct Answer: ");
-  txt = txt.replace(/(?:^|\n)\s*(?:Ans(?:wer)?|सही\s*उत्तर)\s*[:：]\s*/gi, "\n✅ Correct Answer: ");
+  // Pattern: **सही उत्तर:\n**सही उत्तर:** B) ... → drop the first empty line
+  txt = txt.replace(/\*\*\s*(?:सही\s*उत्तर|उत्तर|Ans(?:wer)?)\s*[:：]\s*\n+\s*(?=\*\*\s*(?:सही\s*उत्तर|उत्तर|Ans(?:wer)?))/gi, '');
+  txt = txt.replace(/\*\*\s*(?:सही\s*उत्तर|उत्तर|Ans(?:wer)?)\s*[:：]\s*([^*]+?)\s*\*\*/gi, (_m, v) => `\n✅ Correct Answer: ${v.trim()}`);
+  txt = txt.replace(/\*\*(?:सही\s*उत्तर|उत्तर|Ans(?:wer)?)\s*[:：]?\*\*\s*/gi, "✅ Correct Answer: ");
+  txt = txt.replace(/(?:^|\n)\s*(?:Ans(?:wer)?|सही\s*उत्तर|उत्तर)\s*[:：]\s*/gi, "\n✅ Correct Answer: ");
   txt = txt.replace(/\*\*\s*(?:प्रश्न|Question)\s*(\d+)\s*[:.\-]\s*([\s\S]*?)\*\*([^\n]*)/gi, (_m, n, q, rest) => {
     const combined = (String(q).trim() + " " + String(rest).trim()).trim();
     return `\n**Question ${n}**\n❓ Question: ${combined}`;
@@ -102,7 +104,9 @@ const MCQBuilder: React.FC<{
       }
       const mapped: LessonMCQ[] = parsed.questions.map(q => ({
         id: generateId(),
+        questionNumber: q.questionNumber,
         question: (q.question || "").replace(/<br\/?>/g, "\n").trim(),
+        statements: q.statements?.length ? q.statements : undefined,
         options: (q.options || ["", "", "", ""]).slice(0, 4).map(o =>
           o.replace(/<br\/?>/g, " ").trim()
         ),

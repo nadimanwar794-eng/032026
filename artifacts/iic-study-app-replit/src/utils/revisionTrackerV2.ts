@@ -8,6 +8,10 @@
 
 import type { MCQItem } from '../types';
 import type { RevisionConfig } from '../types';
+import {
+  getTrackedQuestionKey,
+  normalizeMcqForTracking,
+} from './mcqStructure';
 
 export interface TopicBucket {
   subjectId: string;
@@ -23,7 +27,17 @@ export interface TopicBucket {
   // Up to 10 most-recent wrong question stems — used as extra search keywords.
   // `wrongCycles` is incremented every time the student gets THIS specific
   // question wrong, so the Revision Hub can prioritise repeat-offenders.
-  wrongQuestions: { question: string; correctOption?: string; allOptions?: string[]; explanation?: string; at: number; wrongCycles?: number }[];
+  wrongQuestions: {
+    question: string;
+    questionNumber?: string;
+    statements?: string[];
+    correctOption?: string;
+    allOptions?: string[];
+    correctAnswer?: number;
+    explanation?: string;
+    at: number;
+    wrongCycles?: number;
+  }[];
   // Spaced-repetition schedule ------------------------------------------------
   // 'NOTES'  → student should read notes for this topic today
   // 'MCQ'    → student should practice MCQ for this topic today
@@ -90,7 +104,36 @@ function safeRead(): TrackerMap {
     const raw = localStorage.getItem(userStorageKey());
     if (!raw) return {};
     const parsed = JSON.parse(raw);
-    return (parsed && typeof parsed === 'object') ? parsed : {};
+    if (!parsed || typeof parsed !== 'object') return {};
+
+    // Backfill the structured MCQ fields when an older tracker entry is opened.
+    // This keeps existing mistakes visible without requiring a destructive reset.
+    return Object.fromEntries(Object.entries(parsed).map(([key, value]) => {
+      const bucket = value as TopicBucket;
+      const wrongQuestions = Array.isArray(bucket.wrongQuestions)
+        ? bucket.wrongQuestions.map((wrong, index) => {
+            const normalized = normalizeMcqForTracking({
+              question: wrong.question,
+              questionNumber: wrong.questionNumber,
+              statements: wrong.statements,
+              options: wrong.allOptions,
+              correctAnswer: wrong.correctAnswer,
+              explanation: wrong.explanation,
+            }, index);
+            return {
+              ...wrong,
+              questionNumber: wrong.questionNumber || normalized.questionNumber,
+              statements: wrong.statements?.length ? wrong.statements : normalized.statements,
+              allOptions: normalized.allOptions,
+              correctAnswer: Number.isInteger(wrong.correctAnswer)
+                ? wrong.correctAnswer
+                : normalized.allOptions.findIndex(option => option === wrong.correctOption),
+              correctOption: wrong.correctOption || normalized.correctOption,
+            };
+          })
+        : [];
+      return [key, { ...bucket, wrongQuestions }];
+    })) as TrackerMap;
   } catch { return {}; }
 }
 
@@ -141,6 +184,7 @@ export function recordAttempt(args: RecordAttemptArgs) {
   // session" and apply the long-spacing schedule (notes +10d, MCQ +20d).
   const sessionStats: Record<string, { total: number; correct: number }> = {};
   args.questions.forEach((q, idx) => {
+    const tracked = normalizeMcqForTracking(q, idx);
     const topic = (q.topic || 'General').trim() || 'General';
     const k = bucketKey(args.subjectId, args.chapterId, pageKey, topic);
     const prev: TopicBucket = map[k] || {
@@ -159,21 +203,30 @@ export function recordAttempt(args: RecordAttemptArgs) {
     };
     prev.total += 1;
     const ans = args.userAnswers[idx];
-    const isCorrect = ans !== null && ans !== undefined && ans === q.correctAnswer;
+    const isCorrect = ans !== null && ans !== undefined && ans === tracked.correctAnswer;
     if (isCorrect) {
       prev.correct += 1;
     } else {
       // Per-question wrong-cycle tracking: if this exact question was already
       // in `wrongQuestions`, bump its `wrongCycles` counter; otherwise insert
       // a fresh entry with wrongCycles = 1.
-      const existingIdx = prev.wrongQuestions.findIndex(w => w.question === q.question);
+      const existingIdx = prev.wrongQuestions.findIndex(w =>
+        getTrackedQuestionKey({
+          question: w.question,
+          questionNumber: w.questionNumber,
+        }) === getTrackedQuestionKey(tracked)
+      );
       if (existingIdx >= 0) {
         const existing = prev.wrongQuestions[existingIdx];
         const updated = {
           ...existing,
-          correctOption: q.options?.[q.correctAnswer] ?? existing.correctOption,
-          allOptions: q.options ?? existing.allOptions,
-          explanation: q.explanation ?? existing.explanation,
+          question: tracked.question,
+          questionNumber: tracked.questionNumber ?? existing.questionNumber,
+          statements: tracked.statements,
+          correctOption: tracked.correctOption || existing.correctOption,
+          allOptions: tracked.allOptions,
+          correctAnswer: tracked.correctAnswer,
+          explanation: tracked.explanation || existing.explanation,
           at: now,
           wrongCycles: (existing.wrongCycles || 1) + 1,
         };
@@ -183,7 +236,17 @@ export function recordAttempt(args: RecordAttemptArgs) {
         ].slice(0, 10);
       } else {
         prev.wrongQuestions = [
-          { question: q.question, correctOption: q.options?.[q.correctAnswer], allOptions: q.options, explanation: q.explanation, at: now, wrongCycles: 1 },
+          {
+            question: tracked.question,
+            questionNumber: tracked.questionNumber,
+            statements: tracked.statements,
+            correctOption: tracked.correctOption,
+            allOptions: tracked.allOptions,
+            correctAnswer: tracked.correctAnswer,
+            explanation: tracked.explanation,
+            at: now,
+            wrongCycles: 1,
+          },
           ...prev.wrongQuestions,
         ].slice(0, 10);
       }

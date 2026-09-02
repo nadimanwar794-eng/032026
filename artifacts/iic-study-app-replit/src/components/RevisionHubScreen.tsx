@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
   ArrowLeft, BookOpen, RotateCcw, Clock, BarChart2, ChevronRight,
-  CheckCircle, XCircle, Zap, Calendar, BrainCircuit, Trophy, Plus,
+  CheckCircle, XCircle, Zap, Calendar, BrainCircuit, Trophy, Plus, List,
 } from 'lucide-react';
 import type { User, StudentTab, SystemSettings } from '../types';
 import { RevisionHubV2 } from './RevisionHubV2';
@@ -19,6 +19,9 @@ import { syncAllRevisionBuckets } from '../utils/revisionFirebase';
 import { applyDeduction, getTotalCredits } from '../utils/creditSystem';
 import { CreditConfirmationModal } from './CreditConfirmationModal';
 import { renderMathInHtml } from '../utils/mathUtils';
+import McqQuestionDisplay from './McqQuestionDisplay';
+import McqPracticeCard from './McqPracticeCard';
+import McqQuestionNavigator from './McqQuestionNavigator';
 
 type HubTab = 'MCQ' | 'REVISION' | 'PERFORMANCE';
 
@@ -101,6 +104,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [showFeedback, setShowFeedback]     = useState(false);
   const [sessionMcqs, setSessionMcqs]       = useState<any[]>([]);
+  const [showSessionNavigator, setShowSessionNavigator] = useState(false);
   const [coinModal, setCoinModal] = useState<{ title: string; cost: number; onConfirm: () => void } | null>(null);
   const [pendingLesson, setPendingLesson] = useState<any | null>(null);
 
@@ -238,6 +242,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
     setSelectedOption(null);
     setShowFeedback(false);
     setSessionDone(false);
+    setShowSessionNavigator(false);
     setSessionActive(true);
   }
 
@@ -292,6 +297,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
       next[sessionQIndex] = optIdx;
       return next;
     });
+
   }
 
   function handlePrev() {
@@ -304,6 +310,9 @@ export const RevisionHubScreen: React.FC<Props> = ({
   }
 
   function finishSession() {
+    const answeredCount = sessionAnswers.filter(a => a !== null && a !== undefined).length;
+    if (sessionMcqs.length === 0 || answeredCount < sessionMcqs.length) return;
+
     setSessionActive(false);
     setSessionDone(true);
     // ── Session tracking: App.tsx ko batao session khatam hua ────────────
@@ -411,6 +420,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
     setSessionMcqs([]);
     setSelectedOption(null);
     setShowFeedback(false);
+    setShowSessionNavigator(false);
   }
 
   const handleTabChange = (tab: HubTab) => {
@@ -464,6 +474,21 @@ export const RevisionHubScreen: React.FC<Props> = ({
                 : 'MCQ · Revision · History · Performance'}
           </p>
         </div>
+         {sessionActive && (
+           <button
+             type="button"
+             onClick={() => setShowSessionNavigator(prev => !prev)}
+             aria-label={showSessionNavigator ? 'Hide question switcher' : 'Show question switcher'}
+             aria-expanded={showSessionNavigator}
+             className={`shrink-0 p-2 rounded-xl border transition-all ${
+               showSessionNavigator
+                 ? 'bg-indigo-100 border-indigo-300 text-indigo-700'
+                 : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'
+             }`}
+           >
+             <List size={18} />
+           </button>
+         )}
       </div>
 
       {/* Progress bar (session only) */}
@@ -504,14 +529,37 @@ export const RevisionHubScreen: React.FC<Props> = ({
       {/* ── Content ── */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden pb-20">
 
+        {sessionActive && showSessionNavigator && (
+          <div className="px-4 pt-3 max-w-xl mx-auto w-full">
+            <McqQuestionNavigator
+              total={sessionMcqs.length}
+              currentIndex={sessionQIndex}
+              answers={Object.fromEntries(
+                sessionAnswers
+                  .map((answer, index) => [index, answer])
+                  .filter(([, answer]) => answer !== null && answer !== undefined),
+              )}
+              onJump={(index) => {
+                setSessionQIndex(index);
+                setSelectedOption(sessionAnswers[index] ?? null);
+                setShowFeedback(false);
+              }}
+            />
+          </div>
+        )}
+
         {/* ══ SESSION MODE ══ */}
         {sessionActive && currentQ && (() => {
           const answered   = sessionAnswers.filter(a => a !== null && a !== undefined).length;
           const correct    = sessionAnswers.filter((a, i) => a !== null && a !== undefined && a === sessionMcqs[i]?.correctAnswer).length;
           const wrong      = answered - correct;
           const isAnswered = sessionAnswers[sessionQIndex] !== null && sessionAnswers[sessionQIndex] !== undefined;
-          const minRequired = Math.min(100, sessionMcqs.length);
-          const ready      = answered >= minRequired;
+           const totalQuestions = sessionMcqs.length;
+           const ready      = totalQuestions > 0 && answered >= totalQuestions;
+           // After moving back, keep a forward-navigation path even if the
+           // current question has not been answered yet. The first question
+           // still requires an answer before moving forward.
+           const canGoForward = isAnswered || (sessionQIndex > 0 && sessionQIndex < totalQuestions - 1);
 
           return (
           <div className="p-4 max-w-xl mx-auto space-y-4">
@@ -532,53 +580,31 @@ export const RevisionHubScreen: React.FC<Props> = ({
               </div>
             </div>
 
-            {/* Question */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
-              <div className="flex items-start gap-2">
-                <p className="font-bold text-slate-800 text-sm leading-relaxed flex-1"
-                  dangerouslySetInnerHTML={{ __html: renderMathInHtml((currentQ.question || '').replace(/<br\/?>/g, '\n')) }}
-                />
-                {onSendToMcqCommunity && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                      const opts = (currentQ.options || []).length === 4
-                        ? currentQ.options as [string,string,string,string]
-                        : ([...(currentQ.options || []), '', '', '', ''].slice(0, 4) as [string,string,string,string]);
-                      onSendToMcqCommunity({ question: currentQ.question, options: opts, correctAnswer: currentQ.correctAnswer ?? 0, explanation: currentQ.explanation || '' });
-                    }}
-                    className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center active:scale-90 transition-all bg-indigo-100 text-indigo-600"
-                    title="MCQ Community mein bhejo"
-                  >
-                    <Plus size={13} strokeWidth={2.5} />
-                  </button>
-                )}
-              </div>
-            </div>
+             <McqPracticeCard
+               q={currentQ}
+               questionNumber={currentQ.questionNumber ?? sessionQIndex + 1}
+               selectedOption={selectedOption}
+               answered={isAnswered}
+               onSelect={handleOptionSelect}
+               actions={onSendToMcqCommunity ? (
+                 <button
+                   onClick={(e) => {
+                     e.stopPropagation();
+                     e.preventDefault();
+                     const opts = (currentQ.options || []).length === 4
+                       ? currentQ.options as [string,string,string,string]
+                       : ([...(currentQ.options || []), '', '', '', ''].slice(0, 4) as [string,string,string,string]);
+                     onSendToMcqCommunity({ question: currentQ.question, options: opts, correctAnswer: currentQ.correctAnswer ?? 0, explanation: currentQ.explanation || '' });
+                   }}
+                   className="w-7 h-7 rounded-full flex items-center justify-center active:scale-90 transition-all bg-indigo-100 text-indigo-600"
+                   title="MCQ Community mein bhejo"
+                 >
+                   <Plus size={13} strokeWidth={2.5} />
+                 </button>
+               ) : undefined}
+             />
 
-            {/* Options — blue highlight only, no green/red until submit */}
-            <div className="space-y-2.5">
-              {(currentQ.options || []).map((opt: string, oi: number) => {
-                const isSelected = selectedOption === oi;
-                let cls = 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-indigo-200 active:scale-[0.99]';
-                if (isSelected) cls = 'bg-blue-50 border-blue-400 text-blue-800';
-                else if (isAnswered) cls = 'bg-slate-50 border-slate-100 text-slate-400 opacity-60';
-                return (
-                  <button
-                    key={oi}
-                    onClick={() => handleOptionSelect(oi)}
-                    disabled={isAnswered}
-                    className={`w-full text-left px-4 py-3 rounded-xl text-sm font-medium border-2 transition-all ${cls}`}
-                  >
-                    <span className="font-black mr-2">{String.fromCharCode(65 + oi)}.</span>
-                    <span dangerouslySetInnerHTML={{ __html: renderMathInHtml(opt) }} />
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Bottom navigation row */}
+             {/* Bottom navigation row */}
             <div className="space-y-2 pt-1">
               <div className="flex gap-2">
                 {/* Prev button */}
@@ -590,22 +616,24 @@ export const RevisionHubScreen: React.FC<Props> = ({
                   <ArrowLeft size={15} /> Pichla
                 </button>
 
-                {/* Next button — shows as soon as option selected */}
-                {isAnswered && sessionQIndex < sessionMcqs.length - 1 ? (
-                  <button
-                    onClick={handleNext}
-                    className="flex-1 flex items-center justify-center gap-2 active:scale-[0.99] text-white font-bold py-3.5 rounded-2xl transition-all"
-                    style={{ background: primary }}
-                  >
-                    Agla Sawaal <ChevronRight size={16} />
-                  </button>
-                ) : (
-                  <div className="flex-1 flex items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 py-3.5">
-                    <p className="text-[11px] text-slate-400 font-bold">
-                      {isAnswered ? '✓ Last question' : '⬆ Ek option chunein'}
-                    </p>
-                  </div>
-                )}
+                 {/* Manual next button — keep the selected answer visible until
+                     the student is ready to move on. */}
+                 <button
+                   type="button"
+                   onClick={handleNext}
+                   disabled={!canGoForward}
+                   className={`flex-1 flex items-center justify-center gap-1.5 rounded-2xl border-2 py-3.5 font-black text-sm active:scale-[0.97] transition-all ${
+                     canGoForward
+                       ? 'border-indigo-500 bg-indigo-600 text-white shadow-md shadow-indigo-200'
+                       : 'border-dashed border-slate-200 bg-white text-slate-400 cursor-not-allowed'
+                   }`}
+                 >
+                   {canGoForward
+                     ? (sessionQIndex < sessionMcqs.length - 1
+                       ? <>Agla <ChevronRight size={16} /></>
+                       : <>✅ Finish</>)
+                     : '⬆ Ek option chunein'}
+                 </button>
               </div>
 
               {/* Submit button */}
@@ -616,8 +644,8 @@ export const RevisionHubScreen: React.FC<Props> = ({
                 style={ready ? { background: '#16a34a' } : {}}
               >
                 {ready
-                  ? <><Trophy size={16} /> Submit karein ({answered} answered)</>
-                  : `${answered}/${minRequired} — ${minRequired - answered} aur sawaal do`}
+                   ? <><Trophy size={16} /> Submit karein ({answered}/{totalQuestions})</>
+                   : `${answered}/${totalQuestions} — ${totalQuestions - answered} sawaal baaki`}
               </button>
             </div>
           </div>

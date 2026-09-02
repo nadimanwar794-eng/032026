@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { Plus, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
 import { normalizeMcqPaste, parseMCQText } from '../utils/mcqParser';
+import { normalizeMcqForStorage } from '../utils/mcqStructure';
 
 export interface CoachingMcqEditorItem {
   id: string;
   topic?: string;
+  questionNumber?: string | number;
   question: string;
   statements?: string[];
   options: string[];
@@ -27,6 +29,7 @@ const makeId = () => `mcq_${Date.now()}_${Math.random().toString(36).slice(2, 8)
 const emptyMcq = (): CoachingMcqEditorItem => ({
   id: makeId(),
   topic: '',
+  questionNumber: '',
   question: '',
   statements: [],
   options: ['', '', '', ''],
@@ -38,6 +41,7 @@ function normalizeItem(item: any): CoachingMcqEditorItem {
   return {
     id: item?.id || makeId(),
     topic: item?.topic || '',
+    questionNumber: item?.questionNumber ?? '',
     question: item?.question || '',
     statements: Array.isArray(item?.statements) ? item.statements : [],
     options: [...(item?.options || ['', '', '', '']), '', '', '', ''].slice(0, 4),
@@ -103,8 +107,9 @@ export function CoachingMcqEditor({ value, onChange, accent = 'emerald', compact
     const raw = bulkText.trim();
     if (!raw) return;
     const parsed = parseMCQText(normalizeMcqPaste(raw));
-    const added = (parsed.questions || []).map((q: any) => normalizeItem({
+    const added = (parsed.questions || []).map((q: any, index: number) => normalizeItem({
       ...q,
+      ...normalizeMcqForStorage(q, index),
       id: makeId(),
       question: (q.question || '').replace(/<br\/?>/g, '\n').trim(),
       options: (q.options || ['', '', '', '']).slice(0, 4),
@@ -195,6 +200,14 @@ export function CoachingMcqEditor({ value, onChange, accent = 'emerald', compact
 
             {expanded && (
               <div className="space-y-2">
+                <input
+                  type="text"
+                  value={mcq.questionNumber ?? ''}
+                  onChange={e => updateItem(index, { questionNumber: e.target.value })}
+                  className="w-full p-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-emerald-500"
+                  placeholder="Question number, e.g. 1"
+                  aria-label="Question number"
+                />
                 <input
                   type="text"
                   value={mcq.topic || ''}

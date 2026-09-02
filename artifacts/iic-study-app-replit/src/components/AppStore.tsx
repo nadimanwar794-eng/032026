@@ -163,16 +163,19 @@ export const AppStore: React.FC<Props> = ({ settings, user, onUserUpdate }) => {
   const unclaimedCoins = getUnclaimedCoins(routineData, subTier);
   const todayClaimed = routineData.dailyClaims?.[getToday()]?.claimed ?? false;
   const dailyAmount = getDailyClaimAmount(subTier);
-  const handleClaim = () => {
+  const handleClaim = async () => {
     const { data: updated, earned } = claimAllPendingCoins(routineData, subTier);
-    setRoutineDataRaw(updated);
-    saveRoutineData(userId, updated);
     // Add earned coins to main app credits
     if (earned > 0 && onUserUpdate && user) {
       const updatedUser = { ...user, credits: (user.credits || 0) + earned };
+      if (!await saveUserToLive(updatedUser)) {
+        window.alert("Coins save nahi ho paaye. Internet check karke dobara try karein.");
+        return;
+      }
       onUserUpdate(updatedUser);
-      try { saveUserToLive(updatedUser); } catch (_) {}
     }
+    setRoutineDataRaw(updated);
+    saveRoutineData(userId, updated);
   };
 
   const apps: DownloadApp[] = useMemo(

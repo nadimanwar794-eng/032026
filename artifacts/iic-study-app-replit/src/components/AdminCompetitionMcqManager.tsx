@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Save, Trash2, ArrowLeft, BookOpen, CheckSquare, Calendar, FileText, Hash, ChevronRight } from 'lucide-react';
 import { parseMCQText } from '../utils/mcqParser';
 import { saveMcqLesson, deleteMcqLesson, subscribeMcqLessons } from '../firebase';
+import { getClassSubjectOptions, getLucentSubjectOptions } from '../constants';
 
 // ── MCQ text normalizer (same as AdminClassMcqManager) ───────────────────────
 function normalizeMcqPaste(raw: string): string {
@@ -10,8 +11,8 @@ function normalizeMcqPaste(raw: string): string {
   txt = txt.replace(/\r\n/g, '\n');
   txt = txt.replace(/^---+\s*$/gm, '');
   txt = txt.replace(/^###\s+.+$/gm, '');
-  txt = txt.replace(/^[ \t]*(?:\*{1,2})?\s*सही\s*उत्तर\s*:\s*(?:\*{1,2})?\s*$/gm, '');
-  txt = txt.replace(/\*\*\s*(?:सही\s*उत्तर|Ans(?:wer)?)\s*[:：]\s*\n+\s*(?=\*\*\s*(?:सही\s*उत्तर|Ans(?:wer)?))/gi, '');
+  txt = txt.replace(/^[ \t]*(?:\*{1,2})?\s*(?:सही\s*उत्तर|उत्तर)\s*:\s*(?:\*{1,2})?\s*$/gm, '');
+  txt = txt.replace(/\*\*\s*(?:सही\s*उत्तर|उत्तर|Ans(?:wer)?)\s*[:：]\s*\n+\s*(?=\*\*\s*(?:सही\s*उत्तर|उत्तर|Ans(?:wer)?))/gi, '');
   txt = txt.replace(/^\s*\[(?:[⚡🔥💡🎯⭐✨🏆⚠️🌟][^\]]*?|[^\]]{1,10})\]\s*/gm, '');
   txt = txt.replace(/^\*\*\s*कूट\s*:?\s*\*?\*?\s*$/gm, '');
   txt = txt.replace(/\*\*Q\s*(\d+)\s*[:.]\s*([\s\S]*?)\*\*/gi, (_m, n, q) =>
@@ -25,10 +26,10 @@ function normalizeMcqPaste(raw: string): string {
   txt = txt.replace(/(?:^|\n)[ \t]*(?:\*\*\s*)?(?:प्रश्न|Question)\s*(\d+)\s*[:.\-]\s*/gi, (_m, n) => `\n**Question ${n}**\n❓ Question: `);
   txt = txt.replace(/\*\*प्रश्न\s*[:：]?\*\*/gi, '__PRASHNA__');
   txt = txt.replace(/\*\*Question\s*[:：]?\*\*/gi, '__PRASHNA__');
-  txt = txt.replace(/\*\*\s*(?:सही\s*उत्तर|Ans(?:wer)?)\s*[:：]\s*([^*]+?)\s*\*\*/gi,
+  txt = txt.replace(/\*\*\s*(?:सही\s*उत्तर|उत्तर|Ans(?:wer)?)\s*[:：]\s*([^*]+?)\s*\*\*/gi,
     (_m, val) => `\n✅ Correct Answer: ${String(val).trim()}`);
-  txt = txt.replace(/\*\*(?:सही\s*उत्तर|Ans(?:wer)?)\s*[:：]?\*\*\s*/gi, '✅ Correct Answer: ');
-  txt = txt.replace(/(?:^|\n)\s*(?:Ans(?:wer)?|सही\s*उत्तर)\s*[:：]\s*/gi, '\n✅ Correct Answer: ');
+  txt = txt.replace(/\*\*(?:सही\s*उत्तर|उत्तर|Ans(?:wer)?)\s*[:：]?\*\*\s*/gi, '✅ Correct Answer: ');
+  txt = txt.replace(/(?:^|\n)\s*(?:Ans(?:wer)?|सही\s*उत्तर|उत्तर)\s*[:：]\s*/gi, '\n✅ Correct Answer: ');
   txt = txt.replace(/\*\*/g, '');
   let qNum = 0;
   txt = txt.replace(/__PRASHNA__\s*/g, () => { qNum += 1; return `\n**Question ${qNum}**\n❓ Question: `; });
@@ -54,11 +55,39 @@ const BOARD_OPTIONS = [
   { id: 'BSEB' as const,     label: '🟠 BSEB',        desc: 'Bihar board' },
 ];
 
-interface Props {
-  onBack: () => void;
+const PRACTICE_CLASS_OPTIONS = [
+  { id: 'COMPETITION', label: 'Competition' },
+  ...['6', '7', '8', '9', '10', '11', '12'].map(id => ({ id, label: `Class ${id}` })),
+];
+
+function getPracticeSubjectOptions(classLevel: string, settings: any) {
+  if (classLevel === 'COMPETITION') {
+    return [
+      { id: 'MCQ_PRACTICE', name: 'MCQ Practice' },
+      ...getLucentSubjectOptions(settings),
+    ].filter((subject, index, subjects) => subjects.findIndex(s => s.id === subject.id) === index);
+  }
+  return getClassSubjectOptions(classLevel);
 }
 
-export const AdminCompetitionMcqManager: React.FC<Props> = ({ onBack }) => {
+function getLessonPracticeClass(lesson: any) {
+  return lesson.practiceClass || lesson.classLevel || '';
+}
+
+function getLessonPracticeSubject(lesson: any) {
+  return lesson.practiceSubject || lesson.subject || '';
+}
+
+function getLessonPracticeSubjectName(lesson: any) {
+  return lesson.practiceSubjectName || (lesson.subject === 'MCQ_PRACTICE' ? 'MCQ Practice' : lesson.subject || '');
+}
+
+interface Props {
+  onBack: () => void;
+  settings?: any;
+}
+
+export const AdminCompetitionMcqManager: React.FC<Props> = ({ onBack, settings }) => {
   const [tab, setTab] = useState<'ADD' | 'HISTORY'>('ADD');
   const [allLessons, setAllLessons] = useState<any[]>([]);
 
@@ -67,6 +96,10 @@ export const AdminCompetitionMcqManager: React.FC<Props> = ({ onBack }) => {
   const [date, setDate]     = useState('');
   const [pageNo, setPageNo] = useState('');
   const [board, setBoard]   = useState<'' | 'NCERT_EN' | 'NCERT_HI' | 'BSEB'>('');
+  const [practiceClass, setPracticeClass] = useState('COMPETITION');
+  const [practiceSubject, setPracticeSubject] = useState('MCQ_PRACTICE');
+  const [classFilter, setClassFilter] = useState('');
+  const [subjectFilter, setSubjectFilter] = useState('');
   const [pasteText, setPasteText] = useState('');
   const [saving, setSaving]       = useState(false);
   const [alert, setAlert]         = useState('');
@@ -74,15 +107,31 @@ export const AdminCompetitionMcqManager: React.FC<Props> = ({ onBack }) => {
 
   const showAlert = (msg: string) => { setAlert(msg); setTimeout(() => setAlert(''), 5000); };
 
-  // Subscribe to mcq_lessons — show only COMPETITION / MCQ_PRACTICE
+  // Subscribe to MCQ Practice lessons. The canonical competition fields remain
+  // unchanged for the student-facing Competition Practice flow; practiceClass
+  // and practiceSubject provide creator-friendly categorisation/filtering.
   useEffect(() => {
     const unsub = subscribeMcqLessons((lessons) => {
-      setAllLessons(
-        lessons.filter(l => l.classLevel === 'COMPETITION' && l.subject === 'MCQ_PRACTICE')
-      );
+      setAllLessons(lessons.filter(l => l.classLevel === 'COMPETITION' && l.subject === 'MCQ_PRACTICE'));
     });
     return unsub;
   }, []);
+
+  const practiceSubjectOptions = getPracticeSubjectOptions(practiceClass, settings);
+  const historySubjectOptions = Array.from(
+    new Map(
+      allLessons
+        .map(lesson => [
+          getLessonPracticeSubject(lesson),
+          getLessonPracticeSubjectName(lesson),
+        ])
+        .filter(([id, name]) => id && name)
+    )
+  ).map(([id, name]) => ({ id, name }));
+  const filteredLessons = allLessons.filter(lesson =>
+    (!classFilter || getLessonPracticeClass(lesson) === classFilter) &&
+    (!subjectFilter || getLessonPracticeSubject(lesson) === subjectFilter)
+  );
 
   const handleSave = async () => {
     if (!title.trim() && !date && !pageNo.trim()) {
@@ -100,6 +149,7 @@ export const AdminCompetitionMcqManager: React.FC<Props> = ({ onBack }) => {
       const ts = Date.now();
       const parsed = (result?.questions || []).map((q: any, i: number) => ({
         id: `mcq_${ts}_${i}_${Math.random().toString(36).slice(2)}`,
+        questionNumber: q.questionNumber,
         question: (q.question || '').replace(/<br\/?>/g, '\n').replace(/^Q?\s*\d+[.)]\s*/i, '').trim(),
         options: (q.options || ['', '', '', '']).slice(0, 4),
         correctAnswer: q.correctAnswer ?? 0,
@@ -124,6 +174,9 @@ export const AdminCompetitionMcqManager: React.FC<Props> = ({ onBack }) => {
         id:           `lesson_${ts}_${Math.random().toString(36).slice(2)}`,
         classLevel:   'COMPETITION',
         subject:      'MCQ_PRACTICE',
+        practiceClass,
+        practiceSubject,
+        practiceSubjectName: practiceSubjectOptions.find(s => s.id === practiceSubject)?.name || practiceSubject,
         board:        board || null,
         lessonTitle,
         pageNo:       pageNo.trim() || null,
@@ -250,6 +303,43 @@ export const AdminCompetitionMcqManager: React.FC<Props> = ({ onBack }) => {
             </div>
           </div>
 
+          {/* Practice Class + Subject */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[10px] font-black text-violet-700 uppercase tracking-wide block mb-1">
+                🎓 Class
+              </label>
+              <select
+                value={practiceClass}
+                onChange={e => {
+                  const nextClass = e.target.value;
+                  const nextSubjects = getPracticeSubjectOptions(nextClass, settings);
+                  setPracticeClass(nextClass);
+                  setPracticeSubject(nextSubjects[0]?.id || '');
+                }}
+                className="w-full p-2.5 border border-violet-200 rounded-lg text-sm outline-none focus:border-violet-500 bg-white font-bold"
+              >
+                {PRACTICE_CLASS_OPTIONS.map(option => (
+                  <option key={option.id} value={option.id}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-violet-700 uppercase tracking-wide block mb-1">
+                📚 Subject
+              </label>
+              <select
+                value={practiceSubject}
+                onChange={e => setPracticeSubject(e.target.value)}
+                className="w-full p-2.5 border border-violet-200 rounded-lg text-sm outline-none focus:border-violet-500 bg-white font-bold"
+              >
+                {practiceSubjectOptions.map(subject => (
+                  <option key={subject.id} value={subject.id}>{subject.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
           {/* Board */}
           <div>
             <label className="text-[10px] font-black text-violet-700 uppercase tracking-wide block mb-2">
@@ -325,15 +415,64 @@ export const AdminCompetitionMcqManager: React.FC<Props> = ({ onBack }) => {
       {/* ── HISTORY TAB ── */}
       {tab === 'HISTORY' && (
         <div className="space-y-3">
-          {allLessons.length === 0 && (
+          {/* Creator-friendly filters */}
+          <div className="bg-violet-50 border border-violet-100 rounded-2xl p-3">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <p className="text-[10px] font-black text-violet-700 uppercase tracking-wide">
+                🔎 Class aur Subject se filter karein
+              </p>
+              {(classFilter || subjectFilter) && (
+                <button
+                  type="button"
+                  onClick={() => { setClassFilter(''); setSubjectFilter(''); }}
+                  className="text-[10px] font-bold text-rose-500 hover:text-rose-700"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <select
+                value={classFilter}
+                onChange={e => setClassFilter(e.target.value)}
+                className="w-full p-2.5 border border-violet-200 rounded-lg text-xs outline-none focus:border-violet-500 bg-white font-bold"
+                aria-label="Filter by class"
+              >
+                <option value="">All Classes</option>
+                {PRACTICE_CLASS_OPTIONS.map(option => (
+                  <option key={option.id} value={option.id}>{option.label}</option>
+                ))}
+              </select>
+              <select
+                value={subjectFilter}
+                onChange={e => setSubjectFilter(e.target.value)}
+                className="w-full p-2.5 border border-violet-200 rounded-lg text-xs outline-none focus:border-violet-500 bg-white font-bold"
+                aria-label="Filter by subject"
+              >
+                <option value="">All Subjects</option>
+                {historySubjectOptions.map(subject => (
+                  <option key={subject.id} value={subject.id}>{subject.name}</option>
+                ))}
+              </select>
+            </div>
+            <p className="text-[10px] text-violet-500 font-bold mt-2">
+              {filteredLessons.length} set{filteredLessons.length !== 1 ? 's' : ''} found
+            </p>
+          </div>
+
+          {filteredLessons.length === 0 && (
             <div className="text-center py-14 text-slate-400">
               <CheckSquare size={44} className="mx-auto mb-3 opacity-25" />
-              <p className="font-bold text-slate-500">Koi MCQ set nahi</p>
-              <p className="text-sm mt-1">Add New tab se MCQs add karein.</p>
+              <p className="font-bold text-slate-500">
+                {allLessons.length === 0 ? 'Koi MCQ set nahi' : 'Is filter mein koi set nahi'}
+              </p>
+              <p className="text-sm mt-1">
+                {allLessons.length === 0 ? 'Add New tab se MCQs add karein.' : 'Class ya Subject filter badal kar dekhein.'}
+              </p>
             </div>
           )}
 
-          {allLessons.map(lesson => (
+          {filteredLessons.map(lesson => (
             <div key={lesson.id} className="bg-slate-50 border border-slate-200 rounded-xl p-4 hover:border-violet-200 transition-colors">
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1 min-w-0">
@@ -341,6 +480,16 @@ export const AdminCompetitionMcqManager: React.FC<Props> = ({ onBack }) => {
                     {lesson.lessonTitle}
                   </p>
                   <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    <span className="text-[9px] font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">
+                      {getLessonPracticeClass(lesson) === 'COMPETITION'
+                        ? 'Competition'
+                        : `Class ${getLessonPracticeClass(lesson)}`}
+                    </span>
+                    {getLessonPracticeSubjectName(lesson) && (
+                      <span className="text-[9px] font-bold bg-fuchsia-100 text-fuchsia-700 px-2 py-0.5 rounded-full">
+                        {getLessonPracticeSubjectName(lesson)}
+                      </span>
+                    )}
                     <span className="text-[9px] font-bold bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full">
                       {lesson.mcqCount} MCQs
                     </span>

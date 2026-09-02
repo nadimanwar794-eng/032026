@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, ChevronRight, ChevronLeft, RotateCw, Volume2, Square, Shuffle, Lightbulb, Edit2, X, MoreVertical, RefreshCw, BookOpen, Tv, CheckCircle, Maximize2, Minimize2 } from 'lucide-react';
+import { ArrowLeft, ChevronRight, ChevronLeft, RotateCw, Volume2, Square, Shuffle, Lightbulb, Edit2, X, MoreVertical, RefreshCw, BookOpen, Tv, CheckCircle, Maximize2, Minimize2, LayoutGrid } from 'lucide-react';
 import type { MCQItem } from '../types';
 import type { User, SystemSettings } from '../types';
 import { speakText, stopSpeech } from '../utils/textToSpeech';
@@ -19,7 +19,10 @@ import { fireSessionComplete } from '../utils/sessionNotify';
 import { renderMathInHtml, formatExplanationHtml } from '../utils/mathUtils';
 import { inlineMd, parseMcqQuestion } from '../utils/mcqRender';
 import McqQuestionDisplay from './McqQuestionDisplay';
-import { deferStudyCoins } from '../utils/studyRewards';
+import McqPracticeCard from './McqPracticeCard';
+import McqQuestionNavigator from './McqQuestionNavigator';
+import { deferMcqCreditsFromXp } from '../utils/studyRewards';
+import { McqAnalysisOverlay } from './McqAnalysisOverlay';
 
 interface Props {
   questions: MCQItem[];
@@ -36,6 +39,9 @@ interface Props {
   sourceKey?: string;
   /** If true, component opens directly in Projector Mode (TV button shortcut) */
   startInProjectorMode?: boolean;
+  /** Keep the parent lesson tab selection in sync when projector is toggled
+   * from inside the flashcard overlay. */
+  onProjectorModeChange?: (enabled: boolean) => void;
   /** Lesson tab bar rendered at the very top (Reading Mode | Writing Mode | MCQ Practice | Projector) */
   tabBar?: React.ReactNode;
   /** If true, hides the "PROJECTOR MODE" badge in the projector header */
@@ -76,7 +82,7 @@ const addTodayCount = (userId: string, n: number) => {
 };
 
 export const FlashcardMcqView: React.FC<Props> = ({
-  questions, title, subtitle, subject, onBack, user, settings, onUpdateUser, sourceMeta, sourceKey, startInProjectorMode, tabBar, hideProjectorLabel
+  questions, title, subtitle, subject, onBack, user, settings, onUpdateUser, sourceMeta, sourceKey, startInProjectorMode, onProjectorModeChange, tabBar, hideProjectorLabel
 }) => {
   const isMountedRef = useRef(true);
   const [pickedIndices, setPickedIndices] = useState<number[]>([]);
@@ -94,6 +100,14 @@ export const FlashcardMcqView: React.FC<Props> = ({
   const [showTopMenu, setShowTopMenu] = useState(false);
   // ── Projector Mode ──
   const [isProjectorMode, setIsProjectorMode] = useState(() => startInProjectorMode ?? false);
+  // The lesson tab bar can switch this overlay between Flashcard and Projector
+  // without remounting the component. Keep the local presentation state in
+  // sync with that external mode switch.
+  useEffect(() => {
+    if (typeof startInProjectorMode === 'boolean') {
+      setIsProjectorMode(startInProjectorMode);
+    }
+  }, [startInProjectorMode]);
   const [projectorFontIdx, setProjectorFontIdx] = useState<number>(getStoredProjFontIdx);
   const projectorFontSize = PROJ_FONT_SIZES[projectorFontIdx];
   const changeProjFont = (dir: 1 | -1) => {
@@ -115,6 +129,8 @@ export const FlashcardMcqView: React.FC<Props> = ({
   const projectorQStartTimeRef = useRef(Date.now());
   // Persistent per-question selections (qIndex → chosen option index)
   const [projectorSelections, setProjectorSelections] = useState<Record<number, number>>({});
+  const [projectorSkipped, setProjectorSkipped] = useState<Set<number>>(new Set());
+  const [projectorNavigatorOpen, setProjectorNavigatorOpen] = useState(false);
   // Review screen — shown after Submit
   const [projectorShowReview, setProjectorShowReview] = useState(false);
   // Snapshot of question data captured at submit time so the review never
@@ -168,9 +184,7 @@ export const FlashcardMcqView: React.FC<Props> = ({
           sessionRevealPtsRef.current += pts;
           showMcqScore(pts);
           const _routineOn = loadRoutineData(user.id).enabled;
-          const _coinMult  = _routineOn ? (1 / 6) : (1 / 8);
-          const _coinEarned = Math.max(1, Math.floor(pts * _coinMult));
-          deferStudyCoins(user.id, _coinEarned);
+          deferMcqCreditsFromXp(user.id, pts, _routineOn);
           const updated = { ...user, totalScore: (user.totalScore || 0) + pts };
           onUpdateUser(updated);
           saveUserToLive(updated);
@@ -246,7 +260,8 @@ export const FlashcardMcqView: React.FC<Props> = ({
   // Reset per-question timer whenever the projector moves to a new question
   useEffect(() => {
     projectorQStartTimeRef.current = Date.now();
-  }, [projectorQIndex]);
+    setProjectorSelected(projectorSelections[projectorQIndex] ?? null);
+  }, [projectorQIndex, projectorSelections]);
 
   useEffect(() => {
     const handleVisibility = () => {
@@ -388,9 +403,7 @@ export const FlashcardMcqView: React.FC<Props> = ({
         showMcqScore(pts);
         if (onUpdateUser) {
           const _routineOn  = loadRoutineData(user.id).enabled;
-          const _coinMult   = _routineOn ? (1 / 6) : (1 / 8);
-          const _coinEarned = Math.max(1, Math.floor(pts * _coinMult));
-          deferStudyCoins(user.id, _coinEarned);
+          deferMcqCreditsFromXp(user.id, pts, _routineOn);
           const updated = { ...user, totalScore: (user.totalScore || 0) + pts };
           onUpdateUser(updated);
           saveUserToLive(updated);
@@ -501,6 +514,18 @@ export const FlashcardMcqView: React.FC<Props> = ({
   }
 
   const isLast = pos >= total - 1;
+  const submitProjectorQuiz = () => {
+    const answered = Array.from(projectorAnswered).sort((a, b) => a - b);
+    const correct = answered.filter(index => projectorSelections[index] === questions[index]?.correctAnswer).length;
+    setProjectorCorrect(correct);
+    setProjectorWrong(answered.length - correct);
+    setReviewSnapshot({
+      answered,
+      selections: { ...projectorSelections },
+      questions: [...questions],
+    });
+    setProjectorShowReview(true);
+  };
 
   return (
     <>
@@ -522,132 +547,137 @@ export const FlashcardMcqView: React.FC<Props> = ({
           ⭐ +{mcqScorePopup} pts
         </div>
       )}
-      {/* Top Bar */}
-      <div className="shrink-0 px-3 py-2.5 flex items-center gap-2.5 border-b border-white/10">
-        <div className="min-w-0 flex-1">
-          {hardReviewMode ? (
-            <>
-              <p className="text-[10px] font-black text-red-300 uppercase tracking-widest truncate flex items-center gap-1">
-                <span>🔴</span> Hard Cards Review
-              </p>
-              <h2 className="text-sm font-black text-white truncate">{hardQueue.length} Hard Card{hardQueue.length !== 1 ? 's' : ''} dobara dekho</h2>
-            </>
-          ) : (
-            <>
-              <p className="text-[10px] font-black text-amber-300 uppercase tracking-widest truncate">
-                🃏 Flashcards · {total} cards
-                {hardQueueRef.current.length > 0 && (
-                  <span className="ml-1 text-red-300">· {hardQueueRef.current.length} Hard</span>
-                )}
-              </p>
-              <h2 className="text-sm font-black text-white truncate">{title || 'Flashcards'}</h2>
-              {subtitle && <p className="text-[10px] text-white/50 truncate">{subtitle}</p>}
-            </>
-          )}
-        </div>
-        {/* Live session score chip — always visible */}
-        <div className="relative shrink-0" style={{ zIndex: 50 }}>
-          <span
-            onClick={() => { setScoreTooltip(true); setTimeout(() => setScoreTooltip(false), 2500); }}
-            style={{ fontSize: '10px', fontWeight: 900, color: '#4ade80', background: 'rgba(34,197,94,0.18)', border: '1px solid rgba(34,197,94,0.35)', borderRadius: 99, padding: '2px 8px', cursor: 'pointer', display: 'block' }}>
-            📖 {sessionScore}
-          </span>
+      {/* Top Bar — title/actions stay separate from session stats on mobile */}
+      <div className="shrink-0 px-4 pt-3 pb-2.5 border-b border-white/10">
+        <div className="flex items-start gap-3">
+          <div className="min-w-0 flex-1">
+            {hardReviewMode ? (
+              <>
+                <p className="text-[10px] font-black text-red-300 uppercase tracking-widest truncate flex items-center gap-1">
+                  <span>🔴</span> Hard Cards Review
+                </p>
+                <h2 className="text-sm font-black text-white truncate">{hardQueue.length} Hard Card{hardQueue.length !== 1 ? 's' : ''} dobara dekho</h2>
+              </>
+            ) : (
+              <>
+                <p className="text-[10px] font-black text-amber-300 uppercase tracking-widest truncate">
+                  🃏 Flashcards · {total} cards
+                  {hardQueueRef.current.length > 0 && (
+                    <span className="ml-1 text-red-300">· {hardQueueRef.current.length} Hard</span>
+                  )}
+                </p>
+                <h2 className="text-sm font-black text-white truncate">{title || 'Flashcards'}</h2>
+                {subtitle && <p className="text-[10px] text-white/50 truncate">{subtitle}</p>}
+              </>
+            )}
           </div>
-        <div className="bg-white/10 px-2.5 py-1 rounded-full shrink-0">
-          <span className="text-[10px] font-black text-white/70">
-            {getTodayCount(userId)}/{isAdmin ? '∞' : dailyLimit}
-          </span>
-        </div>
-        {/* 💡 Suggestions button — directly in top bar */}
-        <button
-          onClick={() => { setFlipped(true); setShowSuggestion(true); setSuggestionNote(''); setSuggestionSaved(false); }}
-          className={`shrink-0 p-2 rounded-full active:scale-95 transition ${showSuggestion ? 'bg-amber-400 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}
-          title="Suggestions & Corrections"
-        >
-          <Lightbulb size={16} />
-        </button>
-        {/* 📽️ Projector Mode — directly in top bar */}
-        {questions.length > 0 && (
-          <button
-            onClick={() => { setProjectorQIndex(0); setProjectorReveal(false); setProjectorRotated(false); setProjectorAnswered(new Set()); setProjectorCorrect(0); setProjectorWrong(0); setProjectorSelections({}); setProjectorShowReview(false); setIsProjectorMode(true); }}
-            className="shrink-0 p-2 rounded-full bg-white/10 hover:bg-amber-500 text-amber-300 hover:text-white active:scale-95 transition"
-            title="Projector Mode"
-          >
-            <Tv size={16} />
-          </button>
-        )}
-        {/* 3-dot menu */}
-        <div className="relative shrink-0">
-          <button
-            onClick={() => setShowTopMenu(v => !v)}
-            className="bg-white/10 hover:bg-white/20 text-white p-2 rounded-full active:scale-95 transition"
-            title="More"
-          >
-            <MoreVertical size={16} />
-          </button>
-          {showTopMenu && (
-            <>
-              {/* Backdrop */}
-              <div className="fixed inset-0 z-[300]" onClick={() => setShowTopMenu(false)} />
-              <div className="absolute right-0 top-10 z-[301] bg-white rounded-2xl shadow-2xl border border-slate-100 py-1.5 w-52 overflow-hidden">
-                {/* Reshuffle — only in normal mode */}
-                {!hardReviewMode && (
-                  <button
-                    onClick={() => { setShowTopMenu(false); reshuffle(); }}
-                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors font-semibold"
-                  >
-                    <Shuffle size={15} className="text-indigo-500 shrink-0" />
-                    Cards Shuffle karo
-                  </button>
-                )}
-                {/* Restart from beginning */}
-                <button
-                  onClick={() => { setShowTopMenu(false); setPos(0); setFlipped(false); setHardReviewMode(false); setHardReviewPos(0); }}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors font-semibold"
-                >
-                  <RefreshCw size={15} className="text-slate-500 shrink-0" />
-                  Shuru se dekho
-                </button>
-                {/* Hard review toggle */}
-                {hardQueueRef.current.length > 0 && (
-                  <button
-                    onClick={() => { setShowTopMenu(false); setHardReviewMode(v => !v); setHardReviewPos(0); setFlipped(false); }}
-                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold transition-colors text-red-600 hover:bg-red-50"
-                  >
-                    <BookOpen size={15} className="text-red-500 shrink-0" />
-                    {hardReviewMode ? 'Normal mode mein jao' : `Hard Cards (${hardQueueRef.current.length}) dekho`}
-                  </button>
-                )}
-                {/* Projector Mode */}
-                {questions.length > 0 && (
-                  <button
-                    onClick={() => { setShowTopMenu(false); setProjectorQIndex(0); setProjectorReveal(false); setProjectorAnswered(new Set()); setProjectorCorrect(0); setProjectorWrong(0); setProjectorSelections({}); setProjectorShowReview(false); setIsProjectorMode(true); }}
-                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold transition-colors text-amber-700 hover:bg-amber-50"
-                  >
-                    <Tv size={15} className="text-amber-500 shrink-0" />
-                    📽️ Projector Mode
-                  </button>
-                )}
-              </div>
-            </>
-          )}
-        </div>
-      </div>
 
-      {/* Progress */}
-      <div className="px-4 mb-4">
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] font-black text-white/70">
-            <span className="text-white">{activePos + 1}</span> / {activeTotal}
-          </span>
-          <div className="flex-1 h-1 bg-white/20 rounded-full overflow-hidden">
-            <div
-              className={`h-full transition-all duration-300 rounded-full ${hardReviewMode ? 'bg-red-400' : 'bg-white/70'}`}
-              style={{ width: `${((activePos + 1) / activeTotal) * 100}%` }}
-            />
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Projector Mode */}
+            {questions.length > 0 && (
+              <button
+                onClick={() => { setProjectorQIndex(0); setProjectorReveal(false); setProjectorRotated(false); setProjectorAnswered(new Set()); setProjectorSkipped(new Set()); setProjectorNavigatorOpen(false); setProjectorCorrect(0); setProjectorWrong(0); setProjectorSelections({}); setProjectorShowReview(false); setIsProjectorMode(true); }}
+                className="p-2 rounded-full bg-white/10 hover:bg-amber-500 text-amber-300 hover:text-white active:scale-95 transition"
+                title="Projector Mode"
+                aria-label="Projector Mode"
+              >
+                <Tv size={16} />
+              </button>
+            )}
+            {/* 3-dot menu */}
+            <div className="relative">
+              <button
+                onClick={() => setShowTopMenu(v => !v)}
+                className="bg-white/10 hover:bg-white/20 text-white p-2 rounded-full active:scale-95 transition"
+                title="More"
+                aria-label="More options"
+              >
+                <MoreVertical size={16} />
+              </button>
+              {showTopMenu && (
+                <>
+                  <div className="fixed inset-0 z-[300]" onClick={() => setShowTopMenu(false)} />
+                  <div className="absolute right-0 top-10 z-[301] bg-white rounded-2xl shadow-2xl border border-slate-100 py-1.5 w-52 overflow-hidden">
+                    {/* Suggestions & Corrections */}
+                    <button
+                      onClick={() => { setShowTopMenu(false); setFlipped(true); setShowSuggestion(true); setSuggestionNote(''); setSuggestionSaved(false); }}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors font-semibold"
+                    >
+                      <Lightbulb size={15} className="text-amber-500 shrink-0" />
+                      Suggestions & Corrections
+                    </button>
+                    {/* Reshuffle — only in normal mode */}
+                    {!hardReviewMode && (
+                      <button
+                        onClick={() => { setShowTopMenu(false); reshuffle(); }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors font-semibold"
+                      >
+                        <Shuffle size={15} className="text-indigo-500 shrink-0" />
+                        Cards Shuffle karo
+                      </button>
+                    )}
+                    {/* Restart from beginning */}
+                    <button
+                      onClick={() => { setShowTopMenu(false); setPos(0); setFlipped(false); setHardReviewMode(false); setHardReviewPos(0); }}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors font-semibold"
+                    >
+                      <RefreshCw size={15} className="text-slate-500 shrink-0" />
+                      Shuru se dekho
+                    </button>
+                    {/* Hard review toggle */}
+                    {hardQueueRef.current.length > 0 && (
+                      <button
+                        onClick={() => { setShowTopMenu(false); setHardReviewMode(v => !v); setHardReviewPos(0); setFlipped(false); }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold transition-colors text-red-600 hover:bg-red-50"
+                      >
+                        <BookOpen size={15} className="text-red-500 shrink-0" />
+                        {hardReviewMode ? 'Normal mode mein jao' : `Hard Cards (${hardQueueRef.current.length}) dekho`}
+                      </button>
+                    )}
+                    {/* Projector Mode */}
+                    {questions.length > 0 && (
+                      <button
+                        onClick={() => {
+                          setShowTopMenu(false);
+                          setProjectorQIndex(0);
+                          setProjectorReveal(false);
+                          setProjectorAnswered(new Set());
+                          setProjectorCorrect(0);
+                          setProjectorWrong(0);
+                          setProjectorSkipped(new Set());
+                          setProjectorNavigatorOpen(false);
+                          setProjectorSelections({});
+                          setProjectorShowReview(false);
+                          setIsProjectorMode(true);
+                          onProjectorModeChange?.(true);
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold transition-colors text-amber-700 hover:bg-amber-50"
+                      >
+                        <Tv size={15} className="text-amber-500 shrink-0" />
+                        📽️ Projector Mode
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
+        </div>
+
+        {/* Compact session stats — one row instead of mixing with actions */}
+        <div className="mt-3 flex items-center gap-2 overflow-x-auto">
+          <span className="shrink-0 rounded-lg bg-white/10 px-2.5 py-1.5 text-[10px] font-black text-white/70">
+            Today <strong className="text-white">{getTodayCount(userId)}/{isAdmin ? '∞' : dailyLimit}</strong>
+          </span>
+          <button
+            type="button"
+            onClick={() => { setScoreTooltip(true); setTimeout(() => setScoreTooltip(false), 2500); }}
+            className="shrink-0 rounded-lg border border-emerald-300/30 bg-emerald-400/15 px-2.5 py-1.5 text-[10px] font-black text-emerald-200"
+          >
+            Score <strong className="text-emerald-100">+{sessionScore}</strong>
+          </button>
           {!hardReviewMode && confidenceMap[pos] && (
-            <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-md ${
+            <span className={`shrink-0 rounded-lg px-2.5 py-1.5 text-[10px] font-black ${
               confidenceMap[pos] === 'easy' ? 'bg-emerald-500/30 text-emerald-200' :
               confidenceMap[pos] === 'medium' ? 'bg-amber-500/30 text-amber-200' :
               'bg-red-500/30 text-red-200'
@@ -655,6 +685,21 @@ export const FlashcardMcqView: React.FC<Props> = ({
               {confidenceMap[pos] === 'easy' ? '✓ Easy' : confidenceMap[pos] === 'medium' ? '~ Med' : '✗ Hard'}
             </span>
           )}
+        </div>
+      </div>
+
+      {/* Single question progress row */}
+      <div className="shrink-0 px-4 pt-2.5 pb-3">
+        <div className="flex items-center gap-2">
+          <span className="shrink-0 text-[11px] font-black text-white/70">
+            Q <span className="text-white">{activePos + 1}</span> of {activeTotal}
+          </span>
+          <div className="flex-1 h-1.5 bg-white/20 rounded-full overflow-hidden">
+            <div
+              className={`h-full transition-all duration-300 rounded-full ${hardReviewMode ? 'bg-red-400' : 'bg-white/70'}`}
+              style={{ width: `${((activePos + 1) / activeTotal) * 100}%` }}
+            />
+          </div>
         </div>
       </div>
 
@@ -973,6 +1018,7 @@ export const FlashcardMcqView: React.FC<Props> = ({
         if (!pq) return null;
         const total = questions.length;
         const optionLetters = ['A','B','C','D','E'];
+        const projectorCurrentSelection = projectorSelections[projectorQIndex] ?? null;
 
         const overlayStyle: React.CSSProperties = {
           position: 'fixed',
@@ -987,6 +1033,28 @@ export const FlashcardMcqView: React.FC<Props> = ({
         return createPortal(
           <div style={overlayStyle}>
             {tabBar}
+             {projectorFocused && (
+               <div style={{ position:'absolute', top:12, right:12, zIndex:30, display:'flex', alignItems:'center', gap:8 }}>
+                 <button
+                   onClick={async () => {
+                     const result = await rotateScreen();
+                     if (result !== null) { setProjectorRotated(result === 'landscape'); }
+                     else { alert('📱 Phone ko physically rotate karein — landscape ke liye sideways, portrait ke liye seedha.'); }
+                   }}
+                   title={projectorRotated ? 'Portrait mode' : 'Landscape mode'}
+                   aria-label={projectorRotated ? 'Portrait mode' : 'Landscape mode'}
+                   style={{ width:36, height:36, background:'rgba(248,250,252,0.94)', border: projectorRotated ? '1px solid #c4b5fd' : '1px solid #e2e8f0', borderRadius:12, color: projectorRotated ? '#7c3aed' : '#64748b', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 4px 14px rgba(15,23,42,0.12)' }}>
+                   <RotateCw size={15} />
+                 </button>
+                 <button
+                   onClick={() => setProjectorNavigatorOpen(open => !open)}
+                   title="All Questions"
+                   aria-label="All Questions"
+                   style={{ width:36, height:36, background: projectorNavigatorOpen ? '#e0e7ff' : 'rgba(248,250,252,0.94)', border: projectorNavigatorOpen ? '1px solid #a5b4fc' : '1px solid #e2e8f0', borderRadius:12, color:'#4338ca', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 4px 14px rgba(15,23,42,0.12)' }}>
+                   <LayoutGrid size={17} />
+                 </button>
+               </div>
+             )}
             {/* Header — hidden in focus mode */}
             {!projectorFocused && (
               <div style={{ display:'flex', alignItems:'center', gap:8, padding:'10px 12px', borderBottom:'1px solid #f1f5f9', background:'#ffffff', flexShrink:0, boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
@@ -1002,6 +1070,7 @@ export const FlashcardMcqView: React.FC<Props> = ({
                       } else {
                         setIsProjectorMode(false);
                         setProjectorRotated(false);
+                        onProjectorModeChange?.(false);
                       }
                     }}
                     style={{ flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', width:36, height:36, background:'#f1f5f9', border:'1px solid #e2e8f0', borderRadius:10, color:'#475569', cursor:'pointer' }}>
@@ -1039,7 +1108,7 @@ export const FlashcardMcqView: React.FC<Props> = ({
                   style={{ flexShrink:0, padding:'7px 10px', background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:12, color: projectorFontIdx === PROJ_FONT_SIZES.length - 1 ? '#cbd5e1' : '#475569', fontSize:13, fontWeight:900, cursor: projectorFontIdx === PROJ_FONT_SIZES.length - 1 ? 'not-allowed' : 'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:1, minWidth:36 }}>
                   <span style={{ lineHeight:1 }}>A+</span>
                 </button>
-                {/* Rotate button */}
+                 {/* Rotate button — icon-only to keep the projector toolbar compact */}
                 <button
                   onClick={async () => {
                     const result = await rotateScreen();
@@ -1047,102 +1116,113 @@ export const FlashcardMcqView: React.FC<Props> = ({
                     else { alert('📱 Phone ko physically rotate karein — landscape ke liye sideways, portrait ke liye seedha.'); }
                   }}
                   title={projectorRotated ? 'Portrait mode' : 'Landscape mode'}
-                  style={{ flexShrink:0, padding:'7px 10px', background: projectorRotated ? '#ede9fe' : '#f8fafc', border: projectorRotated ? '1px solid #c4b5fd' : '1px solid #e2e8f0', borderRadius:12, color: projectorRotated ? '#7c3aed' : '#64748b', fontSize:11, fontWeight:900, cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}>
+                   aria-label={projectorRotated ? 'Portrait mode' : 'Landscape mode'}
+                   style={{ flexShrink:0, width:36, height:36, background: projectorRotated ? '#ede9fe' : '#f8fafc', border: projectorRotated ? '1px solid #c4b5fd' : '1px solid #e2e8f0', borderRadius:12, color: projectorRotated ? '#7c3aed' : '#64748b', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
                   <RotateCw size={13} />
-                  {projectorRotated ? 'Portrait' : 'Landscape'}
                 </button>
+                 {/* All questions — compact 9-dot button beside rotate */}
+                 <button
+                   onClick={() => setProjectorNavigatorOpen(open => !open)}
+                   title="All Questions"
+                   aria-label="All Questions"
+                   style={{ flexShrink:0, width:36, height:36, background: projectorNavigatorOpen ? '#e0e7ff' : '#f8fafc', border: projectorNavigatorOpen ? '1px solid #a5b4fc' : '1px solid #e2e8f0', borderRadius:12, color:'#4338ca', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                   <LayoutGrid size={17} />
+                 </button>
+                 {/* Focus / fullscreen button */}
+                 <button
+                   onClick={() => setProjectorFocused(true)}
+                   title="Focus Mode"
+                   aria-label="Open Focus Mode"
+                   style={{ flexShrink:0, width:36, height:36, background:'#f0fdf4', border:'2px solid #bbf7d0', borderRadius:12, color:'#16a34a', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                   <Maximize2 size={18} />
+                 </button>
               </div>
             )}
-            {/* Scrollable content — flex:1 + overflowY:auto keeps bottom bar always visible */}
-            <div style={{ flex:1, overflowY:'auto', padding: projectorFocused ? '24px 24px 24px' : '18px 24px 12px', display:'flex', flexDirection:'column', gap:14, minHeight:0 }}>
-              {/* Question */}
-              <div style={{ background:'#f8fafc', border:'3px solid #cbd5e1', borderRadius:14, padding:'16px 20px', flexShrink:0 }}>
-                <div style={{ display:'flex', alignItems:'flex-start', gap:12 }}>
-                  <span style={{ background:'#3b82f6', color:'#fff', borderRadius:999, width:36, height:36, display:'flex', alignItems:'center', justifyContent:'center', fontSize:16, fontWeight:900, flexShrink:0 }}>{projectorQIndex + 1}</span>
-                  <div style={{ flex:1, minWidth:0, display:'flex', flexDirection:'column', fontSize: projectorFontSize }}>
-                    <McqQuestionDisplay
-                      q={pq}
-                      questionClassName="font-bold text-slate-900 leading-snug"
-                      variant="default"
-                      stmtClassName="bg-indigo-50 border-l-4 border-indigo-400 px-4 py-3 rounded-xl text-slate-800 font-semibold leading-snug"
-                    />
-                  </div>
-                </div>
-              </div>
-              {/* Options */}
-              {(pq.options || []).length > 0 && <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-                {(pq.options || []).map((opt, oi) => {
-                  const isCorrect = oi === pq.correctAnswer;
-                  const isSelected = projectorSelected === oi;
-                  const answered = projectorSelected !== null;
-
-                  let bg = '#f8fafc';
-                  let border = '1px solid #e2e8f0';
-                  let textColor = '#1e293b';
-                  let radioBorder = '2px solid #94a3b8';
-                  let radioFill = 'transparent';
-                  let icon: React.ReactNode = null;
-
-                  if (answered) {
-                    if (isSelected && isCorrect) { bg = '#dcfce7'; border = '2px solid #22c55e'; textColor = '#15803d'; radioBorder = '2px solid #22c55e'; radioFill = '#22c55e'; icon = <CheckCircle size={20} color="#22c55e" />; }
-                    else if (isSelected && !isCorrect) { bg = '#fef2f2'; border = '2px solid #ef4444'; textColor = '#991b1b'; radioBorder = '2px solid #ef4444'; radioFill = '#ef4444'; icon = <span style={{ fontSize:18, fontWeight:900, color:'#ef4444' }}>✗</span>; }
-                    else if (isCorrect) { bg = '#dcfce7'; border = '2px solid #22c55e'; textColor = '#15803d'; radioBorder = '2px solid #22c55e'; radioFill = '#22c55e'; icon = <CheckCircle size={20} color="#22c55e" />; }
-                  }
-
-                  return (
-                    <div key={oi}
-                      onClick={() => {
-                        if (!answered && !projectorAnswered.has(projectorQIndex)) {
-                          setProjectorSelected(oi);
-                          setProjectorSelections(prev => ({ ...prev, [projectorQIndex]: oi }));
-                          const newAnswered = new Set(projectorAnswered);
-                          newAnswered.add(projectorQIndex);
-                          setProjectorAnswered(newAnswered);
-                          const isCorrect = oi === pq.correctAnswer;
-                          const elapsedSec = Math.round((Date.now() - projectorQStartTimeRef.current) / 1000);
-                          // Track projector attempt in activity store
-                          if (user?.id && sourceKey) {
-                            recordProjectorAnswer(user.id, sourceKey, `proj_${projectorQIndex}`, isCorrect, elapsedSec);
-                          }
-                          if (isCorrect) {
-                            setProjectorCorrect(c => c + 1);
-                            if (user?.id && !isAdmin) {
-                              const pts = tryEarnScore(user.id, 1, userTier, userTier !== 'FREE', 0, 'FLASHCARD_MCQ_CORRECT');
-                              if (pts > 0) {
-                                showMcqScore(pts);
-                                if (onUpdateUser) {
-                                  const _routineOn  = loadRoutineData(user.id).enabled;
-                                  const _coinMult   = _routineOn ? (1 / 6) : (1 / 8);
-                                  const _coinEarned = Math.max(1, Math.floor(pts * _coinMult));
-                                  deferStudyCoins(user.id, _coinEarned);
-                                  const updated = { ...user, totalScore: (user.totalScore || 0) + pts };
-                                  onUpdateUser(updated);
-                                  saveUserToLive(updated);
-                                }
-                              }
-                            }
-                          } else {
-                            setProjectorWrong(w => w + 1);
+            {/* Scrollable content — shared Revision Hub card, scaled for projection */}
+            <div style={{ flex:1, overflowY:'auto', padding: projectorFocused ? '24px 24px 24px' : '18px 24px 12px', minHeight:0 }}>
+              <div style={{ maxWidth: 1200, margin: '0 auto' }}>
+                 {projectorNavigatorOpen && (
+                   <div style={projectorFocused
+                     ? { position:'absolute', top:58, right:12, zIndex:40, width:'min(360px, calc(100% - 24px))', padding:10, background:'#ffffff', border:'1px solid #c7d2fe', borderRadius:16, boxShadow:'0 12px 32px rgba(15,23,42,0.18)' }
+                     : { marginBottom:14 }}>
+                     <McqQuestionNavigator
+                       total={total}
+                       currentIndex={projectorQIndex}
+                       answers={projectorSelections}
+                       skipped={projectorSkipped}
+                       onJump={(index) => {
+                         setProjectorQIndex(index);
+                         setProjectorSelected(projectorSelections[index] ?? null);
+                         setProjectorNavigatorOpen(false);
+                       }}
+                     />
+                   </div>
+                 )}
+                <McqPracticeCard
+                  q={pq}
+                  questionNumber={pq.questionNumber ?? projectorQIndex + 1}
+                  selectedOption={projectorCurrentSelection}
+                  answered={projectorCurrentSelection !== null}
+                   // Premium MCQ gives instant feedback after each selection.
+                   // The final submit still opens the Full Analysis overlay below.
+                   showResult={projectorCurrentSelection !== null}
+                  variant="projector"
+                  fontSize={projectorFontSize}
+                  onSelect={(oi) => {
+                    if (projectorShowReview) return;
+                    const previousSelection = projectorSelections[projectorQIndex];
+                    if (previousSelection === oi) return;
+                    setProjectorSelected(oi);
+                    setProjectorSelections(prev => ({ ...prev, [projectorQIndex]: oi }));
+                    setProjectorSkipped(prev => {
+                      const next = new Set(prev);
+                      next.delete(projectorQIndex);
+                      return next;
+                    });
+                    const isCorrect = oi === pq.correctAnswer;
+                    if (previousSelection === undefined) {
+                      const newAnswered = new Set(projectorAnswered);
+                      newAnswered.add(projectorQIndex);
+                      setProjectorAnswered(newAnswered);
+                    } else {
+                      const wasCorrect = previousSelection === pq.correctAnswer;
+                      if (wasCorrect !== isCorrect) {
+                        if (isCorrect) {
+                          setProjectorCorrect(c => c + 1);
+                          setProjectorWrong(w => Math.max(0, w - 1));
+                        } else {
+                          setProjectorCorrect(c => Math.max(0, c - 1));
+                          setProjectorWrong(w => w + 1);
+                        }
+                      }
+                    }
+                    const elapsedSec = Math.round((Date.now() - projectorQStartTimeRef.current) / 1000);
+                    if (previousSelection === undefined && user?.id && sourceKey) {
+                      recordProjectorAnswer(user.id, sourceKey, `proj_${projectorQIndex}`, isCorrect, elapsedSec);
+                    }
+                    if (previousSelection === undefined && isCorrect) {
+                      setProjectorCorrect(c => c + 1);
+                      if (user?.id && !isAdmin) {
+                        const pts = tryEarnScore(user.id, 1, userTier, userTier !== 'FREE', 0, 'FLASHCARD_MCQ_CORRECT');
+                        if (pts > 0) {
+                          showMcqScore(pts);
+                          if (onUpdateUser) {
+                            const _routineOn  = loadRoutineData(user.id).enabled;
+                            deferMcqCreditsFromXp(user.id, pts, _routineOn);
+                            const updated = { ...user, totalScore: (user.totalScore || 0) + pts };
+                            onUpdateUser(updated);
+                            saveUserToLive(updated);
                           }
                         }
-                      }}
-                      style={{
-                        display:'flex', alignItems:'center', gap:12,
-                        background: bg, border, borderRadius:14, padding:'12px 16px',
-                        cursor: answered ? 'default' : 'pointer',
-                        transition:'background 0.2s, border 0.2s'
-                      }}>
-                      <span style={{ width:22, height:22, borderRadius:'50%', border: radioBorder, background: radioFill, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center' }}>
-                        {radioFill !== 'transparent' && <span style={{ width:10, height:10, borderRadius:'50%', background:'#fff' }} />}
-                      </span>
-                      <div style={{ fontSize: projectorFontSize, fontWeight:500, color: textColor, lineHeight:1.35, flex:1 }} dangerouslySetInnerHTML={{ __html: renderMathInHtml(opt) }} />
-                      {icon}
-                    </div>
-                  );
-                })}
-              </div>}
+                      }
+                    } else if (previousSelection === undefined) {
+                      setProjectorWrong(w => w + 1);
+                    }
+                  }}
+                />
+              </div>
               {/* Explanation after answering */}
-              {projectorSelected !== null && pq.explanation && (
+              {projectorCurrentSelection !== null && pq.explanation && (
                 <div style={{ background:'#fefce8', border:'2px solid #fde047', borderRadius:12, padding:'14px 18px', fontSize: projectorFontSize, color:'#713f12', lineHeight:1.5, flexShrink:0 }}>
                   💡 <strong>Explanation:</strong> <span dangerouslySetInnerHTML={{ __html: formatExplanationHtml(pq.explanation) }} />
                 </div>
@@ -1150,31 +1230,41 @@ export const FlashcardMcqView: React.FC<Props> = ({
             </div>
             {/* Bottom bar — hidden in focus mode */}
             {!projectorFocused && (() => {
-              const submitThreshold = Math.min(20, total);
+               // Projector quiz can be submitted after any one answered MCQ.
+               const submitThreshold = 1;
               const canSubmit = projectorAnswered.size >= submitThreshold;
               return (
                 <div style={{ display:'flex', alignItems:'center', padding:'10px 20px', borderTop:'3px solid #e2e8f0', background:'#f8fafc', flexShrink:0, gap:10 }}>
-                  <button onClick={() => { setProjectorQIndex(i => Math.max(0,i-1)); setProjectorReveal(false); setProjectorSelected(null); }}
+                  <button onClick={() => {
+                    const index = Math.max(0, projectorQIndex - 1);
+                    setProjectorQIndex(index);
+                    setProjectorReveal(false);
+                    setProjectorSelected(projectorSelections[index] ?? null);
+                  }}
                     disabled={projectorQIndex === 0}
                     style={{ background: projectorQIndex===0 ? '#e2e8f0' : '#3b82f6', color: projectorQIndex===0 ? '#94a3b8' : '#fff', border:'none', borderRadius:10, padding:'10px 18px', fontSize:15, fontWeight:900, cursor: projectorQIndex===0 ? 'not-allowed' : 'pointer', display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
                     <ChevronLeft size={18} /> Prev
                   </button>
                   <button
-                    onClick={() => setProjectorFocused(true)}
-                    title="Focus Mode"
-                    style={{ background:'#f0fdf4', border:'2px solid #bbf7d0', borderRadius:10, color:'#16a34a', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', padding: '10px 14px', flexShrink: 0 }}>
-                    <Maximize2 size={20} />
+                    onClick={() => {
+                      if (projectorQIndex < total - 1) {
+                        setProjectorSkipped(prev => new Set([...prev, projectorQIndex]));
+                        const index = projectorQIndex + 1;
+                        setProjectorQIndex(index);
+                        setProjectorSelected(projectorSelections[index] ?? null);
+                      } else if (projectorCurrentSelection === null) {
+                        setProjectorSkipped(prev => new Set([...prev, projectorQIndex]));
+                      }
+                    }}
+                    disabled={projectorShowReview || (projectorQIndex === total - 1 && projectorCurrentSelection !== null)}
+                    style={{ background:'#fffbeb', color:'#b45309', border:'1px solid #fcd34d', borderRadius:10, padding:'10px 12px', fontSize:12, fontWeight:900, cursor:'pointer', flexShrink:0 }}
+                  >
+                    Skip
                   </button>
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {canSubmit ? (
                       <button onClick={() => {
-                        // Snapshot all data needed for the review at submit time
-                        setReviewSnapshot({
-                          answered: Array.from(projectorAnswered).sort((a, b) => a - b),
-                          selections: { ...projectorSelections },
-                          questions: [...questions],
-                        });
-                        setProjectorShowReview(true);
+                        submitProjectorQuiz();
                       }}
                         style={{ width: '100%', background:'linear-gradient(135deg,#16a34a,#15803d)', color:'#fff', border:'none', borderRadius:10, padding:'10px 18px', fontSize:15, fontWeight:900, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:8, boxShadow:'0 2px 12px rgba(22,163,74,0.35)' }}>
                         <CheckCircle size={18} /> Submit ({projectorAnswered.size})
@@ -1188,7 +1278,12 @@ export const FlashcardMcqView: React.FC<Props> = ({
                       </div>
                     )}
                   </div>
-                  <button onClick={() => { setProjectorQIndex(i => Math.min(total-1,i+1)); setProjectorReveal(false); setProjectorSelected(null); }}
+                  <button onClick={() => {
+                    const index = Math.min(total - 1, projectorQIndex + 1);
+                    setProjectorQIndex(index);
+                    setProjectorReveal(false);
+                    setProjectorSelected(projectorSelections[index] ?? null);
+                  }}
                     disabled={projectorQIndex === total-1}
                     style={{ background: projectorQIndex===total-1 ? '#e2e8f0' : '#3b82f6', color: projectorQIndex===total-1 ? '#94a3b8' : '#fff', border:'none', borderRadius:10, padding:'10px 18px', fontSize:15, fontWeight:900, cursor: projectorQIndex===total-1 ? 'not-allowed' : 'pointer', display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
                     Next <ChevronRight size={18} />
@@ -1200,7 +1295,12 @@ export const FlashcardMcqView: React.FC<Props> = ({
             {projectorFocused && (
               <div style={{ position:'absolute', bottom:16, left:'50%', transform:'translateX(-50%)', display:'flex', alignItems:'center', gap:12, zIndex:20 }}>
                 <button
-                  onClick={() => { setProjectorQIndex(i => Math.max(0,i-1)); setProjectorReveal(false); setProjectorSelected(null); }}
+                  onClick={() => {
+                    const index = Math.max(0, projectorQIndex - 1);
+                    setProjectorQIndex(index);
+                    setProjectorReveal(false);
+                    setProjectorSelected(projectorSelections[index] ?? null);
+                  }}
                   disabled={projectorQIndex === 0}
                   style={{ background: projectorQIndex===0 ? 'rgba(30,41,59,0.4)' : 'rgba(30,41,59,0.85)', color: projectorQIndex===0 ? 'rgba(255,255,255,0.3)' : '#fff', border:'none', borderRadius:10, padding:'10px 20px', fontSize:15, fontWeight:900, cursor: projectorQIndex===0 ? 'not-allowed' : 'pointer', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', gap:6 }}>
                   <ChevronLeft size={18} /> Prev
@@ -1212,27 +1312,30 @@ export const FlashcardMcqView: React.FC<Props> = ({
                 </button>
                 {projectorQIndex < total - 1 ? (
                   <button
-                    onClick={() => { setProjectorQIndex(i => Math.min(total-1,i+1)); setProjectorReveal(false); setProjectorSelected(null); }}
+                    onClick={() => {
+                      if (projectorCurrentSelection === null) {
+                        setProjectorSkipped(prev => new Set([...prev, projectorQIndex]));
+                      }
+                      const index = Math.min(total - 1, projectorQIndex + 1);
+                      setProjectorQIndex(index);
+                      setProjectorReveal(false);
+                      setProjectorSelected(projectorSelections[index] ?? null);
+                    }}
                     style={{ background: 'rgba(30,41,59,0.85)', color: '#fff', border:'none', borderRadius:10, padding:'10px 20px', fontSize:15, fontWeight:900, cursor: 'pointer', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', gap:6 }}>
                     Next <ChevronRight size={18} />
                   </button>
                 ) : (
                   <button
                     onClick={() => {
-                      const submitThreshold = Math.min(20, total);
-                      if (projectorAnswered.size >= submitThreshold) {
-                        setReviewSnapshot({
-                          answered: Array.from(projectorAnswered).sort((a, b) => a - b),
-                          selections: { ...projectorSelections },
-                          questions: [...questions],
-                        });
-                        setProjectorShowReview(true);
+                       const submitThreshold = 1;
+                       if (projectorAnswered.size >= submitThreshold) {
+                        submitProjectorQuiz();
                       } else {
                         setProjectorFocused(false);
                       }
                     }}
                     style={{ background: 'rgba(30,41,59,0.85)', color: '#fff', border:'none', borderRadius:10, padding:'10px 20px', fontSize:15, fontWeight:900, cursor: 'pointer', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', gap:6 }}>
-                    {projectorAnswered.size >= Math.min(20, total) ? (
+                     {projectorAnswered.size >= 1 ? (
                       <><CheckCircle size={18} /> Submit</>
                     ) : (
                       <><Minimize2 size={18} /> Exit Focus</>
@@ -1249,6 +1352,42 @@ export const FlashcardMcqView: React.FC<Props> = ({
       {/* ── Projector Review Screen ── shown after Submit */}
       {projectorShowReview && isProjectorMode && reviewSnapshot && createPortal(
         (() => {
+          if (user) {
+            const analysisAnswers = { ...reviewSnapshot.selections };
+            const analysisSubmitted = reviewSnapshot.answered.reduce((acc, qIndex) => {
+              acc[qIndex] = true;
+              return acc;
+            }, {} as Record<number, boolean>);
+            return (
+              // MarksheetCard has its own z-index, so keep the review in a
+              // higher stacking context than the projector overlay (z-index 99999).
+              <div style={{ position: 'fixed', inset: 0, zIndex: 100000 }}>
+                <McqAnalysisOverlay
+                  questions={reviewSnapshot.questions}
+                  answers={analysisAnswers}
+                  submitted={analysisSubmitted}
+                  title={title || 'MCQ Practice'}
+                  subtitle={subtitle}
+                  subject={subject || 'MCQ Practice'}
+                  user={user}
+                  settings={settings}
+                  onClose={() => setProjectorShowReview(false)}
+                  onRestart={() => {
+                    setProjectorQIndex(0);
+                    setProjectorReveal(false);
+                    setProjectorAnswered(new Set());
+                    setProjectorCorrect(0);
+                    setProjectorWrong(0);
+                    setProjectorSkipped(new Set());
+                    setProjectorNavigatorOpen(false);
+                    setProjectorSelections({});
+                    setProjectorShowReview(false);
+                    setIsProjectorMode(true);
+                  }}
+                />
+              </div>
+            );
+          }
           const _total   = reviewSnapshot.answered.length;
           const _pct     = _total > 0 ? Math.round((projectorCorrect / _total) * 100) : 0;
           const _grade   = _pct >= 80
@@ -1264,6 +1403,8 @@ export const FlashcardMcqView: React.FC<Props> = ({
             setProjectorAnswered(new Set());
             setProjectorCorrect(0);
             setProjectorWrong(0);
+            setProjectorSkipped(new Set());
+            setProjectorNavigatorOpen(false);
             setProjectorSelections({});
             setProjectorShowReview(false);
             setIsProjectorMode(true);

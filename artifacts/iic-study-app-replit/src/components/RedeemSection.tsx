@@ -328,7 +328,14 @@ export const RedeemSection: React.FC<Props> = ({ user, onSuccess }) => {
             updatedUser = { ...updatedUser, inbox: updatedInbox };
         }
         
-        // Save User immediately to local storage first (always succeeds)
+        // Persist the reward to the backend before updating any device cache.
+        // A redeem is not successful unless the account state is durable.
+        if (!await saveUserToLive(updatedUser)) {
+            throw new Error('Account credits and rewards could not be saved to the backend.');
+        }
+
+        // Local storage is only a convenience cache for the already-persisted
+        // account state. It must never be the only successful write.
         const allUsersStr = localStorage.getItem('nst_users');
         if (allUsersStr) {
             try {
@@ -341,10 +348,6 @@ export const RedeemSection: React.FC<Props> = ({ user, onSuccess }) => {
             } catch (_) {}
         }
         localStorage.setItem('nst_current_user', JSON.stringify(updatedUser));
-        // Cloud sync (best-effort — doesn't block success if offline)
-        try { await saveUserToLive(updatedUser); } catch (syncErr) {
-            console.warn("Cloud sync after redeem failed (offline?), saved locally:", syncErr);
-        }
 
         setStatus('SUCCESS');
         setMsg(successMessage);

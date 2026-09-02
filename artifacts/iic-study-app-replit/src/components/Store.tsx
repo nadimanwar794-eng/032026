@@ -187,16 +187,19 @@ function DailyClaimCard({ userId, user: u, onUpdateUser }: { userId: string; use
   const todayClaimed = routineData.dailyClaims?.[getToday()]?.claimed ?? false;
   const dailyAmt = getDailyClaimAmount(subTier);
 
-  const handleClaim = () => {
+  const handleClaim = async () => {
     const { data: updated, earned } = claimAllPendingCoins(routineData, subTier);
-    setRoutineDataRaw(updated);
-    saveRoutineData(userId, updated);
     // Add earned coins to main app credits
     if (earned > 0 && onUpdateUser && u) {
       const updatedUser = { ...u, credits: (u.credits || 0) + earned };
+      if (!await saveUserToLive(updatedUser)) {
+        window.alert("Coins save nahi ho paaye. Internet check karke dobara try karein.");
+        return;
+      }
       onUpdateUser(updatedUser);
-      try { saveUserToLive(updatedUser); } catch (_) {}
     }
+    setRoutineDataRaw(updated);
+    saveRoutineData(userId, updated);
   };
 
   if (subTier === 'NONE') return (
@@ -394,7 +397,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, renderEar
 
     try {
       setCreditConfirmLoading(true);
-      await saveUserToLive(updatedUser);
+      if (!await saveUserToLive(updatedUser)) throw new Error('Subscription purchase could not be saved to the backend.');
       onUserUpdate(updatedUser);
       // Record in credit history so it appears in Store → History tab
       try {

@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import { LessonContent, Subject, ClassLevel, Chapter, MCQItem, ContentType, User, SystemSettings } from '../types';
-import { ArrowLeft, Clock, AlertTriangle, ExternalLink, CheckCircle, XCircle, Trophy, BookOpen, Play, Lock, ChevronRight, ChevronLeft, Save, X, Maximize, Volume2, Square, Zap, StopCircle, Globe, Lightbulb, FileText, BrainCircuit, Grip, CheckSquare, List, Download, BarChart3, RotateCcw, Monitor, CloudOff, MoreVertical, EyeOff, Eye, LayoutGrid, Pencil, Send, Plus, Tv } from 'lucide-react';
+import { ArrowLeft, Clock, AlertTriangle, ExternalLink, CheckCircle, XCircle, Trophy, BookOpen, Play, Lock, ChevronRight, ChevronLeft, Save, X, Maximize, Minimize2, Volume2, Square, Zap, StopCircle, Globe, Lightbulb, FileText, BrainCircuit, Grip, CheckSquare, List, Download, BarChart3, RotateCcw, Monitor, CloudOff, MoreVertical, EyeOff, Eye, LayoutGrid, Pencil, Send, Plus, Tv } from 'lucide-react';
 import { CustomConfirm, CustomAlert } from './CustomDialogs';
 import { CreditConfirmationModal } from './CreditConfirmationModal';
 import { CustomPlayer } from './CustomPlayer';
@@ -20,6 +20,8 @@ import { McqSpeakButtons } from './McqSpeakButtons';
 import { ChunkedNotesReader } from './ChunkedNotesReader';
 import { renderMathInHtml, formatExplanationHtml } from '../utils/mathUtils';
 import McqQuestionDisplay from './McqQuestionDisplay';
+import McqPracticeCard from './McqPracticeCard';
+import McqQuestionNavigator from './McqQuestionNavigator';
 import { stopSpeaking } from '../utils/ttsHighlighter';
 import { speakText, stripHtml } from '../utils/textToSpeech';
 import jsPDF from 'jspdf';
@@ -607,6 +609,7 @@ export const LessonView: React.FC<Props> = ({
   const [showQuestionDrawer, setShowQuestionDrawer] = useState(false);
   const [showTopicSidebar, setShowTopicSidebar] = useState(false);
   const [batchIndex, setBatchIndex] = useState(0);
+  const [skippedQuestions, setSkippedQuestions] = useState<Set<number>>(new Set());
   const [comparisonMsg, setComparisonMsg] = useState('');
   const [activeAnalysisTab, setActiveAnalysisTab] = useState<'CHAPTER_ANALYSIS' | 'OVERVIEW' | 'QUESTIONS' | 'MISTAKES'>('CHAPTER_ANALYSIS');
   // Auto-enable TTS for Premium Instant Explanation Mode
@@ -705,7 +708,9 @@ export const LessonView: React.FC<Props> = ({
 
   // Full Screen Ref
   const containerRef = useRef<HTMLDivElement>(null);
+  const projectorContainerRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isProjectorFullscreen, setIsProjectorFullscreen] = useState(false);
   const [showSuggestionPanel, setShowSuggestionPanel] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [mcqSuggestionOpen, setMcqSuggestionOpen] = useState<Record<number, boolean>>({});
@@ -718,12 +723,16 @@ export const LessonView: React.FC<Props> = ({
   const [projectorReveal, setProjectorReveal] = useState(false);
   const [projectorSelected, setProjectorSelected] = useState<number | null>(null);
   const [projectorFocused, setProjectorFocused] = useState(false);
+  const [projectorSelections, setProjectorSelections] = useState<Record<number, number>>({});
+  const [projectorSkipped, setProjectorSkipped] = useState<Set<number>>(new Set());
+  const [projectorNavigatorOpen, setProjectorNavigatorOpen] = useState(false);
+  const [projectorShowReview, setProjectorShowReview] = useState(false);
 
   const toggleFullScreen = () => {
       if (!document.fullscreenElement) {
-          containerRef.current?.requestFullscreen().then(() => {
-              setIsFullscreen(true);
-          }).catch(e => console.error(e));
+          const request = containerRef.current?.requestFullscreen();
+          if (!request) return;
+          request.then(() => setIsFullscreen(true)).catch(e => console.error(e));
       } else {
           document.exitFullscreen().then(() => {
               setIsFullscreen(false);
@@ -731,13 +740,53 @@ export const LessonView: React.FC<Props> = ({
       }
   };
 
+  const toggleProjectorFullscreen = async () => {
+      const projectorElement = projectorContainerRef.current;
+      if (!projectorElement) return;
+
+      try {
+          if (document.fullscreenElement === projectorElement) {
+              await document.exitFullscreen();
+          } else {
+              // A different fullscreen target can be left behind when the
+              // projector is opened from an already immersive lesson.
+              if (document.fullscreenElement) {
+                  await document.exitFullscreen();
+              }
+              await projectorElement.requestFullscreen();
+          }
+      } catch (error) {
+          console.error('Unable to toggle projector fullscreen', error);
+      }
+  };
+
+  const closeProjectorMode = async () => {
+      if (document.fullscreenElement === projectorContainerRef.current) {
+          try {
+              await document.exitFullscreen();
+          } catch (error) {
+              console.error('Unable to exit projector fullscreen', error);
+          }
+      }
+      setIsProjectorMode(false);
+  };
+
   useEffect(() => {
       const handleFullscreenChange = () => {
-          setIsFullscreen(!!document.fullscreenElement);
+           setIsFullscreen(document.fullscreenElement === containerRef.current);
+           setIsProjectorFullscreen(document.fullscreenElement === projectorContainerRef.current);
       };
       document.addEventListener('fullscreenchange', handleFullscreenChange);
       return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
+
+  useEffect(() => {
+      if (isProjectorMode) return;
+      if (document.fullscreenElement === projectorContainerRef.current) {
+          document.exitFullscreen().catch(() => {});
+      }
+      setIsProjectorFullscreen(false);
+  }, [isProjectorMode]);
 
   // TIMER STATE
   const [sessionTime, setSessionTime] = useState(0); // Total seconds
@@ -861,7 +910,7 @@ export const LessonView: React.FC<Props> = ({
           </button>
           {isAdmin && displayData && displayData.length > 0 && (
             <button
-              onClick={() => { setProjectorQIndex(0); setProjectorReveal(false); setIsProjectorMode(true); setFabOpen(false); }}
+              onClick={() => { setProjectorQIndex(0); setProjectorReveal(false); setProjectorSelections({}); setProjectorSkipped(new Set()); setProjectorNavigatorOpen(false); setProjectorShowReview(false); setIsProjectorMode(true); setFabOpen(false); }}
               style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#d97706', color: '#fff', border: 'none', borderRadius: '24px', padding: '8px 14px', fontSize: '12px', fontWeight: 900, boxShadow: '0 4px 16px rgba(0,0,0,0.25)', cursor: 'pointer', whiteSpace: 'nowrap' }}
             >
               📽️ Projector Mode
@@ -1814,6 +1863,7 @@ export const LessonView: React.FC<Props> = ({
           const key = `nst_mcq_progress_${chapter.id}`;
           storage.removeItem(key);
           setMcqState({});
+          setSkippedQuestions(new Set());
           setBatchIndex(0);
           setLocalMcqData([...(content.mcqData || [])].sort(() => Math.random() - 0.5));
           setShowResumePrompt(false);
@@ -1831,6 +1881,7 @@ export const LessonView: React.FC<Props> = ({
                   const shuffled = [...(content.mcqData || [])].sort(() => Math.random() - 0.5);
                   setLocalMcqData(shuffled);
                   setMcqState({});
+                  setSkippedQuestions(new Set());
                   setBatchIndex(0);
                   setShowResults(false);
                   setAnalysisUnlocked(false);
@@ -1853,8 +1904,10 @@ export const LessonView: React.FC<Props> = ({
       const currentCorrect = score;
       const currentWrong = Object.keys(mcqState).length - currentCorrect;
       const attemptedCount = Object.keys(mcqState).length;
-      const minRequired = Math.min(30, displayData.length);
-      const canSubmit = attemptedCount >= minRequired;
+       // A student may submit as soon as at least one question is answered.
+       // There is intentionally no 20/30-question threshold here.
+       const minRequired = 1;
+       const canSubmit = attemptedCount >= minRequired;
 
       const currentBatchAttemptedCount = currentBatchData.reduce((acc, _, localIdx) => {
           const idx = (batchIndex * BATCH_SIZE) + localIdx;
@@ -1869,12 +1922,18 @@ export const LessonView: React.FC<Props> = ({
       };
 
       const handleOptionSelect = (qIdx: number, oIdx: number) => {
-          if (mcqState[qIdx] !== undefined && mcqState[qIdx] !== null) return;
+          // Answers stay editable until the final submit.
+          const wasAnswered = mcqState[qIdx] !== undefined && mcqState[qIdx] !== null;
           setMcqState(prev => ({ ...prev, [qIdx]: oIdx }));
+          setSkippedQuestions(prev => {
+              const next = new Set(prev);
+              next.delete(qIdx);
+              return next;
+          });
           const isCorrect = oIdx === displayData[qIdx].correctAnswer;
 
           // ── MCQ Scoring: +2 correct, -1 wrong, streak bonuses ────────────────
-          if (user?.id && !showResults) {
+          if (user?.id && !showResults && !wasAnswered) {
               const _subValid = !!(user.isPremium || (user.subscriptionTier && user.subscriptionTier !== 'FREE'));
               const _tier = user.subscriptionTier || 'FREE';
               if (isCorrect) {
@@ -1911,34 +1970,12 @@ export const LessonView: React.FC<Props> = ({
               }
           }
 
-          // Auto-Next Logic — only for instantExplanation (premium) mode
-          if (!showResults && (batchIndex + 1) * BATCH_SIZE < displayData.length) {
-              if (instantExplanation) {
-                  // PREMIUM FLOW
-                  if (isCorrect) {
-                      // Correct: Short delay then next
-                      setTimeout(nextQuestion, 1000);
-                  } else {
-                      // Wrong: Speak feedback then next
-                      const correctOpt = displayData[qIdx].options[displayData[qIdx].correctAnswer];
-                      const explanation = displayData[qIdx].explanation || "";
-
-                      const feedback = `Wrong Answer. The correct answer is ${stripHtml(correctOpt)}. ${stripHtml(explanation)}`;
-
-                      speakText(
-                          feedback,
-                          null,
-                          1.0,
-                          language === 'Hindi' ? 'hi-IN' : 'en-US',
-                          undefined,
-                          () => {
-                              nextQuestion();
-                          }
-                      );
-                  }
-              }
-              // STANDARD FLOW: No auto-next. User clicks Next button manually.
-          }
+           // This flow shows one question at a time (BATCH_SIZE is 1), so
+           // choosing an option immediately opens the next question. The
+           // final question remains available for the existing submit flow.
+           if (!showResults && qIdx === batchIndex && batchIndex < displayData.length - 1) {
+               nextQuestion();
+           }
       };
 
       const handleSubmitRequest = () => {
@@ -2299,7 +2336,7 @@ export const LessonView: React.FC<Props> = ({
       };
 
       return (
-          <div className="flex flex-col h-full bg-slate-50 relative mcq-container overflow-y-auto">
+          <div ref={containerRef} className="flex flex-col h-full bg-slate-50 relative mcq-container overflow-y-auto">
                {/* MCQ Score Popup */}
                {mcqScorePopup !== null && (
                    <div style={{
@@ -2433,6 +2470,8 @@ export const LessonView: React.FC<Props> = ({
                                             btnClass += "bg-amber-500 text-white border-amber-600 shadow-md shadow-amber-200 scale-105 ring-4 ring-amber-100";
                                         } else if (isAnswered) {
                                             btnClass += "bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100 ring-1 ring-emerald-100/50";
+                                        } else if (skippedQuestions.has(idx)) {
+                                            btnClass += "bg-amber-100 text-amber-800 border-amber-300 hover:bg-amber-200";
                                         } else {
                                             btnClass += "bg-white text-slate-500 border-slate-200 hover:bg-slate-50 hover:border-slate-300";
                                         }
@@ -2454,8 +2493,9 @@ export const LessonView: React.FC<Props> = ({
                             </div>
                             <div className="p-4 border-t bg-[#FDFBF7] text-sm font-medium text-slate-600 flex justify-center gap-4 flex-wrap rounded-b-xl border-amber-100">
                                 <div className="flex items-center gap-2"><div className="w-4 h-4 rounded-md bg-emerald-50 border border-emerald-200 shadow-sm"></div> <span className="text-emerald-700">Answered</span></div>
+                                <div className="flex items-center gap-2"><div className="w-4 h-4 rounded-md bg-amber-100 border border-amber-300 shadow-sm"></div> <span className="text-amber-700">Skipped</span></div>
                                 <div className="flex items-center gap-2"><div className="w-4 h-4 rounded-md bg-amber-500 border border-amber-600 shadow-sm"></div> <span className="text-amber-700">Current</span></div>
-                                <div className="flex items-center gap-2"><div className="w-4 h-4 rounded-md bg-white border border-slate-200 shadow-sm"></div> <span>Unattempted</span></div>
+                                <div className="flex items-center gap-2"><div className="w-4 h-4 rounded-md bg-white border border-slate-200 shadow-sm"></div> <span className="text-slate-500">Unattempted</span></div>
                             </div>
                         </div>
                    </div>
@@ -2472,13 +2512,18 @@ export const LessonView: React.FC<Props> = ({
                    if (!pq) return null;
                    const total = displayData.length;
                    const optionLetters = ['A','B','C','D','E'];
-                   return createPortal(
-                       <div style={{ position:'fixed', inset:0, zIndex:99999, background:'#ffffff', display:'flex', flexDirection:'column', overflow:'hidden' }}>
+                   const currentProjectorSelection = projectorSelections[projectorQIndex] ?? null;
+                   const projectorAttempted = Object.keys(projectorSelections).length;
+                   const projectorCorrectCount = Object.entries(projectorSelections).reduce((count, [key, value]) => (
+                       count + (displayData[Number(key)]?.correctAnswer === value ? 1 : 0)
+                   ), 0);
+                    return createPortal(
+                        <div ref={projectorContainerRef} style={{ position:'fixed', inset:0, zIndex:99999, background:'#ffffff', display:'flex', flexDirection:'column', overflow:'hidden' }}>
                            {/* Top bar — clean, matches MCQ Practice bar style */}
                            <div style={{ display:'flex', alignItems:'center', gap:8, padding:'10px 12px', borderBottom:'1px solid #f1f5f9', background:'#ffffff', flexShrink:0, boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
                                {/* Close */}
                                <button
-                                   onClick={() => setIsProjectorMode(false)}
+                                    onClick={closeProjectorMode}
                                    style={{ flexShrink:0, padding:'8px', background:'#f8fafc', border:'none', borderRadius:12, color:'#64748b', cursor:'pointer', display:'flex', alignItems:'center' }}
                                ><X size={18} /></button>
                                {/* Title block */}
@@ -2488,6 +2533,27 @@ export const LessonView: React.FC<Props> = ({
                                        <Tv size={10} /> PROJECTOR MODE
                                    </div>
                                </div>
+                                {/* Screen controls — kept together so fullscreen exit is always visible */}
+                                <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
+                                    <button
+                                        type="button"
+                                        onClick={handleRotate}
+                                        aria-label="Rotate screen"
+                                        title="Landscape / Rotate screen"
+                                        style={{ width:34, height:34, border:'1px solid #e2e8f0', borderRadius:12, background:'#f8fafc', color:'#64748b', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}
+                                    >
+                                        <RotateCcw size={16} />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={toggleProjectorFullscreen}
+                                        aria-label={isProjectorFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+                                        title={isProjectorFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+                                        style={{ width:34, height:34, border:`1px solid ${isProjectorFullscreen ? '#fca5a5' : '#e2e8f0'}`, borderRadius:12, background:isProjectorFullscreen ? '#fff1f2' : '#f8fafc', color:isProjectorFullscreen ? '#e11d48' : '#64748b', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}
+                                    >
+                                        {isProjectorFullscreen ? <Minimize2 size={16} /> : <Maximize size={16} />}
+                                    </button>
+                                </div>
                                {/* Q counter pill */}
                                <div style={{ flexShrink:0, display:'flex', alignItems:'center', gap:4, background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:12, padding:'6px 10px' }}>
                                    <span style={{ fontSize:11, fontWeight:900, color:'#1e293b' }}>{projectorQIndex + 1}</span>
@@ -2500,57 +2566,88 @@ export const LessonView: React.FC<Props> = ({
                                ><Eye size={13} /> {projectorReveal ? 'Hide Ans' : 'Show Ans'}</button>
                            </div>
 
-                           {/* Question */}
-                           <div style={{ flex:1, overflowY:'auto', padding:'40px 48px 24px', display:'flex', flexDirection:'column', gap:28 }}>
-                               <div style={{ background:'#f8fafc', border:'3px solid #cbd5e1', borderRadius:20, padding:'32px 36px' }}>
-                                   <div style={{ display:'flex', alignItems:'flex-start', gap:16 }}>
-                                       <span style={{ background:'#3b82f6', color:'#fff', borderRadius:999, width:44, height:44, display:'flex', alignItems:'center', justifyContent:'center', fontSize:20, fontWeight:900, flexShrink:0 }}>{projectorQIndex + 1}</span>
-                                       <div style={{ fontSize:28, fontWeight:700, color:'#0f172a', lineHeight:1.5 }}
-                                           dangerouslySetInnerHTML={{ __html: renderMathInHtml(pq.question) }} />
-                                   </div>
-                               </div>
-
-                               {/* Options */}
-                               <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-                                   {(pq.options || []).map((opt, oi) => {
-                                       const isCorrect = oi === pq.correctAnswer;
-                                       const isSelected = projectorSelected === oi;
-                                       const answered = projectorSelected !== null;
-
-                                       let bg = '#f8fafc';
-                                       let border = '1px solid #e2e8f0';
-                                       let textColor = '#1e293b';
-                                       let radioBorder = '2px solid #94a3b8';
-                                       let radioFill = 'transparent';
-                                       let icon: React.ReactNode = null;
-
-                                       if (projectorReveal) {
-                                           if (isCorrect) { bg = '#dcfce7'; border = '2px solid #22c55e'; textColor = '#15803d'; radioBorder = '2px solid #22c55e'; radioFill = '#22c55e'; icon = <CheckCircle size={28} color="#22c55e" />; }
-                                       } else if (answered) {
-                                           if (isSelected && isCorrect) { bg = '#dcfce7'; border = '2px solid #22c55e'; textColor = '#15803d'; radioBorder = '2px solid #22c55e'; radioFill = '#22c55e'; icon = <CheckCircle size={28} color="#22c55e" />; }
-                                           else if (isSelected && !isCorrect) { bg = '#fef2f2'; border = '2px solid #ef4444'; textColor = '#991b1b'; radioBorder = '2px solid #ef4444'; radioFill = '#ef4444'; icon = <span style={{ fontSize:24, fontWeight:900, color:'#ef4444' }}>✗</span>; }
-                                           else if (isCorrect) { bg = '#dcfce7'; border = '2px solid #22c55e'; textColor = '#15803d'; radioBorder = '2px solid #22c55e'; radioFill = '#22c55e'; icon = <CheckCircle size={28} color="#22c55e" />; }
-                                       }
-
-                                       return (
-                                           <div key={oi}
-                                               onClick={() => { if (!answered && !projectorReveal) setProjectorSelected(oi); }}
-                                               style={{ display:'flex', alignItems:'center', gap:16, background:bg, border, borderRadius:14, padding:'16px 20px', cursor: (answered || projectorReveal) ? 'default' : 'pointer', transition:'background 0.2s, border 0.2s' }}>
-                                               <span style={{ width:24, height:24, borderRadius:'50%', border: radioBorder, background: radioFill, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center' }}>
-                                                   {radioFill !== 'transparent' && <span style={{ width:10, height:10, borderRadius:'50%', background:'#fff' }} />}
-                                               </span>
-                                               <div style={{ fontSize:22, fontWeight:500, color:textColor, lineHeight:1.4, flex:1 }}
-                                                   dangerouslySetInnerHTML={{ __html: renderMathInHtml(opt) }} />
-                                               {icon}
-                                           </div>
-                                       );
-                                   })}
-                               </div>
+                            {/* Shared Revision Hub-style projector question and options */}
+                            <div style={{ flex:1, overflowY:'auto', padding:'40px 48px 24px', minHeight:0 }}>
+                                <div style={{ maxWidth: 1400, margin: '0 auto' }}>
+                                    {projectorNavigatorOpen && (
+                                        <div style={{ marginBottom: 16 }}>
+                                            <McqQuestionNavigator
+                                                total={total}
+                                                currentIndex={projectorQIndex}
+                                                answers={projectorSelections}
+                                                skipped={projectorSkipped}
+                                                onJump={(index) => {
+                                                    setProjectorQIndex(index);
+                                                    setProjectorSelected(projectorSelections[index] ?? null);
+                                                    setProjectorReveal(false);
+                                                    setProjectorNavigatorOpen(false);
+                                                }}
+                                            />
+                                        </div>
+                                    )}
+                                    <McqPracticeCard
+                                        q={pq}
+                                        questionNumber={pq.questionNumber ?? projectorQIndex + 1}
+                                        selectedOption={currentProjectorSelection}
+                                        answered={currentProjectorSelection !== null || projectorReveal}
+                                        showResult={projectorShowReview || projectorReveal}
+                                        disabled={projectorReveal || projectorShowReview}
+                                        variant="projector"
+                                        fontSize={28}
+                                        onSelect={(oi) => {
+                                            if (projectorReveal || projectorShowReview) return;
+                                            setProjectorSelected(oi);
+                                            setProjectorSelections(prev => ({ ...prev, [projectorQIndex]: oi }));
+                                            setProjectorSkipped(prev => {
+                                                const next = new Set(prev);
+                                                next.delete(projectorQIndex);
+                                                return next;
+                                            });
+                                             // Keep projector mode sequential:
+                                             // selecting an option opens the
+                                             // next question immediately.
+                                             if (projectorQIndex < total - 1) {
+                                                 const nextIndex = projectorQIndex + 1;
+                                                 setProjectorQIndex(nextIndex);
+                                                 setProjectorSelected(projectorSelections[nextIndex] ?? null);
+                                                 setProjectorReveal(false);
+                                             }
+                                        }}
+                                         actions={(
+                                             <>
+                                                 <McqSpeakButtons
+                                                     question={pq.question}
+                                                     options={pq.options}
+                                                     correctAnswer={pq.correctAnswer}
+                                                     mode="all"
+                                                 />
+                                                 <button
+                                                     type="button"
+                                                     onClick={() => setProjectorNavigatorOpen(open => !open)}
+                                                     aria-label="Open all projector questions"
+                                                     title="All Questions"
+                                                     style={{ flexShrink: 0, width: 32, height: 32, borderRadius: 999, border: 'none', background: projectorNavigatorOpen ? '#e0e7ff' : '#eef2ff', color: '#4338ca', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                                 >
+                                                     <LayoutGrid size={15} />
+                                                 </button>
+                                             </>
+                                         )}
+                                    />
+                                </div>
 
                                {/* Explanation after answering */}
-                               {projectorSelected !== null && pq.explanation && (
+                               {(projectorShowReview || projectorReveal) && currentProjectorSelection !== null && pq.explanation && (
                                    <div style={{ background:'#fefce8', border:'2px solid #fde047', borderRadius:16, padding:'20px 24px', fontSize:20, color:'#713f12', lineHeight:1.5 }}>
                                        💡 <strong>Explanation:</strong> {pq.explanation}
+                                   </div>
+                               )}
+                               {projectorShowReview && (
+                                   <div style={{ marginTop:16, background:'linear-gradient(135deg,#4f46e5,#7c3aed)', borderRadius:16, padding:'16px 20px', color:'#fff', display:'flex', alignItems:'center', justifyContent:'space-between', gap:16 }}>
+                                       <div>
+                                           <div style={{ fontSize:11, fontWeight:900, textTransform:'uppercase', letterSpacing:'0.08em', opacity:0.75 }}>Quiz Result</div>
+                                           <div style={{ fontSize:24, fontWeight:900 }}>{projectorCorrectCount}/{projectorAttempted} correct</div>
+                                       </div>
+                                       <button onClick={() => setProjectorShowReview(false)} style={{ background:'rgba(255,255,255,0.18)', color:'#fff', border:'none', borderRadius:10, padding:'9px 13px', fontSize:12, fontWeight:900, cursor:'pointer' }}>Edit Answers</button>
                                    </div>
                                )}
                            </div>
@@ -2558,13 +2655,46 @@ export const LessonView: React.FC<Props> = ({
                            {/* Bottom action bar */}
                            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 32px', borderTop:'3px solid #e2e8f0', background:'#f8fafc', flexShrink:0, gap:16 }}>
                                <button
-                                   onClick={() => { setProjectorQIndex(i => Math.max(0, i-1)); setProjectorReveal(false); setProjectorSelected(null); }}
+                                   onClick={() => {
+                                       const index = Math.max(0, projectorQIndex - 1);
+                                       setProjectorQIndex(index);
+                                       setProjectorReveal(false);
+                                       setProjectorSelected(projectorSelections[index] ?? null);
+                                   }}
                                    disabled={projectorQIndex === 0}
                                    style={{ background: projectorQIndex === 0 ? '#e2e8f0' : '#3b82f6', color: projectorQIndex === 0 ? '#94a3b8' : '#fff', border:'none', borderRadius:14, padding:'14px 32px', fontSize:20, fontWeight:900, cursor: projectorQIndex === 0 ? 'not-allowed' : 'pointer', display:'flex', alignItems:'center', gap:8 }}
                                ><ChevronLeft size={24} /> Pichla</button>
 
                                <button
-                                   onClick={() => { setProjectorQIndex(i => Math.min(total-1, i+1)); setProjectorReveal(false); setProjectorSelected(null); }}
+                                   onClick={() => {
+                                       if (projectorQIndex < total - 1) {
+                                           setProjectorSkipped(prev => new Set([...prev, projectorQIndex]));
+                                           const index = projectorQIndex + 1;
+                                           setProjectorQIndex(index);
+                                           setProjectorSelected(projectorSelections[index] ?? null);
+                                           setProjectorReveal(false);
+                                       } else if (currentProjectorSelection === null) {
+                                           setProjectorSkipped(prev => new Set([...prev, projectorQIndex]));
+                                       }
+                                   }}
+                                   disabled={projectorShowReview || (projectorQIndex === total - 1 && currentProjectorSelection !== null)}
+                                   style={{ background:'#fffbeb', color:'#b45309', border:'1px solid #fcd34d', borderRadius:14, padding:'14px 18px', fontSize:16, fontWeight:900, cursor:'pointer' }}
+                               >Skip</button>
+
+                               {!projectorShowReview && projectorAttempted > 0 && (
+                                   <button
+                                       onClick={() => setProjectorShowReview(true)}
+                                       style={{ background:'linear-gradient(135deg,#16a34a,#15803d)', color:'#fff', border:'none', borderRadius:14, padding:'14px 22px', fontSize:18, fontWeight:900, cursor:'pointer', display:'flex', alignItems:'center', gap:8 }}
+                                   ><CheckCircle size={22} /> Submit ({projectorAttempted})</button>
+                               )}
+
+                               <button
+                                   onClick={() => {
+                                       const index = Math.min(total - 1, projectorQIndex + 1);
+                                       setProjectorQIndex(index);
+                                       setProjectorReveal(false);
+                                       setProjectorSelected(projectorSelections[index] ?? null);
+                                   }}
                                    disabled={projectorQIndex === total - 1}
                                    style={{ background: projectorQIndex === total-1 ? '#e2e8f0' : '#3b82f6', color: projectorQIndex === total-1 ? '#94a3b8' : '#fff', border:'none', borderRadius:14, padding:'14px 32px', fontSize:20, fontWeight:900, cursor: projectorQIndex === total-1 ? 'not-allowed' : 'pointer', display:'flex', alignItems:'center', gap:8 }}
                                >Agla <ChevronRight size={24} /></button>
@@ -2636,15 +2766,9 @@ export const LessonView: React.FC<Props> = ({
                            </span>
                        </div>
                    </div>
-                   {/* All Questions button */}
-                   <button onClick={() => setShowQuestionDrawer(true)}
-                       className="shrink-0 flex items-center gap-1.5 bg-white/10 border border-white/20 hover:bg-white/20 text-white font-black text-[11px] px-2.5 py-1.5 rounded-xl transition-colors">
-                       <Grip size={14} />
-                       <span className="text-[10px] font-black text-white/70">{attemptedCount}/{displayData.length}</span>
-                   </button>
                    {/* Projector Mode button — admin/subadmin only */}
                    {isAdmin && (
-                   <button onClick={() => { setProjectorQIndex(0); setProjectorReveal(false); setProjectorSelected(null); setIsProjectorMode(true); }}
+                   <button onClick={() => { setProjectorQIndex(0); setProjectorReveal(false); setProjectorSelected(null); setProjectorSelections({}); setProjectorSkipped(new Set()); setProjectorNavigatorOpen(false); setProjectorShowReview(false); setIsProjectorMode(true); }}
                        className="shrink-0 p-2 bg-amber-500/20 hover:bg-amber-500/30 rounded-xl text-amber-300 border border-amber-400/30 transition-colors" title="Projector Mode">
                        <Tv size={17} />
                    </button>
@@ -2654,6 +2778,13 @@ export const LessonView: React.FC<Props> = ({
                        className="shrink-0 p-2 bg-white/10 hover:bg-white/20 rounded-xl text-white border border-white/20 transition-colors active:scale-90" title="Screen Rotate">
                        <RotateCcw size={17} />
                    </button>
+                    {/* Fullscreen toggle stays beside rotate so the exit control is always reachable */}
+                    <button onClick={toggleFullScreen}
+                        className={`shrink-0 p-2 rounded-xl text-white border transition-colors active:scale-90 ${isFullscreen ? 'bg-rose-500/80 hover:bg-rose-500 border-rose-300/50' : 'bg-white/10 hover:bg-white/20 border-white/20'}`}
+                        title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+                        aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}>
+                        {isFullscreen ? <Minimize2 size={17} /> : <Maximize size={17} />}
+                    </button>
                    {/* Admin Edit button — only for admin/subadmin */}
                    {isAdmin && onAdminEdit && (
                        <button onClick={onAdminEdit} className="shrink-0 p-2 bg-amber-500/20 hover:bg-amber-500/30 rounded-xl text-amber-300 border border-amber-400/30 transition-colors" title="Edit / Delete MCQ (Admin)">
@@ -2702,7 +2833,7 @@ export const LessonView: React.FC<Props> = ({
                                    <Maximize size={15} className="text-slate-400 shrink-0" /> Fullscreen
                                </button>
                                {isAdmin && (
-                               <button onClick={() => { setProjectorQIndex(0); setProjectorReveal(false); setIsProjectorMode(true); setShowMoreMenu(false); }}
+                               <button onClick={() => { setProjectorQIndex(0); setProjectorReveal(false); setProjectorSelections({}); setProjectorSkipped(new Set()); setProjectorNavigatorOpen(false); setProjectorShowReview(false); setIsProjectorMode(true); setShowMoreMenu(false); }}
                                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-amber-700 hover:bg-amber-50 font-semibold transition-colors">
                                    <Tv size={15} className="text-amber-500 shrink-0" /> 📽️ Projector Mode
                                </button>
@@ -3103,6 +3234,15 @@ export const LessonView: React.FC<Props> = ({
                                                                    allQuestions={group.questions as any}
                                                                    index={localI}
                                                                />
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setShowQuestionDrawer(true)}
+                                                                    aria-label="Open all questions"
+                                                                    title="All Questions"
+                                                                    className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center bg-indigo-50 text-indigo-600 hover:bg-indigo-100 active:scale-95 transition-colors"
+                                                                >
+                                                                    <LayoutGrid size={15} />
+                                                                </button>
                                                                {onSendToMcqCommunity && (
                                                                    <button
                                                                        onPointerDown={(e) => {
@@ -3192,92 +3332,66 @@ export const LessonView: React.FC<Props> = ({
                                const showExplanation = (showResults && isAnswered) || isRevealed;
                                const fullQuestionText = `${q.question}. Options are: ${q.options.map((opt, i) => `Option ${i+1}: ${opt}`).join('. ')}`;
 
-                               return (
-                                   <div key={idx} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm transition-all hover:shadow-md">
-                                       <div className="flex justify-between items-start mb-4 gap-3">
-                                           <div className="font-bold text-slate-800 flex gap-3 leading-relaxed flex-1">
-                                               <span className="bg-blue-100 text-blue-700 w-6 h-6 rounded-full flex items-center justify-center text-xs shrink-0 font-bold mt-0.5">{idx + 1}</span>
-                                               <div className="w-full">
-                                                   <McqQuestionDisplay q={q} questionClassName="prose prose-sm max-w-none" />
-                                               </div>
-                                           </div>
-                                           <div className="flex flex-col items-end gap-1.5 shrink-0">
-                                               <McqSpeakButtons
-                                                   question={q.question}
-                                                   options={q.options}
-                                                   correctAnswer={q.correctAnswer}
-                                                   allQuestions={currentBatchData as any}
-                                                   index={localIdx}
-                                               />
-                                               {onSendToMcqCommunity && (
-                                                   <button
-                                                       onPointerDown={(e) => {
-                                                           e.stopPropagation();
-                                                           const opts = q.options.length === 4
-                                                               ? q.options as [string,string,string,string]
-                                                               : ([...q.options, '', '', '', ''].slice(0, 4) as [string,string,string,string]);
-                                                           onSendToMcqCommunity({ question: q.question, options: opts, correctAnswer: q.correctAnswer, explanation: (q as any).explanation || '' });
-                                                       }}
-                                                       className="w-6 h-6 rounded-full flex items-center justify-center active:scale-90 transition-all bg-violet-100 text-violet-600"
-                                                       title="MCQ Community mein bhejo"
-                                                   >
-                                                       <Plus size={13} strokeWidth={2.5} />
-                                                   </button>
-                                               )}
-                                               {autoReadEnabled && !showResults && !showSubmitModal && (
-                                                   <SpeakButton
-                                                       text={fullQuestionText}
-                                                       className="hidden"
-                                                       settings={settings}
-                                                       autoPlay={autoReadEnabled && !showResults && !showSubmitModal}
-                                                       onToggleAutoTts={onToggleAutoTts}
-                                                   />
-                                               )}
-                                           </div>
-                                       </div>
-                                       <div className="space-y-2">
-                                           {q.options.map((opt, oIdx) => {
-                                               let btnClass = "w-full text-left p-3 rounded-xl border transition-all text-sm font-medium relative overflow-hidden ";
-
-                                               const showColors = showResults || isRevealed;
-
-                                               if (showColors) {
-                                                   if (oIdx === q.correctAnswer) {
-                                                       btnClass += "bg-green-100 border-green-300 text-green-800";
-                                                   } else if (userAnswer === oIdx) {
-                                                       btnClass += "bg-red-100 border-red-300 text-red-800";
-                                                   } else {
-                                                       btnClass += "bg-slate-50 border-slate-100 opacity-60 text-slate-800";
-                                                   }
-                                               }
-                                               else if (isAnswered) {
-                                                    if (userAnswer === oIdx) {
-                                                         btnClass += "bg-blue-100 border-blue-300 text-blue-800";
-                                                    } else {
-                                                         btnClass += "bg-slate-50 border-slate-100 opacity-60 text-slate-800";
-                                                    }
-                                               } else {
-                                                   btnClass += "bg-white border-slate-200 hover:bg-slate-50 hover:border-blue-200 text-slate-800";
-                                               }
-
-                                               return (
-                                                   <button
-                                                       key={oIdx}
-                                                       disabled={isAnswered || showResults}
-                                                       onClick={() => handleOptionSelect(idx, oIdx)}
-                                                       className={btnClass}
-                                                   >
-                                                       <span className="relative z-10 flex justify-between items-center w-full gap-2">
-                                                           <div dangerouslySetInnerHTML={{ __html: renderMathInHtml(opt) }} className="flex-1" />
-                                                           <div className="flex items-center gap-2 shrink-0">
-                                                              {showColors && oIdx === q.correctAnswer && <CheckCircle size={16} className="text-green-600" />}
-                                                              {showColors && userAnswer === oIdx && userAnswer !== q.correctAnswer && <XCircle size={16} className="text-red-500" />}
-                                                           </div>
-                                                       </span>
-                                                   </button>
-                                               );
-                                           })}
-                                       </div>
+                                return (
+                                    <div key={idx} className="transition-all">
+                                        {q.topic && (
+                                            <div className="mb-2 inline-flex text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
+                                                {q.topic}
+                                            </div>
+                                        )}
+                                        <McqPracticeCard
+                                            q={q}
+                                            questionNumber={q.questionNumber ?? idx + 1}
+                                            selectedOption={userAnswer ?? null}
+                                            answered={isAnswered || isRevealed}
+                                            showResult={showResults || isRevealed}
+                                            disabled={showResults}
+                                            onSelect={(oIdx) => handleOptionSelect(idx, oIdx)}
+                                            actions={(
+                                                <>
+                                                    <McqSpeakButtons
+                                                        question={q.question}
+                                                        options={q.options}
+                                                        correctAnswer={q.correctAnswer}
+                                                        allQuestions={currentBatchData as any}
+                                                        index={localIdx}
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setShowQuestionDrawer(true)}
+                                                        aria-label="Open all questions"
+                                                        title="All Questions"
+                                                        className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center bg-indigo-50 text-indigo-600 hover:bg-indigo-100 active:scale-95 transition-colors"
+                                                    >
+                                                        <LayoutGrid size={15} />
+                                                    </button>
+                                                    {onSendToMcqCommunity && (
+                                                        <button
+                                                            onPointerDown={(e) => {
+                                                                e.stopPropagation();
+                                                                const opts = q.options.length === 4
+                                                                    ? q.options as [string,string,string,string]
+                                                                    : ([...q.options, '', '', '', ''].slice(0, 4) as [string,string,string,string]);
+                                                                onSendToMcqCommunity({ question: q.question, options: opts, correctAnswer: q.correctAnswer, explanation: (q as any).explanation || '' });
+                                                            }}
+                                                            className="w-7 h-7 rounded-full flex items-center justify-center active:scale-90 transition-all bg-violet-100 text-violet-600"
+                                                            title="MCQ Community mein bhejo"
+                                                        >
+                                                            <Plus size={13} strokeWidth={2.5} />
+                                                        </button>
+                                                    )}
+                                                    {autoReadEnabled && !showResults && !showSubmitModal && (
+                                                        <SpeakButton
+                                                            text={fullQuestionText}
+                                                            className="hidden"
+                                                            settings={settings}
+                                                            autoPlay={autoReadEnabled && !showResults && !showSubmitModal}
+                                                            onToggleAutoTts={onToggleAutoTts}
+                                                        />
+                                                    )}
+                                                </>
+                                            )}
+                                        />
 
                                        {/* ── MCQ Suggestion Button ── */}
                                        <div className="mt-3 flex justify-end">
@@ -3479,53 +3593,93 @@ export const LessonView: React.FC<Props> = ({
                    onDownloadMhtml={() => handleConfirmDownload('MHTML')}
                />
 
-               <div className={`fixed bottom-0 left-0 right-0 w-full mx-auto p-4 pb-safe sm:pb-4 bg-white border-t border-slate-200 flex gap-3 z-[9999] shadow-[0_-4px_10px_rgba(0,0,0,0.05)]${isImmersive ? ' hidden' : ''}`}>
-                   {batchIndex > 0 && (
-                       <button onClick={handlePrevPage} className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl flex items-center justify-center gap-2">
-                           <ChevronLeft size={20} /> Back
-                       </button>
-                   )}
-
-                   {/* Logic for Single Question Navigation */}
-                   {!showResults && (
-                       <>
-                           {hasMore ? (
+               <div className={`fixed bottom-0 left-0 right-0 w-full mx-auto z-[9999] border-t border-slate-200/90 bg-white/95 px-3 pt-2.5 pb-safe shadow-[0_-8px_24px_rgba(15,23,42,0.09)] backdrop-blur-md sm:px-4 sm:pt-3 sm:pb-4${isImmersive ? ' hidden' : ''}`}>
+                    <div className="mx-auto flex w-full max-w-3xl items-center gap-2 sm:gap-3">
+                        {showResults && !hasMore ? (
+                            <button
+                                onClick={handleBack}
+                                className="flex h-12 flex-1 items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 text-sm font-black text-white shadow-lg shadow-slate-200 transition-all hover:bg-slate-800 active:scale-[0.98]"
+                            >
+                                Finish Review <ArrowLeft size={18} />
+                            </button>
+                        ) : (
+                            <>
                                 <button
-                                   onClick={handleNextPage}
-                                   disabled={!canGoNext}
-                                   className={`flex-[2] py-3 font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg ${canGoNext ? 'bg-blue-600 text-white shadow-blue-100' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
-                               >
-                                   Next <ChevronRight size={20} />
-                               </button>
-                           ) : (
-                               <div className="flex-[2]"></div> // Spacer if no next button on last page
-                           )}
+                                    type="button"
+                                    onClick={handlePrevPage}
+                                    disabled={batchIndex === 0}
+                                    aria-label="Go to previous question"
+                                    title="Back"
+                                    className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-slate-600 shadow-sm transition-all hover:border-slate-300 hover:bg-slate-100 active:scale-95 disabled:cursor-not-allowed disabled:opacity-35 max-[380px]:h-11 max-[380px]:w-11 sm:h-14 sm:w-14"
+                                >
+                                    <ChevronLeft size={20} strokeWidth={2.5} />
+                                </button>
 
-                           {/* Submit Button - Always visible; disabled with hint until threshold met */}
-                           <button
-                               onClick={handleSubmitRequest}
-                               disabled={!canSubmit}
-                               className={`flex-[2] py-3 font-bold rounded-xl flex flex-col items-center justify-center gap-0.5 shadow-lg transition-all ${canSubmit ? 'bg-green-600 text-white shadow-green-100' : 'bg-slate-100 text-slate-400 border border-slate-200'}`}
-                           >
-                               <span className="flex items-center gap-1.5">Submit <Trophy size={18} /></span>
-                               {!canSubmit && (
-                                   <span className="text-[9px] font-black leading-none opacity-70">
-                                       {minRequired - attemptedCount} more to go
-                                   </span>
-                               )}
-                           </button>
-                       </>
-                   )}
+                                {!showResults && (
+                                    <>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                const qIdx = batchIndex * BATCH_SIZE;
+                                                if (mcqState[qIdx] === undefined || mcqState[qIdx] === null) {
+                                                    setSkippedQuestions(prev => new Set([...prev, qIdx]));
+                                                }
+                                                if (hasMore) handleNextPage();
+                                            }}
+                                            disabled={!hasMore}
+                                            className="flex h-12 min-w-[68px] shrink-0 items-center justify-center gap-1.5 rounded-2xl border border-amber-200 bg-amber-50 px-3 text-[11px] font-black text-amber-700 shadow-sm transition-all hover:border-amber-300 hover:bg-amber-100 active:scale-95 disabled:cursor-not-allowed disabled:opacity-35 max-[380px]:h-11 max-[380px]:min-w-[58px] max-[380px]:gap-1 max-[380px]:px-2 max-[380px]:text-[10px] sm:h-14 sm:min-w-[78px] sm:text-xs"
+                                        >
+                                            <SkipForward size={15} strokeWidth={2.5} />
+                                            <span>Skip</span>
+                                        </button>
 
-                   {showResults && !hasMore && (
-                       <button 
-                           onClick={handleBack}
-                           className="flex-[2] py-3 bg-slate-800 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg"
-                       >
-                           Finish Review <ArrowLeft size={20} />
-                       </button>
-                   )}
-               </div>
+                                        <button
+                                            type="button"
+                                            onClick={handleNextPage}
+                                            disabled={!hasMore || !canGoNext}
+                                            aria-label="Go to next question"
+                                            title={!canGoNext ? 'Choose an option first' : 'Next'}
+                                            className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border shadow-sm transition-all active:scale-95 max-[380px]:h-11 max-[380px]:w-11 sm:h-14 sm:w-14 ${hasMore && canGoNext
+                                                ? 'border-blue-600 bg-blue-600 text-white shadow-blue-200 hover:bg-blue-700'
+                                                : 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-300'
+                                            }`}
+                                        >
+                                            <ChevronRight size={20} strokeWidth={2.5} />
+                                        </button>
+
+                                        <div className="min-w-0 flex-1 text-center leading-tight">
+                                            <p className="truncate text-[11px] font-black text-slate-700 sm:text-xs">
+                                                <span className="max-[380px]:hidden">Question </span>{batchIndex + 1} <span className="font-bold text-slate-400">of {displayData.length}</span>
+                                            </p>
+                                            <p className="mt-1 text-[10px] font-bold text-slate-400 max-[380px]:hidden">
+                                                {attemptedCount} answered
+                                            </p>
+                                        </div>
+
+                                        <button
+                                            type="button"
+                                            onClick={handleSubmitRequest}
+                                            disabled={!canSubmit}
+                                            className={`flex h-12 min-w-[112px] shrink-0 flex-col items-center justify-center rounded-2xl px-3 text-xs font-black leading-tight shadow-lg transition-all active:scale-[0.98] max-[380px]:h-11 max-[380px]:min-w-[96px] max-[380px]:px-2 max-[380px]:text-[11px] sm:h-14 sm:min-w-[138px] sm:text-sm ${canSubmit
+                                                ? 'bg-gradient-to-br from-emerald-500 to-green-600 text-white shadow-green-200 hover:from-emerald-600 hover:to-green-700'
+                                                : 'cursor-not-allowed border border-slate-200 bg-slate-100 text-slate-400 shadow-none'
+                                            }`}
+                                        >
+                                            <span className="flex items-center gap-1.5">
+                                                Submit Test <Trophy size={16} strokeWidth={2.5} />
+                                            </span>
+                                            {!canSubmit && (
+                                                <span className="mt-0.5 text-[9px] font-bold opacity-75">
+                                                    Answer 1 question
+                                                </span>
+                                            )}
+                                        </button>
+                                    </>
+                                )}
+                            </>
+                        )}
+                    </div>
+                </div>
           </div>
       );
   }

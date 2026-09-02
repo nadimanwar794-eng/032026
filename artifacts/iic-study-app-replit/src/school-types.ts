@@ -82,7 +82,9 @@ export interface SchoolSubject {
 
 export interface LessonMCQ {
   id: string;
+  questionNumber?: string | number;
   question: string;
+  statements?: string[];
   options: string[];
   correctIndex: number;
   explanation?: string;

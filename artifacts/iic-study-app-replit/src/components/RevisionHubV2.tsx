@@ -184,6 +184,9 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
   const [practiceSelected, setPracticeSelected] = useState<number | null>(null);
   const [practiceScores, setPracticeScores] = useState<Record<string, { got: number; total: number }>>({});
   const [practiceDone, setPracticeDone] = useState(false);
+  const [practiceAnswers, setPracticeAnswers] = useState<Record<number, number | null>>({});
+  const [practiceRevealedQuestions, setPracticeRevealedQuestions] = useState<Set<number>>(new Set());
+  const [practiceCompletedQuestions, setPracticeCompletedQuestions] = useState<Set<number>>(new Set());
 
   // Live clock — ticks every second for countdown timers
   const [now, setNow] = useState(Date.now());
@@ -353,6 +356,9 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
     setPracticeRevealed(false);
     setPracticeScores({});
     setPracticeDone(false);
+    setPracticeAnswers({});
+    setPracticeRevealedQuestions(new Set());
+    setPracticeCompletedQuestions(new Set());
     setPracticeActive(true);
   };
 
@@ -367,6 +373,9 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
     setPracticeRevealed(false);
     setPracticeScores({});
     setPracticeDone(false);
+    setPracticeAnswers({});
+    setPracticeRevealedQuestions(new Set());
+    setPracticeCompletedQuestions(new Set());
     setPracticeActive(true);
   };
 
@@ -382,18 +391,38 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
   }, [autoStartMcq, dueMcq]);
 
   const handlePracticeRate = (got: boolean) => {
+    const q = practiceQs[practiceIdx];
+    const alreadyCompleted = practiceCompletedQuestions.has(practiceIdx);
+    // A completed question can be revisited from the palette, but must not
+    // award XP or count twice. Move to the next unfinished question instead.
+    if (alreadyCompleted) {
+      const next = practiceQs.findIndex((_, index) => index > practiceIdx && !practiceCompletedQuestions.has(index));
+      const firstUncompleted = practiceQs.findIndex((_, index) => !practiceCompletedQuestions.has(index));
+      const target = next >= 0 ? next : firstUncompleted;
+      if (target >= 0) setPracticeIdx(target);
+      return;
+    }
     // Award XP for school revision hub MCQ answer; respect gate (returns false if daily limit hit)
     if (onMcqAnswer) { if (!onMcqAnswer(got)) return; }
-    const q = practiceQs[practiceIdx];
-    setPracticeScores(prev => {
-      const cur = prev[q.bucketKey] || { got: 0, total: 0 };
-      return { ...prev, [q.bucketKey]: { got: cur.got + (got ? 1 : 0), total: cur.total + 1 } };
-    });
-    const next = practiceIdx + 1;
-    if (next >= practiceQs.length) {
+    if (!alreadyCompleted) {
+      setPracticeScores(prev => {
+        const cur = prev[q.bucketKey] || { got: 0, total: 0 };
+        return { ...prev, [q.bucketKey]: { got: cur.got + (got ? 1 : 0), total: cur.total + 1 } };
+      });
+      setPracticeCompletedQuestions(prev => {
+        const next = new Set(prev);
+        next.add(practiceIdx);
+        return next;
+      });
+    }
+
+    const completedCount = practiceCompletedQuestions.size + (alreadyCompleted ? 0 : 1);
+    if (completedCount >= practiceQs.length) {
       setPracticeDone(true);
     } else {
-      setPracticeIdx(next);
+      const next = practiceQs.findIndex((_, index) => index > practiceIdx && !practiceCompletedQuestions.has(index));
+      const firstUncompleted = practiceQs.findIndex((_, index) => !practiceCompletedQuestions.has(index) && index !== practiceIdx);
+      setPracticeIdx(next >= 0 && next !== practiceIdx ? next : firstUncompleted);
       setPracticeRevealed(false);
       setPracticeSelected(null);
     }
@@ -423,6 +452,9 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
     setPracticeRevealed(false);
     setPracticeSelected(null);
     setPracticeScores({});
+    setPracticeAnswers({});
+    setPracticeRevealedQuestions(new Set());
+    setPracticeCompletedQuestions(new Set());
   };
 
   // ── MCQ open + self-rating ────────────────────────────────────────────────
@@ -687,12 +719,31 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
 
           {/* Progress bar */}
           {!practiceDone && (
-            <div className="h-1 bg-slate-100 shrink-0">
-              <div
-                className="h-1 bg-emerald-500 transition-all duration-300"
-                style={{ width: `${((practiceIdx) / practiceQs.length) * 100}%` }}
-              />
-            </div>
+            <>
+              <div className="h-1 bg-slate-100 shrink-0">
+                <div
+                  className="h-1 bg-emerald-500 transition-all duration-300"
+                  style={{ width: `${((practiceIdx) / practiceQs.length) * 100}%` }}
+                />
+              </div>
+              <div className="px-4 pt-3 max-w-xl mx-auto w-full">
+                <McqQuestionNavigator
+                  total={practiceQs.length}
+                  currentIndex={practiceIdx}
+                  answers={Object.fromEntries(
+                    Array.from(practiceCompletedQuestions).map(index => [
+                      index,
+                      practiceAnswers[index] ?? true,
+                    ]),
+                  )}
+                  onJump={(index) => {
+                    setPracticeIdx(index);
+                    setPracticeSelected(practiceAnswers[index] ?? null);
+                    setPracticeRevealed(practiceRevealedQuestions.has(index));
+                  }}
+                />
+              </div>
+            </>
           )}
 
           <div className="flex-1 overflow-y-auto overflow-x-hidden pb-20 p-4 max-w-xl mx-auto w-full">
@@ -700,6 +751,8 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
             {/* ── Session in progress ── */}
             {!practiceDone && practiceQs[practiceIdx] && (() => {
               const q = practiceQs[practiceIdx];
+              const selectedAnswer = practiceAnswers[practiceIdx] ?? null;
+              const showResultForQuestion = practiceRevealedQuestions.has(practiceIdx);
               return (
                 <div className="space-y-4 pt-2">
                   {/* Topic badge */}
@@ -722,9 +775,9 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
                       <div className="space-y-2.5">
                         {q.allOptions.map((opt, oi) => {
                           const letter = String.fromCharCode(65 + oi);
-                          const isSelected = practiceSelected === oi;
+                          const isSelected = selectedAnswer === oi;
                           const isCorrect = oi === correctIdx;
-                          const showResult = practiceRevealed;
+                          const showResult = showResultForQuestion;
                           let optClass = 'border-slate-200 bg-white text-slate-700';
                           if (showResult && isCorrect) optClass = 'border-emerald-400 bg-emerald-50 text-emerald-800';
                           else if (showResult && isSelected && !isCorrect) optClass = 'border-rose-400 bg-rose-50 text-rose-800';
@@ -734,6 +787,12 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
                               key={oi}
                               disabled={showResult}
                               onClick={() => {
+                                setPracticeAnswers(prev => ({ ...prev, [practiceIdx]: oi }));
+                                setPracticeRevealedQuestions(prev => {
+                                  const next = new Set(prev);
+                                  next.add(practiceIdx);
+                                  return next;
+                                });
                                 setPracticeSelected(oi);
                                 setPracticeRevealed(true);
                               }}
@@ -753,9 +812,9 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
                         })}
 
                         {/* After reveal — Next/Back navigation */}
-                        {practiceRevealed && (
+                        {showResultForQuestion && (
                           <div className="space-y-3 pt-1">
-                            {practiceSelected !== null && practiceSelected !== correctIdx && (
+                            {selectedAnswer !== null && selectedAnswer !== correctIdx && (
                               <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs text-amber-800 font-medium">
                                 💡 Sahi jawab: <strong>{q.allOptions[correctIdx]}</strong>
                               </div>
@@ -780,7 +839,7 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
                                 ← Pichla
                               </button>
                               <button
-                                onClick={() => handlePracticeRate(practiceSelected === correctIdx)}
+                                onClick={() => handlePracticeRate(selectedAnswer === correctIdx)}
                                 className="flex-1 flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-indigo-600 text-white font-black text-sm active:scale-[0.97] transition-all shadow-md shadow-indigo-200"
                               >
                                 {practiceIdx + 1 >= practiceQs.length ? '✅ Finish' : 'Agla →'}
@@ -792,9 +851,16 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
                     );
                   })() : (
                     /* Fallback — no options stored, show reveal button */
-                    !practiceRevealed ? (
+                    !showResultForQuestion ? (
                       <button
-                        onClick={() => setPracticeRevealed(true)}
+                        onClick={() => {
+                          setPracticeRevealedQuestions(prev => {
+                            const next = new Set(prev);
+                            next.add(practiceIdx);
+                            return next;
+                          });
+                          setPracticeRevealed(true);
+                        }}
                         className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-indigo-300 text-indigo-600 font-black py-4 rounded-2xl text-sm active:scale-[0.99] transition-all bg-indigo-50"
                       >
                         <Eye size={18} /> Sahi Jawab Dekho

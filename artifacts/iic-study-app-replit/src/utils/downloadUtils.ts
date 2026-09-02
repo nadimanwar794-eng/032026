@@ -45,20 +45,27 @@ export const downloadAsHTML = (
 <html lang="hi-IN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Keep saved reports in desktop layout even when opened on a phone. -->
+  <meta name="viewport" content="width=1024, initial-scale=1.0">
   <title>${pageTitle} — ${appName}</title>
   <style>
     * { box-sizing: border-box; }
-    body { font-family: system-ui, -apple-system, sans-serif; padding: 16px; max-width: 900px; margin: 0 auto; background: #f8fafc; color: #1e293b; }
+     html, body { width: 1024px !important; min-width: 1024px !important; }
+     body { font-family: system-ui, -apple-system, sans-serif; padding: 24px; width: 1024px !important; min-width: 1024px !important; max-width: none !important; margin: 0; background: #f8fafc; color: #1e293b; overflow-x: visible; }
     .iic-header { background: ${brandColor}; color: white; padding: 12px 16px; border-radius: 8px 8px 0 0; }
     .iic-header strong { font-size: 15px; display: block; }
     .iic-header small { font-size: 11px; opacity: 0.85; margin-top: 3px; display: block; }
     .iic-content { background: white; padding: 16px; border-radius: 0 0 8px 8px; border: 1px solid #e2e8f0; border-top: none; min-height: 200px; }
     .iic-footer { text-align: center; font-size: 10px; color: #94a3b8; margin-top: 12px; padding: 8px; }
-    ${cssText}
+     ${cssText}
+     /* Re-apply these after the app stylesheet so mobile media queries cannot
+        collapse a downloaded report back into the phone layout. */
+     html.desktop-export, body.desktop-export { width: 1024px !important; min-width: 1024px !important; max-width: none !important; }
+     body.desktop-export { margin: 0 !important; padding: 24px !important; overflow-x: visible !important; }
+     body.desktop-export .iic-content { width: 976px !important; min-width: 976px !important; max-width: none !important; }
   </style>
 </head>
-<body>
+<body class="desktop-export">
   <div class="iic-header">
     <strong>${appName} — ${pageTitle}</strong>
     <small>${subtitle ? subtitle + ' · ' : ''}Downloaded: ${date}</small>
@@ -125,6 +132,7 @@ export const downloadAsMHTML = async (
   const element = document.getElementById(elementId);
   if (!element) {
     console.error(`[download] Element #${elementId} not found`);
+    alert('Download content not found. Please try again.');
     return;
   }
 
@@ -132,26 +140,79 @@ export const downloadAsMHTML = async (
   const pageTitle  = branding?.pageTitle  || filename || 'Notes';
   const subtitle   = branding?.subtitle   || '';
   const brandColor = branding?.brandColor || '#4f46e5';
+  const computedStyle = window.getComputedStyle(element);
+  const isHiddenExportTarget =
+    computedStyle.opacity === '0' ||
+    computedStyle.visibility === 'hidden' ||
+    element.getBoundingClientRect().width === 0;
+  const originalStyles = {
+    position: element.style.position,
+    top: element.style.top,
+    left: element.style.left,
+    opacity: element.style.opacity,
+    visibility: element.style.visibility,
+    pointerEvents: element.style.pointerEvents,
+    zIndex: element.style.zIndex,
+    width: element.style.width,
+    overflow: element.style.overflow,
+    maxHeight: element.style.maxHeight,
+  };
 
   try {
-    const originalOverflow = element.style.overflow;
-    const originalMaxHeight = element.style.maxHeight;
-    element.style.overflow  = 'visible';
+    // The full report is intentionally kept off-screen. Make it renderable
+    // for html2canvas without flashing it over the marksheet on mobile.
+    if (isHiddenExportTarget) {
+      element.style.position = 'fixed';
+      element.style.top = '0';
+      element.style.left = '-100000px';
+      element.style.opacity = '1';
+      element.style.visibility = 'visible';
+      element.style.pointerEvents = 'none';
+      element.style.zIndex = '-1';
+    }
+    // Always render the export target at desktop width. This is especially
+    // important when the report is downloaded from a mobile browser.
+    element.style.width = '1024px';
+    element.style.overflow = 'visible';
     element.style.maxHeight = 'none';
 
+    // Give the browser a paint cycle after revealing an off-screen export
+    // target. Without this, mobile Chrome can capture a zero-height clone.
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+
+    const cssWidth = Math.max(element.scrollWidth, element.offsetWidth, 1);
+    const cssHeight = Math.max(element.scrollHeight, element.offsetHeight, 1);
+    const maxCanvasDimension = 16000;
+    const scale = Math.max(
+      0.5,
+      Math.min(
+        2.5,
+        window.devicePixelRatio || 1,
+        maxCanvasDimension / cssWidth,
+        maxCanvasDimension / cssHeight,
+      ),
+    );
+
     const canvas = await html2canvas(element, {
-      scale: 2.5,
+      scale,
       useCORS: true,
-      allowTaint: true,
+      allowTaint: false,
       backgroundColor: '#ffffff',
       logging: false,
       windowWidth: 1024,
       scrollX: 0,
       scrollY: -window.scrollY,
+      imageTimeout: 15000,
+      onclone: (clonedDocument) => {
+        // Remote Firebase logos may not expose CORS headers. Skipping only
+        // those images keeps the rest of the marksheet downloadable.
+        clonedDocument.querySelectorAll('img').forEach((img) => {
+          img.setAttribute('crossorigin', 'anonymous');
+        });
+      },
     });
-
-    element.style.overflow  = originalOverflow;
-    element.style.maxHeight = originalMaxHeight;
 
     const A4_W_PT = 595.28;
     const A4_H_PT = 841.89;
@@ -192,6 +253,27 @@ export const downloadAsMHTML = async (
 
   } catch (err) {
     console.error('[download] PDF generation failed:', err);
-    alert('Download fail hua. Please try again.');
+    // A PDF capture can fail on mobile browsers when a canvas contains a
+    // cross-origin logo, a very tall report, or an unsupported CSS rule.
+    // Keep the user's report downloadable instead of leaving the button as a
+    // silent no-op.
+    try {
+      downloadAsHTML(element.innerHTML, filename, branding);
+      alert('Report MHTML/Webpage format mein successfully download ho gayi.');
+    } catch (fallbackError) {
+      console.error('[download] HTML fallback failed:', fallbackError);
+      alert('Download fail hua. Please try again.');
+    }
+  } finally {
+    element.style.position = originalStyles.position;
+    element.style.top = originalStyles.top;
+    element.style.left = originalStyles.left;
+    element.style.opacity = originalStyles.opacity;
+    element.style.visibility = originalStyles.visibility;
+    element.style.pointerEvents = originalStyles.pointerEvents;
+    element.style.zIndex = originalStyles.zIndex;
+    element.style.width = originalStyles.width;
+    element.style.overflow = originalStyles.overflow;
+    element.style.maxHeight = originalStyles.maxHeight;
   }
 };

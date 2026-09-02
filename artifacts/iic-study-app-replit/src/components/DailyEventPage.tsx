@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import {
   ArrowLeft, BookOpen, BrainCircuit, CalendarCheck,
-  Clock, Target, ChevronRight, Zap, CheckCircle, Lock,
+  Clock, Target, ChevronRight, Zap, CheckCircle, Lock, Rocket,
 } from 'lucide-react';
 import { loadRoutineData, getUserSubTier, getDailyClaimAmount } from '../utils/routineStorage';
 import { getLevelInfo } from '../utils/levelSystem';
@@ -20,8 +20,9 @@ import { getAutoTrackSnapshot, getLessonStats, isLessonRewarded } from '../utils
 import { RoutineRevisionBadge } from './RoutineRevisionBadge';
 import { getMistakeSessions } from '../utils/mistakeAnalytics';
 import { tryEarnScore, getDailyScoreEarned } from '../utils/scoreSystem';
-import type { User, SystemSettings } from '../types';
+import type { User, SystemSettings, Challenge20 } from '../types';
 import type { MistakeEntry } from '../utils/mistakeBank';
+import { getChallengeDateKey, isDailyChallenge20 } from '../utils/challengeGenerator';
 
 interface Props {
   user: User;
@@ -34,6 +35,9 @@ interface Props {
   onOpenTracking?: () => void;
   onOpenLesson?: (lessonId: string) => void;
   onUpdateUser?: (u: User) => void;
+  challenge20s?: Challenge20[];
+  onStartChallenge20?: (challenge: Challenge20) => void;
+  onClaimChallenge20?: (challenge: Challenge20) => void | Promise<void>;
 }
 
 // ── Small reusable pieces ─────────────────────────────────────────────────────
@@ -96,11 +100,12 @@ const TaskRow: React.FC<{ emoji: string; title: string; sub: string; done: boole
 
 export const DailyEventPage: React.FC<Props> = ({
   user, settings, onBack, onOpenRoutine, onOpenRevisionHub, onPracticeMistakes, onOpenSubjects, onOpenTracking, onOpenLesson,
+  onUpdateUser, challenge20s = [], onStartChallenge20, onClaimChallenge20,
 }) => {
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getChallengeDateKey();
   const yesterdayStr = useMemo(() => {
     const d = new Date(); d.setDate(d.getDate() - 1);
-    return d.toISOString().split('T')[0];
+    return getChallengeDateKey(d);
   }, []);
   const lucentNotes = useMemo(() => (settings?.lucentNotes || []) as any[], [settings]);
 
@@ -115,8 +120,61 @@ export const DailyEventPage: React.FC<Props> = ({
   const [revMcqSessionActive, setRevMcqSessionActive] = useState(false);
   const [revMcqTopics, setRevMcqTopics] = useState<TopicItem[]>([]);
   const [refreshTick, setRefreshTick] = useState(0);
+  const [challengeTick, setChallengeTick] = useState(0);
+  const [claimingChallengeId, setClaimingChallengeId] = useState<string | null>(null);
 
   const reloadRevision = useCallback(() => setRefreshTick(t => t + 1), []);
+
+  useEffect(() => {
+    const handler = () => setChallengeTick(t => t + 1);
+    window.addEventListener('iic-test-completed', handler);
+    return () => window.removeEventListener('iic-test-completed', handler);
+  }, []);
+
+  const dailyChallengeStatuses = useMemo(() => {
+    let attempts: Record<string, any> = {};
+    try {
+      attempts = JSON.parse(localStorage.getItem(`nst_test_attempts_${user.id}`) || '{}');
+    } catch {}
+
+    const statuses = new Map<string, { completed: boolean; claimed: boolean }>();
+    challenge20s
+      .filter(challenge => isDailyChallenge20(challenge))
+      .forEach(challenge => {
+        const attempt = attempts[challenge.id];
+        const completed = attempt?.isCompleted === true ||
+          (Boolean(attempt?.submittedAt) && Boolean(attempt?.answers));
+        // The date-based key was used by the old auto-award flow. Treat it as
+        // claimed for existing users, while new claims use the challenge id so
+        // each published challenge is independently idempotent.
+        const legacyClaimKey = `nst_daily_challenge_20_xp_${user.id}_${todayStr}`;
+        const claimKey = `nst_daily_challenge_20_xp_claimed_${user.id}_${challenge.id}`;
+        const claimed = localStorage.getItem(claimKey) === '1' ||
+          localStorage.getItem(legacyClaimKey) === '1';
+        statuses.set(challenge.id, { completed, claimed });
+      });
+    return statuses;
+  }, [challenge20s, user.id, challengeTick]);
+
+  const dailyChallenges = useMemo(
+    () => challenge20s.filter(challenge => isDailyChallenge20(challenge)),
+    [challenge20s],
+  );
+
+  const handleChallengeClaim = useCallback(async (challenge: Challenge20) => {
+    if (!onClaimChallenge20 || claimingChallengeId) return;
+    setClaimingChallengeId(challenge.id);
+    try {
+      // The claim callback writes the idempotency key before its async save.
+      // Refresh immediately so a slow Firebase response cannot make the
+      // button look like it did nothing.
+      const claimPromise = onClaimChallenge20(challenge);
+      setChallengeTick(t => t + 1);
+      await claimPromise;
+    } finally {
+      setClaimingChallengeId(null);
+    }
+  }, [claimingChallengeId, onClaimChallenge20]);
 
   const showClaimOverlay = useCallback((ptsAdded: number) => {
     const todayTotal = getDailyScoreEarned(user.id);
@@ -520,6 +578,67 @@ export const DailyEventPage: React.FC<Props> = ({
     <div>
 
       <div className="px-4 pt-4 space-y-4 pb-6">
+
+        {/* ── DAILY CHALLENGE 2.0 ─────────────────────────────────────────── */}
+        {dailyChallenges.length > 0 && (
+          <SectionCard
+            emoji="🚀"
+            title="Daily Challenge 2.0"
+            subtitle="Aaj ka challenge complete karo aur +100 XP pao"
+            accent="#7c3aed"
+          >
+            <div className="space-y-2.5">
+              {dailyChallenges.map((challenge) => {
+                const status = dailyChallengeStatuses.get(challenge.id) || { completed: false, claimed: false };
+                const isClaiming = claimingChallengeId === challenge.id;
+                return (
+                <div key={challenge.id} className="relative overflow-hidden rounded-2xl border border-violet-200 bg-gradient-to-r from-violet-50 to-purple-50 p-3.5">
+                  <Rocket size={58} className="absolute -right-3 -top-3 text-violet-200 opacity-70" />
+                  <div className="relative z-10">
+                    <p className="text-[13px] font-black text-violet-900">{challenge.title}</p>
+                    {challenge.description && (
+                      <p className="mt-0.5 text-[10px] text-slate-500">{challenge.description}</p>
+                    )}
+                    <div className="mt-2.5 flex items-center gap-2 text-[10px] font-black text-slate-600">
+                      <span className="rounded-full bg-white/80 px-2 py-1">{challenge.questions.length} Questions</span>
+                      <span className="rounded-full bg-white/80 px-2 py-1">Max 60 min</span>
+                      <span className="rounded-full bg-amber-100 px-2 py-1 text-amber-700">+100 XP</span>
+                    </div>
+                    {status.completed ? (
+                      status.claimed ? (
+                        <div className="mt-3 w-full rounded-xl border border-emerald-200 bg-emerald-50 py-2.5 text-center text-xs font-black text-emerald-700">
+                          ✅ +100 XP Claim Ho Gaya
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            void handleChallengeClaim(challenge);
+                          }}
+                          disabled={!onClaimChallenge20 || isClaiming}
+                          className="mt-3 w-full rounded-xl bg-amber-500 py-2.5 text-center text-xs font-black text-white shadow-md shadow-amber-200 transition-colors hover:bg-amber-600 active:scale-[.98] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {isClaiming ? 'Claim ho raha hai…' : '🎁 Claim +100 XP'}
+                        </button>
+                      )
+                    ) : (
+                      <button
+                        onClick={() => onStartChallenge20?.(challenge)}
+                        disabled={!onStartChallenge20}
+                        className="mt-3 w-full rounded-xl bg-violet-600 py-2.5 text-center text-xs font-black text-white shadow-md shadow-violet-200 transition-colors hover:bg-violet-700 active:scale-[.98] disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Start Challenge
+                      </button>
+                    )}
+                  </div>
+                </div>
+                );
+              })}
+            </div>
+          </SectionCard>
+        )}
 
         {/* ── 1. ROUTINE ─────────────────────────────────────────────────── */}
         <SectionCard
@@ -1256,7 +1375,24 @@ export const DailyEventPage: React.FC<Props> = ({
           settings={settings}
           onUpdateUser={onUpdateUser}
           onClose={() => setRevMcqSessionActive(false)}
-          onComplete={(_results) => {
+          onComplete={(results) => {
+            // Keep the Today MCQ result in the live user snapshot too.
+            // saveTestResult writes the per-session Firestore record, but the
+            // dashboard Performance tab reads mcqHistory.
+            if (onUpdateUser && Array.isArray(results) && results.length > 0) {
+              const latestUser = (window as any).__dashUserRef?.current ?? user;
+              const existingHistory = Array.isArray(latestUser.mcqHistory)
+                ? latestUser.mcqHistory
+                : [];
+              const existingIds = new Set(existingHistory.map((entry: any) => entry?.id).filter(Boolean));
+              const newResults = results.filter((result: any) => result?.id && !existingIds.has(result.id));
+              if (newResults.length > 0) {
+                onUpdateUser({
+                  ...latestUser,
+                  mcqHistory: [...newResults, ...existingHistory],
+                });
+              }
+            }
             setRevMcqSessionActive(false);
             reloadRevision();
           }}

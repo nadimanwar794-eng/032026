@@ -61,7 +61,7 @@ import { HomeStatsToast } from './components/HomeStatsToast';
 import { DailyChallengeRankCard } from './components/DailyChallengeRankCard';
 import { DailyChallengePopup } from './components/DailyChallengePopup';
 import { recordCreditTx } from './utils/creditHistory';
-import { buildAutoMixQuestions, generateDailyChallengeQuestions } from './utils/challengeGenerator';
+import { generateDailyChallengeQuestions, getChallengeDateKey, getChallengeWeekKey, isDailyChallenge20 } from './utils/challengeGenerator';
 import { BrainCircuit, Globe, LogOut, LayoutDashboard, BookOpen, Headphones, HelpCircle, Newspaper, KeyRound, Lock, X, ShieldCheck, FileText, UserPlus, EyeOff, WifiOff, Cloud, ArrowLeft, ExternalLink } from 'lucide-react'; // eslint-disable-line @typescript-eslint/no-unused-vars
 import { SUPPORT_EMAIL, APP_VERSION } from './constants';
 import { StudentTab, PendingReward, MCQResult, SubscriptionHistoryEntry } from './types';
@@ -1747,32 +1747,43 @@ const App: React.FC = () => {
             setTimeout(() => setShowDailyRankCard(true), 800);
         }
 
-        const isSunday = new Date().getDay() === 0;
-        const lastWeeklyAuto = localStorage.getItem('nst_last_weekly_auto_date');
-        if (isSunday && lastWeeklyAuto !== new Date().toDateString()) {
-            const weeklyQs = buildAutoMixQuestions(
-                state.user.classLevel || '10',
-                state.user.board || 'CBSE',
+        // Weekly challenge is available once per local calendar week. It is
+        // intentionally not tied to Sunday: a student opening the app later
+        // in the week still gets this week's challenge.
+        const weekKey = getChallengeWeekKey();
+        const lastWeeklyAuto = localStorage.getItem('nst_last_weekly_auto_week');
+        if (lastWeeklyAuto !== weekKey) {
+            const classLevel = state.user.classLevel || '10';
+            const board = state.user.board || 'CBSE';
+            generateDailyChallengeQuestions(
+                classLevel,
+                board,
                 state.user.stream || null,
-                'WEEKLY'
-            );
-            if (weeklyQs.length > 0) {
+                state.settings,
+                state.user.id,
+                'WEEKLY',
+            ).then((result) => {
+                if (!result || result.questions.length === 0) return;
                 const weeklyTest: WeeklyTest = {
-                    id: `weekly-auto-${Date.now()}`,
-                    name: `Weekly Test — ${new Date().toLocaleDateString()}`,
-                    description: "Sunday ka weekly mega test — 100 sawaal completed lessons se!",
+                    id: result.id,
+                    name: result.name,
+                    description: "Is hafte ka weekly challenge — syllabus ke sabhi chapters se!",
                     isActive: true,
-                    classLevel: state.user.classLevel || '10',
-                    questions: weeklyQs,
-                    totalQuestions: weeklyQs.length,
-                    passingScore: Math.ceil(0.6 * weeklyQs.length),
+                    classLevel,
+                    questions: result.questions,
+                    totalQuestions: result.questions.length,
+                    passingScore: Math.ceil(0.6 * result.questions.length),
                     createdAt: new Date().toISOString(),
-                    durationMinutes: 60,
-                    autoSubmitEnabled: true
+                    durationMinutes: result.durationMinutes,
+                    autoSubmitEnabled: true,
                 };
-                localStorage.setItem('nst_last_weekly_auto_date', new Date().toDateString());
+                localStorage.setItem('nst_last_weekly_auto_week', weekKey);
+                // Keep the old key harmlessly readable for older sessions.
+                localStorage.setItem('nst_last_weekly_auto_date', getChallengeDateKey());
                 setTimeout(() => setActiveWeeklyTest(weeklyTest), 1500);
-            }
+            }).catch((error) => {
+                console.warn('[IIC] Weekly challenge generation skipped:', error);
+            });
         }
     }
   }, [state.user?.id, state.view, state.settings]);
@@ -1857,7 +1868,7 @@ const App: React.FC = () => {
     'nst_daily_study_seconds', 'nst_hidden_notifs', 'nst_display_level',
     'nst_last_daily_challenge_completed', 'nst_last_daily_challenge_date',
     'nst_last_daily_tracker_date', 'nst_last_read_update',
-    'nst_last_refresh_ts', 'nst_last_reload_at', 'nst_last_weekly_auto_date',
+    'nst_last_refresh_ts', 'nst_last_reload_at', 'nst_last_weekly_auto_date', 'nst_last_weekly_auto_week',
     'nst_leaderboard', 'nst_morning_banner', 'nst_pending_sync_results',
     'nst_recycle_bin', 'nst_revision_tracker_v2', 'nst_seen_notif_ids',
     'nst_seen_notifs_v1', 'nst_starred_notes_v1', 'nst_store_last_visit',
@@ -1960,6 +1971,7 @@ const App: React.FC = () => {
         subjectName: state.selectedSubject?.title || '',
         classLevel: state.selectedClass || '',
         userAnswers: answers,
+         questions: displayData,
         wrongQuestions: wrongQuestions,
         topicAnalysis: topicAnalysis
     };
@@ -2608,6 +2620,11 @@ const App: React.FC = () => {
   const handleWeeklyTestComplete = async (score: number, total: number, answers: Record<number, number>) => {
     if (!activeWeeklyTest || !state.user) return;
 
+    // Leave the test player immediately after the user confirms submission.
+    // Result persistence and reward calculation can continue asynchronously
+    // without making the player appear stuck until the user presses Back.
+    setActiveWeeklyTest(null);
+
     const attempt = {
         testId: activeWeeklyTest.id,
         testName: activeWeeklyTest.name,
@@ -2617,7 +2634,8 @@ const App: React.FC = () => {
         submittedAt: new Date().toISOString(),
         score: Math.round((score / total) * 100),
         totalQuestions: total,
-        answers: answers
+        answers: answers,
+        isCompleted: true,
     };
 
     const key = `nst_test_attempts_${state.user.id}`;
@@ -2625,12 +2643,18 @@ const App: React.FC = () => {
     try { attempts = JSON.parse(localStorage.getItem(key) || '{}'); } catch {}
     attempts[activeWeeklyTest.id] = attempt;
     localStorage.setItem(key, JSON.stringify(attempts));
+    window.dispatchEvent(new CustomEvent('iic-test-completed'));
 
-    await saveTestResult(state.user.id, attempt);
+    // Do not hold the result screen behind a remote write. The local attempt
+    // is already durable; Firebase sync can finish in the background.
+    void saveTestResult(state.user.id, attempt).catch((error) => {
+        console.warn('Test result sync failed:', error);
+    });
 
-    const isDailyChallengeAttempt = activeWeeklyTest.id.startsWith('daily-challenge-') || activeWeeklyTest.id.startsWith('weekly-auto-');
+    const isChallenge20Daily = isDailyChallenge20(activeWeeklyTest);
+    const isDailyChallengeAttempt = isChallenge20Daily || activeWeeklyTest.id.startsWith('weekly-auto-');
     if (isDailyChallengeAttempt && !state.originalAdmin) {
-        const today = new Date().toISOString().split('T')[0];
+        const today = getChallengeDateKey();
         const timeTakenStr = localStorage.getItem(`weekly_test_start_${activeWeeklyTest.id}`);
         const timeTaken = timeTakenStr ? Math.round((Date.now() - parseInt(timeTakenStr)) / 1000) : 0;
         saveDailyChallengeScore({
@@ -2653,7 +2677,7 @@ const App: React.FC = () => {
     let rewardMsg = "";
 
     const percentage = (score / total) * 100;
-    const isDailyForReward = activeWeeklyTest.id.startsWith('daily-challenge-');
+    const isDailyForReward = isChallenge20Daily;
     const category = isDailyForReward ? 'DAILY_CHALLENGE' : 'WEEKLY_TEST';
 
     const eligibleRules = (state.settings.prizeRules || [])
@@ -2692,9 +2716,19 @@ const App: React.FC = () => {
         }
     }
 
+    // Daily Challenge 2.0's fixed +100 XP is deliberately claimable from
+    // Routine after submission. Do not award it while submitting the test.
+    if (isChallenge20Daily && !state.originalAdmin) {
+        rewardMsg = rewardMsg
+            ? `${rewardMsg} +100 XP claim karne ke liye Routine kholo.`
+            : 'Daily Challenge 2.0 complete. +100 XP claim karne ke liye Routine kholo.';
+    }
+
     if (!state.originalAdmin) {
         localStorage.setItem('nst_current_user', JSON.stringify(updatedUser));
-        await saveUserToLive(updatedUser);
+         void saveUserToLive(updatedUser).catch((error) => {
+             console.warn('Challenge result user sync failed:', error);
+         });
     }
     setState(prev => ({...prev, user: updatedUser}));
     if (rewardMsg) setAlertConfig({isOpen: true, message: rewardMsg});
@@ -2731,6 +2765,8 @@ const App: React.FC = () => {
         averageTimePerQuestion: total > 0 ? timeTaken / total : 0,
         performanceTag: (score / total) >= 0.8 ? 'EXCELLENT' : (score / total) >= 0.5 ? 'GOOD' : 'BAD',
         classLevel: activeWeeklyTest.classLevel,
+         questions: activeWeeklyTest.questions,
+         userAnswers: answers,
         omrData: omrData,
         wrongQuestions: wrongQuestions
     };
@@ -2789,9 +2825,14 @@ const App: React.FC = () => {
       if (!state.user) return;
 
       const config = state.settings.dailyChallengeConfig || { rewardPercentage: 90, mode: 'AUTO', selectedChapterIds: [] };
+      const routineData = loadRoutineData(state.user.id);
+      const routineClass = routineData.enabled && routineData.selectedClass
+        ? routineData.selectedClass
+        : null;
+      const challengeClass = routineClass || state.user.classLevel || '10';
 
       const result = await generateDailyChallengeQuestions(
-          state.user.classLevel || '10',
+          challengeClass,
           state.user.board || 'BSEB',
           state.user.stream || null,
           state.settings,
@@ -2808,9 +2849,9 @@ const App: React.FC = () => {
       const test: WeeklyTest = {
           id: result.id,
           name: result.name,
-          description: "Aaj ke sawaal — syllabus ke sabhi chapters se!",
+          description: `Aaj ke Class ${challengeClass} Routine ke sawaal!`,
           isActive: true,
-          classLevel: state.user.classLevel || '10',
+          classLevel: challengeClass,
           questions: result.questions,
           totalQuestions: result.questions.length,
           passingScore: Math.ceil((config.rewardPercentage / 100) * result.questions.length),
@@ -2852,7 +2893,8 @@ const App: React.FC = () => {
           autoSubmitEnabled: true
       };
       setActiveWeeklyTest(test);
-      localStorage.setItem('nst_last_weekly_auto_date', new Date().toDateString());
+      localStorage.setItem('nst_last_weekly_auto_week', getChallengeWeekKey());
+      localStorage.setItem('nst_last_weekly_auto_date', getChallengeDateKey());
   };
 
   const goBack = () => {
@@ -3346,6 +3388,10 @@ const App: React.FC = () => {
                               }}
                               onOpenSchool={() => setState(prev => ({...prev, view: 'SCHOOL_ECOSYSTEM' as any}))}
                               onOpenCoaching={() => setState(prev => ({...prev, view: 'COACHING_ECOSYSTEM' as any}))}
+                              onOpenMcqAnalysis={(result) => {
+                                  setLastTestResult(result);
+                                  setLastTestQuestions(result.questions || null);
+                              }}
                           />
                         </ErrorBoundary>
                         </>

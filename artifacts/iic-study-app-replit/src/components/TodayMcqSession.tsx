@@ -16,6 +16,7 @@ import { tryEarnScore, subtractDailyScore, getMcqStreakBonus } from '../utils/sc
 import { hapticCorrect, hapticWrong } from '../utils/haptic';
 import { loadRoutineData } from '../utils/routineStorage';
 import { deferStudyCoins } from '../utils/studyRewards';
+import McqQuestionNavigator from './McqQuestionNavigator';
 
 interface InterleavedQ extends MCQItem {
     _topicIndex: number;
@@ -787,44 +788,6 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                     )}
                 </div>
             )}
-            {/* Sidebar */}
-            {showSidebar && (
-                <div className="fixed inset-0 bg-black/50 z-[110]" onClick={() => setShowSidebar(false)}>
-                    <div className="absolute right-0 top-0 bottom-0 w-64 bg-white shadow-2xl p-4 overflow-y-auto animate-in slide-in-from-right" onClick={e => e.stopPropagation()}>
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="font-black text-slate-800">Topics</h3>
-                            <button onClick={() => setShowSidebar(false)}><X size={20}/></button>
-                        </div>
-                        <div className="space-y-3">
-                            {topics.map((t, idx) => {
-                                const colors = ['bg-blue-50 border-blue-200 text-blue-700', 'bg-purple-50 border-purple-200 text-purple-700', 'bg-green-50 border-green-200 text-green-700', 'bg-orange-50 border-orange-200 text-orange-700', 'bg-rose-50 border-rose-200 text-rose-700', 'bg-teal-50 border-teal-200 text-teal-700'];
-                                const c = colors[idx % 6];
-                                const qCount = interleavedQuestions.filter(q => q._topicIndex === idx).length;
-                                const answeredCount = interleavedQuestions.filter((q, qi) => q._topicIndex === idx && answers[qi] !== undefined).length;
-                                return (
-                                    <div key={idx} className={`p-3 rounded-xl border ${c}`}>
-                                        <p className="text-xs font-bold truncate">{t.name}</p>
-                                        <div className="flex items-center justify-between mt-1">
-                                            <span className="text-[10px] text-slate-500">{t.chapterName}</span>
-                                            <span className="text-[10px] font-bold">{answeredCount}/{qCount} done</span>
-                                        </div>
-                                        <div className="h-1 bg-white/60 rounded-full mt-2">
-                                            <div className="h-full rounded-full bg-current opacity-40 transition-all" style={{ width: `${qCount > 0 ? (answeredCount / qCount) * 100 : 0}%` }} />
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                        {noMcqTopics.length > 0 && (
-                            <div className="mt-4 pt-4 border-t border-slate-100">
-                                <p className="text-[10px] text-slate-400 font-bold uppercase mb-2">MCQ nahi mila</p>
-                                {noMcqTopics.map((n, i) => <p key={i} className="text-[10px] text-slate-400 truncate">• {n}</p>)}
-                            </div>
-                        )}
-                    </div>
-                </div>
-            )}
-
             {/* Header */}
             <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0 z-10 shadow-sm">
                 <div className="flex items-center gap-2">
@@ -840,7 +803,16 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
-                    <button onClick={() => setShowSidebar(true)} className="p-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200">
+                    <button
+                        onClick={() => setShowSidebar(prev => !prev)}
+                        aria-label={showSidebar ? 'Hide question switcher' : 'Show question switcher'}
+                        aria-expanded={showSidebar}
+                        className={`p-2 rounded-lg transition-all ${
+                            showSidebar
+                                ? 'bg-indigo-100 text-indigo-700 ring-1 ring-indigo-300'
+                                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                    >
                         <List size={20} />
                     </button>
                     <div className="flex flex-col items-end">
@@ -872,6 +844,23 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                     style={{ width: `${((qIndex + 1) / interleavedQuestions.length) * 100}%` }}
                 />
             </div>
+
+            {showSidebar && (
+                <div className="px-4 pt-3 bg-slate-50 border-b border-slate-100">
+                    <div className="max-w-xl mx-auto">
+                        <McqQuestionNavigator
+                            total={interleavedQuestions.length}
+                            currentIndex={qIndex}
+                            answers={answers}
+                            onJump={(index) => {
+                                setQIndex(index);
+                                setShowSidebar(false);
+                            }}
+                            className="mb-1"
+                        />
+                    </div>
+                </div>
+            )}
 
             {/* Question */}
             <div className="flex-1 overflow-y-auto p-6 pb-24">

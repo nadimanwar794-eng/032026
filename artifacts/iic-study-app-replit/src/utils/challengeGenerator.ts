@@ -1,5 +1,41 @@
 import { ClassLevel, Board, Stream, MCQItem, SystemSettings } from '../types';
 import { getSubjectsList } from '../constants';
+import { sanitizeChallengeQuestions } from './challengeMcq';
+
+const pad = (value: number) => String(value).padStart(2, '0');
+
+export const getChallengeDateKey = (date = new Date()): string =>
+  `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+
+/** Daily challenges stay available until the next local midnight. */
+export const getChallengeExpiryDate = (date = new Date()): Date => {
+  const expiry = new Date(date);
+  expiry.setHours(24, 0, 0, 0);
+  return expiry;
+};
+
+export const isDailyChallenge20 = (challenge: any): boolean => {
+  const type = String(challenge?.type || challenge?.challengeType || '').toUpperCase();
+  const id = String(challenge?.id || '').toLowerCase();
+  return type === 'DAILY_CHALLENGE' ||
+    type === 'DAILY' ||
+    id.startsWith('daily-') ||
+    id.startsWith('daily-challenge-');
+};
+
+export const getChallengeWeekKey = (date = new Date()): string => {
+  const monday = new Date(date);
+  const day = monday.getDay();
+  monday.setDate(monday.getDate() - (day === 0 ? 6 : day - 1));
+  return getChallengeDateKey(monday);
+};
+
+export const getChallengeTitle = (
+  mode: 'DAILY' | 'WEEKLY',
+  date = new Date(),
+): string => mode === 'DAILY'
+  ? `Daily Challenge — ${date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`
+  : `Weekly Challenge — Week of ${date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`;
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 function _shuffle<T>(arr: T[]): T[] {
@@ -39,13 +75,40 @@ function _seededShuffle<T>(arr: T[], seed: string): T[] {
   return result;
 }
 
+const matchesClassLevel = (value: unknown, classLevel: ClassLevel): boolean => {
+  if (Array.isArray(value)) {
+    return value.some(item => String(item) === String(classLevel));
+  }
+  return typeof value === 'string' && String(value) === String(classLevel);
+};
+
+/**
+ * Centrally stored MCQs are only safe for a class-scoped challenge when the
+ * source explicitly carries a matching class. Lesson MCQs get their class
+ * from the nst_content_* key, so they are filtered separately below.
+ */
+const isClassScopedQuestion = (question: any, classLevel: ClassLevel): boolean =>
+  matchesClassLevel(
+    question?.classLevel ?? question?.targetClass ?? question?.targetClasses,
+    classLevel,
+  );
+
+export const isContentKeyForClass = (
+  key: string,
+  classLevel: ClassLevel,
+  board?: Board | null,
+): boolean => {
+  if (!key.startsWith('nst_content_')) return false;
+  if (board && !key.startsWith(`nst_content_${board}_`)) return false;
+  return key.includes(`_${classLevel}_`) || key.includes(`_${classLevel}-`);
+};
+
 /**
  * buildAutoMixQuestions
  * ---------------------
- * Collects MCQs from two sources — without any AI call:
- *   1. Completed lesson content stored in `nst_content_*` localStorage keys
- *      (manualMcqData, weeklyTestMcqData, mcqData fields)
- *   2. Wrong-answer history in the Revision Hub (`nst_revision_tracker_v2`)
+ * Collects class-scoped MCQs without any AI call. Questions from sources
+ * without a class tag are intentionally excluded: a daily challenge must not
+ * mix another class's content into the selected class.
  *
  * Returns a shuffled, deduplicated pool trimmed to `totalTarget` questions.
  */
@@ -54,9 +117,10 @@ export const buildAutoMixQuestions = (
   board: Board | null,
   stream: Stream | null,
   mode: 'DAILY' | 'WEEKLY' = 'DAILY',
-  selectedChapterIds: string[] = []
+  selectedChapterIds: string[] = [],
+  settings?: SystemSettings,
 ): MCQItem[] => {
-  const totalTarget = mode === 'DAILY' ? 50 : 100;
+  const totalTarget = mode === 'DAILY' ? 100 : 100;
   const usedQuestions = new Set<string>();
   const pool: MCQItem[] = [];
 
@@ -78,10 +142,9 @@ export const buildAutoMixQuestions = (
       const chId = parts[parts.length - 1];
       if (!selectedSet.has(chId)) continue;
     } else {
-      // Auto mode — match prefix (board-specific or all-boards)
-      if (!key.startsWith(autoPrefix)) continue;
-      // When scanning all boards, still filter by class level embedded in key
-      if (!board && !key.includes(`_${classLevel}_`) && !key.includes(`_${classLevel}-`)) continue;
+      // Auto mode — match class and, when supplied, the selected board.
+      if (!isContentKeyForClass(key, classLevel, board)) continue;
+      if (board && !key.startsWith(autoPrefix)) continue;
     }
 
     try {
@@ -113,8 +176,9 @@ export const buildAutoMixQuestions = (
         (bucket.wrongQuestions || []).forEach((wq: any) => {
           if (!wq.question) return;
           const qKey = wq.question.trim().toLowerCase();
-          if (usedQuestions.has(qKey)) return;
-          if (!wq.allOptions || wq.allOptions.length < 2) return;
+           if (usedQuestions.has(qKey)) return;
+           if (!isClassScopedQuestion(wq, classLevel)) return;
+           if (!wq.allOptions || wq.allOptions.length !== 4) return;
           const correctIdx = wq.allOptions.indexOf(wq.correctOption);
           if (correctIdx === -1) return;
           pool.push({
@@ -129,7 +193,58 @@ export const buildAutoMixQuestions = (
     }
   } catch { /* ignore */ }
 
-  return _shuffle(pool).slice(0, totalTarget);
+  // ── 3. Admin-published pools ─────────────────────────────────────────────
+  // These sources are not stored under nst_content_* because they are
+  // uploaded centrally. Include them so Auto Mix is not limited to chapters
+  // opened on the current device.
+  const addConfiguredQuestions = (questions: unknown, source: string) => {
+    if (!Array.isArray(questions)) return;
+    questions.forEach((q: any) => {
+      if (!q?.question) return;
+      if (!isClassScopedQuestion(q, classLevel)) return;
+      const qKey = q.question.trim().toLowerCase();
+      if (usedQuestions.has(qKey)) return;
+      pool.push({ ...q, topic: q.topic || source });
+      usedQuestions.add(qKey);
+    });
+  };
+  addConfiguredQuestions(settings?.globalChallengeMcq, 'Challenge of the Day');
+  addConfiguredQuestions(settings?.competitionMcqs, 'Competition');
+  (settings?.homework || []).forEach((item: any) => {
+    if (isClassScopedQuestion(item, classLevel)) {
+      addConfiguredQuestions(
+        (item.parsedMcqs || []).map((q: any) => ({ ...q, classLevel })),
+        item.title || 'Homework',
+      );
+    }
+  });
+  (settings?.lucentNotes || []).forEach((entry: any) => {
+    if (matchesClassLevel(entry.classLevel, classLevel)) {
+      (entry.pages || []).forEach((page: any) => {
+        addConfiguredQuestions(
+          (page.mcqs || []).map((q: any) => ({ ...q, classLevel })),
+          page.topicName || entry.lessonTitle || 'Lucent',
+        );
+      });
+    }
+  });
+
+  // ── 4. Question Bank ──────────────────────────────────────────────────────
+  try {
+    const bank = JSON.parse(localStorage.getItem('nst_question_bank') || '[]');
+    if (Array.isArray(bank)) {
+      bank
+        .filter((item: any) => matchesClassLevel(item?.classLevel, classLevel))
+        .forEach((item: any) =>
+          addConfiguredQuestions(
+            [{ ...item.question, classLevel: item.classLevel }],
+            item.subject || 'Question Bank',
+          )
+        );
+    }
+  } catch { /* ignore corrupt bank */ }
+
+  return sanitizeChallengeQuestions(_shuffle(pool).slice(0, totalTarget));
 };
 
 export const generateDailyChallengeQuestions = async (
@@ -139,42 +254,49 @@ export const generateDailyChallengeQuestions = async (
     settings: SystemSettings,
     userId: string,
     mode: 'DAILY' | 'WEEKLY' = 'DAILY'
-): Promise<{ questions: MCQItem[], name: string, id: string, durationMinutes: number }> => {
+): Promise<{ questions: MCQItem[], name: string, id: string, durationMinutes: number, expiryDate: string }> => {
     
-    // 0. Check for Published Challenge (Global)
-    if (mode === 'DAILY' && settings.dailyChallenges && settings.dailyChallenges.length > 0) {
-        const todayStr = new Date().toISOString().split('T')[0];
-        // Find challenge matching date, board, class
-        // ID Format: daily-{board}-{classLevel}-{date}
-        const expectedIdPrefix = `daily-${board}-${classLevel}-${todayStr}`;
-        
-        const published = settings.dailyChallenges.find(c => 
-            c.type === 'DAILY_CHALLENGE' &&
-            c.isActive &&
-            c.id.startsWith(expectedIdPrefix)
-        );
+    const isDaily = mode === 'DAILY';
+    const periodKey = isDaily ? getChallengeDateKey() : getChallengeWeekKey();
+    const challengeTitle = getChallengeTitle(mode);
+
+    // 0. Check for a manually published challenge for this exact period.
+    // Manual challenges are stored in system settings so every student sees
+    // the same set, rather than relying on the admin browser's localStorage.
+    if (settings.dailyChallenges && settings.dailyChallenges.length > 0) {
+        const published = settings.dailyChallenges.find(c => {
+            if (c.type !== (isDaily ? 'DAILY_CHALLENGE' : 'WEEKLY_TEST') || !c.isActive || c.classLevel !== classLevel) {
+                return false;
+            }
+            if (c.board && c.board !== board) return false;
+            const legacyPeriodKey = isDaily
+              ? new Date(c.createdAt).toISOString().split('T')[0]
+              : getChallengeWeekKey(new Date(c.createdAt));
+            return (c.periodKey || legacyPeriodKey) === periodKey &&
+              new Date(c.expiryDate).getTime() > Date.now();
+        });
 
         if (published) {
-            return {
-                id: `${published.id}-${userId}`, // User-specific attempt ID
-                name: published.title,
-                questions: published.questions,
-                durationMinutes: published.durationMinutes || 15
-            };
+            const publishedQuestions = sanitizeChallengeQuestions(published.questions);
+            if (publishedQuestions.length > 0) {
+                return {
+                    id: `${published.id}-${userId}`, // User-specific attempt ID
+                    name: published.title,
+                    questions: publishedQuestions,
+                    durationMinutes: Math.min(published.durationMinutes || (isDaily ? 60 : 60), 60),
+                    expiryDate: published.expiryDate,
+                };
+            }
         }
     }
 
     // CONFIGURATION
-    const isDaily = mode === 'DAILY';
-    const totalTarget = isDaily ? 30 : 100;
-    const durationMinutes = isDaily ? 15 : 60;
+    const totalTarget = isDaily ? 100 : 100;
+    const durationMinutes = isDaily ? 60 : 60;
     
     // Date string used as PRNG seed — all users on the same date get the same
     // question order, making the leaderboard a fair comparison.
-    const todayISO = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-
-    // ── Source priority 1: globalChallengeMcq (admin-curated syllabus pool) ──
-    const globalPool: MCQItem[] = settings.globalChallengeMcq || [];
+    const todayISO = getChallengeDateKey();
 
     // ── Source priority 2: ALL nst_content_* keys (whole syllabus, not just
     //    chapters the user has already studied) ───────────────────────────────
@@ -200,16 +322,17 @@ export const generateDailyChallengeQuestions = async (
         for (let i = 0; i < localStorage.length; i++) {
             const key = localStorage.key(i);
             if (key && key.startsWith('nst_content_')) {
+                if (!isContentKeyForClass(key, classLevel, board)) continue;
                 const parts = key.split('_');
                 const chId = parts[parts.length - 1];
                 if (selectedIds.has(chId)) sourceChapterKeys.push(key);
             }
         }
     } else {
-        // AUTO MODE — scan ALL nst_content_* keys (full syllabus, not just studied chapters)
+        // AUTO MODE — scan only this class's content (and selected board).
         for (let i = 0; i < localStorage.length; i++) {
             const key = localStorage.key(i);
-            if (key && key.startsWith('nst_content_')) {
+            if (key && isContentKeyForClass(key, classLevel, board)) {
                 sourceChapterKeys.push(key);
             }
         }
@@ -233,60 +356,93 @@ export const generateDailyChallengeQuestions = async (
                 ...(content.weeklyTestMcqData || []),
                 ...(content.mcqData || []),
             ];
-            allQs.forEach(q => addQ(q, subjectName));
+            sanitizeChallengeQuestions(allQs).forEach(q => addQ(q, subjectName));
         } catch { /* skip corrupt entries */ }
     }
+
+    // Centrally uploaded MCQs are available even when the student has never
+    // opened a chapter on this device.
+    const addConfiguredBySubject = (questions: unknown, subjectName: string) => {
+        if (!Array.isArray(questions)) return;
+        sanitizeChallengeQuestions(questions).forEach(q => addQ(q, subjectName));
+    };
+    // Only explicitly class-scoped central sources belong in this challenge.
+    // Generic/global, competition, or homework content without a target class
+    // is intentionally not mixed into a school-class routine challenge.
+    if (Array.isArray(settings.globalChallengeMcq)) {
+        addConfiguredBySubject(
+            settings.globalChallengeMcq.filter((q: any) => isClassScopedQuestion(q, classLevel)),
+            'Challenge of the Day',
+        );
+    }
+    if (Array.isArray(settings.competitionMcqs)) {
+        addConfiguredBySubject(
+            settings.competitionMcqs.filter((q: any) => isClassScopedQuestion(q, classLevel)),
+            'Competition',
+        );
+    }
+    (settings.homework || []).forEach((item: any) => {
+        if (isClassScopedQuestion(item, classLevel)) {
+            addConfiguredBySubject(
+                (item.parsedMcqs || []).map((q: any) => ({ ...q, classLevel })),
+                item.targetSubject || item.title || 'Homework',
+            );
+        }
+    });
+    (settings.lucentNotes || []).forEach((entry: any) => {
+        if (!matchesClassLevel(entry.classLevel, classLevel)) return;
+        (entry.pages || []).forEach((page: any) =>
+            addConfiguredBySubject(
+                (page.mcqs || []).map((q: any) => ({ ...q, classLevel })),
+                page.topicName || entry.lessonTitle || 'Lucent',
+            )
+        );
+    });
+    try {
+        const bank = JSON.parse(localStorage.getItem('nst_question_bank') || '[]');
+        if (Array.isArray(bank)) {
+            bank
+                .filter((item: any) => matchesClassLevel(item?.classLevel, classLevel))
+                .forEach((item: any) =>
+                    addConfiguredBySubject(
+                        [{ ...item.question, classLevel: item.classLevel }],
+                        item.subject || 'Question Bank',
+                    )
+                );
+        }
+    } catch { /* ignore corrupt bank */ }
 
     // 3. Selection Logic
     let finalQuestions: MCQItem[] = [];
     const seed = `${todayISO}-${board}-${classLevel}`;
-
-    // If admin has a global MCQ pool, use it directly (seeded shuffle for fairness)
-    if (globalPool.length >= Math.min(totalTarget, 10)) {
-        const deduped = globalPool.filter(q => {
-            const k = q.question?.trim().toLowerCase();
-            return k && !usedQuestions.has(k);
+    const subjects = Object.keys(questionsBySubject);
+    if (isDaily && isJuniorClass) {
+        const targets: Record<string, number> = { 'Math': 10, 'Science': 10, 'Social Science': 10 };
+        Object.entries(targets).forEach(([sub, count]) => {
+            finalQuestions.push(..._seededShuffle(questionsBySubject[sub] || [], seed + sub).slice(0, count));
         });
-        finalQuestions = _seededShuffle([...globalPool], seed).slice(0, totalTarget);
-    } else {
-        // Fall back to all-syllabus content from localStorage
-        if (isDaily && isJuniorClass) {
-            // STRICT 10 Math, 10 Sci, 10 SST
-            const targets: Record<string, number> = { 'Math': 10, 'Science': 10, 'Social Science': 10 };
-            Object.entries(targets).forEach(([sub, count]) => {
-                const pool = _seededShuffle(questionsBySubject[sub] || [], seed + sub);
-                finalQuestions.push(...pool.slice(0, count));
-            });
-            // Fill shortfall from remaining subjects
-            if (finalQuestions.length < totalTarget) {
-                const usedInFinal = new Set(finalQuestions.map(q => q.question));
-                const remaining = Object.values(questionsBySubject).flat().filter(q => !usedInFinal.has(q.question));
-                finalQuestions.push(..._seededShuffle(remaining, seed + 'fill').slice(0, totalTarget - finalQuestions.length));
-            }
-        } else {
-            // MIXED MODE (Weekly or Senior Classes) — equal share per subject
-            const subjects = Object.keys(questionsBySubject);
-            if (subjects.length > 0) {
-                const targetPerSubject = Math.ceil(totalTarget / subjects.length);
-                subjects.forEach(sub => {
-                    const pool = _seededShuffle(questionsBySubject[sub], seed + sub);
-                    finalQuestions.push(...pool.slice(0, targetPerSubject));
-                });
-            }
-        }
-
-        // Final deterministic shuffle + trim
-        finalQuestions = _seededShuffle(finalQuestions, seed).slice(0, totalTarget);
+    } else if (subjects.length > 0) {
+        const targetPerSubject = Math.ceil(totalTarget / subjects.length);
+        subjects.forEach(sub => {
+            finalQuestions.push(..._seededShuffle(questionsBySubject[sub], seed + sub).slice(0, targetPerSubject));
+        });
     }
+    const usedInFinal = new Set(finalQuestions.map(q => q.question?.trim().toLowerCase()));
+    const remaining = Object.values(questionsBySubject)
+        .flat()
+        .filter(q => !usedInFinal.has(q.question?.trim().toLowerCase()));
+    finalQuestions.push(..._seededShuffle(remaining, seed + 'fill').slice(0, Math.max(0, totalTarget - finalQuestions.length)));
+    finalQuestions = _seededShuffle(finalQuestions, seed).slice(0, totalTarget);
 
-    // 4. Return Object — challenge ID is board+class+date (same for all users of same cohort)
+    // 4. Return Object — same period + cohort gives every student the same set.
     const idPrefix = isDaily ? 'daily-challenge' : 'weekly-challenge';
-    const challengeId = `${idPrefix}-${board}-${classLevel}-${todayISO}`;
+    const challengeId = `${idPrefix}-${board}-${classLevel}-${periodKey}`;
     
     return {
         id: challengeId,
-        name: isDaily ? `Daily Challenge (${todayISO})` : `Weekly Mega Test (${todayISO})`,
-        questions: finalQuestions,
-        durationMinutes: durationMinutes
+        name: challengeTitle,
+        questions: sanitizeChallengeQuestions(finalQuestions),
+        durationMinutes: durationMinutes,
+        expiryDate: getChallengeExpiryDate().toISOString(),
     };
 };

@@ -1,8 +1,9 @@
 // @ts-nocheck
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import McqQuestionDisplay from './McqQuestionDisplay';
+import McqPracticeCard from './McqPracticeCard';
 import { User, SystemSettings, MCQItem } from '../types';
-import { X, BookOpen, Zap, CheckCircle, AlertCircle, ChevronRight, Check, RotateCcw, Loader2, Volume2, FileText } from 'lucide-react';
+import { X, BookOpen, Zap, CheckCircle, AlertCircle, ChevronRight, ChevronLeft, SkipForward, Check, RotateCcw, Loader2, Volume2, FileText, List } from 'lucide-react';
 import { getChapterData, saveUserToLive } from '../firebase';
 import { storage } from '../utils/storage';
 import { DEFAULT_SUBJECTS } from '../constants';
@@ -13,6 +14,7 @@ import { renderMathInHtml } from '../utils/mathUtils';
 import { ReadingScoreSession } from '../utils/readingScoreEngine';
 import { getLevelFromScore } from '../utils/levelSystem';
 import { fireSessionComplete } from '../utils/sessionNotify';
+import McqQuestionNavigator from './McqQuestionNavigator';
 
 interface Props {
     user: User;
@@ -139,6 +141,8 @@ export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, su
     const [currentQIndex, setCurrentQIndex] = useState(0);
     const [selectedOption, setSelectedOption] = useState<number | null>(null);
     const [userAnswers, setUserAnswers] = useState<Record<number, number>>({}); // All selected answers
+    const [skipped, setSkipped] = useState<Set<number>>(new Set());
+    const [showQuestionNavigator, setShowQuestionNavigator] = useState(false);
     const [notesRead, setNotesRead] = useState(false); // Track if user read notes
 
     // Start Q&A credit session when review screen opens, stop when it closes
@@ -314,15 +318,22 @@ export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, su
     }, [chapterId, subTopic, subjectName, userBoard, userClass, userStream]);
 
     const handleOptionSelect = (idx: number) => {
-        if (selectedOption !== null) return; // Prevent change
         setSelectedOption(idx);
         setUserAnswers(prev => ({ ...prev, [currentQIndex]: idx }));
+        setSkipped(prev => { const next = new Set(prev); next.delete(currentQIndex); return next; });
+        // Revision practice is sequential: selecting an option opens the next
+        // question immediately. The last question keeps the Submit button.
+        if (currentQIndex < mcqData.length - 1) {
+            const nextIndex = currentQIndex + 1;
+            setCurrentQIndex(nextIndex);
+            setSelectedOption(userAnswers[nextIndex] ?? null);
+        }
     };
 
     const nextQuestion = () => {
         if (currentQIndex < mcqData.length - 1) {
             setCurrentQIndex(prev => prev + 1);
-            setSelectedOption(null);
+            setSelectedOption(userAnswers[currentQIndex + 1] ?? null);
         }
     };
 
@@ -374,6 +385,21 @@ export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, su
                     <h2 className="text-[13px] font-black text-white truncate leading-tight">{subTopic}</h2>
                     <p className="text-[10px] font-bold text-amber-300 uppercase tracking-wide">{chapterTitle} · 📖 Revision Mode</p>
                 </div>
+                {activeTab === 'MCQ' && mcqData.length > 0 && (
+                    <button
+                        type="button"
+                        onClick={() => setShowQuestionNavigator(prev => !prev)}
+                        aria-label={showQuestionNavigator ? 'Hide question switcher' : 'Show question switcher'}
+                        aria-expanded={showQuestionNavigator}
+                        className={`shrink-0 p-2 rounded-xl border transition-all ${
+                            showQuestionNavigator
+                                ? 'bg-white text-indigo-700 border-white'
+                                : 'bg-white/10 text-white border-white/30 hover:bg-white/20'
+                        }`}
+                    >
+                        <List size={18} />
+                    </button>
+                )}
             </div>
 
             {/* TABS */}
@@ -400,6 +426,24 @@ export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, su
                     {isMcqAvailable ? (readingTimer > 0 ? `Wait (${readingTimer}s)` : 'Quick Practice') : 'Locked'}
                 </button>
             </div>
+
+            {activeTab === 'MCQ' && showQuestionNavigator && mcqData.length > 0 && (
+                <div className="px-4 pt-3 bg-slate-50 border-b border-slate-100">
+                    <div className="max-w-3xl mx-auto">
+                        <McqQuestionNavigator
+                            total={mcqData.length}
+                            currentIndex={currentQIndex}
+                            answers={userAnswers}
+                            skipped={skipped}
+                            onJump={(index) => {
+                                setCurrentQIndex(index);
+                                setSelectedOption(userAnswers[index] ?? null);
+                            }}
+                            className="mb-1"
+                        />
+                    </div>
+                </div>
+            )}
 
             {/* CONTENT AREA */}
             <div className="flex-1 overflow-y-auto bg-slate-50 p-4">
@@ -515,58 +559,60 @@ export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, su
                                             <span>Topic: {subTopic}</span>
                                         </div>
 
-                                        {/* QUESTION CARD */}
-                                        <div className="bg-white p-6 rounded-2xl shadow-lg border border-slate-100 flex-1 flex flex-col">
-                                            <div className="mb-6">
-                                                <McqQuestionDisplay
-                                                    q={mcqData[currentQIndex] as any}
-                                                    questionClassName="text-lg font-bold text-slate-800 leading-relaxed"
-                                                />
-                                            </div>
+                                        <McqQuestionNavigator
+                                            total={mcqData.length}
+                                            currentIndex={currentQIndex}
+                                            answers={userAnswers}
+                                            skipped={skipped}
+                                            onJump={(index) => {
+                                                setCurrentQIndex(index);
+                                                setSelectedOption(userAnswers[index] ?? null);
+                                            }}
+                                            className="mb-2"
+                                        />
 
-                                            <div className="space-y-3 flex-1">
-                                                {mcqData[currentQIndex].options.map((opt, idx) => {
-                                                    const isSelected = selectedOption === idx;
-                                                    const stateClass = isSelected
-                                                        ? "bg-purple-100 border-purple-500 text-purple-800 font-bold"
-                                                        : selectedOption !== null
-                                                            ? "opacity-50 border-slate-100 text-slate-500"
-                                                            : "border-slate-200 hover:border-purple-300 hover:bg-purple-50 text-slate-600";
+                                         <McqPracticeCard
+                                             q={mcqData[currentQIndex]}
+                                             questionNumber={mcqData[currentQIndex].questionNumber ?? currentQIndex + 1}
+                                             selectedOption={selectedOption}
+                                             answered={selectedOption !== null}
+                                             onSelect={handleOptionSelect}
+                                         />
 
-                                                    return (
-                                                        <button
-                                                            key={idx}
-                                                            onClick={() => handleOptionSelect(idx)}
-                                                            disabled={selectedOption !== null}
-                                                            className={`w-full p-4 rounded-xl border-2 text-left transition-all flex items-center gap-3 ${stateClass}`}
-                                                        >
-                                                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold border ${
-                                                                isSelected
-                                                                    ? 'bg-purple-500 border-purple-600 text-white'
-                                                                    : 'bg-white border-slate-300 text-slate-600'
-                                                            }`}>
-                                                                {['A','B','C','D'][idx]}
-                                                            </div>
-                                                            <span className="flex-1 text-sm" dangerouslySetInnerHTML={{ __html: renderMathInHtml(opt) }} />
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                        </div>
-
-                                        {/* NEXT & SUBMIT BUTTONS */}
+                                        {/* NEXT / SKIP / SUBMIT BUTTONS */}
                                         <div className="space-y-3 pb-8 animate-in slide-in-from-bottom-4">
-                                            {selectedOption !== null && currentQIndex < mcqData.length - 1 && (
+                                            <div className="grid grid-cols-3 gap-2">
+                                                <button
+                                                    onClick={() => {
+                                                        if (currentQIndex === 0) return;
+                                                        const index = currentQIndex - 1;
+                                                        setCurrentQIndex(index);
+                                                        setSelectedOption(userAnswers[index] ?? null);
+                                                    }}
+                                                    disabled={currentQIndex === 0}
+                                                    className="flex items-center justify-center gap-1 rounded-xl border border-slate-200 py-3 text-xs font-black text-slate-600 disabled:opacity-30"
+                                                ><ChevronLeft size={15} /> Pichla</button>
+                                                <button
+                                                    onClick={() => {
+                                                        if (currentQIndex >= mcqData.length - 1) return;
+                                                        setSkipped(prev => selectedOption === null ? new Set(prev).add(currentQIndex) : prev);
+                                                        const index = currentQIndex + 1;
+                                                        setCurrentQIndex(index);
+                                                        setSelectedOption(userAnswers[index] ?? null);
+                                                    }}
+                                                    disabled={currentQIndex >= mcqData.length - 1}
+                                                    className="flex items-center justify-center gap-1 rounded-xl border border-amber-200 bg-amber-50 py-3 text-xs font-black text-amber-700 disabled:opacity-30"
+                                                >Skip <SkipForward size={14} /></button>
                                                 <button
                                                     onClick={nextQuestion}
-                                                    className="w-full py-4 bg-slate-900 text-white font-bold rounded-xl shadow-lg hover:bg-slate-800 active:scale-95 transition-all flex items-center justify-center gap-2"
-                                                >
-                                                    Next Question <ChevronRight size={18} />
-                                                </button>
-                                            )}
+                                                    disabled={currentQIndex >= mcqData.length - 1}
+                                                    className="flex items-center justify-center gap-1 rounded-xl bg-slate-900 py-3 text-xs font-black text-white disabled:opacity-30"
+                                                >Agla <ChevronRight size={15} /></button>
+                                            </div>
                                             {(() => {
                                                 const answered = Object.keys(userAnswers).length;
-                                                const minRequired = Math.min(100, mcqData.length);
+                                                 // Submit is available after any one answered question.
+                                                 const minRequired = 1;
                                                 const ready = answered >= minRequired;
                                                 return (
                                                     <button

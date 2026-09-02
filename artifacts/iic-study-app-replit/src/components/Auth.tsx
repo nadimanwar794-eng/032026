@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, SystemSettings } from '../types';
 import { ADMIN_EMAIL } from '../constants';
-import { saveUserToLive, auth, getUserByEmail, getUserByMobileOrId, getUserData, getUserByLinkedGoogleUid } from '../firebase';
+import { saveUserToLive, auth, getUserByEmail, getUserByMobileOrId, getUserData, getFreshUserData, getUserByLinkedGoogleUid } from '../firebase';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, setPersistence, browserLocalPersistence, signInAnonymously, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { Lock, User as UserIcon, Phone, Mail, ShieldCheck, KeyRound, Copy, Check, XCircle, HelpCircle, Eye, EyeOff, ShieldQuestion, Loader2, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { LoginGuide } from './LoginGuide';
@@ -221,7 +221,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
       const userPhoto = firebaseUser.photoURL || '';
       const uid = firebaseUser.uid;
 
-      let appUser: any = await getUserData(uid);
+      let appUser: any = await getFreshUserData(uid);
       if (!appUser && userEmail) appUser = await getUserByEmail(userEmail);
       if (!appUser) appUser = await getUserByLinkedGoogleUid(uid);
 
@@ -237,12 +237,12 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
           profileCompleted: true,
           securityQuestion: appUser.securityQuestion || DEFAULT_QUESTIONS[0],
           securityAnswer: appUser.securityAnswer || 'google',
-          credits: typeof appUser.credits === 'number' && appUser.credits > 0 ? appUser.credits : 50
+          credits: typeof appUser.credits === 'number' ? appUser.credits : 50
         };
 
+        if (!await saveUserToLive(appUser)) throw new Error('Account could not be saved to the backend.');
         localStorage.setItem('nst_current_user', JSON.stringify(appUser));
         localStorage.setItem('nst_last_user_id', uid);
-        await saveUserToLive(appUser);
 
         if (logActivity) logActivity("LOGIN", "Logged In via Google Auth", appUser);
         triggerLoginSuccess(appUser);
@@ -289,9 +289,9 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
           ]
         };
 
+        if (!await saveUserToLive(newUser)) throw new Error('Account could not be saved to the backend.');
         localStorage.setItem('nst_current_user', JSON.stringify(newUser));
         localStorage.setItem('nst_last_user_id', uid);
-        await saveUserToLive(newUser);
 
         if (logActivity) logActivity("SIGNUP_GOOGLE", "New Student via Google", newUser);
         triggerLoginSuccess(newUser);
@@ -326,7 +326,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
         try {
           const res = await signInWithEmailAndPassword(auth, input.toLowerCase(), pass);
           const uid = res.user.uid;
-          let appUser: any = await getUserData(uid);
+          let appUser: any = await getFreshUserData(uid);
           if (!appUser) appUser = await getUserByEmail(input.toLowerCase());
 
           const completeUser: User = {
@@ -347,9 +347,9 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
             profileCompleted: true
           };
 
+          if (!await saveUserToLive(completeUser)) throw new Error('Account could not be saved to the backend.');
           localStorage.setItem('nst_current_user', JSON.stringify(completeUser));
           localStorage.setItem('nst_last_user_id', uid);
-          await saveUserToLive(completeUser);
 
           if (logActivity) logActivity("LOGIN", "Logged In via Email", completeUser);
           triggerLoginSuccess(completeUser);
@@ -381,7 +381,13 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
         const passwordMatch = targetUser.password && (targetUser.password === pass || pass === settings?.adminCode || pass === appSettings?.adminCode);
 
         if (passwordMatch) {
-          let freshProfile = await getUserData(targetUser.id);
+          // Restore the real Firebase account before reading user_data. This
+          // is required for secure Firestore rules on a fresh device; the
+          // anonymous session is only a lookup fallback for mobile/UID login.
+          if (targetUser.email && !auth.currentUser?.email) {
+            await signInWithEmailAndPassword(auth, targetUser.email, pass).catch(() => {});
+          }
+          let freshProfile = await getFreshUserData(targetUser.id);
           const raw = freshProfile || targetUser;
           const uid = raw.id || raw.uid;
 
@@ -396,9 +402,9 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
             profileCompleted: true
           };
 
-          localStorage.setItem('nst_current_user', JSON.stringify(finalUser));
-          localStorage.setItem('nst_last_user_id', uid);
-          await saveUserToLive(finalUser);
+           if (!await saveUserToLive(finalUser)) throw new Error('Account could not be saved to the backend.');
+           localStorage.setItem('nst_current_user', JSON.stringify(finalUser));
+           localStorage.setItem('nst_last_user_id', uid);
 
           if (logActivity) logActivity("LOGIN", "Logged In via Mobile/UID", finalUser);
           triggerLoginSuccess(finalUser);
@@ -496,9 +502,9 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
         ]
       };
 
+      if (!await saveUserToLive(newStudentUser)) throw new Error('Account could not be saved to the backend.');
       localStorage.setItem('nst_current_user', JSON.stringify(newStudentUser));
       localStorage.setItem('nst_last_user_id', uid);
-      await saveUserToLive(newStudentUser);
       if (logActivity) logActivity("SIGNUP_EMAIL", "New Student Registered", newStudentUser);
 
       setGeneratedId(newId);
@@ -578,7 +584,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
       setLoading(true);
       try {
         const validId = recoveryUserObj.id || recoveryUserObj.uid;
-        let freshProfile = await getUserData(validId);
+        let freshProfile = await getFreshUserData(validId);
         const raw = freshProfile || recoveryUserObj;
 
         const completeUser: User = {
@@ -601,9 +607,9 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
           provider: raw.provider || 'recovery'
         };
 
+        if (!await saveUserToLive(completeUser)) throw new Error('Account could not be saved to the backend.');
         localStorage.setItem('nst_current_user', JSON.stringify(completeUser));
         localStorage.setItem('nst_last_user_id', validId);
-        await saveUserToLive(completeUser);
 
         if (logActivity) logActivity("INSTANT_SECURITY_LOGIN", "Login via Security Answer", completeUser);
         setLoading(false);
