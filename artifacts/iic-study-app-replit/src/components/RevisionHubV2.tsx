@@ -27,12 +27,15 @@ import {
 } from 'lucide-react';
 import type { SystemSettings, User, StudentTab, TopicItem } from '../types';
 import { TodayMcqSession } from './TodayMcqSession';
+import McqQuestionNavigator from './McqQuestionNavigator';
 import { setMcqNotifSuppressed } from '../utils/creditNotify';
 import { toast } from 'sonner';
+import { saveTestResult, saveUserHistory, saveUserToLive, rtdb } from '../firebase';
+import { ref, update } from 'firebase/database';
 import {
   getDueItems, getUpcomingItems, markNotesReviewed, markMcqDone,
   clearTracker, getAllBuckets, getTrackerMap, bucketKey, keywordsForBucket,
-  getTopicNote,
+  getTopicNote, setRevisionTrackerUser, getIsRevisionHydrating,
   type WeakBucket
 } from '../utils/revisionTrackerV2';
 import { syncAllRevisionBuckets } from '../utils/revisionFirebase';
@@ -187,6 +190,15 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
   const [practiceAnswers, setPracticeAnswers] = useState<Record<number, number | null>>({});
   const [practiceRevealedQuestions, setPracticeRevealedQuestions] = useState<Set<number>>(new Set());
   const [practiceCompletedQuestions, setPracticeCompletedQuestions] = useState<Set<number>>(new Set());
+  const [isSavingPerformance, setIsSavingPerformance] = useState(false);
+  const [performanceSaved, setPerformanceSaved] = useState(false);
+
+  // Ensure revision tracker is scoped to the active user as soon as Revision Hub opens
+  useEffect(() => {
+    if (user?.id) {
+      setRevisionTrackerUser(user.id);
+    }
+  }, [user?.id]);
 
   // Live clock — ticks every second for countdown timers
   const [now, setNow] = useState(Date.now());
@@ -200,7 +212,7 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
     upcomingRef.current = upcoming;
     const all = getAllBuckets();
     setAllBuckets(all);
-    setTotalTracked(all.filter(b => b.wrongQuestions.length > 0).length);
+    setTotalTracked(all.filter(b => (b.wrongQuestions?.length ?? 0) > 0 || b.stage === 'MCQ' || b.stage === 'NOTES').length);
     setNoteResults({});
     setLoadingNotes({});
     setSelfRateKey(null);
@@ -210,15 +222,30 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
     if (user?.id) syncAllRevisionBuckets(user.id, getTrackerMap());
   }, [user?.id]);
 
+  const [isHydrating, setIsHydrating] = useState(getIsRevisionHydrating());
+
   // Firebase hydration happens at app login. Refresh this mounted screen when
   // that async restore completes after the screen has already rendered.
   useEffect(() => {
     const onHydrated = (event: Event) => {
+      setIsHydrating(false);
       const detail = (event as CustomEvent<{ userId?: string }>).detail;
       if (!detail?.userId || detail.userId === user?.id) reload();
     };
+    const onStateChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ hydrating?: boolean }>).detail;
+      if (typeof detail?.hydrating === 'boolean') {
+        setIsHydrating(detail.hydrating);
+      } else {
+        setIsHydrating(getIsRevisionHydrating());
+      }
+    };
     window.addEventListener('iic-revision-tracker-hydrated', onHydrated);
-    return () => window.removeEventListener('iic-revision-tracker-hydrated', onHydrated);
+    window.addEventListener('iic-revision-hydration-state', onStateChange);
+    return () => {
+      window.removeEventListener('iic-revision-tracker-hydrated', onHydrated);
+      window.removeEventListener('iic-revision-hydration-state', onStateChange);
+    };
   }, [reload, user?.id]);
 
   // Every second: update clock + auto-reload when any upcoming topic becomes due
@@ -276,8 +303,20 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
       }
       // 2. Keyword-based fallback search across all cached chapters
       const words = keywordsForBucket(b);
-      const results = await searchNotesByWords(words, 10);
-      setNoteResults(p => ({ ...p, [k]: results }));
+      let results = await searchNotesByWords(words, 10);
+
+      // 3. Resilient Fallback: If topic or chapter was renamed by Admin,
+      // search using chapterTitle, chapterId, or subjectName so the student is never left with empty notes
+      if (!results || results.length === 0) {
+        const fallbackWords = [b.chapterTitle, b.chapterId, b.subjectName, b.topic]
+          .filter(Boolean)
+          .flatMap(s => (s as string).split(/\s+/))
+          .filter(w => w.length >= 2);
+        if (fallbackWords.length > 0) {
+          results = await searchNotesByWords(fallbackWords, 5);
+        }
+      }
+      setNoteResults(p => ({ ...p, [k]: results || [] }));
     } catch {
       setNoteResults(p => ({ ...p, [k]: [] }));
     } finally {
@@ -329,11 +368,19 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
     // Build per-topic buckets first, then interleave round-robin so questions
     // from different topics are mixed instead of appearing topic-by-topic.
     const topicBuckets: PracticeQ[][] = [];
-    dueMcq.forEach(b => {
-      const bk = bucketKey(b.subjectId, b.chapterId, b.pageKey, b.topic);
-      const qs: PracticeQ[] = b.wrongQuestions
-        .filter(q => q.question && q.correctOption)
-        .map(q => ({ question: q.question, correctOption: q.correctOption!, allOptions: q.allOptions, topic: b.topic, bucketKey: bk }));
+    (dueMcq || []).forEach(b => {
+      const bk = b.key || b._key || bucketKey(b.subjectId, b.chapterId, b.pageKey || b.chapterId, b.topic);
+      const wrongList = Array.isArray(b?.wrongQuestions) ? b.wrongQuestions : [];
+      const qs: PracticeQ[] = wrongList
+        .filter(q => q && q.question && q.correctOption)
+        .map(q => ({
+          question: q.question,
+          correctOption: q.correctOption!,
+          allOptions: Array.isArray(q.allOptions) ? q.allOptions : undefined,
+          explanation: q.explanation,
+          topic: b.topic || 'Practice',
+          bucketKey: bk,
+        }));
       // Fisher-Yates shuffle within each topic bucket
       for (let i = qs.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
@@ -344,7 +391,7 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
     if (topicBuckets.length === 0) return;
     // Round-robin interleave across topic buckets
     const allQs: PracticeQ[] = [];
-    const maxLen = Math.max(...topicBuckets.map(b => b.length));
+    const maxLen = topicBuckets.length > 0 ? Math.max(...topicBuckets.map(b => b.length)) : 0;
     for (let row = 0; row < maxLen; row++) {
       for (let col = 0; col < topicBuckets.length; col++) {
         if (row < topicBuckets[col].length) allQs.push(topicBuckets[col][row]);
@@ -359,14 +406,23 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
     setPracticeAnswers({});
     setPracticeRevealedQuestions(new Set());
     setPracticeCompletedQuestions(new Set());
+    setPerformanceSaved(false);
     setPracticeActive(true);
   };
 
   const startPracticeTopic = (b: WeakBucket) => {
-    const bk = bucketKey(b.subjectId, b.chapterId, b.pageKey, b.topic);
-    const topicQs: PracticeQ[] = b.wrongQuestions
-      .filter(q => q.question && q.correctOption)
-      .map(q => ({ question: q.question, correctOption: q.correctOption!, allOptions: q.allOptions, topic: b.topic, bucketKey: bk }));
+    const bk = b.key || b._key || bucketKey(b.subjectId, b.chapterId, b.pageKey || b.chapterId, b.topic);
+    const wrongList = Array.isArray(b?.wrongQuestions) ? b.wrongQuestions : [];
+    const topicQs: PracticeQ[] = wrongList
+      .filter(q => q && q.question && q.correctOption)
+      .map(q => ({
+        question: q.question,
+        correctOption: q.correctOption!,
+        allOptions: Array.isArray(q.allOptions) ? q.allOptions : undefined,
+        explanation: q.explanation,
+        topic: b.topic || 'Practice',
+        bucketKey: bk,
+      }));
     if (topicQs.length === 0) return;
     setPracticeQs(topicQs);
     setPracticeIdx(0);
@@ -376,12 +432,13 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
     setPracticeAnswers({});
     setPracticeRevealedQuestions(new Set());
     setPracticeCompletedQuestions(new Set());
+    setPerformanceSaved(false);
     setPracticeActive(true);
   };
 
   useEffect(() => {
-    if (autoStartMcq && !autoStartedRef.current && dueMcq.length > 0) {
-      const withQs = dueMcq.filter(b => b.wrongQuestions && b.wrongQuestions.length > 0);
+    if (autoStartMcq && !autoStartedRef.current && (dueMcq?.length ?? 0) > 0) {
+      const withQs = dueMcq.filter(b => Array.isArray(b?.wrongQuestions) && b.wrongQuestions.length > 0);
       if (withQs.length > 0) {
         autoStartedRef.current = true;
         startPracticeAll();
@@ -392,6 +449,7 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
 
   const handlePracticeRate = (got: boolean) => {
     const q = practiceQs[practiceIdx];
+    if (!q) return;
     const alreadyCompleted = practiceCompletedQuestions.has(practiceIdx);
     // A completed question can be revisited from the palette, but must not
     // award XP or count twice. Move to the next unfinished question instead.
@@ -428,23 +486,210 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
     }
   };
 
-  const finishPracticeSession = () => {
-    dueMcq.forEach(b => {
-      const bk = bucketKey(b.subjectId, b.chapterId, b.pageKey, b.topic);
-      const sc = practiceScores[bk];
-      if (sc) {
-        const acc = sc.total > 0 ? sc.got / sc.total : 0;
-        markMcqDone(bk, acc, revisionConfig);
+  const finishPracticeSession = async () => {
+    if (isSavingPerformance) return;
+    setIsSavingPerformance(true);
+
+    try {
+      if (user?.id) {
+        setRevisionTrackerUser(user.id);
       }
-    });
-    syncRevisionProgress();
-    setPracticeActive(false);
-    setPracticeDone(false);
-    reload();
-    setActiveTab('results');
+
+      // 1. Gather all unique bucket keys from practiceScores and practiceQs
+      const practicedBucketKeys = Array.from(
+        new Set([
+          ...Object.keys(practiceScores),
+          ...practiceQs.map(q => q.bucketKey).filter(Boolean),
+        ])
+      );
+
+      // Collect question correctness and update buckets
+      practicedBucketKeys.forEach(bk => {
+        let sc = practiceScores[bk];
+        if (!sc || sc.total === 0) {
+          // Robust fallback: calculate directly from questions and completed answers
+          const topicQs = practiceQs.filter(q => q.bucketKey === bk);
+          if (topicQs.length > 0) {
+            let got = 0;
+            topicQs.forEach(q => {
+              const idx = practiceQs.indexOf(q);
+              if (practiceCompletedQuestions.has(idx)) {
+                const userAns = practiceAnswers[idx];
+                const correctIdx = q.allOptions?.findIndex(o => o?.trim() === q.correctOption?.trim());
+                if (userAns === correctIdx) got++;
+              }
+            });
+            sc = { got, total: topicQs.length };
+          }
+        }
+
+        // Collect question texts that were answered correctly
+        const correctQuestionTexts = practiceQs
+          .filter((q, idx) => {
+            if (q.bucketKey !== bk) return false;
+            if (!practiceCompletedQuestions.has(idx)) return false;
+            const userAns = practiceAnswers[idx];
+            if (userAns === null || userAns === undefined) return false;
+            const correctIdx = q.allOptions?.findIndex(
+              o => o?.trim() === q.correctOption?.trim()
+            );
+            return userAns === correctIdx;
+          })
+          .map(q => q.question);
+
+        const total = sc?.total || 1;
+        const got = sc?.got ?? (correctQuestionTexts.length > 0 ? correctQuestionTexts.length : 0);
+        const acc = total > 0 ? got / total : 1;
+        markMcqDone(bk, acc, revisionConfig, {
+          total,
+          got,
+          correctQuestionTexts,
+        });
+      });
+
+      // Also ensure any bucket in dueMcq that matches practiced topics is marked done
+      (dueMcq || []).forEach(b => {
+        const key = b.key || b._key || bucketKey(b.subjectId, b.chapterId, b.pageKey || b.chapterId, b.topic);
+        const match = practicedBucketKeys.find(
+          pbk => pbk === key || pbk.endsWith(`::${b.topic}`) || b.topic === (pbk.split('::')[3] || '')
+        );
+        if (match) {
+          const sc = practiceScores[match] || { got: 1, total: 1 };
+          markMcqDone(key, sc.got / (sc.total || 1), revisionConfig, {
+            total: sc.total,
+            got: sc.got,
+          });
+        }
+      });
+
+      // 2. Update user topicStrength with latest score (replaces old topic score)
+      const updatedTopicStrength = { ...(user?.topicStrength || {}) };
+      practicedBucketKeys.forEach(bk => {
+        const sc = practiceScores[bk] || { got: 1, total: 1 };
+        const topicName =
+          practiceQs.find(q => q.bucketKey === bk)?.topic ||
+          dueMcq.find(b => (b.key || b._key || bucketKey(b.subjectId, b.chapterId, b.pageKey || b.chapterId, b.topic)) === bk)?.topic ||
+          bk.split('::')[3] || '';
+        if (topicName && sc.total > 0) {
+          // Replace previous score with latest session score as requested
+          updatedTopicStrength[topicName] = {
+            correct: sc.got,
+            total: sc.total,
+          };
+        }
+      });
+
+      // 3. Save test results & update user mcqHistory / XP points
+      const totalGot = Object.values(practiceScores).reduce((s, v) => s + v.got, 0);
+      const totalTotal = Math.max(Object.values(practiceScores).reduce((s, v) => s + v.total, 0), practiceQs.length, 1);
+
+      if (user?.id) {
+        const percentage = Math.round((totalGot / totalTotal) * 100);
+        const practicedTopics = Array.from(
+          new Set(practiceQs.map(q => q.topic).filter(Boolean))
+        );
+        const topicTitle =
+          practicedTopics.length === 1
+            ? practicedTopics[0]
+            : `Today MCQ Practice (${practicedTopics.length || 1} Topics)`;
+
+        const newEntry: any = {
+          id: `rhub-rev-${Date.now()}`,
+          testId: `rhub-${Date.now()}`,
+          userId: user.id,
+          chapterId: 'revision-mcq',
+          chapterTitle: topicTitle,
+          subjectId: 'REVISION',
+          subjectName: 'Revision Hub',
+          date: new Date().toISOString(),
+          score: totalGot,
+          totalQuestions: totalTotal,
+          correctCount: totalGot,
+          wrongCount: Math.max(0, totalTotal - totalGot),
+          totalTimeSeconds: 0,
+          averageTimePerQuestion: 0,
+          performanceTag:
+            percentage >= 80
+              ? 'EXCELLENT'
+              : percentage >= 50
+              ? 'GOOD'
+              : 'BAD',
+          type: 'REVISION_MCQ',
+          topic: practicedTopics.join(', '),
+        };
+
+        // Award points (+2 for correct, +1 for wrong)
+        const ptsEarned = totalGot * 2 + Math.max(0, totalTotal - totalGot);
+        const updatedUser: User = {
+          ...user,
+          topicStrength: updatedTopicStrength,
+          mcqHistory: [...(user.mcqHistory || []), newEntry],
+          totalScore: (user.totalScore || 0) + ptsEarned,
+        };
+
+        // Instant local storage write
+        try {
+          localStorage.setItem('nst_current_user', JSON.stringify(updatedUser));
+          localStorage.setItem(`nst_user_profile_${user.id}`, JSON.stringify(updatedUser));
+          localStorage.setItem('nst_last_user_id', String(user.id));
+        } catch (_) {}
+
+        if (onUpdateUser) {
+          onUpdateUser(updatedUser);
+        }
+
+        // Fire background network writes without blocking UI
+        saveTestResult(user.id, newEntry).catch(e => console.warn('[IIC] saveTestResult error:', e));
+        saveUserHistory(user.id, newEntry).catch(e => console.warn('[IIC] saveUserHistory error:', e));
+        saveUserToLive(updatedUser).catch(e => console.warn('[IIC] saveUserToLive error:', e));
+
+        // Mirror to Realtime Database
+        if (rtdb) {
+          try {
+            update(ref(rtdb, `users/${user.id}/lastMcqPerformance`), {
+              testId: newEntry.id,
+              score: totalGot,
+              total: totalTotal,
+              percentage,
+              topic: newEntry.topic,
+              date: newEntry.date,
+              timestamp: Date.now(),
+            }).catch(() => {});
+          } catch (_) {}
+        }
+      }
+
+      // 4. Sync all revision buckets to Firebase Firestore & RTDB in background
+      syncRevisionProgress();
+
+      // 5. Dispatch events so Routine page, DailyEventPage, etc. immediately update
+      try {
+        window.dispatchEvent(new CustomEvent('iic-revision-updated'));
+        window.dispatchEvent(new CustomEvent('iic-user-updated'));
+      } catch (_) {}
+
+      toast.success('Performance save ho gaya! Latest score ke hisab se update ho chuka hai.');
+      setPerformanceSaved(true);
+
+      // 6. Reload due items and open results tab
+      reload();
+      setPracticeActive(false);
+      setPracticeDone(false);
+      setActiveTab('results');
+    } catch (err) {
+      console.error('[IIC] Error saving performance:', err);
+      toast.error('Performance save karne mein samasya aayi.');
+    } finally {
+      setIsSavingPerformance(false);
+    }
   };
 
   const resetPractice = () => {
+    // If practice finished and user hasn't saved yet, auto-save so user work is never lost
+    if (practiceDone && !performanceSaved) {
+      finishPracticeSession();
+      return;
+    }
     setPracticeActive(false);
     setPracticeDone(false);
     setPracticeQs([]);
@@ -455,6 +700,7 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
     setPracticeAnswers({});
     setPracticeRevealedQuestions(new Set());
     setPracticeCompletedQuestions(new Set());
+    setPerformanceSaved(false);
   };
 
   // ── MCQ open + self-rating ────────────────────────────────────────────────
@@ -532,6 +778,7 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
 
   // MCQ bucket card — no individual Practice button, just shows topic info + wrong questions preview
   const McqBucketCard = ({ b }: { b: WeakBucket }) => {
+    const wrongQs = Array.isArray(b?.wrongQuestions) ? b.wrongQuestions : [];
     return (
       <div className="border-b border-slate-100 last:border-b-0 px-4 py-3">
         <div className="flex items-start gap-3">
@@ -544,22 +791,22 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
             <p className="text-[10px] text-rose-500 font-bold">{b.wrongCount} galat · {b.total} attempts</p>
           </div>
           <span className="shrink-0 text-[10px] font-bold bg-rose-100 text-rose-600 px-2 py-1 rounded-full">
-            {b.wrongQuestions.length}Q
+            {wrongQs.length}Q
           </span>
         </div>
 
-        {b.wrongQuestions.length > 0 && (
+        {wrongQs.length > 0 && (
           <div className="mt-2 space-y-1.5">
-            {b.wrongQuestions.slice(0, 2).map((q, i) => (
+            {wrongQs.slice(0, 2).map((q, i) => (
               <div key={i} className="rounded-lg bg-rose-50 border border-rose-100 px-3 py-2">
-                <p className="text-[11px] text-slate-700" dangerouslySetInnerHTML={{ __html: renderMathInHtml(q.question) }} />
-                {q.correctOption && (
+                <p className="text-[11px] text-slate-700" dangerouslySetInnerHTML={{ __html: renderMathInHtml(q?.question || '') }} />
+                {q?.correctOption && (
                   <p className="text-[10px] text-emerald-700 font-bold mt-0.5">✓ <span dangerouslySetInnerHTML={{ __html: renderMathInHtml(q.correctOption) }} /></p>
                 )}
               </div>
             ))}
-            {b.wrongQuestions.length > 2 && (
-              <p className="text-[10px] text-slate-400 text-center">+{b.wrongQuestions.length - 2} aur sawaal</p>
+            {wrongQs.length > 2 && (
+              <p className="text-[10px] text-slate-400 text-center">+{wrongQs.length - 2} aur sawaal</p>
             )}
           </div>
         )}
@@ -678,7 +925,68 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
           settings={settings}
           onUpdateUser={onUpdateUser}
           onClose={() => setRevMcqSessionActive(false)}
-          onComplete={(_results) => {
+          onComplete={(results) => {
+            // Mark all dueMcq topics that were practiced as completed in revision tracker
+            try {
+              (dueMcq || []).forEach(b => {
+                const bk = b.key || b._key || bucketKey(b.subjectId, b.chapterId, b.pageKey || b.chapterId, b.topic);
+                // Look for matching topic result
+                const matchedResult = results?.find(
+                  (r: any) => r?.topicAnalysis?.[b.topic] || r?.chapterTitle === b.topic || r?.topic?.includes(b.topic)
+                );
+                const stats = matchedResult?.topicAnalysis?.[b.topic];
+                const total = stats?.total || 5;
+                const got = stats?.correct ?? Math.round(0.8 * total);
+                const acc = total > 0 ? got / total : 0.8;
+                markMcqDone(bk, acc, revisionConfig, { total, got });
+              });
+            } catch (_) {}
+
+            if (onUpdateUser && Array.isArray(results) && results.length > 0) {
+              const existingHistory = Array.isArray(user?.mcqHistory) ? user.mcqHistory : [];
+              const existingIds = new Set(existingHistory.map((e: any) => e?.id).filter(Boolean));
+              const newResults = results.filter((r: any) => r?.id && !existingIds.has(r.id));
+              
+              // Calculate points earned (+2 correct, +1 wrong)
+              let pts = 0;
+              const updatedTopicStrength = { ...(user?.topicStrength || {}) };
+              newResults.forEach((r: any) => {
+                const correct = Number(r?.correctCount || r?.score || 0);
+                const total = Number(r?.totalQuestions || 0);
+                pts += correct * 2 + Math.max(0, total - correct);
+                if (r?.topicAnalysis) {
+                  Object.entries(r.topicAnalysis).forEach(([top, stats]: [string, any]) => {
+                    if (stats && stats.total > 0) {
+                      updatedTopicStrength[top] = { correct: stats.correct, total: stats.total };
+                    }
+                  });
+                }
+              });
+
+              const updatedUser = {
+                ...user,
+                topicStrength: updatedTopicStrength,
+                mcqHistory: [...newResults, ...existingHistory],
+                totalScore: (user?.totalScore || 0) + pts,
+              };
+
+              // Instant local storage update
+              try {
+                localStorage.setItem('nst_current_user', JSON.stringify(updatedUser));
+                if (user?.id) {
+                  localStorage.setItem(`nst_user_profile_${user.id}`, JSON.stringify(updatedUser));
+                  localStorage.setItem('nst_last_user_id', String(user.id));
+                }
+              } catch (_) {}
+
+              onUpdateUser(updatedUser);
+              try { saveUserToLive(updatedUser); } catch (_) {}
+            }
+            syncRevisionProgress();
+            try {
+              window.dispatchEvent(new CustomEvent('iic-revision-updated'));
+              window.dispatchEvent(new CustomEvent('iic-user-updated'));
+            } catch (_) {}
             setRevMcqSessionActive(false);
             reload();
             setActiveTab('results');
@@ -688,7 +996,7 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
 
       {/* ── Inline "Practice All" MCQ Session Overlay ── */}
       {practiceActive && (
-        <div className="fixed inset-0 z-[200] flex flex-col bg-white" style={{ height: '100dvh' }}>
+        <div className="fixed inset-0 z-[200] flex flex-col bg-white" style={{ height: '100dvh', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
 
           {/* Top bar */}
           <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-slate-100 shadow-sm shrink-0">
@@ -702,7 +1010,9 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
               {practiceDone ? (
                 <>
                   <h1 className="text-base font-black text-slate-800 leading-none">Session Complete!</h1>
-                  <p className="text-[11px] text-slate-500 mt-0.5">Performance save ho raha hai…</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    {performanceSaved ? 'Performance save ho gaya ✅' : 'Apna performance save karein'}
+                  </p>
                 </>
               ) : (
                 <>
@@ -746,7 +1056,7 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
             </>
           )}
 
-          <div className="flex-1 overflow-y-auto overflow-x-hidden pb-20 p-4 max-w-xl mx-auto w-full">
+          <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 pb-[max(110px,calc(env(safe-area-inset-bottom,0px)+110px))] max-w-xl mx-auto w-full">
 
             {/* ── Session in progress ── */}
             {!practiceDone && practiceQs[practiceIdx] && (() => {
@@ -770,7 +1080,8 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
 
                   {/* Options — A/B/C/D if available, else reveal-only */}
                   {q.allOptions && q.allOptions.length > 0 ? (() => {
-                    const correctIdx = q.allOptions.findIndex(o => o === q.correctOption);
+                    const correctIdx = q.allOptions.findIndex(o => o?.trim() === q.correctOption?.trim());
+                    const correctText = correctIdx >= 0 ? q.allOptions[correctIdx] : q.correctOption;
                     return (
                       <div className="space-y-2.5">
                         {q.allOptions.map((opt, oi) => {
@@ -804,7 +1115,7 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
                                 : !showResult && isSelected ? 'border-indigo-500 bg-indigo-500 text-white'
                                 : 'border-slate-300 bg-slate-100 text-slate-600'
                               }`}>{letter}</span>
-                              <span className="font-semibold text-sm leading-relaxed pt-0.5" dangerouslySetInnerHTML={{ __html: renderMathInHtml(opt) }} />
+                              <span className="font-semibold text-sm leading-relaxed pt-0.5" dangerouslySetInnerHTML={{ __html: renderMathInHtml(opt || '') }} />
                               {showResult && isCorrect && <CheckCircle size={18} className="shrink-0 ml-auto text-emerald-500 mt-0.5" />}
                               {showResult && isSelected && !isCorrect && <XCircle size={18} className="shrink-0 ml-auto text-rose-500 mt-0.5" />}
                             </button>
@@ -816,7 +1127,7 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
                           <div className="space-y-3 pt-1">
                             {selectedAnswer !== null && selectedAnswer !== correctIdx && (
                               <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs text-amber-800 font-medium">
-                                💡 Sahi jawab: <strong>{q.allOptions[correctIdx]}</strong>
+                                💡 Sahi jawab: <strong>{correctText}</strong>
                               </div>
                             )}
                             {q.explanation && (
@@ -921,10 +1232,11 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
 
                   {/* Per-topic breakdown */}
                   <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 text-center">Topic-wise Results</p>
-                  {dueMcq.map(b => {
-                    const bk = bucketKey(b.subjectId, b.chapterId, b.pageKey, b.topic);
-                    const sc = practiceScores[bk];
-                    if (!sc) return null;
+                  {Object.entries(practiceScores).map(([bk, sc]) => {
+                    if (!sc || sc.total === 0) return null;
+                    const topicName = practiceQs.find(q => q.bucketKey === bk)?.topic ||
+                      dueMcq.find(b => (b.key || b._key || bucketKey(b.subjectId, b.chapterId, b.pageKey || b.chapterId, b.topic)) === bk)?.topic ||
+                      bk.split('::')[3] || 'Topic';
                     const pct = sc.total > 0 ? Math.round((sc.got / sc.total) * 100) : 0;
                     const _thr = revisionConfig?.thresholds ?? { strong: 65, average: 50, mastery: 80 };
                     const tier = pct >= _thr.mastery ? { bg: 'bg-violet-100', text: 'text-violet-700', label: '🏆 Mastered' }
@@ -938,7 +1250,7 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
                           <span className="text-[9px] uppercase">score</span>
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-black text-slate-800 truncate">{b.topic}</p>
+                          <p className="text-sm font-black text-slate-800 truncate">{topicName}</p>
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${tier.bg} ${tier.text}`}>{tier.label}</span>
                         </div>
                       </div>
@@ -947,23 +1259,43 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
 
                   {/* Info */}
                   <div className="rounded-xl bg-indigo-50 border border-indigo-100 px-3 py-2.5 text-xs text-indigo-700 flex gap-2">
-                    <span>📅</span>
-                    <span>Performance save ho gaya. <strong>Performance</strong> tab mein dekho.</span>
+                    <span>{performanceSaved ? '✅' : '💾'}</span>
+                    <span>
+                      {performanceSaved
+                        ? <>Performance successfully save ho gaya! <strong>Performance / Results</strong> tab mein update ho chuka hai.</>
+                        : <>Niche diye gaye button par click karke apna <strong>Performance Save</strong> karein taaki Today MCQ complete ho jaye.</>}
+                    </span>
                   </div>
 
                   {/* Submit + reset */}
-                  <button
-                    onClick={finishPracticeSession}
-                    className="w-full flex items-center justify-center gap-2 text-white font-black py-4 rounded-2xl text-base transition-all shadow-lg active:scale-[0.99] bg-emerald-600"
-                  >
-                    <Trophy size={20} /> Performance Save Karo
-                  </button>
-                  <button
-                    onClick={resetPractice}
-                    className="w-full flex items-center justify-center gap-2 bg-slate-100 text-slate-700 font-bold py-3.5 rounded-2xl transition-all"
-                  >
-                    <RotateCcw size={16} /> Wapas Jao
-                  </button>
+                  <div className="space-y-3 pt-2 pb-[max(28px,calc(env(safe-area-inset-bottom,0px)+28px))]">
+                    <button
+                      onClick={performanceSaved ? () => { setPracticeActive(false); setPracticeDone(false); setActiveTab('results'); } : finishPracticeSession}
+                      disabled={isSavingPerformance}
+                      className="w-full flex items-center justify-center gap-2 text-white font-black py-4 rounded-2xl text-base transition-all shadow-lg active:scale-[0.99] bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60"
+                    >
+                      {isSavingPerformance ? (
+                        <>
+                          <RefreshCw size={20} className="animate-spin" /> Saving Performance...
+                        </>
+                      ) : performanceSaved ? (
+                        <>
+                          <CheckCircle size={20} /> Performance Saved! Results Dekho
+                        </>
+                      ) : (
+                        <>
+                          <Trophy size={20} /> Performance Save Karo
+                        </>
+                      )}
+                    </button>
+                    <button
+                      onClick={resetPractice}
+                      disabled={isSavingPerformance}
+                      className="w-full flex items-center justify-center gap-2 bg-slate-100 text-slate-700 font-bold py-3.5 rounded-2xl transition-all hover:bg-slate-200 active:scale-[0.99]"
+                    >
+                      <RotateCcw size={16} /> Wapas Jao
+                    </button>
+                  </div>
                 </div>
               );
             })()}
@@ -1058,7 +1390,7 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
             </div>
 
             {/* Empty state */}
-            {totalTracked === 0 && (
+            {totalTracked === 0 && totalDue === 0 && (
               <div className="rounded-2xl border border-dashed border-indigo-200 bg-indigo-50 p-6 text-center">
                 <Sparkles size={30} className="mx-auto text-indigo-400 mb-3" />
                 <p className="font-black text-indigo-800 text-base mb-1">No topics being tracked yet</p>
@@ -1067,7 +1399,7 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
             )}
 
             {/* Notes due today */}
-            {totalTracked > 0 && (
+            {(totalTracked > 0 || dueNotes.length > 0) && (
               <div>
                 <SectionHeader icon={<BookOpen size={14} />} label="Notes To Read Today" count={dueNotes.length} color="indigo" />
                 {dueNotes.length === 0
@@ -1097,15 +1429,23 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
             )}
 
             {/* MCQ due today */}
-            {totalTracked > 0 && (
+            {(totalTracked > 0 || dueMcq.length > 0) && (
               <div>
                 <SectionHeader icon={<Target size={14} />} label="MCQ Practice For Today" count={dueMcq.length} color="emerald" />
-                {dueMcq.length === 0
-                  ? <EmptyCard msg="No MCQs pending today!" />
-                  : (() => {
+                {dueMcq.length === 0 ? (
+                  isHydrating ? (
+                    <div className="rounded-2xl border border-indigo-100 bg-indigo-50/70 p-5 text-center my-2 shadow-sm">
+                      <RefreshCw size={22} className="mx-auto mb-2 text-indigo-600 animate-spin" />
+                      <p className="text-xs font-black text-indigo-900">Cloud se revision data sync ho raha hai...</p>
+                      <p className="text-[11px] text-indigo-600 mt-1">Aapke sabhi topics aur revision schedules restore ho rahe hain</p>
+                    </div>
+                  ) : (
+                    <EmptyCard msg="No MCQs pending today!" />
+                  )
+                ) : (() => {
                     // Separate buckets: those with actual wrong questions vs routine-scheduled (no questions yet)
-                    const withQs   = dueMcq.filter(b => b.wrongQuestions.length > 0);
-                    const selfRate = dueMcq.filter(b => b.wrongQuestions.length === 0 && (b.cycleCount ?? 0) === 0);
+                    const withQs   = dueMcq.filter(b => (b.wrongQuestions?.length ?? 0) > 0);
+                    const selfRate = dueMcq.filter(b => (b.wrongQuestions?.length ?? 0) === 0);
                     return (
                       <>
                         {/* ── Self-rate section: routine-scheduled topics with no wrong questions ── */}
@@ -1175,7 +1515,7 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
                                     <div className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
                                     <p className="text-sm font-semibold text-slate-800 flex-1 min-w-0 truncate">{b.topic}</p>
                                     <span className="shrink-0 text-[10px] font-bold bg-rose-100 text-rose-600 px-2 py-0.5 rounded-full">
-                                      {b.wrongQuestions.length}Q
+                                      {(b.wrongQuestions?.length ?? 0)}Q
                                     </span>
                                     {b.subjectName && (
                                       <span className="text-[10px] text-slate-400 shrink-0 truncate max-w-[70px]">{b.subjectName}</span>
@@ -1393,7 +1733,7 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
                     <p className="text-[10px] text-slate-400 truncate">{b.subjectName} · {b.chapterTitle}</p>
                     <div className="flex items-center gap-1.5 mt-0.5">
                       <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${badgeColor}`}>{badgeText}</span>
-                      <span className="text-[9px] text-slate-400">{b.wrongQuestions.length} galat · {b.total} total</span>
+                      <span className="text-[9px] text-slate-400">{(b.wrongQuestions?.length ?? 0)} galat · {b.total} total</span>
                     </div>
                     {/* ── Last 3 sessions history ── */}
                     {history && history.length > 0 && (
@@ -1628,8 +1968,8 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
                                   <p className="text-xs font-bold text-slate-800 truncate">{b.topic}</p>
                                   <p className="text-[10px] text-slate-400 truncate">{b.subjectName}</p>
                                   <div className="flex items-center gap-2 mt-0.5">
-                                    {b.wrongQuestions.length > 0 && (
-                                      <span className="text-[9px] font-black bg-rose-100 text-rose-600 px-1.5 py-0.5 rounded-full">{b.wrongQuestions.length} galat</span>
+                                    {(b.wrongQuestions?.length ?? 0) > 0 && (
+                                      <span className="text-[9px] font-black bg-rose-100 text-rose-600 px-1.5 py-0.5 rounded-full">{(b.wrongQuestions?.length ?? 0)} galat</span>
                                     )}
                                     <span className="text-[9px] text-slate-400">Due: {nextDue}</span>
                                   </div>

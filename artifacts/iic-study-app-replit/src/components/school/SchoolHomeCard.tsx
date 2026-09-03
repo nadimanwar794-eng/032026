@@ -31,7 +31,7 @@ export const SchoolHomeCard: React.FC<Props> = ({ school, onOpen, onChangeSchool
       };
 
   return (
-    <div className="w-full rounded-2xl overflow-hidden transition-all" style={cardStyle}>
+    <div className="nst-card-animated w-full rounded-2xl overflow-hidden transition-all" style={cardStyle}>
 
       {/* Main content */}
       <div className="flex items-center gap-3 px-4 py-3.5">

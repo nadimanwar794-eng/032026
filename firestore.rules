@@ -1,0 +1,154 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'ADMIN' ||
+        request.auth.token.role == 'SUB_ADMIN' ||
+        request.auth.token.email == 'admin@gmail.com'
+      );
+    }
+
+    // Public configurations and settings
+    match /config/{document=**} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    match /admin_settings/{document=**} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    match /admin_stats/{document=**} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /admin_secure/{document=**} {
+      allow read, write: if isAdmin();
+    }
+
+    // Public content & shared resources
+    match /homework_entries/{id} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    match /competition_mcqs/{id} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    match /daily_gk/{id} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    match /notifications/{id} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    match /broadcast_codes/{id} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    match /global_challenge_mcq/{id} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    match /lucent_entries/{id} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    match /content_data/{id} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    match /published_themes/{id} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /published_animations/{id} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /suggestion_leaderboard/{uid} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /user_coins/{uid} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    match /ai_interactions/{id} {
+      allow read, write: if true;
+    }
+
+    // User profiles & account data
+    match /users/{userId} {
+      allow read: if true;
+      allow write: if isOwner(userId) || isAdmin() || !isAuthenticated();
+
+      match /test_results/{resultId} {
+        allow read, write: if isOwner(userId) || isAdmin() || !isAuthenticated();
+      }
+
+      match /history/{historyId} {
+        allow read, write: if isOwner(userId) || isAdmin() || !isAuthenticated();
+      }
+    }
+
+    match /user_data/{userId} {
+      allow read: if true;
+      allow write: if isOwner(userId) || isAdmin() || !isAuthenticated();
+    }
+
+    // School management
+    match /schools/{schoolId} {
+      allow read: if true;
+      allow write: if isAuthenticated() || true;
+
+      match /{subcollection=**} {
+        allow read, write: if true;
+      }
+    }
+
+    match /school_users/{uid} {
+      allow read, write: if true;
+    }
+
+    // Coaching management
+    match /coachings/{coachingId} {
+      allow read: if true;
+      allow write: if true;
+
+      match /{subcollection=**} {
+        allow read, write: if true;
+      }
+    }
+
+    match /coaching_users/{uid} {
+      allow read, write: if true;
+    }
+  }
+}

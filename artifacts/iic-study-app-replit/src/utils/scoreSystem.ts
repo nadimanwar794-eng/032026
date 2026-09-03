@@ -5,6 +5,8 @@
  * Multipliers: Free=1x, Basic=1.2x (+20%), Ultra=1.5x (+50%)
  */
 
+import { saveScoreLogToFirebase } from '../firebase';
+
 export const DAILY_SCORE_LIMIT = 1500;
 
 /** Fixed daily score limits by tier (Free=1500, Basic=25000, Ultra=3500) */
@@ -138,9 +140,7 @@ export const logScoreActivity = (userId: string, activity: string, pts: number, 
     if (pruned.length > MAX_LOG) pruned.splice(0, pruned.length - MAX_LOG);
     localStorage.setItem(SCORE_LOG_KEY(userId), JSON.stringify(pruned));
     // Fire-and-forget Firebase sync so history persists across devices/browser clears
-    import('../firebase').then(({ saveScoreLogToFirebase }) => {
-      saveScoreLogToFirebase(userId, pruned).catch(() => {});
-    }).catch(() => {});
+    saveScoreLogToFirebase(userId, pruned).catch(() => {});
   } catch {}
 };
 

@@ -4,13 +4,18 @@ import * as schema from "./schema";
 
 const { Pool } = pg;
 
-if (!process.env.DATABASE_URL) {
-  throw new Error(
-    "DATABASE_URL must be set. Did you forget to provision a database?",
-  );
-}
+export let pool: any = null;
+export let db: any = null;
 
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-export const db = drizzle(pool, { schema });
+if (process.env.DATABASE_URL) {
+  try {
+    pool = new Pool({ connectionString: process.env.DATABASE_URL });
+    db = drizzle(pool, { schema });
+  } catch (e) {
+    console.warn("[AI Studio] Failed to connect to DATABASE_URL", e);
+  }
+} else {
+  console.warn("[AI Studio] DATABASE_URL not set — database client inactive");
+}
 
 export * from "./schema";

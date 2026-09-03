@@ -1024,7 +1024,7 @@ export function CoachingHomeworkSection({
             <button
               key={coaching.id}
               onClick={() => { hapticStrong(); setSelected(coaching); }}
-              className="w-full rounded-2xl overflow-hidden active:scale-[0.99] transition-all text-left"
+              className="nst-card-animated w-full rounded-2xl overflow-hidden active:scale-[0.99] transition-all text-left"
               style={card3D
                 ? { background: bg, border: `2px solid ${borderColor}`, boxShadow: `0 1px 0 rgba(255,255,255,0.85) inset, 0 4px 0 ${borderColor}bb, 0 7px 18px ${borderColor}28`, transform: 'translateY(-1px)' }
                 : { background: bg, border: `2px solid ${borderColor}`, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }

@@ -8,7 +8,8 @@ import { rotateScreen } from '../utils/displayPrefs';
 import { getChapterData, saveUserToLive, saveTestResult, saveDemand } from '../firebase';
 import { storage } from '../utils/storage';
 import { generateAnalysisJson } from '../utils/analysisUtils';
-import { recordAttempt as recordRevisionAttempt, applyInitialSchedule, bucketKey, getTrackerMap } from '../utils/revisionTrackerV2';
+import { recordAttempt as recordRevisionAttempt, applyInitialSchedule, markMcqDone, bucketKey, getTrackerMap } from '../utils/revisionTrackerV2';
+import { syncAllRevisionBuckets } from '../utils/revisionFirebase';
 import { addMistakes, removeMistakeByQuestion } from '../utils/mistakeBank';
 import { getEffectiveDailyLimit, getLevelInfo, UNLIMITED } from '../utils/levelSystem';
 import { SubscriptionEngine } from '../utils/engines/subscriptionEngine';
@@ -408,6 +409,10 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                 if (topic) {
                     const bk = bucketKey(meta._subjectId, meta._chapterId, meta._chapterId, meta._topicName);
                     applyInitialSchedule(bk, accuracy, settings?.revisionConfig);
+                    markMcqDone(bk, accuracy, settings?.revisionConfig, {
+                        total,
+                        got: correct,
+                    });
                 }
             } catch (_) {}
 
@@ -499,6 +504,10 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                     item.sessionHistory = trackerMap[bk]?.sessionHistory;
                 }
             });
+            if (user?.id) {
+                syncAllRevisionBuckets(user.id, trackerMap);
+            }
+            window.dispatchEvent(new CustomEvent('iic-revision-updated'));
         } catch (_) {}
 
         // Store results + show summary screen instead of immediately closing

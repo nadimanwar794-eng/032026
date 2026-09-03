@@ -131,6 +131,16 @@ export const DailyEventPage: React.FC<Props> = ({
     return () => window.removeEventListener('iic-test-completed', handler);
   }, []);
 
+  useEffect(() => {
+    const onRevisionUpdated = () => setRefreshTick(t => t + 1);
+    window.addEventListener('iic-revision-updated', onRevisionUpdated);
+    window.addEventListener('iic-revision-tracker-hydrated', onRevisionUpdated);
+    return () => {
+      window.removeEventListener('iic-revision-updated', onRevisionUpdated);
+      window.removeEventListener('iic-revision-tracker-hydrated', onRevisionUpdated);
+    };
+  }, []);
+
   const dailyChallengeStatuses = useMemo(() => {
     let attempts: Record<string, any> = {};
     try {
@@ -373,7 +383,7 @@ export const DailyEventPage: React.FC<Props> = ({
       ).length;
       return { notesReviewedToday, mcqDoneToday };
     } catch { return { notesReviewedToday: 0, mcqDoneToday: 0 }; }
-  }, []);
+  }, [refreshTick]);
 
   // Skipped / low-time pages from routine lesson progress
   const skippedPages = useMemo(() => {

@@ -1,6 +1,6 @@
 // @ts-nocheck
 import React, { useState, useEffect } from 'react';
-import { User, UserCustomTheme, SystemSettings, ThemeHistoryEntry } from '../types';
+import { User, UserCustomTheme, SystemSettings, ThemeHistoryEntry, AdminSavedTheme, AdminLoadingScreen, OwnedTheme } from '../types';
 import { saveUserToLive, saveSystemSettings } from '../firebase';
 import { getTotalCredits, applyDeduction } from '../utils/creditSystem';
 import { DEFAULT_NAV_ACTIVE_COLORS } from '../utils/tierTheme';
@@ -19,6 +19,9 @@ interface Props {
 }
 
 const THEME_COST = 200;
+const ACCESS_DURATIONS = [1, 7, 30] as const;
+type AccessDurationDays = typeof ACCESS_DURATIONS[number];
+const ACCESS_PRICES: Record<AccessDurationDays, number> = { 1: 10, 7: 50, 30: 100 };
 
 interface ThemeState {
     bgColor: string;
@@ -48,6 +51,16 @@ interface ThemeState {
     themeEmoji?: string;
 }
 
+interface ThemePurchaseEntry {
+    id: string;
+    name: string;
+    emoji?: string;
+    themeData: ThemeState;
+    accessMode: 'FREE' | 'CREDITS';
+    creditCost?: number;
+    source?: 'BUILT_IN' | 'ADMIN_PUBLISHED';
+}
+
 const DEFAULT_THEME: ThemeState = {
     bgColor: '#ffffff',
     topBarStart: '#1e3a5f',
@@ -71,7 +84,67 @@ const DEFAULT_THEME: ThemeState = {
     mcqTabActive: '#3b82f6',
 };
 
-const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefault?: boolean }> = [
+const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefault?: boolean; isStoreFree?: boolean }> = [
+    {
+        name: 'Light', emoji: '☀️', isStoreFree: true,
+        colors: {
+            ...DEFAULT_THEME,
+            themeName: 'Light', themeEmoji: '☀️',
+            topBarStart: '#f8fafc', topBarEnd: '#e2e8f0',
+            navBg: '#ffffff', navActive: '#334155', navBorder: '#cbd5e1',
+            cardBg: '#ffffff', cardBorder: '#cbd5e1',
+            btnStart: '#334155', btnEnd: '#64748b',
+            textPrimary: '#0f172a', textSecondary: '#64748b',
+            accentGlow: '#94a3b8', progressColor: '#475569',
+            flashcardBg1: '#334155', flashcardBg2: '#64748b',
+            chapterAccent: '#475569', mcqTabActive: '#334155',
+        }
+    },
+    {
+        name: 'Dark', emoji: '🌙', isStoreFree: true,
+        colors: {
+            ...DEFAULT_THEME,
+            themeName: 'Dark', themeEmoji: '🌙',
+            bgColor: '#090d16', topBarStart: '#111827', topBarEnd: '#030712',
+            navBg: '#0f172a', navActive: '#e2e8f0', navBorder: '#1e293b',
+            cardBg: '#111827', cardBorder: '#334155',
+            btnStart: '#475569', btnEnd: '#1e293b',
+            textPrimary: '#f8fafc', textSecondary: '#94a3b8',
+            accentGlow: '#64748b', progressColor: '#94a3b8',
+            flashcardBg1: '#111827', flashcardBg2: '#1e293b',
+            chapterAccent: '#94a3b8', mcqTabActive: '#64748b',
+        }
+    },
+    {
+        name: 'Blue', emoji: '💙', isStoreFree: true,
+        colors: {
+            ...DEFAULT_THEME,
+            themeName: 'Blue', themeEmoji: '💙',
+            bgColor: '#eff6ff', topBarStart: '#1e3a8a', topBarEnd: '#0c4a6e',
+            navBg: '#ffffff', navActive: '#2563eb', navBorder: '#bfdbfe',
+            cardBg: '#f8fbff', cardBorder: '#bfdbfe',
+            btnStart: '#2563eb', btnEnd: '#0ea5e9',
+            textPrimary: '#1e3a8a', textSecondary: '#2563eb',
+            accentGlow: '#38bdf8', progressColor: '#2563eb',
+            flashcardBg1: '#1e3a8a', flashcardBg2: '#0369a1',
+            chapterAccent: '#2563eb', mcqTabActive: '#2563eb',
+        }
+    },
+    {
+        name: 'Dark Blue', emoji: '🌌', isStoreFree: true,
+        colors: {
+            ...DEFAULT_THEME,
+            themeName: 'Dark Blue', themeEmoji: '🌌',
+            bgColor: '#071126', topBarStart: '#111c4a', topBarEnd: '#020617',
+            navBg: '#081631', navActive: '#60a5fa', navBorder: '#1e3a8a',
+            cardBg: '#0d1b3a', cardBorder: '#1e40af',
+            btnStart: '#2563eb', btnEnd: '#06b6d4',
+            textPrimary: '#eff6ff', textSecondary: '#93c5fd',
+            accentGlow: '#38bdf8', progressColor: '#3b82f6',
+            flashcardBg1: '#102a63', flashcardBg2: '#075985',
+            chapterAccent: '#60a5fa', mcqTabActive: '#3b82f6',
+        }
+    },
     {
         name: 'Default — ULTRA', emoji: '💙', isDefault: true,
         colors: {
@@ -503,6 +576,47 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     },
 ];
 
+type LoadingTemplate = 'cards' | 'orbit' | 'pulse' | 'sort';
+interface LoadingCodeConfig {
+    template: LoadingTemplate;
+    duration: 4000 | 5000;
+    background: string;
+    accent: string;
+    title: string;
+    messages: string[];
+}
+
+const DEFAULT_LOADING_SCREEN_CODE = JSON.stringify({
+    template: 'pulse',
+    duration: 4000,
+    background: '#07111f',
+    accent: '#38bdf8',
+    title: 'Ready to Learn',
+    messages: ['Preparing your study space…', 'Syncing progress…', 'Almost ready!'],
+}, null, 2);
+
+const parseLoadingScreenCode = (raw: string): LoadingCodeConfig | null => {
+    try {
+        const value = JSON.parse(raw);
+        const hex = (input: unknown, fallback: string) =>
+            typeof input === 'string' && /^#[0-9a-f]{6}$/i.test(input) ? input : fallback;
+        const template: LoadingTemplate = ['cards', 'orbit', 'pulse', 'sort'].includes(value?.template) ? value.template : 'pulse';
+        const messages = Array.isArray(value?.messages)
+            ? value.messages.filter((message: unknown) => typeof message === 'string').slice(0, 4)
+            : [];
+        return {
+            template,
+            duration: Number(value?.duration) === 5000 ? 5000 : 4000,
+            background: hex(value?.background, '#07111f'),
+            accent: hex(value?.accent, '#38bdf8'),
+            title: typeof value?.title === 'string' && value.title.trim() ? value.title.trim().slice(0, 40) : 'Ready to Learn',
+            messages: messages.length ? messages : ['Preparing your study space…', 'Syncing progress…', 'Almost ready!'],
+        };
+    } catch {
+        return null;
+    }
+};
+
 type ColorSection = 'BACKGROUND' | 'TOPBAR' | 'NAVIGATION' | 'CARDS' | 'BUTTONS' | 'TEXT' | 'ACCENTS' | 'FLASHCARD' | 'CHAPTERS' | 'MCQ_TABS';
 
 const SECTIONS: Array<{ id: ColorSection; label: string; icon: React.ReactNode; desc: string }> = [
@@ -663,6 +777,11 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
     const [showEntryPopup, setShowEntryPopup] = useState(true);
     /* Selected preset index in the entry popup (-1 = none) */
     const [popupPresetIdx, setPopupPresetIdx] = useState<number>(-1);
+    const [storeTab, setStoreTab] = useState<'THEMES' | 'OWNED'>('THEMES');
+    const [themeDurationEntry, setThemeDurationEntry] = useState<ThemePurchaseEntry | null>(null);
+    const [themeDurationDays, setThemeDurationDays] = useState<AccessDurationDays>(7);
+    const [loadingScreenPurchaseEntry, setLoadingScreenPurchaseEntry] = useState<any>(null);
+    const [loadingScreenPurchaseDays, setLoadingScreenPurchaseDays] = useState<AccessDurationDays>(7);
 
     /* Coin confirmation popup — shown before applying a 2nd/changed theme */
     const [showCoinPopup, setShowCoinPopup]   = useState(false);
@@ -711,17 +830,387 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
     const [adminHistoryPreview, setAdminHistoryPreview] = useState<ThemeHistoryEntry | null>(null);
     const [adminHistorySaving, setAdminHistorySaving]   = useState(false);
 
-    /* ── ONE-TIME: clear old adminThemeLibrary data from Firestore ── */
-    useEffect(() => {
-        if (!isAdmin) return;
-        const lib = (settings as any)?.adminThemeLibrary;
-        if (lib && lib.length > 0) {
-            const cleaned = { ...(settings || {}), adminThemeLibrary: [] };
-            saveSystemSettings(cleaned as any)
-                .then(() => onUpdateSettings?.(cleaned as any))
-                .catch(() => {});
+    /* ── ADMIN PUBLISHED THEME LIBRARY ── */
+    const [adminPublishSaving, setAdminPublishSaving] = useState(false);
+    const [editingAdminThemeId, setEditingAdminThemeId] = useState<string | null>(null);
+    const [adminPublishTier, setAdminPublishTier] = useState<'all' | 'free' | 'basic' | 'ultra'>('all');
+    const [adminPublishMode, setAdminPublishMode] = useState<'FREE' | 'CREDITS'>('FREE');
+    const ADMIN_THEME_PRICES: Record<1 | 7 | 30, number> = { 1: 10, 7: 50, 30: 100 };
+    const adminThemeLibrary: AdminSavedTheme[] = (settings as any)?.adminThemeLibrary || [];
+    const userTierStr = user.isPremium && (user as any).subscriptionLevel === 'ULTRA' ? 'ultra'
+        : user.isPremium && (user as any).subscriptionLevel === 'BASIC' ? 'basic' : 'free';
+    const applicablePublishedThemes = adminThemeLibrary.filter(entry =>
+        entry.published !== false &&
+        (entry.targetTier === 'all' || entry.targetTier === userTierStr)
+    );
+    const storedOwnedThemes: OwnedTheme[] = Array.isArray((user as any).ownedThemes)
+        ? (user as any).ownedThemes
+        : [];
+    const legacyThemeEntry = user.personalTheme && (() => {
+        const sourceThemeId = (user as any).activeAppliedThemeId || user.personalTheme.id || 'legacy_current_theme';
+        const published = adminThemeLibrary.find(entry => entry.id === sourceThemeId);
+        return {
+            id: `legacy_owned_${user.id}`,
+            sourceThemeId,
+            name: published?.name || user.personalTheme.themeName || 'Current Theme',
+            emoji: user.personalTheme.themeEmoji,
+            themeData: user.personalTheme,
+            purchasedAt: user.personalTheme.createdAt || new Date().toISOString(),
+            expiresAt: (user as any).personalThemeExpiry,
+            accessMode: 'CREDITS' as const,
+            accessDurationDays: 7 as const,
+            creditCost: 0,
+        } satisfies OwnedTheme;
+    })();
+    // Keep legacy personalTheme data visible alongside the newer ownedThemes
+    // list. Deduplicate by source/id so old users do not lose a purchase after
+    // the ownership model was introduced.
+    const ownedThemes: OwnedTheme[] = (() => {
+        const merged = [...storedOwnedThemes];
+        if (legacyThemeEntry && !merged.some(item =>
+            item.id === legacyThemeEntry.id || item.sourceThemeId === legacyThemeEntry.sourceThemeId
+        )) {
+            merged.push(legacyThemeEntry);
         }
-    }, []);
+        return merged;
+    })();
+
+    const saveOwnedTheme = (
+        baseUser: User,
+        sourceThemeId: string,
+        name: string,
+        emoji: string | undefined,
+        themeData: UserCustomTheme,
+        duration: AccessDurationDays,
+        accessMode: 'FREE' | 'CREDITS',
+        creditCost: number,
+        existingExpiry?: string,
+    ): User => {
+        const now = Date.now();
+        const currentOwned: OwnedTheme[] = Array.isArray((baseUser as any).ownedThemes)
+            ? (baseUser as any).ownedThemes
+            : [];
+        const existing = currentOwned.find(item => item.sourceThemeId === sourceThemeId);
+        const currentExpiry = existing?.expiresAt ? new Date(existing.expiresAt).getTime() : 0;
+        const expiry = existingExpiry || new Date(
+            Math.max(now, Number.isFinite(currentExpiry) ? currentExpiry : 0) + duration * 86400000
+        ).toISOString();
+        const owned: OwnedTheme = {
+            id: existing?.id || `owned_theme_${sourceThemeId}_${now}`,
+            sourceThemeId,
+            name,
+            emoji,
+            themeData,
+            purchasedAt: existing?.purchasedAt || new Date(now).toISOString(),
+            expiresAt: expiry,
+            accessMode,
+            accessDurationDays: duration,
+            creditCost,
+        };
+        return {
+            ...baseUser,
+            ownedThemes: [owned, ...currentOwned.filter(item => item.id !== owned.id)].slice(0, 100),
+            activeOwnedThemeId: owned.id,
+        } as User;
+    };
+
+    /* ── ADMIN LOADING-SCREEN CODE STORE ── */
+    const adminLoadingScreenLibrary: AdminLoadingScreen[] = (settings as any)?.adminLoadingScreenLibrary || [];
+    const [loadingScreenCode, setLoadingScreenCode] = useState(DEFAULT_LOADING_SCREEN_CODE);
+    const [loadingScreenName, setLoadingScreenName] = useState('');
+    const [loadingScreenEmoji, setLoadingScreenEmoji] = useState('✨');
+    const [loadingScreenPublishTier, setLoadingScreenPublishTier] = useState<'all' | 'free' | 'basic' | 'ultra'>('all');
+    const [loadingScreenPublishMode, setLoadingScreenPublishMode] = useState<'FREE' | 'CREDITS'>('CREDITS');
+    const [loadingScreenSaving, setLoadingScreenSaving] = useState(false);
+    const [editingLoadingScreenId, setEditingLoadingScreenId] = useState<string | null>(null);
+    const builtInLoadingScreens = [
+        { slotId: 1, name: 'Future Cards', emoji: '🃏', description: 'Default · 5 seconds', accessMode: 'FREE' as const },
+        { slotId: 2, name: 'Orbit', emoji: '🪐', description: '4 seconds', accessMode: 'CREDITS' as const },
+        { slotId: 3, name: 'Algorithm Sort', emoji: '⚙️', description: '4 seconds', accessMode: 'CREDITS' as const },
+        { slotId: 4, name: 'Discovery Ring', emoji: '🧭', description: '4 seconds', accessMode: 'CREDITS' as const },
+    ];
+    // Keep the store in sync with the splash screen even when an older session
+    // has the unlock data only in localStorage and not yet on the user object.
+    const storedLoadingScreenState = (key: string) => {
+        try {
+            const value = JSON.parse(localStorage.getItem(`nst_${key}_${user.id}`) || '{}');
+            return value && typeof value === 'object' ? value : {};
+        } catch {
+            return {};
+        }
+    };
+    const loadingScreenSlotUnlocks = Object.keys((user as any).loadingScreenSlotUnlocks || {}).length
+        ? (user as any).loadingScreenSlotUnlocks
+        : storedLoadingScreenState('splash_slot_unlocks');
+    const loadingScreenUnlocks = Object.keys((user as any).loadingScreenUnlocks || {}).length
+        ? (user as any).loadingScreenUnlocks
+        : storedLoadingScreenState('splash_unlocks');
+    const applicableLoadingScreens = adminLoadingScreenLibrary.filter(entry =>
+        entry.published !== false && (!entry.targetTier || entry.targetTier === 'all' || entry.targetTier === userTierStr)
+    );
+
+    const openPreset = (presetIndex: number) => {
+        const preset = PRESETS[presetIndex];
+        if (!preset) return;
+        setPopupPresetIdx(presetIndex);
+        setTheme({ ...preset.colors });
+        if (!isAdmin) {
+            setThemeDurationEntry({
+                id: `builtin_theme_${presetIndex}`,
+                name: preset.name,
+                emoji: preset.emoji,
+                themeData: { ...preset.colors },
+                accessMode: 'CREDITS',
+                source: 'BUILT_IN',
+            });
+            setThemeDurationDays(7);
+            // Students should keep the catalogue open while the duration
+            // sheet is shown, so Theme Studio never falls back to the old
+            // two-item "available themes" section.
+            setShowEntryPopup(isAdmin ? false : true);
+        }
+    };
+
+    const doPublishLoadingScreen = async () => {
+        if (!isAdmin) return;
+        const parsed = parseLoadingScreenCode(loadingScreenCode);
+        if (!parsed) {
+            alert('Loading screen code valid JSON nahi hai. Example format neeche diya hai.');
+            return;
+        }
+        if (!loadingScreenName.trim()) {
+            alert('Loading screen ka naam daalo pehle.');
+            return;
+        }
+        setLoadingScreenSaving(true);
+        const now = new Date().toISOString();
+        const existing = adminLoadingScreenLibrary.find(entry => entry.id === editingLoadingScreenId);
+        const slotId = existing?.slotId || Math.max(4, ...adminLoadingScreenLibrary.map(entry => Number(entry.slotId) || 0)) + 1;
+        const id = editingLoadingScreenId || `admin_loading_${Date.now()}`;
+        const item: AdminLoadingScreen = {
+            id,
+            slotId,
+            name: loadingScreenName.trim().slice(0, 40),
+            emoji: loadingScreenEmoji.slice(0, 2) || '✨',
+            code: JSON.stringify(parsed),
+            targetTier: loadingScreenPublishTier,
+            accessMode: loadingScreenPublishMode,
+            // The student chooses 1, 7, or 30 days when unlocking it.
+            creditCost: 0,
+            accessDurationDays: undefined,
+            published: true,
+            publishedAt: now,
+            createdAt: existing?.createdAt || now,
+        };
+        const nextLibrary = [item, ...adminLoadingScreenLibrary.filter(entry => entry.id !== id)].slice(0, 100);
+        const nextSettings = { ...(settings || {}), adminLoadingScreenLibrary: nextLibrary };
+        try {
+            await saveSystemSettings(nextSettings as any);
+            onUpdateSettings?.(nextSettings as any);
+            setEditingLoadingScreenId(null);
+            setLoadingScreenName('');
+            setLoadingScreenCode(DEFAULT_LOADING_SCREEN_CODE);
+            alert(`✅ "${item.name}" loading screen publish ho gayi.`);
+        } catch {
+            alert('❌ Loading screen publish nahi ho payi — dobara try karo.');
+        } finally {
+            setLoadingScreenSaving(false);
+        }
+    };
+
+    const editLoadingScreen = (entry: AdminLoadingScreen) => {
+        setEditingLoadingScreenId(entry.id);
+        setLoadingScreenName(entry.name);
+        setLoadingScreenEmoji(entry.emoji || '✨');
+        setLoadingScreenCode(JSON.stringify(parseLoadingScreenCode(entry.code) || {}, null, 2));
+    };
+
+    const toggleLoadingScreenPublished = async (entry: AdminLoadingScreen) => {
+        const nextLibrary = adminLoadingScreenLibrary.map(item => item.id === entry.id ? { ...item, published: entry.published === false } : item);
+        const nextSettings = { ...(settings || {}), adminLoadingScreenLibrary: nextLibrary };
+        await saveSystemSettings(nextSettings as any);
+        onUpdateSettings?.(nextSettings as any);
+    };
+
+    const deleteLoadingScreen = async (entry: AdminLoadingScreen) => {
+        if (!confirm(`"${entry.name}" loading screen delete karna chahte ho?`)) return;
+        const nextSettings = { ...(settings || {}), adminLoadingScreenLibrary: adminLoadingScreenLibrary.filter(item => item.id !== entry.id) };
+        await saveSystemSettings(nextSettings as any);
+        onUpdateSettings?.(nextSettings as any);
+        if (editingLoadingScreenId === entry.id) setEditingLoadingScreenId(null);
+    };
+
+    const buyLoadingScreen = async (entry: { slotId: number; name: string; accessMode?: 'FREE' | 'CREDITS'; creditCost?: number; accessDurationDays?: AccessDurationDays }, selectedDuration?: AccessDurationDays) => {
+        if (entry.slotId === 1 || isAdmin) {
+            alert(`✅ ${entry.name} free mein available hai.`);
+            return;
+        }
+        const duration = selectedDuration || entry.accessDurationDays || 7;
+        const cost = entry.accessMode === 'FREE' ? 0 : ACCESS_PRICES[duration];
+        const currentUnlocks = (user as any).loadingScreenUnlocks || {};
+        const currentSlotUnlocks = (user as any).loadingScreenSlotUnlocks || {};
+        const currentExpiry = currentUnlocks[entry.slotId];
+        if (currentExpiry && currentExpiry > Date.now()) {
+            alert(`${entry.name} already active hai.`);
+            return;
+        }
+        if (totalCoins < cost) {
+            alert(`❌ Is loading screen ke liye ${cost} credits chahiye. Aapke paas ${totalCoins} hain.`);
+            return;
+        }
+        const deducted = cost > 0 ? applyDeduction(user, cost) : user;
+        if (!deducted) return;
+        const nextUnlocks = { ...currentUnlocks, [entry.slotId]: Date.now() + duration * 86400000 };
+        const nextSlotUnlocks = { ...currentSlotUnlocks, [entry.slotId]: true };
+        const currentAssignments = (user as any).loadingScreenSlotAssignments || { 1: 1 };
+        const assigned = Object.values(currentAssignments).map(Number);
+        const nextAssignments = assigned.includes(entry.slotId)
+            ? currentAssignments
+            : { ...currentAssignments, [Math.max(1, ...Object.keys(currentAssignments).map(Number)) + 1]: entry.slotId };
+        const updated = {
+            ...deducted,
+            loadingScreenUnlocks: nextUnlocks,
+            loadingScreenSlotUnlocks: nextSlotUnlocks,
+            loadingScreenSlotAssignments: nextAssignments,
+        } as User;
+        onUpdateUser(updated);
+        try { await saveUserToLive(updated); } catch {}
+        alert(`✅ ${entry.name} unlock ho gaya — ${duration} din ke liye${cost ? ` ${cost} credits deduct hue` : ' free'} .`);
+    };
+
+    const isLoadingScreenUnlocked = (entry: { slotId: number; accessMode?: 'FREE' | 'CREDITS' }) => {
+        if (entry.slotId === 1 || isAdmin) return true;
+        const expiry = loadingScreenUnlocks?.[entry.slotId];
+        return loadingScreenSlotUnlocks?.[entry.slotId] === true || (!!expiry && expiry > Date.now());
+    };
+
+    const toggleLoadingScreenRotation = async (slotId: number) => {
+        const current = (user as any).loadingScreenSlotAssignments || { 1: 1 };
+        const values = Object.values(current).map(Number);
+        if (values.includes(slotId)) {
+            if (slotId === 1 && values.length === 1) return;
+            const filtered = values.filter(id => id !== slotId);
+            const next = filtered.includes(1) ? filtered : [1, ...filtered];
+            const assignments = next.reduce<Record<number, number>>((acc, id, index) => { acc[index + 1] = id; return acc; }, {});
+            onUpdateUser({ ...user, loadingScreenSlotAssignments: assignments } as User);
+            try { await saveUserToLive({ ...user, loadingScreenSlotAssignments: assignments } as User); } catch {}
+        } else {
+            const assignments = { ...current, [Math.max(1, ...Object.keys(current).map(Number)) + 1]: slotId };
+            onUpdateUser({ ...user, loadingScreenSlotAssignments: assignments } as User);
+            try { await saveUserToLive({ ...user, loadingScreenSlotAssignments: assignments } as User); } catch {}
+        }
+    };
+
+    // Opening Theme Studio is the user's acknowledgement that they have seen
+    // the current catalogue. The dashboard uses this marker for its NEW badge.
+    useEffect(() => {
+        if (!isAdmin && applicablePublishedThemes.length) {
+            try {
+                localStorage.setItem(`nst_theme_studio_seen_${user.id}`, String(Date.now()));
+            } catch {}
+        }
+    }, [user.id, isAdmin, applicablePublishedThemes.length]);
+
+    const doPublishAdminTheme = async () => {
+        if (!isAdmin) return;
+        const name = (theme.themeName || '').trim();
+        if (!name) {
+            alert('Theme ka naam daalo pehle.');
+            return;
+        }
+        setAdminPublishSaving(true);
+        const now = new Date().toISOString();
+        const id = editingAdminThemeId || `admin_theme_${Date.now()}`;
+        const themeObj = { ...buildThemeObj(), id, themeName: name, themeEmoji: theme.themeEmoji || '🎨' };
+        const saved: AdminSavedTheme = {
+            id,
+            name,
+            themeData: themeObj,
+            createdAt: adminThemeLibrary.find(t => t.id === id)?.createdAt || now,
+            createdBy: user.name || user.id,
+            targetTier: adminPublishTier,
+            accessMode: adminPublishMode,
+            // The buyer chooses the duration at purchase time.
+            creditCost: 0,
+            accessDurationDays: undefined,
+            published: true,
+            publishedAt: now,
+        };
+        const nextLibrary = [saved, ...adminThemeLibrary.filter(t => t.id !== id)].slice(0, 100);
+        const historyEntry: ThemeHistoryEntry = {
+            id,
+            name,
+            themeData: themeObj,
+            targetTier: adminPublishTier,
+            appliedAt: now,
+            expiresAt: null,
+            accessMode: saved.accessMode,
+            creditCost: saved.creditCost,
+            accessDurationDays: saved.accessDurationDays,
+            source: 'ADMIN_PUBLISHED',
+            published: true,
+        };
+        const previousHistory: ThemeHistoryEntry[] = (settings as any)?.themeHistory || [];
+        const nextSettings = {
+            ...(settings || {}),
+            adminThemeLibrary: nextLibrary,
+            themeHistory: [historyEntry, ...previousHistory.filter(entry => entry.id !== id)].slice(0, 100),
+        };
+        try {
+            await saveSystemSettings(nextSettings as any);
+            onUpdateSettings?.(nextSettings as any);
+            setEditingAdminThemeId(null);
+            alert(`✅ "${name}" publish ho gayi!\n${adminPublishTier === 'all' ? 'Sabhi tiers' : adminPublishTier.toUpperCase()} · ${adminPublishMode === 'FREE' ? 'FREE' : 'Buyer chooses 1, 7, or 30 days'}`);
+        } catch {
+            alert('❌ Theme publish nahi ho payi — dobara try karo.');
+        } finally {
+            setAdminPublishSaving(false);
+        }
+    };
+
+    const loadAdminThemeForEdit = (entry: AdminSavedTheme) => {
+        setTheme(stateFromTheme(entry.themeData));
+        setEditingAdminThemeId(entry.id);
+        setAdminPublishTier(entry.targetTier || 'all');
+        setAdminPublishMode(entry.accessMode || 'FREE');
+        setBuilderMode('ADVANCED');
+        setShowEntryPopup(false);
+    };
+
+    const deleteAdminTheme = async (entry: AdminSavedTheme) => {
+        if (!confirm(`"${entry.name}" ko library se delete karna chahte ho?`)) return;
+        const nextLibrary = adminThemeLibrary.filter(t => t.id !== entry.id);
+        const previousHistory: ThemeHistoryEntry[] = (settings as any)?.themeHistory || [];
+        const nextSettings = {
+            ...(settings || {}),
+            adminThemeLibrary: nextLibrary,
+            themeHistory: previousHistory.filter(item => item.id !== entry.id),
+        };
+        try {
+            await saveSystemSettings(nextSettings as any);
+            onUpdateSettings?.(nextSettings as any);
+            if (editingAdminThemeId === entry.id) setEditingAdminThemeId(null);
+        } catch {
+            alert('❌ Theme delete nahi ho payi.');
+        }
+    };
+
+    const toggleAdminThemePublished = async (entry: AdminSavedTheme) => {
+        const published = entry.published === false;
+        const nextLibrary = adminThemeLibrary.map(item => item.id === entry.id ? { ...item, published } : item);
+        const previousHistory: ThemeHistoryEntry[] = (settings as any)?.themeHistory || [];
+        const nextSettings = {
+            ...(settings || {}),
+            adminThemeLibrary: nextLibrary,
+            themeHistory: previousHistory.map(item => item.id === entry.id ? { ...item, published } : item),
+        };
+        try {
+            await saveSystemSettings(nextSettings as any);
+            onUpdateSettings?.(nextSettings as any);
+        } catch {
+            alert('❌ Theme status update nahi ho paya.');
+        }
+    };
 
     const setColor = (key: keyof ThemeState) => (v: string) =>
         setTheme(prev => ({ ...prev, [key]: v }));
@@ -765,10 +1254,13 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
         }));
     };
 
+    const selectedPopupPreset = popupPresetIdx >= 0 ? PRESETS[popupPresetIdx] : undefined;
+    const selectedPopupPresetIsFree = !!selectedPopupPreset?.isStoreFree || isFirstTime || isAdmin;
+
     /* ─────────────────────────────────────────
        APPLY THEME
     ───────────────────────────────────────── */
-    const doApply = async () => {
+    const doApply = async (selectedDuration?: AccessDurationDays, selectedTheme: ThemeState = theme) => {
         setSaving(true);
         setShowCoinPopup(false);
 
@@ -776,46 +1268,47 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
             id: `ptheme_${user.id}_${Date.now()}`,
             userId: user.id,
             userName: user.name,
-            bgColor:       isAdmin ? theme.bgColor : '#ffffff',
-            accentColor:   theme.btnStart,
-            textColor:     theme.textPrimary,
-            cardColor:     isAdmin ? theme.cardBg : '#ffffff',
-            topBarStart:   theme.topBarStart,
-            topBarEnd:     theme.topBarEnd,
-            navBg:         isAdmin ? theme.navBg : '#ffffff',
-            navActive:     theme.navActive,
-            navInactive:   theme.navInactive || DEFAULT_THEME.navInactive,
-            navActiveColors: [...(theme.navActiveColors || DEFAULT_NAV_ACTIVE_COLORS)].slice(0, 5),
-            navBorder:     theme.navBorder,
-            cardBg:        isAdmin ? theme.cardBg : '#ffffff',
-            cardBorder:    theme.cardBorder,
-            btnStart:      theme.btnStart,
-            btnEnd:        theme.btnEnd,
-            textSecondary: theme.textSecondary,
-            accentGlow:    theme.accentGlow,
-            progressColor: theme.progressColor,
-            flashcardBg1:  theme.flashcardBg1,
-            flashcardBg2:  theme.flashcardBg2,
-            chapterAccent: theme.chapterAccent,
-            mcqTabActive:  theme.mcqTabActive,
-            topBarEffect:  theme.topBarEffect,
-            animColor:     theme.animColor,
-            animSpeed:     theme.animSpeed,
-            themeName:     theme.themeName,
-            themeEmoji:    theme.themeEmoji,
+            bgColor:       isAdmin ? selectedTheme.bgColor : '#ffffff',
+            accentColor:   selectedTheme.btnStart,
+            textColor:     selectedTheme.textPrimary,
+            cardColor:     isAdmin ? selectedTheme.cardBg : '#ffffff',
+            topBarStart:   selectedTheme.topBarStart,
+            topBarEnd:     selectedTheme.topBarEnd,
+            navBg:         isAdmin ? selectedTheme.navBg : '#ffffff',
+            navActive:     selectedTheme.navActive,
+            navInactive:   selectedTheme.navInactive || DEFAULT_THEME.navInactive,
+            navActiveColors: [...(selectedTheme.navActiveColors || DEFAULT_NAV_ACTIVE_COLORS)].slice(0, 5),
+            navBorder:     selectedTheme.navBorder,
+            cardBg:        isAdmin ? selectedTheme.cardBg : '#ffffff',
+            cardBorder:    selectedTheme.cardBorder,
+            btnStart:      selectedTheme.btnStart,
+            btnEnd:        selectedTheme.btnEnd,
+            textSecondary: selectedTheme.textSecondary,
+            accentGlow:    selectedTheme.accentGlow,
+            progressColor: selectedTheme.progressColor,
+            flashcardBg1:  selectedTheme.flashcardBg1,
+            flashcardBg2:  selectedTheme.flashcardBg2,
+            chapterAccent: selectedTheme.chapterAccent,
+            mcqTabActive:  selectedTheme.mcqTabActive,
+            topBarEffect:  selectedTheme.topBarEffect,
+            animColor:     selectedTheme.animColor,
+            animSpeed:     selectedTheme.animSpeed,
+            themeName:     selectedTheme.themeName,
+            themeEmoji:    selectedTheme.themeEmoji,
             createdAt:     new Date().toISOString(),
             likes:         0,
         };
 
+        const duration = selectedDuration || 7;
+        const cost = isAdmin ? 0 : ACCESS_PRICES[duration];
         let baseUser: User;
-        if (isAdmin || isFirstTime) {
-            /* Admin = free always. First time user = free. */
+        if (isAdmin) {
+            /* Admin preview/apply stays free. */
             baseUser = { ...user };
         } else {
-            /* Paid apply — deduct 200 coins */
-            const deducted = applyDeduction(user, THEME_COST);
+            /* Built-in themes are purchased by the student for the selected duration. */
+            const deducted = applyDeduction(user, cost);
             if (!deducted) {
-                /* Should not reach here (we checked before showing popup), but safety net */
                 alert(`⚠️ Coins insufficient. Theme apply nahi hua.`);
                 setSaving(false);
                 return;
@@ -823,17 +1316,25 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
             baseUser = { ...deducted };
         }
 
-        const updated: User = {
+        let updated: User = {
             ...baseUser,
             personalTheme:      themeObj,
             personalThemeColor: theme.btnStart,
+            activeAppliedThemeId: 'default',
         };
-        // Event theme always expires after exactly 7 days, then reverts to default
-        const sbe = (settings as any)?.scoreBoostEvent;
-        if (!isAdmin && sbe?.enabled && sbe?.themeStudioEnabled) {
-            (updated as any).personalThemeExpiry = new Date(Date.now() + 7 * 24 * 3600000).toISOString();
-        } else if (!isAdmin) {
-            delete (updated as any).personalThemeExpiry;
+        if (!isAdmin) {
+            (updated as any).personalThemeExpiry = new Date(Date.now() + duration * 24 * 3600000).toISOString();
+            updated = saveOwnedTheme(
+                updated,
+                `builtin_theme_${selectedTheme.themeName || 'custom'}`,
+                selectedTheme.themeName || 'Custom Theme',
+                selectedTheme.themeEmoji,
+                themeObj,
+                duration,
+                'CREDITS',
+                cost,
+                (updated as any).personalThemeExpiry,
+            );
         }
         // User explicitly set a custom theme — clear the "lock to default" flag
         delete (updated as any).useDefaultTheme;
@@ -844,10 +1345,18 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
 
         const msg = isAdmin
             ? '✅ Theme apply ho gayi! (Admin — free)'
-            : isFirstTime
-                ? '✅ Pehli baar FREE mein theme apply ho gayi! 🎉\nAgle baar theme change karne pe 200 coins lagenge.'
-                : `✅ Theme apply ho gayi! 200 🪙 coins kat gaye.`;
+            : `✅ Theme apply ho gayi! ${duration} din ke liye ${cost} 🪙 coins kat gaye.`;
         alert(msg);
+    };
+
+    const applySelectedThemePurchase = async () => {
+        if (!themeDurationEntry) return;
+        if (themeDurationEntry.source === 'BUILT_IN') {
+            await doApply(themeDurationDays, themeDurationEntry.themeData);
+        } else {
+            await doSetUserActiveTheme(themeDurationEntry.id, themeDurationDays);
+        }
+        setThemeDurationEntry(null);
     };
 
     const handleApplyClick = () => {
@@ -1212,12 +1721,104 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
     /* ─────────────────────────────────────────
        USER: SET ACTIVE HISTORY THEME
     ───────────────────────────────────────── */
-    const doSetUserActiveTheme = async (themeId: string | 'default') => {
+    const doSetUserActiveTheme = async (themeId: string | 'default', selectedDuration?: AccessDurationDays) => {
         setUserThemeSaving(true);
-        const updated = { ...user, activeAppliedThemeId: themeId } as User;
+        const history: ThemeHistoryEntry[] = (settings as any)?.themeHistory || [];
+        const publishedEntry = themeId === 'default'
+            ? null
+            : adminThemeLibrary.find(entry => entry.id === themeId);
+        const selected = themeId === 'default'
+            ? null
+            : history.find(entry => entry.id === themeId) || publishedEntry;
+
+        // Students can only activate admin-published themes and choose their
+        // own access duration. Keep this gate here as well as in the UI.
+        if (!isAdmin && selected && !selectedDuration) {
+            setThemeDurationEntry((publishedEntry || selected) as ThemePurchaseEntry);
+            setThemeDurationDays((selected.accessDurationDays || 7) as AccessDurationDays);
+            setUserThemeSaving(false);
+            return;
+        }
+
+        let updated = { ...user, activeAppliedThemeId: themeId } as User;
+        if (themeId === 'default') {
+            delete (updated as any).personalTheme;
+            delete (updated as any).personalThemeExpiry;
+            delete (updated as any).personalThemeColor;
+        } else if (selected) {
+            const duration = selectedDuration || selected.accessDurationDays || 7;
+            const cost = selected.accessMode === 'CREDITS' ? ACCESS_PRICES[duration] : 0;
+            const currentExpiry = (user as any).personalThemeExpiry as string | undefined;
+            const ownedEntry = ownedThemes.find(item => item.sourceThemeId === themeId);
+            const ownedEntryActive = !!ownedEntry && (!ownedEntry.expiresAt || new Date(ownedEntry.expiresAt) > new Date());
+            const alreadyOwned = ownedEntryActive || (
+                (user as any).activeAppliedThemeId === themeId &&
+                !!currentExpiry &&
+                new Date(currentExpiry) > new Date()
+            );
+            if (!alreadyOwned && totalCoins < cost) {
+                alert(`❌ Is theme ke liye ${cost} credits chahiye. Aapke paas ${totalCoins} hain.`);
+                setUserThemeSaving(false);
+                return;
+            }
+            const deducted = alreadyOwned ? user : applyDeduction(user, cost);
+            if (!deducted) { setUserThemeSaving(false); return; }
+            const nextExpiry = alreadyOwned
+                ? (ownedEntry?.expiresAt || currentExpiry)
+                : new Date(Date.now() + duration * 86400000).toISOString();
+            updated = {
+                ...deducted,
+                activeAppliedThemeId: themeId,
+                personalTheme: selected.themeData,
+                personalThemeColor: selected.themeData.btnStart,
+                personalThemeExpiry: nextExpiry,
+            } as User;
+            updated = saveOwnedTheme(
+                updated,
+                themeId,
+                selected.name,
+                selected.themeData.themeEmoji,
+                selected.themeData as UserCustomTheme,
+                duration,
+                selected.accessMode || 'FREE',
+                cost,
+                nextExpiry,
+            );
+        } else {
+            delete (updated as any).personalTheme;
+            delete (updated as any).personalThemeExpiry;
+            delete (updated as any).personalThemeColor;
+        }
+        onUpdateUser(updated);
+        try { await saveUserToLive(updated); } catch {}
+        setThemeDurationEntry(null);
+        if (selected && !isAdmin) {
+            const duration = selectedDuration || selected.accessDurationDays || 7;
+            const cost = selected.accessMode === 'CREDITS' ? ACCESS_PRICES[duration] : 0;
+            alert(`✅ Theme apply ho gayi! ${duration} din ke liye${cost ? ` ${cost} credits deduct hue` : ' free'} .`);
+        }
+        setUserThemeSaving(false);
+    };
+
+    const applyOwnedTheme = async (owned: OwnedTheme) => {
+        if (owned.expiresAt && new Date(owned.expiresAt) <= new Date()) {
+            alert('⛔ Is theme ka access expire ho gaya hai. Dobara purchase karke activate karo.');
+            return;
+        }
+        setUserThemeSaving(true);
+        const updated: User = {
+            ...user,
+            activeOwnedThemeId: owned.id,
+            activeAppliedThemeId: 'default',
+            personalTheme: owned.themeData,
+            personalThemeColor: owned.themeData.btnStart,
+            personalThemeExpiry: owned.expiresAt,
+        } as User;
+        delete (updated as any).useDefaultTheme;
         onUpdateUser(updated);
         try { await saveUserToLive(updated); } catch {}
         setUserThemeSaving(false);
+        alert(`✅ ${owned.name} theme apply ho gayi.`);
     };
 
     const sectionColors: Record<ColorSection, React.ReactNode> = {
@@ -1312,11 +1913,11 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
             {/* ══════════════════════════════════════════
                 ENTRY POPUP — shown when user first opens
             ══════════════════════════════════════════ */}
-            {showEntryPopup && (
-                <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(0,0,0,0.80)', backdropFilter: 'blur(8px)' }}>
+             {showEntryPopup && (
+                <div className="fixed inset-0 z-[9998] flex items-end justify-center pb-[calc(64px+env(safe-area-inset-bottom,0px))]" style={{ background: 'rgba(0,0,0,0.80)', backdropFilter: 'blur(8px)' }}>
                     <div
                         className="w-full rounded-t-3xl overflow-hidden shadow-2xl flex flex-col"
-                        style={{ background: '#0d0f1a', border: '1px solid rgba(255,255,255,0.08)', maxHeight: '88vh' }}
+                        style={{ background: '#0d0f1a', border: '1px solid rgba(255,255,255,0.08)', maxHeight: 'calc(100dvh - 84px - env(safe-area-inset-bottom,0px))' }}
                     >
                         {/* Top gradient strip */}
                         <div className="h-1 w-full shrink-0" style={{ background: `linear-gradient(90deg, ${theme.btnStart}, ${theme.btnEnd})` }} />
@@ -1339,13 +1940,84 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
                             </div>
                         </div>
 
-                        {/* Section label */}
-                        <p className="px-4 pb-2 text-[10px] font-bold text-white/30 uppercase tracking-widest shrink-0">33 Ready-made Presets</p>
+                         <div className="mx-4 mt-2 mb-2 p-1 rounded-xl flex gap-1" style={{ background: 'rgba(255,255,255,0.05)' }}>
+                             <button
+                                 type="button"
+                                 onClick={() => setStoreTab('THEMES')}
+                                 className="flex-1 rounded-lg py-2 text-[10px] font-black transition-all"
+                                 style={{
+                                     color: storeTab === 'THEMES' ? '#fff' : 'rgba(255,255,255,0.42)',
+                                     background: storeTab === 'THEMES' ? 'rgba(255,255,255,0.10)' : 'transparent',
+                                 }}
+                             >
+                                 🎨 Themes
+                             </button>
+                             {!isAdmin && (
+                                 <button
+                                     type="button"
+                                     onClick={() => setStoreTab('OWNED')}
+                                     className="flex-1 rounded-lg py-2 text-[10px] font-black transition-all"
+                                     style={{
+                                         color: storeTab === 'OWNED' ? '#fff' : 'rgba(255,255,255,0.42)',
+                                         background: storeTab === 'OWNED' ? 'rgba(255,255,255,0.10)' : 'transparent',
+                                     }}
+                                 >
+                                     👜 Own Themes {ownedThemes.length > 0 ? `(${ownedThemes.length})` : ''}
+                                 </button>
+                             )}
+                        </div>
+
+                         {storeTab === 'THEMES' && (<>
+                         {/* Section label */}
+                         <p className="px-4 pb-2 text-[10px] font-bold text-white/30 uppercase tracking-widest shrink-0">
+                             Theme Store · All Available Themes
+                         </p>
 
                         {/* Preset grid — scrollable */}
-                        <div className="overflow-y-auto flex-1 px-3 pb-2" style={{ WebkitOverflowScrolling: 'touch' }}>
+                         <div className="overflow-y-auto flex-1 px-3 pb-2" style={{ WebkitOverflowScrolling: 'touch' }}>
+                             <>
+                             {/* ── Free themes always stay at the top ── */}
+                             <div className="flex items-center justify-between mb-1.5 mt-0.5">
+                                 <p className="text-[9px] font-black text-emerald-400/80 uppercase tracking-widest">{isAdmin ? 'Free Themes' : 'All 33 Themes'}</p>
+                                 <span className="text-[8px] font-bold text-emerald-300/60">{isAdmin ? 'Always free' : '1/7/30 days · 10/50/100 credits'}</span>
+                             </div>
+                             <div className="grid grid-cols-3 gap-2 mb-4">
+                                 {PRESETS.filter(p => p.isStoreFree).map(p => {
+                                     const i = PRESETS.indexOf(p);
+                                     const sel = popupPresetIdx === i;
+                                     return (
+                                         <button
+                                             key={p.name}
+                                             onClick={() => openPreset(i)}
+                                             className="rounded-2xl overflow-hidden active:scale-95 transition-all flex flex-col"
+                                             style={{
+                                                 border: sel ? `2px solid ${p.colors.btnStart}` : '2px solid rgba(52,211,153,0.28)',
+                                                 background: '#0a0c14',
+                                                 boxShadow: sel ? `0 0 14px ${p.colors.btnStart}60` : 'none',
+                                             }}
+                                         >
+                                             <div className="h-12 w-full relative" style={{ background: `linear-gradient(135deg, ${p.colors.topBarStart}, ${p.colors.topBarEnd})` }}>
+                                                  <div className="absolute top-1 left-1 bg-emerald-400/90 rounded px-1 py-px text-[7px] font-black text-black leading-none tracking-wide">{isAdmin ? 'FREE' : '10/50/100 CR'}</div>
+                                                 <div className="absolute bottom-1.5 right-1.5 flex gap-1">
+                                                     <div className="w-3 h-3 rounded-full border border-white/30" style={{ background: p.colors.navActive }} />
+                                                     <div className="w-3 h-3 rounded-full border border-white/30" style={{ background: p.colors.btnStart }} />
+                                                 </div>
+                                                 {sel && (
+                                                     <div className="absolute top-1 right-1 w-4 h-4 rounded-full bg-white/90 flex items-center justify-center">
+                                                         <Check size={9} className="text-black" strokeWidth={3} />
+                                                     </div>
+                                                 )}
+                                             </div>
+                                             <div className="px-2 py-2 flex items-center gap-1">
+                                                 <span className="text-sm leading-none">{p.emoji}</span>
+                                                 <p className="text-[10px] font-black leading-tight truncate" style={{ color: sel ? p.colors.btnStart : 'rgba(167,243,208,0.85)' }}>{p.name}</p>
+                                             </div>
+                                         </button>
+                                     );
+                                 })}
+                             </div>
                             {/* ── Default Tier Themes ── */}
-                            <p className="text-[9px] font-black text-amber-400/70 uppercase tracking-widest mb-1.5 mt-0.5">App Default Themes</p>
+                             <p className="text-[9px] font-black text-amber-400/70 uppercase tracking-widest mb-1.5 mt-0.5">More Available Themes</p>
                             <div className="grid grid-cols-3 gap-2 mb-3">
                                 {PRESETS.filter(p => p.isDefault).map((p, _i) => {
                                     const i = PRESETS.indexOf(p);
@@ -1353,7 +2025,7 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
                                     return (
                                         <button
                                             key={p.name}
-                                            onClick={() => { setPopupPresetIdx(i); setTheme({ ...p.colors }); }}
+                                             onClick={() => openPreset(i)}
                                             className="rounded-2xl overflow-hidden active:scale-95 transition-all flex flex-col"
                                             style={{
                                                 border: sel ? `2px solid ${p.colors.btnStart}` : '2px solid rgba(251,191,36,0.22)',
@@ -1362,7 +2034,7 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
                                             }}
                                         >
                                             <div className="h-10 w-full relative" style={{ background: `linear-gradient(135deg, ${p.colors.topBarStart}, ${p.colors.topBarEnd})` }}>
-                                                <div className="absolute top-1 left-1 bg-amber-400/90 rounded px-1 py-px text-[7px] font-black text-black leading-none tracking-wide">DEFAULT</div>
+                                                 <div className="absolute top-1 left-1 bg-amber-400/90 rounded px-1 py-px text-[7px] font-black text-black leading-none tracking-wide">{isAdmin ? 'DEFAULT' : '10/50/100 CR'}</div>
                                                 <div className="absolute bottom-1.5 right-1.5 flex gap-1">
                                                     <div className="w-3 h-3 rounded-full border border-white/30" style={{ background: p.colors.navActive }} />
                                                     <div className="w-3 h-3 rounded-full border border-white/30" style={{ background: p.colors.btnStart }} />
@@ -1384,13 +2056,13 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
                             {/* ── All Other Presets ── */}
                             <p className="text-[9px] font-black text-white/30 uppercase tracking-widest mb-1.5">Custom Presets</p>
                             <div className="grid grid-cols-3 gap-2">
-                                {PRESETS.filter(p => !p.isDefault).map((p, _i) => {
+                                 {PRESETS.filter(p => !p.isDefault && !p.isStoreFree).map((p, _i) => {
                                     const i = PRESETS.indexOf(p);
                                     const sel = popupPresetIdx === i;
                                     return (
                                         <button
                                             key={p.name}
-                                            onClick={() => { setPopupPresetIdx(i); setTheme({ ...p.colors }); }}
+                                     onClick={() => openPreset(i)}
                                             className="rounded-2xl overflow-hidden active:scale-95 transition-all flex flex-col"
                                             style={{
                                                 border: sel ? `2px solid ${p.colors.btnStart}` : '2px solid rgba(255,255,255,0.06)',
@@ -1416,12 +2088,292 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
                                         </button>
                                     );
                                 })}
-                            </div>
-                        </div>
+                             </div>
+                             </>
+
+                             {/* ── Admin-published store themes ── */}
+                             {!isAdmin && applicablePublishedThemes.length > 0 && (
+                                 <div className="mt-4">
+                                     <div className="flex items-center justify-between mb-1.5">
+                                         <p className="text-[9px] font-black text-fuchsia-300/80 uppercase tracking-widest">New Themes from Store</p>
+                                         <span className="text-[8px] font-bold text-fuchsia-200/60">{applicablePublishedThemes.length} available</span>
+                                     </div>
+                                     <div className="space-y-1.5">
+                                         {applicablePublishedThemes.map(entry => {
+                                             const isActive = (user as any).activeAppliedThemeId === entry.id;
+                                             const isNew = !!entry.publishedAt && (() => {
+                                                 try {
+                                                     const seenAt = Number(localStorage.getItem(`nst_theme_studio_seen_${user.id}`) || 0);
+                                                     return new Date(entry.publishedAt).getTime() > seenAt;
+                                                 } catch { return false; }
+                                             })();
+                                             return (
+                                                 <button
+                                                     key={entry.id}
+                                                     type="button"
+                                                     onClick={() => {
+                                                         doSetUserActiveTheme(entry.id);
+                                                     }}
+                                                     className="w-full rounded-xl px-2.5 py-2 flex items-center gap-2 text-left active:scale-[0.98] transition-all"
+                                                     style={{
+                                                         background: isActive ? `${entry.themeData.btnStart || '#a855f7'}20` : 'rgba(255,255,255,0.04)',
+                                                         border: `1px solid ${isActive ? `${entry.themeData.btnStart || '#a855f7'}65` : 'rgba(255,255,255,0.08)'}`,
+                                                     }}
+                                                 >
+                                                     <div
+                                                         className="w-10 h-8 rounded-lg shrink-0 border border-white/15"
+                                                         style={{ background: `linear-gradient(135deg, ${entry.themeData.topBarStart || '#312e81'}, ${entry.themeData.btnStart || '#7c3aed'})` }}
+                                                     />
+                                                     <div className="flex-1 min-w-0">
+                                                         <div className="flex items-center gap-1.5">
+                                                             <span className="text-[10px] font-black text-white truncate">{entry.name}</span>
+                                                             {isNew && <span className="text-[7px] font-black px-1 py-0.5 rounded bg-fuchsia-500/25 text-fuchsia-200 shrink-0">NEW</span>}
+                                                         </div>
+                                                         <span className="block text-[8px] text-white/40 mt-0.5">
+                                                             {entry.accessMode === 'CREDITS'
+                                                                 ? `${entry.creditCost || 0} credits · ${entry.accessDurationDays || 7} days`
+                                                                 : 'FREE · Permanent'}
+                                                         </span>
+                                                     </div>
+                                                     <span
+                                                         className="shrink-0 rounded-lg px-2 py-1.5 text-[8px] font-black text-white"
+                                                         style={{ background: isActive ? 'rgba(34,197,94,0.28)' : `linear-gradient(135deg, ${entry.themeData.btnStart || '#7c3aed'}, ${entry.themeData.btnEnd || '#db2777'})` }}
+                                                     >
+                                                         {isActive ? 'ACTIVE' : entry.accessMode === 'CREDITS' ? `BUY ${entry.creditCost || 0}` : 'USE FREE'}
+                                                     </span>
+                                                 </button>
+                                             );
+                                         })}
+                                     </div>
+                                 </div>
+                             )}
+                         </div>
+                         </>)}
+
+                         {storeTab === 'OWNED' && !isAdmin && (
+                             <div className="overflow-y-auto flex-1 px-3 pb-4" style={{ WebkitOverflowScrolling: 'touch' }}>
+                                 <div className="px-1 pb-3">
+                                     <p className="text-[10px] font-black text-white/85 uppercase tracking-widest">Own Themes</p>
+                                     <p className="text-[9px] text-white/40 mt-1 leading-relaxed">
+                                         Aapne jo themes purchase ya unlock kiye hain, woh yahan save rahenge.
+                                     </p>
+                                 </div>
+                                 {ownedThemes.length === 0 ? (
+                                     <div className="rounded-2xl p-5 text-center" style={{ background: 'rgba(255,255,255,0.04)', border: '1px dashed rgba(255,255,255,0.14)' }}>
+                                         <div className="text-3xl mb-2">🎨</div>
+                                         <p className="text-xs font-black text-white/75">Abhi koi own theme nahi hai</p>
+                                         <p className="text-[9px] text-white/35 mt-1">Themes tab se theme choose karke purchase karo.</p>
+                                         <button
+                                             type="button"
+                                             onClick={() => setStoreTab('THEMES')}
+                                             className="mt-3 rounded-xl px-3 py-2 text-[9px] font-black text-white"
+                                             style={{ background: `linear-gradient(135deg, ${theme.btnStart}, ${theme.btnEnd})` }}
+                                         >
+                                             Browse Themes
+                                         </button>
+                                     </div>
+                                 ) : (
+                                     <div className="space-y-2">
+                                         {ownedThemes.map(owned => {
+                                             const expired = !!(owned.expiresAt && new Date(owned.expiresAt) <= new Date());
+                                             const active = !expired && (user as any).activeOwnedThemeId === owned.id;
+                                             const timeLeft = (() => {
+                                                 if (!owned.expiresAt) return 'Permanent';
+                                                 const ms = new Date(owned.expiresAt).getTime() - Date.now();
+                                                 if (ms <= 0) return 'Expired';
+                                                 const days = Math.floor(ms / 86400000);
+                                                 const hours = Math.floor((ms % 86400000) / 3600000);
+                                                 return days > 0 ? `${days}d ${hours}h bachi` : `${Math.max(1, hours)}h bachi`;
+                                             })();
+                                             return (
+                                                 <button
+                                                     key={owned.id}
+                                                     type="button"
+                                                     onClick={() => applyOwnedTheme(owned)}
+                                                     disabled={expired || userThemeSaving}
+                                                     className="w-full flex items-center gap-2.5 rounded-2xl px-3 py-2.5 border text-left transition-all active:scale-[0.98] disabled:opacity-55"
+                                                     style={{
+                                                         background: active ? `${owned.themeData.btnStart || '#3b82f6'}18` : 'rgba(255,255,255,0.04)',
+                                                         borderColor: active ? `${owned.themeData.btnStart || '#3b82f6'}60` : 'rgba(255,255,255,0.08)',
+                                                     }}
+                                                 >
+                                                     <div
+                                                         className="w-10 h-9 rounded-xl shrink-0 border border-white/15"
+                                                         style={{ background: `linear-gradient(135deg, ${owned.themeData.topBarStart || '#1e3a5f'}, ${owned.themeData.btnStart || '#3b82f6'})`, opacity: expired ? 0.45 : 1 }}
+                                                     />
+                                                     <div className="flex-1 min-w-0">
+                                                         <div className="flex items-center gap-1.5">
+                                                             <span className="text-xs">{owned.emoji || owned.themeData.themeEmoji || '🎨'}</span>
+                                                             <p className="text-xs font-black text-white truncate">{owned.name}</p>
+                                                         </div>
+                                                         <p className={`text-[9px] mt-0.5 ${expired ? 'text-red-300' : active ? 'text-green-300' : 'text-white/45'}`}>
+                                                             {expired ? '⛔ Expired — dobara purchase karo' : `✅ ${timeLeft}`}
+                                                         </p>
+                                                     </div>
+                                                     {active ? (
+                                                         <span className="text-[8px] font-black px-2 py-1 rounded-full text-green-300 shrink-0" style={{ background: 'rgba(34,197,94,0.16)' }}>ACTIVE</span>
+                                                     ) : !expired ? (
+                                                         <span className="text-[8px] font-black px-2 py-1 rounded-lg text-white/80 shrink-0" style={{ background: 'rgba(255,255,255,0.09)' }}>APPLY</span>
+                                                     ) : null}
+                                                 </button>
+                                             );
+                                         })}
+                                     </div>
+                                 )}
+                             </div>
+                         )}
+
+                         {false && storeTab === 'LOADING' && (
+                             <div className="overflow-y-auto flex-1 px-3 pb-2" style={{ WebkitOverflowScrolling: 'touch' }}>
+                                 <div className="rounded-xl p-3 mb-3" style={{ background: 'rgba(56,189,248,0.09)', border: '1px solid rgba(56,189,248,0.22)' }}>
+                                     <p className="text-[10px] font-black text-sky-200">Loading screen alag store hai</p>
+                                     <p className="text-[9px] text-sky-100/55 mt-1 leading-relaxed">
+                                         Future Cards free default hai. Baaki screens ko 1 day 10, 7 days 50 ya 30 days 100 credits mein unlock karke rotation mein add karo.
+                                     </p>
+                                 </div>
+                                 <p className="text-[9px] font-black text-emerald-300/80 uppercase tracking-widest mb-1.5">Built-in Loading Screens</p>
+                                 <div className="space-y-1.5">
+                                     {builtInLoadingScreens.map(entry => {
+                                         const unlocked = isLoadingScreenUnlocked(entry);
+                                         const assigned = Object.values((user as any).loadingScreenSlotAssignments || { 1: 1 }).map(Number).includes(entry.slotId);
+                                         return (
+                                             <div key={entry.slotId} className="rounded-xl px-3 py-2.5 flex items-center gap-2.5" style={{ background: assigned ? 'rgba(56,189,248,0.12)' : 'rgba(255,255,255,0.04)', border: `1px solid ${assigned ? 'rgba(56,189,248,0.48)' : 'rgba(255,255,255,0.08)'}` }}>
+                                                 <span className="text-xl w-8 text-center">{entry.emoji}</span>
+                                                 <div className="flex-1 min-w-0">
+                                                     <p className="text-[10px] font-black text-white">{entry.name}</p>
+                                                      <p className="text-[8px] text-white/40">{entry.description} · {entry.accessMode === 'FREE' ? 'FREE · 1/7/30 days' : '1/7/30 days · credits'}</p>
+                                                 </div>
+                                                 {unlocked ? (
+                                                     <button type="button" onClick={() => toggleLoadingScreenRotation(entry.slotId)} className="rounded-lg px-2 py-1.5 text-[8px] font-black text-sky-100 bg-sky-500/20 border border-sky-400/25">
+                                                         {assigned ? '✓ IN ROTATION' : '+ ADD'}
+                                                     </button>
+                                                 ) : (
+                                                      <button
+                                                          type="button"
+                                                          onClick={() => {
+                                                              setLoadingScreenPurchaseEntry(entry);
+                                                              setLoadingScreenPurchaseDays((entry.accessDurationDays || 7) as AccessDurationDays);
+                                                          }}
+                                                          className="rounded-lg px-2 py-1.5 text-[8px] font-black text-white bg-gradient-to-r from-sky-500 to-indigo-500"
+                                                      >
+                                                          {entry.accessMode === 'FREE' ? 'USE FREE' : 'CHOOSE DAYS'}
+                                                     </button>
+                                                 )}
+                                             </div>
+                                         );
+                                     })}
+                                 </div>
+
+                                 {applicableLoadingScreens.length > 0 && (
+                                     <>
+                                         <p className="text-[9px] font-black text-fuchsia-300/80 uppercase tracking-widest mt-4 mb-1.5">New Loading Screens</p>
+                                         <div className="space-y-1.5">
+                                             {applicableLoadingScreens.map(entry => {
+                                                 const unlocked = isLoadingScreenUnlocked(entry);
+                                                 const assigned = Object.values((user as any).loadingScreenSlotAssignments || {}).map(Number).includes(entry.slotId);
+                                                 const parsed = parseLoadingScreenCode(entry.code);
+                                                 return (
+                                                     <div key={entry.id} className="rounded-xl px-3 py-2.5 flex items-center gap-2.5" style={{ background: assigned ? 'rgba(217,70,239,0.13)' : 'rgba(255,255,255,0.04)', border: `1px solid ${assigned ? 'rgba(217,70,239,0.5)' : 'rgba(255,255,255,0.08)'}` }}>
+                                                         <div className="w-10 h-8 rounded-lg flex items-center justify-center text-lg border border-white/10" style={{ background: parsed ? `radial-gradient(circle, ${parsed.accent}80, ${parsed.background})` : '#111827' }}>{entry.emoji || '✨'}</div>
+                                                         <div className="flex-1 min-w-0">
+                                                             <p className="text-[10px] font-black text-white truncate">{entry.name}</p>
+                                                              <p className="text-[8px] text-white/40">{parsed?.template || 'custom'} · {parsed?.duration || 4000}ms · {entry.accessMode === 'FREE' ? 'FREE · 1/7/30 days' : '1/7/30 days · credits'}</p>
+                                                         </div>
+                                                         {unlocked ? (
+                                                             <button type="button" onClick={() => toggleLoadingScreenRotation(entry.slotId)} className="rounded-lg px-2 py-1.5 text-[8px] font-black text-fuchsia-100 bg-fuchsia-500/20 border border-fuchsia-400/25">{assigned ? '✓ IN ROTATION' : '+ ADD'}</button>
+                                                         ) : (
+                                                              <button
+                                                                  type="button"
+                                                                  onClick={() => {
+                                                                      setLoadingScreenPurchaseEntry(entry);
+                                                                      setLoadingScreenPurchaseDays((entry.accessDurationDays || 7) as AccessDurationDays);
+                                                                  }}
+                                                                  className="rounded-lg px-2 py-1.5 text-[8px] font-black text-white bg-gradient-to-r from-fuchsia-500 to-pink-500"
+                                                              >
+                                                                  {entry.accessMode === 'FREE' ? 'USE FREE' : 'CHOOSE DAYS'}
+                                                              </button>
+                                                         )}
+                                                     </div>
+                                                 );
+                                             })}
+                                         </div>
+                                     </>
+                                 )}
+
+                                 {isAdmin && (
+                                     <div className="mt-4 rounded-2xl p-3 border" style={{ background: 'rgba(56,189,248,0.07)', borderColor: 'rgba(56,189,248,0.25)' }}>
+                                         <div className="flex items-start gap-2 mb-2.5">
+                                             <span className="text-lg">🧩</span>
+                                             <div className="flex-1">
+                                                 <p className="text-[10px] font-black text-white">Admin: Loading Screen Code</p>
+                                                 <p className="text-[8px] text-sky-200/55 mt-0.5 leading-relaxed">Safe JSON code likho — app uske template, colors, messages aur duration se screen banayega. JavaScript execute nahi hota.</p>
+                                             </div>
+                                             {editingLoadingScreenId && <span className="text-[8px] font-black text-amber-300 bg-amber-400/15 px-2 py-1 rounded-full">EDITING</span>}
+                                         </div>
+                                         <div className="grid grid-cols-[1fr_48px] gap-1.5 mb-1.5">
+                                             <input value={loadingScreenName} onChange={e => setLoadingScreenName(e.target.value)} placeholder="Screen name (e.g. Neon Focus)" className="rounded-lg px-2.5 py-2 text-[10px] text-white placeholder-white/25 outline-none border border-white/10 bg-black/20" />
+                                             <input value={loadingScreenEmoji} onChange={e => setLoadingScreenEmoji(e.target.value.slice(0, 2))} aria-label="Loading screen emoji" className="rounded-lg px-2 py-2 text-center text-base text-white outline-none border border-white/10 bg-black/20" />
+                                         </div>
+                                         <textarea value={loadingScreenCode} onChange={e => setLoadingScreenCode(e.target.value)} rows={9} spellCheck={false} className="w-full rounded-xl px-2.5 py-2 text-[9px] leading-relaxed font-mono text-sky-100 placeholder-white/25 outline-none border border-white/10 bg-black/30 resize-y" />
+                                         <div className="grid grid-cols-2 gap-1.5 mt-2">
+                                             {([
+                                                 ['cards', '🃏 Cards'],
+                                                 ['orbit', '🪐 Orbit'],
+                                                 ['pulse', '💫 Pulse'],
+                                                 ['sort', '⚙️ Sort'],
+                                             ] as const).map(([template, label]) => (
+                                                 <button key={template} type="button" onClick={() => {
+                                                     const parsed = parseLoadingScreenCode(loadingScreenCode) || parseLoadingScreenCode(DEFAULT_LOADING_SCREEN_CODE)!;
+                                                     setLoadingScreenCode(JSON.stringify({ ...parsed, template }, null, 2));
+                                                 }} className="rounded-lg py-1.5 text-[8px] font-black border border-white/10 text-white/55 bg-white/5">{label}</button>
+                                             ))}
+                                         </div>
+                                         <div className="grid grid-cols-4 gap-1.5 mt-2">
+                                             {([
+                                                 ['all', 'ALL'], ['free', 'FREE'], ['basic', 'BASIC'], ['ultra', 'ULTRA'],
+                                             ] as const).map(([value, label]) => (
+                                                 <button key={value} type="button" onClick={() => setLoadingScreenPublishTier(value)} className="rounded-lg py-1.5 text-[8px] font-black border" style={{ color: loadingScreenPublishTier === value ? '#fff' : 'rgba(255,255,255,0.4)', background: loadingScreenPublishTier === value ? 'rgba(56,189,248,0.22)' : 'rgba(255,255,255,0.04)', borderColor: loadingScreenPublishTier === value ? 'rgba(56,189,248,0.65)' : 'rgba(255,255,255,0.08)' }}>{label}</button>
+                                             ))}
+                                         </div>
+                                         <div className="grid grid-cols-2 gap-1.5 mt-2">
+                                             {([
+                                                 ['FREE', '🆓 Free'],
+                                                 ['CREDITS', '🪙 Credits'],
+                                             ] as const).map(([value, label]) => (
+                                                 <button key={value} type="button" onClick={() => setLoadingScreenPublishMode(value)} className="rounded-lg py-1.5 text-[8px] font-black border" style={{ color: loadingScreenPublishMode === value ? '#fff' : 'rgba(255,255,255,0.4)', background: loadingScreenPublishMode === value ? 'rgba(34,197,94,0.18)' : 'rgba(255,255,255,0.04)', borderColor: loadingScreenPublishMode === value ? 'rgba(34,197,94,0.55)' : 'rgba(255,255,255,0.08)' }}>{label}</button>
+                                             ))}
+                                         </div>
+                                          {loadingScreenPublishMode === 'CREDITS' && (
+                                              <p className="mt-2 rounded-lg px-2.5 py-2 text-[8px] text-amber-200/70 border border-amber-400/15 bg-amber-400/5">
+                                                  Buyer loading screen unlock karte waqt 1, 7, ya 30 days choose karega.
+                                              </p>
+                                          )}
+                                         <button type="button" onClick={doPublishLoadingScreen} disabled={loadingScreenSaving} className="w-full mt-2.5 py-2.5 rounded-xl text-[10px] font-black text-white disabled:opacity-50" style={{ background: 'linear-gradient(135deg,#0284c7,#4f46e5)' }}>
+                                             {loadingScreenSaving ? 'Publishing…' : editingLoadingScreenId ? '💾 Update & Republish' : '🚀 Save & Publish Loading Screen'}
+                                         </button>
+                                         {editingLoadingScreenId && <button type="button" onClick={() => setEditingLoadingScreenId(null)} className="w-full py-1.5 text-[9px] font-bold text-white/40">Editing cancel karo</button>}
+                                         {adminLoadingScreenLibrary.length > 0 && (
+                                             <div className="mt-3 pt-2 border-t border-white/10 space-y-1.5">
+                                                 <p className="text-[8px] font-black uppercase tracking-widest text-white/35">Published loading screens</p>
+                                                 {adminLoadingScreenLibrary.map(entry => (
+                                                     <div key={entry.id} className={`flex items-center gap-2 rounded-lg px-2 py-1.5 bg-black/20 border border-white/5 ${entry.published === false ? 'opacity-50' : ''}`}>
+                                                         <span className="text-sm">{entry.emoji || '✨'}</span>
+                                                         <span className="flex-1 text-[9px] font-black text-white truncate">{entry.name}</span>
+                                                         <button type="button" onClick={() => editLoadingScreen(entry)} className="text-[8px] font-black text-sky-300">Edit</button>
+                                                         <button type="button" onClick={() => toggleLoadingScreenPublished(entry)} className="text-[8px] font-black text-amber-300">{entry.published === false ? 'Enable' : 'Disable'}</button>
+                                                         <button type="button" onClick={() => deleteLoadingScreen(entry)} className="text-[8px] font-black text-red-300">Delete</button>
+                                                     </div>
+                                                 ))}
+                                             </div>
+                                         )}
+                                     </div>
+                                 )}
+                             </div>
+                         )}
 
                         {/* Bottom action area */}
                         <div className="px-4 pt-2 pb-5 shrink-0 flex flex-col gap-2.5" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                            {popupPresetIdx >= 0 ? (
+                             {isAdmin && popupPresetIdx >= 0 ? (
                                 <button
                                     onClick={() => {
                                         /* Apply the selected preset directly */
@@ -1437,9 +2389,9 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
                                     className="w-full py-3.5 rounded-2xl font-black text-sm text-white active:scale-95 transition-all"
                                     style={{ background: `linear-gradient(135deg, ${theme.btnStart}, ${theme.btnEnd})`, boxShadow: `0 6px 20px ${theme.btnStart}50` }}
                                 >
-                                    {isFirstTime || isAdmin ? `✅ Apply — ${PRESETS[popupPresetIdx].emoji} ${PRESETS[popupPresetIdx].name}` : `🪙 Apply (${THEME_COST} coins) — ${PRESETS[popupPresetIdx].emoji} ${PRESETS[popupPresetIdx].name}`}
+                                    {selectedPopupPresetIsFree ? `✅ Apply Free — ${PRESETS[popupPresetIdx].emoji} ${PRESETS[popupPresetIdx].name}` : `🪙 Apply (${THEME_COST} credits) — ${PRESETS[popupPresetIdx].emoji} ${PRESETS[popupPresetIdx].name}`}
                                 </button>
-                            ) : (
+                             ) : isAdmin ? (
                                 <button
                                     onClick={() => setShowEntryPopup(false)}
                                     className="w-full py-3.5 rounded-2xl font-black text-sm text-white active:scale-95 transition-all"
@@ -1447,12 +2399,154 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
                                 >
                                     {isFirstTime ? '🎁 Studio Kholo (Free)' : '🎨 Studio Kholo'}
                                 </button>
+                             ) : (
+                                 <button
+                                      onClick={() => onBack()}
+                                     className="w-full py-3.5 rounded-2xl font-black text-sm text-white active:scale-95 transition-all"
+                                     style={{ background: `linear-gradient(135deg, ${theme.btnStart}, ${theme.btnEnd})`, boxShadow: `0 6px 20px ${theme.btnStart}50` }}
+                                 >
+                                      ✅ Close Theme Studio
+                                 </button>
                             )}
+                             {isAdmin && (
+                                 <button
+                                     onClick={() => setShowEntryPopup(false)}
+                                     className="w-full py-2 text-xs font-bold text-white/40 active:text-white/70 transition-colors"
+                                 >
+                                     Custom colors set karo →
+                                 </button>
+                             )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── STUDENT THEME DURATION POPUP ── */}
+            {themeDurationEntry && !isAdmin && (
+                 <div className="fixed inset-0 z-[9999] flex items-end justify-center px-4 pb-[calc(84px+env(safe-area-inset-bottom,0px))]" style={{ background: 'rgba(0,0,0,0.84)', backdropFilter: 'blur(7px)' }}>
+                    <div className="w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl" style={{ background: '#0d0f1a', border: `1px solid ${themeDurationEntry.themeData.btnStart || '#a855f7'}55` }}>
+                        <div
+                            className="h-1.5"
+                            style={{ background: `linear-gradient(90deg, ${themeDurationEntry.themeData.btnStart || '#a855f7'}, ${themeDurationEntry.themeData.btnEnd || '#db2777'})` }}
+                        />
+                        <div className="p-5">
+                            <div className="flex items-center gap-3 mb-4">
+                                <div
+                                    className="w-12 h-12 rounded-2xl border border-white/15 shrink-0"
+                                    style={{ background: `linear-gradient(135deg, ${themeDurationEntry.themeData.topBarStart || '#312e81'}, ${themeDurationEntry.themeData.btnStart || '#7c3aed'})` }}
+                                />
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-base font-black text-white truncate">{themeDurationEntry.themeData.themeEmoji || '🎨'} {themeDurationEntry.name}</p>
+                                    <p className="text-[10px] text-white/45 mt-0.5">Theme kitne din ke liye apply karni hai?</p>
+                                </div>
+                                <button type="button" onClick={() => setThemeDurationEntry(null)} className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center shrink-0">
+                                    <X size={13} className="text-white/70" />
+                                </button>
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-2 mb-4">
+                                {ACCESS_DURATIONS.map(days => {
+                                    const selected = themeDurationDays === days;
+                                    const price = themeDurationEntry.accessMode === 'CREDITS' ? ACCESS_PRICES[days] : 0;
+                                    return (
+                                        <button
+                                            key={days}
+                                            type="button"
+                                            onClick={() => setThemeDurationDays(days)}
+                                            className="rounded-2xl py-3 border transition-all active:scale-95"
+                                            style={{
+                                                background: selected ? `${themeDurationEntry.themeData.btnStart || '#a855f7'}25` : 'rgba(255,255,255,0.04)',
+                                                borderColor: selected ? `${themeDurationEntry.themeData.btnStart || '#a855f7'}90` : 'rgba(255,255,255,0.10)',
+                                            }}
+                                        >
+                                            <p className="text-sm font-black text-white">{days} day{days > 1 ? 's' : ''}</p>
+                                            <p className="text-[9px] font-bold mt-0.5" style={{ color: selected ? '#fcd34d' : 'rgba(255,255,255,0.45)' }}>
+                                                {price ? `${price} credits` : 'FREE'}
+                                            </p>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+
+                            <p className="text-[9px] text-white/35 text-center mb-3">
+                                {themeDurationEntry.accessMode === 'CREDITS'
+                                    ? 'Duration select karne par usi hisaab se credits deduct honge.'
+                                    : 'Ye admin-published theme free hai; selected duration ke baad default theme wapas aayegi.'}
+                            </p>
                             <button
-                                onClick={() => setShowEntryPopup(false)}
-                                className="w-full py-2 text-xs font-bold text-white/40 active:text-white/70 transition-colors"
+                                type="button"
+                                onClick={applySelectedThemePurchase}
+                                disabled={userThemeSaving || saving}
+                                className="w-full py-3 rounded-2xl text-sm font-black text-white disabled:opacity-50"
+                                style={{ background: `linear-gradient(135deg, ${themeDurationEntry.themeData.btnStart || '#a855f7'}, ${themeDurationEntry.themeData.btnEnd || '#db2777'})` }}
                             >
-                                Custom colors set karo →
+                                {userThemeSaving || saving
+                                    ? 'Applying…'
+                                    : `Apply for ${themeDurationDays} day${themeDurationDays > 1 ? 's' : ''}${themeDurationEntry.accessMode === 'CREDITS' ? ` · ${ACCESS_PRICES[themeDurationDays]} 🪙` : ' · FREE'}`}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── STUDENT LOADING-SCREEN DURATION POPUP ── */}
+            {false && loadingScreenPurchaseEntry && !isAdmin && (
+                 <div className="fixed inset-0 z-[9999] flex items-end justify-center px-4 pb-[calc(84px+env(safe-area-inset-bottom,0px))]" style={{ background: 'rgba(0,0,0,0.84)', backdropFilter: 'blur(7px)' }}>
+                    <div className="w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl" style={{ background: '#0d0f1a', border: '1px solid rgba(56,189,248,0.45)' }}>
+                        <div className="h-1.5 bg-gradient-to-r from-sky-500 to-indigo-500" />
+                        <div className="p-5">
+                            <div className="flex items-center gap-3 mb-4">
+                                <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl border border-sky-400/25 bg-sky-500/10">
+                                    {loadingScreenPurchaseEntry.emoji || '⚡'}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-base font-black text-white truncate">{loadingScreenPurchaseEntry.name}</p>
+                                    <p className="text-[10px] text-white/45 mt-0.5">Loading screen kitne din ke liye chahiye?</p>
+                                </div>
+                                <button type="button" onClick={() => setLoadingScreenPurchaseEntry(null)} className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center shrink-0">
+                                    <X size={13} className="text-white/70" />
+                                </button>
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-2 mb-4">
+                                {ACCESS_DURATIONS.map(days => {
+                                    const selected = loadingScreenPurchaseDays === days;
+                                    const price = loadingScreenPurchaseEntry.accessMode === 'FREE' ? 0 : ACCESS_PRICES[days];
+                                    return (
+                                        <button
+                                            key={days}
+                                            type="button"
+                                            onClick={() => setLoadingScreenPurchaseDays(days)}
+                                            className="rounded-2xl py-3 border transition-all active:scale-95"
+                                            style={{
+                                                background: selected ? 'rgba(56,189,248,0.22)' : 'rgba(255,255,255,0.04)',
+                                                borderColor: selected ? 'rgba(56,189,248,0.75)' : 'rgba(255,255,255,0.10)',
+                                            }}
+                                        >
+                                            <p className="text-sm font-black text-white">{days} day{days > 1 ? 's' : ''}</p>
+                                            <p className="text-[9px] font-bold mt-0.5" style={{ color: selected ? '#7dd3fc' : 'rgba(255,255,255,0.45)' }}>
+                                                {price ? `${price} credits` : 'FREE'}
+                                            </p>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+
+                            <p className="text-[9px] text-white/35 text-center mb-3">
+                                {loadingScreenPurchaseEntry.accessMode === 'FREE'
+                                    ? 'Free loading screen hai; selected duration ke baad default screen wapas aayegi.'
+                                    : 'Selected duration ke hisaab se credits deduct honge.'}
+                            </p>
+                            <button
+                                type="button"
+                                onClick={async () => {
+                                    await buyLoadingScreen(loadingScreenPurchaseEntry, loadingScreenPurchaseDays);
+                                    setLoadingScreenPurchaseEntry(null);
+                                }}
+                                className="w-full py-3 rounded-2xl text-sm font-black text-white"
+                                style={{ background: 'linear-gradient(135deg,#0284c7,#4f46e5)' }}
+                            >
+                                {`Use for ${loadingScreenPurchaseDays} day${loadingScreenPurchaseDays > 1 ? 's' : ''}${loadingScreenPurchaseEntry.accessMode === 'CREDITS' ? ` · ${ACCESS_PRICES[loadingScreenPurchaseDays]} 🪙` : ' · FREE'}`}
                             </button>
                         </div>
                     </div>
@@ -1463,7 +2557,7 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
                 COIN CONFIRM POPUP — before 2nd+ apply
             ══════════════════════════════════════════ */}
             {showCoinPopup && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center px-6" style={{ background: 'rgba(0,0,0,0.80)', backdropFilter: 'blur(6px)' }}>
+                 <div className="fixed inset-0 z-[9999] flex items-center justify-center px-6" style={{ background: 'rgba(0,0,0,0.80)', backdropFilter: 'blur(6px)' }}>
                     <div
                         className="w-full max-w-xs rounded-3xl overflow-hidden shadow-2xl"
                         style={{ background: '#0d0f1a', border: '1px solid rgba(255,255,255,0.08)' }}
@@ -1635,17 +2729,21 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
                     USER: ADMIN APPLIED THEMES HISTORY
                 ═══════════════════════════════════════ */}
                 {!isAdmin && (() => {
-                    const history: ThemeHistoryEntry[] = (settings as any)?.themeHistory || [];
-                    const userTierStr = user.isPremium && (user as any).subscriptionLevel === 'ULTRA' ? 'ultra'
-                        : user.isPremium && (user as any).subscriptionLevel === 'BASIC' ? 'basic' : 'free';
-                    const applicable = history.filter(e => e.targetTier === 'all' || e.targetTier === userTierStr);
+                    // Students only see the currently published admin catalogue.
+                    // Drafts, disabled entries, and builder presets never enter this list.
+                    const applicable = adminThemeLibrary.filter(e =>
+                        e.published !== false && (!e.targetTier || e.targetTier === 'all' || e.targetTier === userTierStr)
+                    );
                     if (!applicable.length) return null;
                     const activeId = (user as any).activeAppliedThemeId as string | undefined;
                     return (
                         <div>
-                            <p className="text-[9px] font-black text-white/30 uppercase tracking-widest mb-2.5 flex items-center gap-1.5">
-                                🎨 Admin Applied Themes
+                             <p className="text-[9px] font-black text-white/30 uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                                 🎨 New &amp; Available Themes
                             </p>
+                             <p className="text-[10px] text-white/40 mb-2.5">
+                                 Naya theme yahin dikhega — tap karke preview karo; paid theme ke liye credits choose karke Buy karo.
+                             </p>
                             <div className="space-y-2">
                                 {/* Default option */}
                                 <button
@@ -1668,11 +2766,21 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
                                 </button>
 
                                 {applicable.map(entry => {
-                                    const expired = !!(entry.expiresAt && new Date(entry.expiresAt) <= new Date());
+                                      const effectiveExpiry = activeId === entry.id
+                                          ? (user as any).personalThemeExpiry
+                                          : undefined;
+                                     const expired = !!(effectiveExpiry && new Date(effectiveExpiry) <= new Date());
                                     const isActive = activeId === entry.id;
+                                      const needsPurchase = entry.accessMode === 'CREDITS' && (!isActive || expired);
+                                     const isNew = !!entry.publishedAt && (() => {
+                                         try {
+                                             const seenAt = Number(localStorage.getItem(`nst_theme_studio_seen_${user.id}`) || 0);
+                                             return new Date(entry.publishedAt).getTime() > seenAt;
+                                         } catch { return false; }
+                                     })();
                                     const timeLeft = (() => {
-                                        if (!entry.expiresAt) return 'Permanent';
-                                        const ms = new Date(entry.expiresAt).getTime() - Date.now();
+                                         if (!effectiveExpiry) return 'Permanent';
+                                         const ms = new Date(effectiveExpiry).getTime() - Date.now();
                                         if (ms <= 0) return 'Expired';
                                         const d = Math.floor(ms / 86400000);
                                         const h = Math.floor((ms % 86400000) / 3600000);
@@ -1684,8 +2792,8 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
                                     return (
                                         <button
                                             key={entry.id}
-                                            onClick={() => !expired && doSetUserActiveTheme(entry.id)}
-                                            disabled={expired || userThemeSaving}
+                                             onClick={() => doSetUserActiveTheme(entry.id)}
+                                             disabled={userThemeSaving}
                                             className="w-full flex items-center gap-2.5 rounded-2xl px-3 py-2.5 transition-all active:scale-95 border disabled:opacity-40 text-left"
                                             style={{
                                                 background: isActive ? `${entry.themeData.btnStart || '#3b82f6'}15` : expired ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.04)',
@@ -1698,15 +2806,24 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
                                                     opacity: expired ? 0.4 : 1,
                                                 }} />
                                             <div className="flex-1 min-w-0">
-                                                <p className="text-xs font-black text-white truncate">{entry.name}</p>
-                                                <p className="text-[9px]" style={{ color: expired ? '#ef4444' : entry.expiresAt ? '#f59e0b' : '#22c55e' }}>
-                                                    {expired ? '⛔ Expire ho gayi' : entry.expiresAt ? `⏱ ${timeLeft}` : '✅ Permanent'}
+                                                <div className="flex items-center gap-1.5 min-w-0">
+                                                    <p className="text-xs font-black text-white truncate">{entry.name}</p>
+                                                    {isNew && <span className="text-[7px] font-black px-1.5 py-0.5 rounded-full text-fuchsia-200 bg-fuchsia-500/25 shrink-0">NEW</span>}
+                                                </div>
+                                             <p className="text-[9px]" style={{ color: expired ? '#ef4444' : entry.accessMode === 'CREDITS' ? '#f59e0b' : '#22c55e' }}>
+                                                 {expired
+                                                     ? '⛔ Expire ho gayi'
+                                                     : entry.accessMode === 'CREDITS'
+                                                         ? `🪙 ${entry.creditCost} credits · ${entry.accessDurationDays} day access · ${needsPurchase ? 'Buy to activate' : timeLeft}`
+                                                          : '✅ FREE · 1/7/30 day choose karo'}
                                                 </p>
                                             </div>
                                             {isActive && !expired ? (
                                                 <span className="text-[9px] font-black px-2 py-0.5 rounded-full text-green-300 shrink-0" style={{ background: 'rgba(34,197,94,0.15)' }}>ACTIVE</span>
                                             ) : !expired ? (
-                                                <span className="text-[9px] font-black px-2 py-0.5 rounded-full text-white/40 border border-white/10 shrink-0">Use</span>
+                                                <span className={`text-[9px] font-black px-2 py-0.5 rounded-full shrink-0 ${needsPurchase ? 'text-amber-200 bg-amber-500/20 border border-amber-400/25' : 'text-white/40 border border-white/10'}`}>
+                                                    {needsPurchase ? `Buy · ${entry.creditCost || ADMIN_THEME_PRICES[entry.accessDurationDays || 7]} cr` : 'Use'}
+                                                </span>
                                             ) : null}
                                         </button>
                                     );
@@ -1717,6 +2834,8 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
                 })()}
 
                 {/* ── LIVE PREVIEW ── */}
+                {isAdmin && (
+                <>
                 <div>
                     <p className="text-[9px] font-black text-white/30 uppercase tracking-widest mb-2.5 flex items-center gap-1.5">
                         <Eye size={10} /> Live Preview
@@ -2167,8 +3286,86 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
                     )}
 
                 </div>
+                </>
+                )}
+
+                {/* ── ADMIN PUBLISHED THEME LIBRARY ── */}
+                {isAdmin && (
+                    <div className="rounded-2xl p-4 border space-y-3" style={{ background: 'rgba(168,85,247,0.07)', borderColor: 'rgba(168,85,247,0.28)' }}>
+                        <div className="flex items-start gap-2">
+                            <Palette size={14} className="text-fuchsia-300 mt-0.5 shrink-0" />
+                            <div className="flex-1">
+                                <p className="text-xs font-black text-white">Admin Theme Library</p>
+                                <p className="text-[9px] text-fuchsia-200/55 mt-0.5">Current colors ko naam dekar users ke liye publish karo.</p>
+                            </div>
+                            {editingAdminThemeId && <span className="text-[8px] font-black text-amber-300 bg-amber-400/15 px-2 py-1 rounded-full">EDITING</span>}
+                        </div>
+                        <div className="grid grid-cols-[1fr_72px] gap-2">
+                            <input value={theme.themeName || ''} onChange={e => setTheme(prev => ({ ...prev, themeName: e.target.value }))}
+                                placeholder="Theme ka naam (e.g. Sunset Glow)"
+                                className="w-full rounded-xl px-3 py-2.5 text-xs text-white placeholder-white/25 outline-none border border-white/10 bg-black/20" />
+                            <input value={theme.themeEmoji || '🎨'} onChange={e => setTheme(prev => ({ ...prev, themeEmoji: e.target.value.slice(0, 2) }))}
+                                aria-label="Theme emoji" className="w-full rounded-xl px-3 py-2.5 text-center text-lg text-white outline-none border border-white/10 bg-black/20" />
+                        </div>
+                        <div>
+                            <p className="text-[9px] font-black uppercase tracking-widest text-white/40 mb-1.5">Kis tier ko dikhana hai?</p>
+                            <div className="grid grid-cols-4 gap-1.5">
+                                {([
+                                    ['all', 'ALL', '🌍'], ['free', 'FREE', '🆓'], ['basic', 'BASIC', '🔵'], ['ultra', 'ULTRA', '⚡'],
+                                ] as const).map(([value, label, emoji]) => (
+                                    <button key={value} onClick={() => setAdminPublishTier(value)} className="py-2 rounded-xl text-[9px] font-black border transition-all"
+                                        style={{ color: adminPublishTier === value ? '#fff' : 'rgba(255,255,255,0.4)', background: adminPublishTier === value ? 'rgba(168,85,247,0.28)' : 'rgba(255,255,255,0.04)', borderColor: adminPublishTier === value ? 'rgba(217,70,239,0.65)' : 'rgba(255,255,255,0.08)' }}>
+                                        {emoji} {label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <div>
+                            <p className="text-[9px] font-black uppercase tracking-widest text-white/40 mb-1.5">Access price</p>
+                            <div className="grid grid-cols-2 gap-1.5">
+                                {([
+                                    ['FREE', '🆓 Free publish'], ['CREDITS', '🪙 Credits se unlock'],
+                                ] as const).map(([value, label]) => (
+                                    <button key={value} onClick={() => setAdminPublishMode(value)} className="py-2.5 rounded-xl text-[9px] font-black border"
+                                        style={{ color: adminPublishMode === value ? '#fff' : 'rgba(255,255,255,0.4)', background: adminPublishMode === value ? 'rgba(34,197,94,0.18)' : 'rgba(255,255,255,0.04)', borderColor: adminPublishMode === value ? 'rgba(34,197,94,0.6)' : 'rgba(255,255,255,0.08)' }}>
+                                        {label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        {adminPublishMode === 'CREDITS' && (
+                            <p className="rounded-xl px-3 py-2 text-[9px] text-amber-200/70 border border-amber-400/15 bg-amber-400/5">
+                                Buyer purchase ke waqt 1, 7, ya 30 days choose karega — admin ko duration set nahi karni.
+                            </p>
+                        )}
+                        <button onClick={doPublishAdminTheme} disabled={adminPublishSaving} className="w-full py-3 rounded-xl text-xs font-black text-white disabled:opacity-50"
+                            style={{ background: 'linear-gradient(135deg,#9333ea,#db2777)' }}>
+                            {adminPublishSaving ? 'Publishing…' : editingAdminThemeId ? '💾 Update & Republish Theme' : '🚀 Save & Publish Theme'}
+                        </button>
+                        {editingAdminThemeId && <button onClick={() => setEditingAdminThemeId(null)} className="w-full py-1.5 text-[10px] font-bold text-white/40">Editing cancel karo</button>}
+                        {adminThemeLibrary.length > 0 && (
+                            <div className="pt-2 border-t border-white/8 space-y-1.5">
+                                <p className="text-[9px] font-black uppercase tracking-widest text-white/35">Published themes ({adminThemeLibrary.length})</p>
+                                {adminThemeLibrary.slice(0, 12).map(entry => (
+                                    <div key={entry.id} className={`flex items-center gap-2 rounded-xl px-2.5 py-2 bg-black/20 border border-white/6 ${entry.published === false ? 'opacity-50' : ''}`}>
+                                        <button onClick={() => setTheme(stateFromTheme(entry.themeData))} title="Preview this theme" className="w-8 h-8 rounded-lg shrink-0" style={{ background: `linear-gradient(135deg,${entry.themeData.topBarStart || entry.themeData.btnStart},${entry.themeData.topBarEnd || entry.themeData.btnEnd})` }} />
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-[10px] font-black text-white truncate">{entry.themeData.themeEmoji || '🎨'} {entry.name}</p>
+                                            <p className="text-[8px] text-white/35">{(entry.targetTier || 'all').toUpperCase()} · {entry.accessMode === 'CREDITS' ? 'Buyer chooses 1/7/30 days' : 'FREE'} · {entry.published === false ? 'DISABLED' : 'LIVE'}</p>
+                                        </div>
+                                        <button onClick={() => setTheme(stateFromTheme(entry.themeData))} className="text-[9px] font-black text-violet-300 px-2 py-1 rounded-lg bg-violet-400/10">Preview</button>
+                                        <button onClick={() => loadAdminThemeForEdit(entry)} className="text-[9px] font-black text-sky-300 px-2 py-1 rounded-lg bg-sky-400/10">Edit</button>
+                                        <button onClick={() => toggleAdminThemePublished(entry)} className="text-[9px] font-black text-amber-300 px-2 py-1 rounded-lg bg-amber-400/10">{entry.published === false ? 'Enable' : 'Disable'}</button>
+                                        <button onClick={() => deleteAdminTheme(entry)} className="text-[9px] font-black text-red-300 px-2 py-1 rounded-lg bg-red-400/10">Delete</button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 {/* ── APPLY BUTTONS ── */}
+                {isAdmin && (
                 <div className="flex gap-2.5 pt-1">
                     {!isFirstTime && (
                         <button
@@ -2193,6 +3390,7 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
                         {saving ? 'Saving...' : 'Apni Profile Pe Apply'}
                     </button>
                 </div>
+                )}
 
                 {/* ── ADMIN GLOBAL APPLY NOW BUTTON ── */}
                 {isAdmin && (

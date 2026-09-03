@@ -4502,12 +4502,14 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                   if (!isDarkMode) {
                                       // Switch to dark mode (default black)
                                       localStorage.setItem('nst_dark_theme_type', 'black');
+                                       window.dispatchEvent(new Event('nst-dark-theme-change'));
                                       onToggleDarkMode && onToggleDarkMode(true);
                                   } else {
                                       // Toggle theme type
                                       const currentType = localStorage.getItem('nst_dark_theme_type');
                                       if (currentType === 'black') {
                                           localStorage.setItem('nst_dark_theme_type', 'blue');
+                                           window.dispatchEvent(new Event('nst-dark-theme-change'));
                                           onToggleDarkMode && onToggleDarkMode(true); // Re-trigger effect
                                       } else {
                                           // Switch back to light mode
@@ -6412,6 +6414,36 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
               <div className="sticky top-0 z-20 bg-white flex items-center gap-4 mb-6 border-b pb-4 pt-1">
                   <button onClick={() => setActiveTab('DASHBOARD')} className="bg-slate-100 p-2 rounded-full hover:bg-slate-200 shrink-0"><ArrowLeft size={20} /></button>
                   <h3 className="text-xl font-black text-slate-800">General Settings</h3>
+              </div>
+
+              {/* CARD ROTATING BORDER ANIMATION */}
+              <div className="mt-4 p-4 rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50/70 to-indigo-50/70 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center text-lg shrink-0 shadow-sm shadow-blue-300">
+                          ✨
+                      </div>
+                      <div>
+                          <h4 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                              Card Rotating Border Animation
+                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${localSettings.cardBorderAnimation !== false ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>
+                                  {localSettings.cardBorderAnimation !== false ? 'ACTIVE' : 'OFF'}
+                              </span>
+                          </h4>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                              App ke sabhi cards (Class, Lesson, Page, Settings) par glowing rotating border animation chalu ya band karein.
+                          </p>
+                      </div>
+                  </div>
+                  <button
+                      type="button"
+                      onClick={() => {
+                          const nextVal = localSettings.cardBorderAnimation === false ? true : false;
+                          setLocalSettings({ ...localSettings, cardBorderAnimation: nextVal });
+                      }}
+                      className={`w-12 h-6 rounded-full transition-colors relative shrink-0 p-0.5 ${localSettings.cardBorderAnimation !== false ? 'bg-blue-600' : 'bg-slate-300'}`}
+                  >
+                      <div className={`w-5 h-5 rounded-full bg-white shadow-md transition-transform ${localSettings.cardBorderAnimation !== false ? 'translate-x-6' : 'translate-x-0'}`} />
+                  </button>
               </div>
 
               {/* HOME SCREEN NOTICE BAR */}
@@ -11992,41 +12024,212 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
               <div className="bg-gradient-to-br from-indigo-50 to-purple-50 p-6 rounded-3xl border border-indigo-100 space-y-4">
                   <h4 className="font-bold text-indigo-900 flex items-center gap-2 text-lg"><Palette size={20} /> App Theme Settings</h4>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                          <div className="bg-white p-4 rounded-xl border border-indigo-100 shadow-sm">
-                              <label className="text-xs font-bold text-slate-600 uppercase mb-2 block">Dark Mode Color</label>
-                              <div className="grid grid-cols-2 gap-2">
-                                  <button
-                                      onClick={() => setLocalSettings({...localSettings, darkThemeColor: '#0f172a', themeColor: '#0f172a'})}
-                                      className={`py-2 rounded-lg font-bold text-xs ${localSettings.darkThemeColor === '#0f172a' ? 'bg-slate-900 text-white shadow' : 'bg-slate-100 text-slate-600'}`}
-                                  >Black</button>
-                                  <button
-                                      onClick={() => setLocalSettings({...localSettings, darkThemeColor: '#1d4ed8', themeColor: '#1d4ed8'})}
-                                      className={`py-2 rounded-lg font-bold text-xs ${localSettings.darkThemeColor === '#1d4ed8' ? 'bg-blue-600 text-white shadow' : 'bg-slate-100 text-slate-600'}`}
-                                  >Blue</button>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                          {/* 1. LIGHT MODE THEME */}
+                          <div className="bg-white p-4 rounded-xl border border-amber-100 shadow-sm flex flex-col justify-between">
+                              <div>
+                                  <div className="flex items-center justify-between mb-2">
+                                      <label className="text-xs font-bold text-slate-800 uppercase flex items-center gap-1.5">
+                                          <span>🔆</span> Light Mode Theme
+                                      </label>
+                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">Light</span>
+                                  </div>
+                                  <p className="text-[10px] text-slate-500 mb-3">Day/Light mode ke colors, background aur top bar gradient.</p>
+                                  
+                                  <div className="grid grid-cols-2 gap-2 mb-2">
+                                      <div>
+                                          <span className="text-[9px] font-bold text-slate-500 block mb-1">Primary / Accent</span>
+                                          <div className="flex items-center gap-1.5">
+                                              <input type="color" value={localSettings.lightThemeColor || '#3b82f6'} onChange={(e) => setLocalSettings({...localSettings, lightThemeColor: e.target.value, themeColor: e.target.value})} className="w-8 h-8 rounded-lg cursor-pointer border-none shrink-0" />
+                                              <input type="text" value={localSettings.lightThemeColor || '#3b82f6'} onChange={(e) => setLocalSettings({...localSettings, lightThemeColor: e.target.value, themeColor: e.target.value})} className="w-full p-1.5 border rounded-lg uppercase text-[11px] font-mono" placeholder="#3b82f6" />
+                                          </div>
+                                      </div>
+                                      <div>
+                                          <span className="text-[9px] font-bold text-slate-500 block mb-1">Background</span>
+                                          <div className="flex items-center gap-1.5">
+                                              <input type="color" value={localSettings.lightThemeBackground || '#ffffff'} onChange={(e) => setLocalSettings({...localSettings, lightThemeBackground: e.target.value})} className="w-8 h-8 rounded-lg cursor-pointer border-none shrink-0" />
+                                              <input type="text" value={localSettings.lightThemeBackground || '#ffffff'} onChange={(e) => setLocalSettings({...localSettings, lightThemeBackground: e.target.value})} className="w-full p-1.5 border rounded-lg uppercase text-[11px] font-mono" placeholder="#ffffff" />
+                                          </div>
+                                      </div>
+                                  </div>
+
+                                  <div className="mb-3">
+                                      <span className="text-[9px] font-bold text-slate-500 block mb-1">Top Bar Gradient (Start / End)</span>
+                                      <div className="grid grid-cols-2 gap-2">
+                                          <div className="flex items-center gap-1.5">
+                                              <input type="color" value={localSettings.lightThemeTopBarStart || '#1b3f41'} onChange={(e) => setLocalSettings({...localSettings, lightThemeTopBarStart: e.target.value})} className="w-7 h-7 rounded-lg cursor-pointer border-none shrink-0" />
+                                              <input type="text" value={localSettings.lightThemeTopBarStart || ''} onChange={(e) => setLocalSettings({...localSettings, lightThemeTopBarStart: e.target.value})} className="w-full p-1.5 border rounded-lg uppercase text-[10px] font-mono" placeholder="Start (opt)" />
+                                          </div>
+                                          <div className="flex items-center gap-1.5">
+                                              <input type="color" value={localSettings.lightThemeTopBarEnd || '#265052'} onChange={(e) => setLocalSettings({...localSettings, lightThemeTopBarEnd: e.target.value})} className="w-7 h-7 rounded-lg cursor-pointer border-none shrink-0" />
+                                              <input type="text" value={localSettings.lightThemeTopBarEnd || ''} onChange={(e) => setLocalSettings({...localSettings, lightThemeTopBarEnd: e.target.value})} className="w-full p-1.5 border rounded-lg uppercase text-[10px] font-mono" placeholder="End (opt)" />
+                                          </div>
+                                      </div>
+                                  </div>
+
+                                  <div className="space-y-1">
+                                      <span className="text-[9px] font-bold text-slate-400 block">Quick Presets:</span>
+                                      <div className="grid grid-cols-3 gap-1.5">
+                                          <button
+                                              onClick={() => setLocalSettings({...localSettings, lightThemeColor: '#3b82f6', themeColor: '#3b82f6', lightThemeBackground: '#ffffff', lightThemeTopBarStart: '', lightThemeTopBarEnd: ''})}
+                                              className="py-1 px-2 rounded-lg font-bold text-[10px] bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition-colors"
+                                          >Blue Sky</button>
+                                          <button
+                                              onClick={() => setLocalSettings({...localSettings, lightThemeColor: '#8b5cf6', themeColor: '#8b5cf6', lightThemeBackground: '#faf5ff', lightThemeTopBarStart: '#4c1d95', lightThemeTopBarEnd: '#7c3aed'})}
+                                              className="py-1 px-2 rounded-lg font-bold text-[10px] bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 transition-colors"
+                                          >Violet</button>
+                                          <button
+                                              onClick={() => setLocalSettings({...localSettings, lightThemeColor: '#10b981', themeColor: '#10b981', lightThemeBackground: '#f0fdf4', lightThemeTopBarStart: '#064e3b', lightThemeTopBarEnd: '#059669'})}
+                                              className="py-1 px-2 rounded-lg font-bold text-[10px] bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition-colors"
+                                          >Emerald</button>
+                                      </div>
+                                  </div>
                               </div>
-                              <div className="mt-3 flex items-center gap-2">
-                                  <input type="color" value={localSettings.darkThemeColor || '#0f172a'} onChange={(e) => setLocalSettings({...localSettings, darkThemeColor: e.target.value, themeColor: e.target.value})} className="w-10 h-10 rounded-lg cursor-pointer border-none" />
-                                  <input type="text" value={localSettings.darkThemeColor || '#0f172a'} onChange={(e) => setLocalSettings({...localSettings, darkThemeColor: e.target.value, themeColor: e.target.value})} className="flex-1 p-2 border rounded-lg uppercase" />
-                              </div>
+
+                              <button
+                                  onClick={() => setLocalSettings({...localSettings, lightThemeColor: '#3b82f6', themeColor: '#3b82f6', lightThemeBackground: '#ffffff', lightThemeTopBarStart: '', lightThemeTopBarEnd: ''})}
+                                  className="mt-3 w-full py-1 text-[10px] font-bold text-slate-400 hover:text-slate-600 underline text-center"
+                              >
+                                  Reset Light Mode to Default
+                              </button>
                           </div>
 
-                          <div className="bg-white p-4 rounded-xl border border-indigo-100 shadow-sm">
-                              <label className="text-xs font-bold text-slate-600 uppercase mb-2 block">Light Mode Color</label>
-                              <div className="grid grid-cols-2 gap-2">
-                                  <button
-                                      onClick={() => setLocalSettings({...localSettings, lightThemeColor: '#3b82f6', themeColor: '#3b82f6'})}
-                                      className={`py-2 rounded-lg font-bold text-xs ${localSettings.lightThemeColor === '#3b82f6' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100 text-slate-600'}`}
-                                  >Default</button>
-                                  <button
-                                      onClick={() => setLocalSettings({...localSettings, lightThemeColor: '#a855f7', themeColor: '#a855f7'})}
-                                      className={`py-2 rounded-lg font-bold text-xs ${localSettings.lightThemeColor === '#a855f7' ? 'bg-violet-600 text-white shadow' : 'bg-slate-100 text-slate-600'}`}
-                                  >Violet</button>
+                          {/* 2. BLACK DARK THEME */}
+                          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
+                              <div>
+                                  <div className="flex items-center justify-between mb-2">
+                                      <label className="text-xs font-bold text-slate-800 uppercase flex items-center gap-1.5">
+                                          <span>🌐</span> Black Dark Theme
+                                      </label>
+                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-200 border border-slate-700">Dark</span>
+                                  </div>
+                                  <p className="text-[10px] text-slate-500 mb-3">Pitch black / Charcoal dark mode colors aur top bar gradient.</p>
+                                  
+                                  <div className="grid grid-cols-2 gap-2 mb-2">
+                                      <div>
+                                          <span className="text-[9px] font-bold text-slate-500 block mb-1">Accent</span>
+                                          <div className="flex items-center gap-1.5">
+                                              <input type="color" value={localSettings.darkThemeColor || '#64748b'} onChange={(e) => setLocalSettings({...localSettings, darkThemeColor: e.target.value})} className="w-8 h-8 rounded-lg cursor-pointer border-none shrink-0" />
+                                              <input type="text" value={localSettings.darkThemeColor || '#64748b'} onChange={(e) => setLocalSettings({...localSettings, darkThemeColor: e.target.value})} className="w-full p-1.5 border rounded-lg uppercase text-[11px] font-mono" placeholder="#64748b" />
+                                          </div>
+                                      </div>
+                                      <div>
+                                          <span className="text-[9px] font-bold text-slate-500 block mb-1">Background</span>
+                                          <div className="flex items-center gap-1.5">
+                                              <input type="color" value={localSettings.darkThemeBackground || '#000000'} onChange={(e) => setLocalSettings({...localSettings, darkThemeBackground: e.target.value})} className="w-8 h-8 rounded-lg cursor-pointer border-none shrink-0" />
+                                              <input type="text" value={localSettings.darkThemeBackground || '#000000'} onChange={(e) => setLocalSettings({...localSettings, darkThemeBackground: e.target.value})} className="w-full p-1.5 border rounded-lg uppercase text-[11px] font-mono" placeholder="#000000" />
+                                          </div>
+                                      </div>
+                                  </div>
+
+                                  <div className="mb-3">
+                                      <span className="text-[9px] font-bold text-slate-500 block mb-1">Top Bar Gradient (Start / End)</span>
+                                      <div className="grid grid-cols-2 gap-2">
+                                          <div className="flex items-center gap-1.5">
+                                              <input type="color" value={localSettings.darkThemeTopBarStart || '#090d16'} onChange={(e) => setLocalSettings({...localSettings, darkThemeTopBarStart: e.target.value})} className="w-7 h-7 rounded-lg cursor-pointer border-none shrink-0" />
+                                              <input type="text" value={localSettings.darkThemeTopBarStart || ''} onChange={(e) => setLocalSettings({...localSettings, darkThemeTopBarStart: e.target.value})} className="w-full p-1.5 border rounded-lg uppercase text-[10px] font-mono" placeholder="#090d16" />
+                                          </div>
+                                          <div className="flex items-center gap-1.5">
+                                              <input type="color" value={localSettings.darkThemeTopBarEnd || '#1e293b'} onChange={(e) => setLocalSettings({...localSettings, darkThemeTopBarEnd: e.target.value})} className="w-7 h-7 rounded-lg cursor-pointer border-none shrink-0" />
+                                              <input type="text" value={localSettings.darkThemeTopBarEnd || ''} onChange={(e) => setLocalSettings({...localSettings, darkThemeTopBarEnd: e.target.value})} className="w-full p-1.5 border rounded-lg uppercase text-[10px] font-mono" placeholder="#1e293b" />
+                                          </div>
+                                      </div>
+                                  </div>
+
+                                  <div className="space-y-1">
+                                      <span className="text-[9px] font-bold text-slate-400 block">Quick Presets:</span>
+                                      <div className="grid grid-cols-3 gap-1.5">
+                                          <button
+                                              onClick={() => setLocalSettings({...localSettings, darkThemeColor: '#64748b', darkThemeBackground: '#000000', darkThemeTopBarStart: '#000000', darkThemeTopBarEnd: '#18181b'})}
+                                              className="py-1 px-2 rounded-lg font-bold text-[10px] bg-black text-white hover:bg-zinc-800 border border-zinc-700 transition-colors"
+                                          >OLED Black</button>
+                                          <button
+                                              onClick={() => setLocalSettings({...localSettings, darkThemeColor: '#94a3b8', darkThemeBackground: '#0f172a', darkThemeTopBarStart: '#0f172a', darkThemeTopBarEnd: '#1e293b'})}
+                                              className="py-1 px-2 rounded-lg font-bold text-[10px] bg-slate-800 text-slate-200 hover:bg-slate-700 border border-slate-600 transition-colors"
+                                          >Slate Dark</button>
+                                          <button
+                                              onClick={() => setLocalSettings({...localSettings, darkThemeColor: '#e2e8f0', darkThemeBackground: '#18181b', darkThemeTopBarStart: '#18181b', darkThemeTopBarEnd: '#27272a'})}
+                                              className="py-1 px-2 rounded-lg font-bold text-[10px] bg-zinc-900 text-zinc-300 hover:bg-zinc-800 border border-zinc-700 transition-colors"
+                                          >Charcoal</button>
+                                      </div>
+                                  </div>
                               </div>
-                              <div className="mt-3 flex items-center gap-2">
-                                  <input type="color" value={localSettings.lightThemeColor || '#3b82f6'} onChange={(e) => setLocalSettings({...localSettings, lightThemeColor: e.target.value, themeColor: e.target.value})} className="w-10 h-10 rounded-lg cursor-pointer border-none" />
-                                  <input type="text" value={localSettings.lightThemeColor || '#3b82f6'} onChange={(e) => setLocalSettings({...localSettings, lightThemeColor: e.target.value, themeColor: e.target.value})} className="flex-1 p-2 border rounded-lg uppercase" />
+
+                              <button
+                                  onClick={() => setLocalSettings({...localSettings, darkThemeColor: '#64748b', darkThemeBackground: '#000000', darkThemeTopBarStart: '', darkThemeTopBarEnd: ''})}
+                                  className="mt-3 w-full py-1 text-[10px] font-bold text-slate-400 hover:text-slate-600 underline text-center"
+                              >
+                                  Reset Black Dark to Default
+                              </button>
+                          </div>
+
+                          {/* 3. BLUE DARK THEME */}
+                          <div className="bg-white p-4 rounded-xl border border-blue-100 shadow-sm flex flex-col justify-between">
+                              <div>
+                                  <div className="flex items-center justify-between mb-2">
+                                      <label className="text-xs font-bold text-slate-800 uppercase flex items-center gap-1.5">
+                                          <span>🌙</span> Blue Dark Theme
+                                      </label>
+                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-950 text-blue-300 border border-blue-800">Blue</span>
+                                  </div>
+                                  <p className="text-[10px] text-slate-500 mb-3">Midnight Blue dark mode colors aur top bar gradient.</p>
+                                  
+                                  <div className="grid grid-cols-2 gap-2 mb-2">
+                                      <div>
+                                          <span className="text-[9px] font-bold text-slate-500 block mb-1">Accent</span>
+                                          <div className="flex items-center gap-1.5">
+                                              <input type="color" value={localSettings.blueThemeColor || '#3b82f6'} onChange={(e) => setLocalSettings({...localSettings, blueThemeColor: e.target.value})} className="w-8 h-8 rounded-lg cursor-pointer border-none shrink-0" />
+                                              <input type="text" value={localSettings.blueThemeColor || '#3b82f6'} onChange={(e) => setLocalSettings({...localSettings, blueThemeColor: e.target.value})} className="w-full p-1.5 border rounded-lg uppercase text-[11px] font-mono" placeholder="#3b82f6" />
+                                          </div>
+                                      </div>
+                                      <div>
+                                          <span className="text-[9px] font-bold text-slate-500 block mb-1">Background</span>
+                                          <div className="flex items-center gap-1.5">
+                                              <input type="color" value={localSettings.blueThemeBackground || '#050d1f'} onChange={(e) => setLocalSettings({...localSettings, blueThemeBackground: e.target.value})} className="w-8 h-8 rounded-lg cursor-pointer border-none shrink-0" />
+                                              <input type="text" value={localSettings.blueThemeBackground || '#050d1f'} onChange={(e) => setLocalSettings({...localSettings, blueThemeBackground: e.target.value})} className="w-full p-1.5 border rounded-lg uppercase text-[11px] font-mono" placeholder="#050d1f" />
+                                          </div>
+                                      </div>
+                                  </div>
+
+                                  <div className="mb-3">
+                                      <span className="text-[9px] font-bold text-slate-500 block mb-1">Top Bar Gradient (Start / End)</span>
+                                      <div className="grid grid-cols-2 gap-2">
+                                          <div className="flex items-center gap-1.5">
+                                              <input type="color" value={localSettings.blueThemeTopBarStart || '#0a1628'} onChange={(e) => setLocalSettings({...localSettings, blueThemeTopBarStart: e.target.value})} className="w-7 h-7 rounded-lg cursor-pointer border-none shrink-0" />
+                                              <input type="text" value={localSettings.blueThemeTopBarStart || ''} onChange={(e) => setLocalSettings({...localSettings, blueThemeTopBarStart: e.target.value})} className="w-full p-1.5 border rounded-lg uppercase text-[10px] font-mono" placeholder="#0a1628" />
+                                          </div>
+                                          <div className="flex items-center gap-1.5">
+                                              <input type="color" value={localSettings.blueThemeTopBarEnd || '#172554'} onChange={(e) => setLocalSettings({...localSettings, blueThemeTopBarEnd: e.target.value})} className="w-7 h-7 rounded-lg cursor-pointer border-none shrink-0" />
+                                              <input type="text" value={localSettings.blueThemeTopBarEnd || ''} onChange={(e) => setLocalSettings({...localSettings, blueThemeTopBarEnd: e.target.value})} className="w-full p-1.5 border rounded-lg uppercase text-[10px] font-mono" placeholder="#172554" />
+                                          </div>
+                                      </div>
+                                  </div>
+
+                                  <div className="space-y-1">
+                                      <span className="text-[9px] font-bold text-slate-400 block">Quick Presets:</span>
+                                      <div className="grid grid-cols-3 gap-1.5">
+                                          <button
+                                              onClick={() => setLocalSettings({...localSettings, blueThemeColor: '#3b82f6', blueThemeBackground: '#050d1f', blueThemeTopBarStart: '#0a1628', blueThemeTopBarEnd: '#172554'})}
+                                              className="py-1 px-2 rounded-lg font-bold text-[10px] bg-blue-950 text-blue-300 hover:bg-blue-900 border border-blue-800 transition-colors"
+                                          >Deep Navy</button>
+                                          <button
+                                              onClick={() => setLocalSettings({...localSettings, blueThemeColor: '#60a5fa', blueThemeBackground: '#071026', blueThemeTopBarStart: '#091530', blueThemeTopBarEnd: '#1e3a8a'})}
+                                              className="py-1 px-2 rounded-lg font-bold text-[10px] bg-blue-900/60 text-blue-200 hover:bg-blue-800 border border-blue-700 transition-colors"
+                                          >Midnight</button>
+                                          <button
+                                              onClick={() => setLocalSettings({...localSettings, blueThemeColor: '#38bdf8', blueThemeBackground: '#081e36', blueThemeTopBarStart: '#03203c', blueThemeTopBarEnd: '#0284c7'})}
+                                              className="py-1 px-2 rounded-lg font-bold text-[10px] bg-sky-950 text-sky-300 hover:bg-sky-900 border border-sky-800 transition-colors"
+                                          >Ocean Abyss</button>
+                                      </div>
+                                  </div>
                               </div>
+
+                              <button
+                                  onClick={() => setLocalSettings({...localSettings, blueThemeColor: '#3b82f6', blueThemeBackground: '#050d1f', blueThemeTopBarStart: '', blueThemeTopBarEnd: ''})}
+                                  className="mt-3 w-full py-1 text-[10px] font-bold text-slate-400 hover:text-slate-600 underline text-center"
+                              >
+                                  Reset Blue Dark to Default
+                              </button>
                           </div>
 
                           <div className="bg-white p-4 rounded-xl border border-indigo-100 shadow-sm">

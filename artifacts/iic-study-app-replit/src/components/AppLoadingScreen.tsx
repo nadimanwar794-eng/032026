@@ -60,17 +60,23 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({
         previewStyle ||
         (userId ? localStorage.getItem(`nst_splash_style_preference_${userId}`) : null) ||
         localStorage.getItem('nst_splash_style_preference') ||
-        '1',
+        '2',
         10,
       );
       if (isPreview) return !isNaN(selected) && selected >= 1 && selected <= 4 ? selected : 1;
 
-      // Every user gets all four designs. Rotate globally for that user's
-      // next app open; no slots, unlocks, subscription, or credit checks.
+      // All four built-in loading screens are permanently free and rotate
+      // automatically. Legacy assignments/unlock records are intentionally
+      // ignored so every user gets the complete rotation.
+      const unlockedSlots = [1, 2, 3, 4];
+      const assigned = Object.values(loadingScreenSlotAssignments || {})
+        .map(value => Number(value))
+        .filter(value => unlockedSlots.includes(value));
+      const available = Array.from(new Set([...unlockedSlots, ...assigned]));
       const rotationKey = `nst_splash_rotation_${userId || 'guest'}`;
       const rotationIndex = parseInt(localStorage.getItem(rotationKey) || '0', 10);
-      const candidate = (rotationIndex % 4) + 1;
-      localStorage.setItem(rotationKey, String((rotationIndex + 1) % 4));
+      const candidate = available[rotationIndex % available.length] || 1;
+      localStorage.setItem(rotationKey, String((rotationIndex + 1) % available.length));
       return candidate;
     } catch {
       return 1;
@@ -124,11 +130,11 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({
     { at: 96, text: 'Welcome to NSTA!' }
   ];
 
-  // ── Engine 1: Linear Timer Progress (Variant 1: 5s | Variants 2, 4: 8s) ──
+  // ── Engine 1: linear loading screens = 4s ──
   useEffect(() => {
     if (isSortMode) return;
 
-    const duration = styleVariant === 1 ? 5000 : 8000;
+    const duration = 4000;
     const intervalTime = 25;
     const steps = duration / intervalTime;
     let currentStep = 0;
@@ -169,11 +175,11 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({
     return () => clearInterval(timer);
   }, [styleVariant, isSortMode]);
 
-  // ── Engine 2: Real-time Algorithm Sort Progress (Variant 3) -> Exact ~7.8s ──
+  // ── Engine 2: Real-time Algorithm Sort Progress (Variant 3) -> Exact ~4s ──
   useEffect(() => {
     if (!isSortMode) return;
     let isCancelled = false;
-    const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+    const sleep = (ms: number) => new Promise(r => setTimeout(r, Math.round(ms * 0.5)));
 
     const runSortEngine = async () => {
       let state = [

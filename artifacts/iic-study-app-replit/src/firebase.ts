@@ -1,5 +1,4 @@
 import { initializeApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, setDoc, getDoc, getDocFromServer, collection, updateDoc, deleteDoc, onSnapshot, getDocs, query, where, limitToLast, orderBy, increment, arrayUnion, limit, startAfter, QueryDocumentSnapshot } from "firebase/firestore";
 import { getDatabase, ref, set, get, onValue, update, remove, query as rtdbQuery, limitToLast as rtdbLimitToLast, orderByChild as rtdbOrderByChild, equalTo as rtdbEqualTo, runTransaction } from "firebase/database";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
@@ -39,6 +38,11 @@ try { localStorage.setItem(_FSP_KEY, firebaseConfig.projectId); } catch {}
 if (typeof window !== 'undefined') {
   window.addEventListener('unhandledrejection', (event) => {
     const msg = String(event?.reason?.message || event?.reason || '');
+    if (msg.includes('analytics') || msg.includes('@firebase/analytics')) {
+      // Suppress benign Firebase Analytics fetch failures in sandboxed/restricted environments
+      event.preventDefault();
+      return;
+    }
     if (msg.includes('FIRESTORE') && msg.includes('INTERNAL ASSERTION FAILED')) {
       event.preventDefault();
       console.warn('[IIC] Firestore assertion error — clearing IndexedDB cache and reloading…');
@@ -61,7 +65,8 @@ if (typeof window !== 'undefined') {
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
+const analytics: any = null;
+export { analytics };
 // Use new persistentLocalCache API (replaces deprecated enableMultiTabIndexedDbPersistence)
 const db = initializeFirestore(app, {
   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
@@ -893,9 +898,24 @@ export const saveUserToLive = async (user: any) => {
   if (!user || !user.id) return false;
 
   try {
+    // Ensure Firebase Auth state is ready before initiating writes
+    if (auth && typeof auth.authStateReady === 'function' && !auth.currentUser) {
+      await auth.authStateReady().catch(() => {});
+    }
+
     // Sanitize data before saving
     const sanitizedUser = sanitizeForFirestore(user);
     const accountState = getAccountState(sanitizedUser);
+
+    // Immediate local persistence guarantee
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem('nst_user_profile', JSON.stringify(sanitizedUser));
+        if (sanitizedUser.id) {
+          window.localStorage.setItem(`nst_user_profile_${sanitizedUser.id}`, JSON.stringify(sanitizedUser));
+        }
+      }
+    } catch (_) {}
 
   // EXTRACT BULKY DATA FOR SEGREGATION
   const {
@@ -920,7 +940,14 @@ export const saveUserToLive = async (user: any) => {
           coreProfile.role = existingRoleSnap.val();
         }
       } catch (roleCheckErr) {
-        console.warn('[saveUserToLive] Role protection check failed (non-fatal):', roleCheckErr);
+        try {
+          const fsDoc = await getDoc(doc(db, "users", user.id));
+          if (fsDoc.exists() && PRIVILEGED_ROLES.includes(fsDoc.data()?.role)) {
+            coreProfile.role = fsDoc.data().role;
+          }
+        } catch {
+          console.warn('[saveUserToLive] Role protection check failed (non-fatal):', roleCheckErr);
+        }
       }
     }
     // ──────────────────────────────────────────────────────────────────────────
@@ -973,11 +1000,6 @@ export const saveUserToLive = async (user: any) => {
     }
 
     const results = await Promise.allSettled(writes.map(write => write.promise));
-    results.forEach((result, index) => {
-      if (result.status === 'rejected') {
-        console.error(`[saveUserToLive] ${writes[index].name} failed:`, result.reason);
-      }
-    });
 
     const rtdbProfileSaved = results[0]?.status === 'fulfilled';
     const firestoreProfileSaved = results[1]?.status === 'fulfilled';
@@ -986,6 +1008,26 @@ export const saveUserToLive = async (user: any) => {
       accountDataIndex === -1 ||
       rtdbProfileSaved ||
       results[accountDataIndex]?.status === 'fulfilled';
+
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        const writeName = writes[index].name;
+        const reason = result.reason;
+        const msg = String(reason?.message || reason || '');
+        const isPermissionDenied = msg.includes('PERMISSION_DENIED') ||
+                                   msg.includes('Permission denied') ||
+                                   String(reason?.code || '').includes('permission-denied');
+
+        // RTDB profile is an auxiliary mirror for recovery/offline support.
+        // If Firestore profile was saved successfully, an RTDB permission denial
+        // is non-fatal and should not emit console.error.
+        if (writeName === 'RTDB profile' && firestoreProfileSaved && isPermissionDenied) {
+          console.warn(`[saveUserToLive] RTDB profile mirror write permission denied (Firestore profile saved successfully).`);
+        } else {
+          console.error(`[saveUserToLive] ${writeName} failed:`, reason);
+        }
+      }
+    });
 
     // Never report success when the account only exists in local state.
     if (!rtdbProfileSaved && !firestoreProfileSaved) {
@@ -1007,7 +1049,9 @@ export const saveUserToLive = async (user: any) => {
 export const subscribeToUsers = (callback: (users: any[]) => void) => {
   // Prefer Firestore for Admin List (More Reliable)
   const q = collection(db, "users");
-  return onSnapshot(q, (snapshot) => {
+  return onSnapshot(
+    q,
+    (snapshot) => {
       const users = snapshot.docs.map(doc => doc.data());
       if (users.length > 0) {
           callback(users);
@@ -1020,7 +1064,18 @@ export const subscribeToUsers = (callback: (users: any[]) => void) => {
              callback(userList);
           }, { onlyOnce: true });
       }
-  });
+    },
+    (err) => {
+      console.warn('[firebase] subscribeToUsers error:', err?.code || err);
+      // Fallback to RTDB on permission-denied or offline
+      const usersRef = ref(rtdb, 'users');
+      onValue(usersRef, (snap) => {
+         const data = snap.val();
+         const userList = data ? Object.values(data) : [];
+         callback(userList);
+      }, { onlyOnce: true });
+    }
+  );
 };
 
 // ── Paginated user loading (saves reads for 1000+ user apps) ──────────────
@@ -1056,9 +1111,16 @@ export const getUsersPage = async (
 // Costs max 10 reads per change instead of total-users reads.
 export const subscribeToRecentUsers = (callback: (users: any[]) => void) => {
   const q = query(collection(db, 'users'), orderBy('createdAt', 'desc'), limit(10));
-  return onSnapshot(q, (snap) => {
-    callback(snap.docs.map(d => d.data()));
-  });
+  return onSnapshot(
+    q,
+    (snap) => {
+      callback(snap.docs.map(d => d.data()));
+    },
+    (err) => {
+      console.warn('[firebase] subscribeToRecentUsers error:', err?.code || err);
+      callback([]);
+    }
+  );
 };
 
 export const subscribeToUser = (userId: string, callback: (user: any) => void) => {
@@ -1469,12 +1531,18 @@ const _subscribeShardedArray = (
 
   const _listenToShard = (idx: number): (() => void) => {
     let fsOk = false;
-    const unsubFs = onSnapshot(doc(db, "config", `${fsPrefix}_shard_${idx}`), (snap) => {
-      fsOk = true;
-      shardsData[idx] = snap.exists() ? (snap.data()?.items ?? []) : [];
-      shardsConfirmed.add(idx);
-      _rebuild();
-    });
+    const unsubFs = onSnapshot(
+      doc(db, "config", `${fsPrefix}_shard_${idx}`),
+      (snap) => {
+        fsOk = true;
+        shardsData[idx] = snap.exists() ? (snap.data()?.items ?? []) : [];
+        shardsConfirmed.add(idx);
+        _rebuild();
+      },
+      (err) => {
+        console.warn(`[firebase] _listenToShard error (${fsPrefix}_shard_${idx}):`, err?.code || err);
+      }
+    );
     const unsubRtdb = onValue(ref(rtdb, `${rtdbPrefix}_shard_${idx}`), (snap) => {
       if (fsOk) return;
       shardsData[idx] = snap.val()?.items ?? [];
@@ -1504,12 +1572,18 @@ const _subscribeShardedArray = (
   _applyShardCount(1);
 
   let metaFromFs = false;
-  const unsubMeta = onSnapshot(doc(db, "config", `${fsPrefix}_meta`), (snap) => {
-    metaFromFs = true;
-    metaConfirmed = true;
-    _applyShardCount(snap.exists() ? (snap.data()?.shardCount ?? 1) : 1);
-    _rebuild(); // re-check now that meta is confirmed
-  });
+  const unsubMeta = onSnapshot(
+    doc(db, "config", `${fsPrefix}_meta`),
+    (snap) => {
+      metaFromFs = true;
+      metaConfirmed = true;
+      _applyShardCount(snap.exists() ? (snap.data()?.shardCount ?? 1) : 1);
+      _rebuild(); // re-check now that meta is confirmed
+    },
+    (err) => {
+      console.warn(`[firebase] unsubMeta error (${fsPrefix}_meta):`, err?.code || err);
+    }
+  );
   const unsubMetaRtdb = onValue(ref(rtdb, `${rtdbPrefix}_meta`), (snap) => {
     if (metaFromFs) return;
     metaConfirmed = true;
@@ -1656,13 +1730,19 @@ const _subscribePerItemCollection = (
   };
 
   // Firestore collection — source of truth for item data
-  const unsubCollection = onSnapshot(collection(db, collectionName), (snapshot) => {
-    collectionFromFs = true;
-    collectionConfirmed = true;
-    itemMap = {};
-    snapshot.forEach(d => { itemMap[d.id] = d.data(); });
-    _rebuild();
-  });
+  const unsubCollection = onSnapshot(
+    collection(db, collectionName),
+    (snapshot) => {
+      collectionFromFs = true;
+      collectionConfirmed = true;
+      itemMap = {};
+      snapshot.forEach(d => { itemMap[d.id] = d.data(); });
+      _rebuild();
+    },
+    (err) => {
+      console.warn(`[firebase] collection listener error (${collectionName}):`, err?.code || err);
+    }
+  );
 
   // RTDB backup — only fills itemMap before Firestore confirms (offline / cold start)
   const unsubRtdb = onValue(ref(rtdb, rtdbBasePath), (snap) => {
@@ -1678,12 +1758,18 @@ const _subscribePerItemCollection = (
   });
 
   // Firestore index — source of truth for ordering
-  const unsubIndex = onSnapshot(doc(db, "config", indexFsDocId), (snap) => {
-    indexFromFs = true;
-    indexConfirmed = true;
-    order = snap.exists() ? (snap.data()?.ids ?? []) : [];
-    _rebuild();
-  });
+  const unsubIndex = onSnapshot(
+    doc(db, "config", indexFsDocId),
+    (snap) => {
+      indexFromFs = true;
+      indexConfirmed = true;
+      order = snap.exists() ? (snap.data()?.ids ?? []) : [];
+      _rebuild();
+    },
+    (err) => {
+      console.warn(`[firebase] index listener error (${indexFsDocId}):`, err?.code || err);
+    }
+  );
 
   // RTDB index backup
   const unsubIndexRtdb = onValue(ref(rtdb, rtdbIndexPath), (snap) => {
@@ -1830,10 +1916,16 @@ export const subscribeToSettings = (callback: (settings: any) => void) => {
 
   // ── Core settings (Firestore primary, RTDB backup) ────────────────────────
   let coreFromFs = false;
-  const unsubCoreFs = onSnapshot(doc(db, "config", "system_settings"), (snap) => {
-    coreFromFs = true;
-    if (snap.exists()) { latestCore = snap.data(); emit(); }
-  });
+  const unsubCoreFs = onSnapshot(
+    doc(db, "config", "system_settings"),
+    (snap) => {
+      coreFromFs = true;
+      if (snap.exists()) { latestCore = snap.data(); emit(); }
+    },
+    (err) => {
+      console.warn('[firebase] unsubCoreFs error:', err?.code || err);
+    }
+  );
   const unsubCoreRtdb = onValue(ref(rtdb, 'system_settings'), (snap) => {
     if (coreFromFs) return;
     const d = snap.val(); if (d) { latestCore = d; emit(); }
@@ -1868,12 +1960,18 @@ export const subscribeToSettings = (callback: (settings: any) => void) => {
   );
 
   // ── lucent: per-item collection (Firestore primary) ───────────────────────
-  const unsubLucentEntries = onSnapshot(collection(db, "lucent_entries"), (snapshot) => {
-    latestLucentMap = {};
-    snapshot.forEach(d => { latestLucentMap[d.id] = d.data(); });
-    lucentEntriesConfirmed = true;
-    emit();
-  });
+  const unsubLucentEntries = onSnapshot(
+    collection(db, "lucent_entries"),
+    (snapshot) => {
+      latestLucentMap = {};
+      snapshot.forEach(d => { latestLucentMap[d.id] = d.data(); });
+      lucentEntriesConfirmed = true;
+      emit();
+    },
+    (err) => {
+      console.warn('[firebase] unsubLucentEntries error:', err?.code || err);
+    }
+  );
   const unsubLucentRtdb = onValue(ref(rtdb, 'lucent_entries'), (snap) => {
     if (lucentEntriesConfirmed) return;
     const data = snap.val();
@@ -1886,10 +1984,16 @@ export const subscribeToSettings = (callback: (settings: any) => void) => {
     }
   });
   let lucentIndexFromFs = false;
-  const unsubLucentIndex = onSnapshot(doc(db, "config", "lucent_index"), (snap) => {
-    lucentIndexFromFs = true;
-    if (snap.exists()) { latestOrder = snap.data()?.ids ?? []; emit(); }
-  });
+  const unsubLucentIndex = onSnapshot(
+    doc(db, "config", "lucent_index"),
+    (snap) => {
+      lucentIndexFromFs = true;
+      if (snap.exists()) { latestOrder = snap.data()?.ids ?? []; emit(); }
+    },
+    (err) => {
+      console.warn('[firebase] unsubLucentIndex error:', err?.code || err);
+    }
+  );
   const unsubLucentIndexRtdb = onValue(ref(rtdb, 'lucent_index'), (snap) => {
     if (lucentIndexFromFs) return;
     const d = snap.val(); if (d?.ids) { latestOrder = d.ids; emit(); }
@@ -2242,18 +2346,46 @@ export const getApiUsage = async () => {
 
 export const subscribeToDrafts = (callback: (drafts: any[]) => void) => {
     const q = query(collection(db, "content_data"), where("isDraft", "==", true));
-    return onSnapshot(q, (snapshot) => {
-        const items = snapshot.docs.map(doc => ({ ...doc.data(), key: doc.id }));
-        callback(items);
-    });
+    return onSnapshot(
+        q,
+        (snapshot) => {
+            const items = snapshot.docs.map(doc => ({ ...doc.data(), key: doc.id }));
+            callback(items);
+        },
+        (err) => {
+            console.warn('[firebase] subscribeToDrafts error:', err?.code || err);
+            callback([]);
+        }
+    );
 };
 
 export const saveTestResult = async (userId: string, attempt: any) => {
     try {
-        const docId = `${attempt.testId}_${Date.now()}`;
+        const testIdentifier = attempt.id || attempt.testId || `test_${Date.now()}`;
+        const docId = `${testIdentifier}_${Date.now()}`;
         const sanitizedAttempt = sanitizeForFirestore(attempt);
         await setDoc(doc(db, "users", userId, "test_results", docId), sanitizedAttempt);
-    } catch(e) { console.error(e); }
+        // Also mirror to RTDB for reliable offline and real-time syncing
+        try {
+            await update(ref(rtdb, `users/${userId}/test_results/${docId}`), sanitizedAttempt);
+            await update(ref(rtdb, `users/${userId}/lastMcqPerformance`), {
+                score: attempt.score ?? attempt.correctCount ?? 0,
+                total: attempt.totalQuestions ?? attempt.total ?? 0,
+                testName: attempt.testName || attempt.title || 'Revision MCQ',
+                date: attempt.date || new Date().toISOString(),
+                timestamp: Date.now(),
+            });
+        } catch (_) {}
+        // Also store in local storage cache
+        try {
+            const cacheKey = `nst_test_results_${userId}`;
+            const existing = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+            const updated = [sanitizedAttempt, ...existing.filter((x: any) => (x.id || x.docId) !== docId)].slice(0, 50);
+            localStorage.setItem(cacheKey, JSON.stringify(updated));
+        } catch (_) {}
+    } catch(e) {
+        console.error("saveTestResult error:", e);
+    }
 };
 
 export const saveUserHistory = async (userId: string, historyItem: any) => {
@@ -2262,6 +2394,15 @@ export const saveUserHistory = async (userId: string, historyItem: any) => {
         const sanitized = sanitizeForFirestore(historyItem);
         // Save to subcollection "history" under the user
         await setDoc(doc(db, "users", userId, "history", docId), sanitized);
+        try {
+            await update(ref(rtdb, `users/${userId}/lastHistoryItem`), {
+                id: docId,
+                title: historyItem.title || historyItem.name || 'Revision Practice',
+                type: historyItem.type || 'revision',
+                date: historyItem.date || new Date().toISOString(),
+                timestamp: Date.now(),
+            });
+        } catch (_) {}
     } catch(e) { console.error("Error saving history:", e); }
 };
 
@@ -2296,7 +2437,12 @@ export const updateUserStatus = async (userId: string, time: number) => {
         // We are ONLY updating `lastActiveTime`.
 
         await update(userRef, { lastActiveTime: new Date().toISOString() });
-    } catch (error) {
+    } catch (error: any) {
+        const msg = String(error?.message || error || '');
+        if (msg.includes('PERMISSION_DENIED') || msg.includes('Permission denied')) {
+            // RTDB status write permission restricted - non-fatal background heartbeat
+            return;
+        }
         console.error("Error updating user status:", error);
     }
 };
@@ -2488,10 +2634,17 @@ export const subscribeToAiHistory = (userId: string, callback: (data: any[]) => 
 export const subscribeToAllAiInteractions = (callback: (data: any[]) => void) => {
     // For Admin: Listen to Firestore
     const q = query(collection(db, "ai_interactions"), orderBy("timestamp", "desc"), limitToLast(50));
-    return onSnapshot(q, (snapshot) => {
-        const items = snapshot.docs.map(doc => doc.data());
-        callback(items);
-    });
+    return onSnapshot(
+        q,
+        (snapshot) => {
+            const items = snapshot.docs.map(doc => doc.data());
+            callback(items);
+        },
+        (err) => {
+            console.warn('[firebase] subscribeToAllAiInteractions error:', err?.code || err);
+            callback([]);
+        }
+    );
 };
 
 // 9. Secure Key Management
@@ -2540,13 +2693,20 @@ export const incrementApiUsage = async (keyIndex: number, type: 'PILOT' | 'STUDE
 
 export const subscribeToApiUsage = (callback: (data: any) => void) => {
     const date = new Date().toISOString().split('T')[0];
-    return onSnapshot(doc(db, "admin_stats", `api_usage_${date}`), (docSnap) => {
-        if (docSnap.exists()) {
-            callback(docSnap.data());
-        } else {
+    return onSnapshot(
+        doc(db, "admin_stats", `api_usage_${date}`),
+        (docSnap) => {
+            if (docSnap.exists()) {
+                callback(docSnap.data());
+            } else {
+                callback(null);
+            }
+        },
+        (err) => {
+            console.warn('[firebase] subscribeToApiUsage error:', err?.code || err);
             callback(null);
         }
-    });
+    );
 };
 
 // 10. Demand Requests
@@ -2749,19 +2909,33 @@ export const publishAnimation = async (anim: any) => {
 };
 
 export const subscribePublishedThemes = (callback: (items: any[]) => void) => {
-    return onSnapshot(collection(db, 'published_themes'), (snap) => {
-        const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        items.sort((a: any, b: any) => (b.likes || 0) - (a.likes || 0));
-        callback(items);
-    });
+    return onSnapshot(
+        collection(db, 'published_themes'),
+        (snap) => {
+            const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            items.sort((a: any, b: any) => (b.likes || 0) - (a.likes || 0));
+            callback(items);
+        },
+        (err) => {
+            console.warn('[firebase] subscribePublishedThemes error:', err?.code || err);
+            callback([]);
+        }
+    );
 };
 
 export const subscribePublishedAnimations = (callback: (items: any[]) => void) => {
-    return onSnapshot(collection(db, 'published_animations'), (snap) => {
-        const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        items.sort((a: any, b: any) => (b.likes || 0) - (a.likes || 0));
-        callback(items);
-    });
+    return onSnapshot(
+        collection(db, 'published_animations'),
+        (snap) => {
+            const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            items.sort((a: any, b: any) => (b.likes || 0) - (a.likes || 0));
+            callback(items);
+        },
+        (err) => {
+            console.warn('[firebase] subscribePublishedAnimations error:', err?.code || err);
+            callback([]);
+        }
+    );
 };
 
 export const likePublishedTheme = async (themeId: string, userId: string) => {

@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/iic-study-app/"
+title = "IIC Study App"
+description = "A student-focused study and progress app with learning tools, revision support, routines, and customizable loading experiences."
+version = "1.0.0"
+id = "artifacts/iic-study-app-replit"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/iic-study-app/" ]
+localPort = 23975
+
+[services.development]
+run = "pnpm --filter @workspace/iic-study-app-replit run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/iic-study-app-replit", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/iic-study-app-replit/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "23975"
+BASE_PATH = "/iic-study-app/"

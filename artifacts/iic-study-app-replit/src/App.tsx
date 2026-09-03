@@ -234,6 +234,13 @@ const App: React.FC = () => {
     }
     return prefersDark;
   });
+  const [darkThemeRevision, setDarkThemeRevision] = useState(0);
+
+  useEffect(() => {
+    const refreshDarkTheme = () => setDarkThemeRevision(value => value + 1);
+    window.addEventListener('nst-dark-theme-change', refreshDarkTheme);
+    return () => window.removeEventListener('nst-dark-theme-change', refreshDarkTheme);
+  }, []);
 
   const [isFlashSaleActive, setIsFlashSaleActive] = useState(false);
 
@@ -249,7 +256,7 @@ const App: React.FC = () => {
          document.documentElement.classList.add(themeType === 'blue' ? 'dark-mode-blue' : 'dark-mode-black');
       }
       localStorage.setItem('nst_dark_mode', darkMode.toString());
-  }, [darkMode]);
+   }, [darkMode, darkThemeRevision]);
 
   useEffect(() => {
     if (!window.matchMedia) return;
@@ -377,6 +384,68 @@ const App: React.FC = () => {
           document.documentElement.classList.remove('global-cards-3d');
       }
   }, [state.settings?.globalCards3D]);
+
+  // Card Rotating Border Animation Handler (Global Admin toggle + Student Profile preference + Theme color awareness)
+  useEffect(() => {
+      const updateBorderAnim = () => {
+          const adminEnabled = state.settings?.cardBorderAnimation !== false; // Active by default
+          const studentOff = localStorage.getItem('nst_card_border_anim_off') === '1';
+          if (adminEnabled && !studentOff) {
+              document.documentElement.classList.add('global-rotating-border-cards');
+          } else {
+              document.documentElement.classList.remove('global-rotating-border-cards');
+          }
+
+          const isBlue = document.documentElement.classList.contains('dark-mode-blue');
+          const isDark = document.documentElement.classList.contains('dark-mode') || document.documentElement.classList.contains('dark-mode-black');
+          const color = isBlue
+            ? (state.settings?.blueThemeColor || '#38bdf8')
+            : isDark
+            ? (state.settings?.darkThemeColor || '#00e5ff')
+            : (state.settings?.lightThemeColor || '#3b82f6');
+          document.documentElement.style.setProperty('--nst-rotating-border-color', color);
+          document.documentElement.style.setProperty('--nst-card-inner-bg', isBlue ? (state.settings?.blueThemeCardBg || '#071224') : isDark ? (state.settings?.darkThemeCardBg || '#0b0f17') : (state.settings?.lightThemeCardBg || '#ffffff'));
+      };
+
+      updateBorderAnim();
+      window.addEventListener('nst-card-border-anim-change', updateBorderAnim);
+      window.addEventListener('nst-dark-theme-change', updateBorderAnim);
+      return () => {
+          window.removeEventListener('nst-card-border-anim-change', updateBorderAnim);
+          window.removeEventListener('nst-dark-theme-change', updateBorderAnim);
+      };
+  }, [state.settings?.cardBorderAnimation, state.settings?.lightThemeColor, state.settings?.darkThemeColor, state.settings?.blueThemeColor, state.settings?.lightThemeCardBg, state.settings?.darkThemeCardBg, state.settings?.blueThemeCardBg]);
+
+  // Card Rotating Border Animation Handler (Global Admin toggle + Student Profile preference + Theme color awareness)
+  useEffect(() => {
+      const updateBorderAnim = () => {
+          const adminEnabled = state.settings?.cardBorderAnimation !== false; // Active by default
+          const studentOff = localStorage.getItem('nst_card_border_anim_off') === '1';
+          if (adminEnabled && !studentOff) {
+              document.documentElement.classList.add('global-rotating-border-cards');
+          } else {
+              document.documentElement.classList.remove('global-rotating-border-cards');
+          }
+
+          const isBlue = document.documentElement.classList.contains('dark-mode-blue');
+          const isDark = document.documentElement.classList.contains('dark-mode') || document.documentElement.classList.contains('dark-mode-black');
+          const color = isBlue
+            ? (state.settings?.blueThemeColor || '#38bdf8')
+            : isDark
+            ? (state.settings?.darkThemeColor || '#00e5ff')
+            : (state.settings?.lightThemeColor || '#3b82f6');
+          document.documentElement.style.setProperty('--nst-rotating-border-color', color);
+          document.documentElement.style.setProperty('--nst-card-inner-bg', isBlue ? (state.settings?.blueThemeCardBg || '#071224') : isDark ? (state.settings?.darkThemeCardBg || '#0b0f17') : (state.settings?.lightThemeCardBg || '#ffffff'));
+      };
+
+      updateBorderAnim();
+      window.addEventListener('nst-card-border-anim-change', updateBorderAnim);
+      window.addEventListener('nst-dark-theme-change', updateBorderAnim);
+      return () => {
+          window.removeEventListener('nst-card-border-anim-change', updateBorderAnim);
+          window.removeEventListener('nst-dark-theme-change', updateBorderAnim);
+      };
+  }, [state.settings?.cardBorderAnimation, state.settings?.lightThemeColor, state.settings?.darkThemeColor, state.settings?.blueThemeColor, state.settings?.lightThemeCardBg, state.settings?.darkThemeCardBg, state.settings?.blueThemeCardBg]);
 
   useEffect(() => {
       const top = state.settings.bannerConfig?.top;
@@ -1127,7 +1196,7 @@ const App: React.FC = () => {
           setRevisionTrackerUser(null);
           return;
       }
-      hydrateRevisionTracker(userId).catch(err => {
+      hydrateRevisionTracker(userId, state.user).catch(err => {
           console.warn('[IIC] Revision tracker restore skipped:', err);
       });
   }, [state.user?.id, state.originalAdmin]);
@@ -1452,9 +1521,16 @@ const App: React.FC = () => {
         user.profileCompleted = true;
 
         if (auth.currentUser === null) {
-            signInAnonymously(auth).catch(e => {
-                console.warn('[IIC] Background Firebase Auth restore skipped:', e.code || e.message);
-            });
+            (async () => {
+                if (typeof auth.authStateReady === 'function') {
+                    await auth.authStateReady().catch(() => {});
+                }
+                if (auth.currentUser === null) {
+                    signInAnonymously(auth).catch(e => {
+                        console.warn('[IIC] Background Firebase Auth restore skipped:', e.code || e.message);
+                    });
+                }
+            })();
         }
 
         if (user.role !== 'ADMIN') {
@@ -1650,10 +1726,24 @@ const App: React.FC = () => {
   useEffect(() => {
       document.title = `${state.settings.appName}`;
 
-      let activeThemeColor = state.settings.themeColor || '#3b82f6';
+       const darkThemeType = localStorage.getItem('nst_dark_theme_type') || 'black';
+       let activeThemeColor = darkMode
+         ? (darkThemeType === 'blue'
+             ? (state.settings.blueThemeColor || state.settings.darkThemeColor)
+             : state.settings.darkThemeColor) || state.settings.themeColor || '#3b82f6'
+         : state.settings.lightThemeColor || state.settings.themeColor || '#3b82f6';
 
-      if (state.user) {
-          if (state.user.isPremium) {
+       if (state.user) {
+           const personalTheme = (state.user as any).personalTheme;
+           const personalThemeExpiry = (state.user as any).personalThemeExpiry;
+           const hasActivePersonalTheme = !!(
+               personalTheme?.btnStart &&
+               (!personalThemeExpiry || new Date(personalThemeExpiry) > new Date())
+           );
+
+           if (hasActivePersonalTheme) {
+               activeThemeColor = personalTheme.btnStart;
+            } else if (!darkMode && state.user.isPremium) {
               if (state.user.subscriptionLevel === 'ULTRA') {
                   activeThemeColor = '#a855f7';
               } else if (state.user.subscriptionLevel === 'BASIC') {
@@ -1663,7 +1753,7 @@ const App: React.FC = () => {
 
           try {
               const lbData = localStorage.getItem('nst_leaderboard');
-              if (lbData) {
+                if (lbData && !hasActivePersonalTheme && !darkMode) {
                   const entries: any[] = JSON.parse(lbData);
                   const top3 = entries
                       .sort((a, b) => b.score - a.score)
@@ -1689,7 +1779,7 @@ const App: React.FC = () => {
       const g = parseInt(hex.substring(2, 4), 16) || 130;
       const b = parseInt(hex.substring(4, 6), 16) || 246;
       styleTag.innerHTML = `:root { --primary: ${activeThemeColor}; --nst-color-brand: ${activeThemeColor}; --nst-color-brand-5: rgba(${r},${g},${b},0.05); --nst-color-brand-10: rgba(${r},${g},${b},0.10); } .text-primary { color: var(--primary); } .bg-primary { background-color: var(--primary); } .border-primary { border-color: var(--primary); } ${state.settings.customCSS || ''}`;
-  }, [state.settings, state.user]);
+   }, [state.settings, state.user, darkMode, darkThemeRevision]);
 
   const logActivity = (action: string, details: string, overrideUser?: User) => {
       const u = overrideUser || state.user;
@@ -1715,6 +1805,7 @@ const App: React.FC = () => {
   const updateSettings = (newSettings: SystemSettings) => {
       setState(prev => ({...prev, settings: newSettings}));
       localStorage.setItem('nst_system_settings', JSON.stringify(newSettings));
+      window.dispatchEvent(new Event('nst-dark-theme-change'));
   };
 
   const handleToggleAutoTts = (enabled: boolean) => {
@@ -2983,6 +3074,7 @@ const App: React.FC = () => {
            loadingScreenSlotAssignments={state.user?.loadingScreenSlotAssignments}
            loadingScreenSlotUnlocks={state.user?.loadingScreenSlotUnlocks}
            loadingScreenUnlocks={state.user?.loadingScreenUnlocks}
+           loadingScreenLibrary={state.settings?.adminLoadingScreenLibrary}
           isPreview={isLoadingPreview}
           onBack={() => {
             sessionStorage.removeItem('nst_splash_preview_style');

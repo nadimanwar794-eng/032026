@@ -181,6 +181,114 @@
 .nst-chapter-card.nst-chapter-current { border-left-color: var(--nst-color-brand); }
 
 /* ══════════════════════════════════════════════════════════════
+   ROTATING BORDER ANIMATION (Conic Gradient Beam Effect)
+   Har card (Class, Lesson, Page, Settings) pe ghumne wala glow border
+   ══════════════════════════════════════════════════════════════ */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+:root {
+  --nst-rotating-border-color: #3b82f6;
+  --nst-card-inner-bg: #ffffff;
+}
+
+.dark-mode {
+  --nst-rotating-border-color: #00e5ff;
+  --nst-card-inner-bg: #111827;
+}
+
+.dark-mode-black {
+  --nst-rotating-border-color: #00e5ff;
+  --nst-card-inner-bg: #0b0f17;
+}
+
+.dark-mode-blue {
+  --nst-rotating-border-color: #38bdf8;
+  --nst-card-inner-bg: #071224;
+}
+
+/* Card classes with rotating border effect */
+.global-rotating-border-cards .nst-card,
+.global-rotating-border-cards .nst-card-brand,
+.global-rotating-border-cards .nst-chapter-card,
+.global-rotating-border-cards .nst-lesson-card,
+.global-rotating-border-cards .nst-subject-card,
+.global-rotating-border-cards .nst-page-card,
+.global-rotating-border-cards .topic-card,
+.global-rotating-border-cards .nst-card-animated {
+  position: relative !important;
+  overflow: hidden !important;
+  border-color: transparent !important;
+}
+
+/* Rotating conic gradient border beam */
+.global-rotating-border-cards .nst-card::before,
+.global-rotating-border-cards .nst-card-brand::before,
+.global-rotating-border-cards .nst-chapter-card::before,
+.global-rotating-border-cards .nst-lesson-card::before,
+.global-rotating-border-cards .nst-subject-card::before,
+.global-rotating-border-cards .nst-page-card::before,
+.global-rotating-border-cards .topic-card::before,
+.global-rotating-border-cards .nst-card-animated::before {
+  content: '';
+  position: absolute;
+  top: -150%;
+  left: -150%;
+  width: 400%;
+  height: 400%;
+  background: conic-gradient(from 0deg, transparent 0%, var(--nst-rotating-border-color, #00e5ff) 15%, transparent 30%);
+  animation: spin 3s linear infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Inner card background */
+.global-rotating-border-cards .nst-card::after,
+.global-rotating-border-cards .nst-card-brand::after,
+.global-rotating-border-cards .nst-chapter-card::after,
+.global-rotating-border-cards .nst-lesson-card::after,
+.global-rotating-border-cards .nst-subject-card::after,
+.global-rotating-border-cards .nst-page-card::after,
+.global-rotating-border-cards .topic-card::after,
+.global-rotating-border-cards .nst-card-animated::after {
+  content: '';
+  position: absolute;
+  inset: 2.5px;
+  background: inherit;
+  background-color: var(--nst-card-inner-bg, #ffffff);
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Ensure card children sit above the inner background and stay interactive */
+.global-rotating-border-cards .nst-card > :not([class*="absolute"]),
+.global-rotating-border-cards .nst-card-brand > :not([class*="absolute"]),
+.global-rotating-border-cards .nst-chapter-card > :not([class*="absolute"]),
+.global-rotating-border-cards .nst-lesson-card > :not([class*="absolute"]),
+.global-rotating-border-cards .nst-subject-card > :not([class*="absolute"]),
+.global-rotating-border-cards .nst-page-card > :not([class*="absolute"]),
+.global-rotating-border-cards .topic-card > :not([class*="absolute"]),
+.global-rotating-border-cards .nst-card-animated > :not([class*="absolute"]) {
+  position: relative;
+  z-index: 1;
+}
+
+.global-rotating-border-cards .nst-card > [class*="absolute"],
+.global-rotating-border-cards .nst-card-brand > [class*="absolute"],
+.global-rotating-border-cards .nst-chapter-card > [class*="absolute"],
+.global-rotating-border-cards .nst-lesson-card > [class*="absolute"],
+.global-rotating-border-cards .nst-subject-card > [class*="absolute"],
+.global-rotating-border-cards .nst-page-card > [class*="absolute"],
+.global-rotating-border-cards .topic-card > [class*="absolute"],
+.global-rotating-border-cards .nst-card-animated > [class*="absolute"] {
+  z-index: 2;
+}
+
+/* ══════════════════════════════════════════════════════════════
    GLOBAL 3D CARDS MODE — admin toggle se activate hota hai
    Har page ka alag intensity level set hota hai (100/80/70/60%)
    ══════════════════════════════════════════════════════════════ */

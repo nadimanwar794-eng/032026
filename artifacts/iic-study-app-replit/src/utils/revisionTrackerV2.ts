@@ -12,6 +12,7 @@ import {
   getTrackedQuestionKey,
   normalizeMcqForTracking,
 } from './mcqStructure';
+import { safeSetItem, pruneLocalStorageForQuota } from './safeUtils';
 
 export interface TopicBucket {
   subjectId: string;
@@ -61,6 +62,9 @@ export interface TopicBucket {
   sessionHistory?: { accuracy: number; tier: 'weak' | 'average' | 'strong' | 'mastered'; at: number }[];
   // Last local/cloud mutation time. Used to merge an offline device with Firebase.
   updatedAt?: number;
+  // Canonical tracker map key
+  key?: string;
+  _key?: string;
 }
 
 export type TrackerMap = Record<string, TopicBucket>;
@@ -69,8 +73,53 @@ const STORAGE_KEY = 'nst_revision_tracker_v2';
 const LEGACY_STORAGE_KEY = STORAGE_KEY;
 let activeUserId: string | null = null;
 
-function userStorageKey(userId: string | null = activeUserId): string {
-  return userId ? `${STORAGE_KEY}_${encodeURIComponent(userId)}` : STORAGE_KEY;
+// In-memory cache to guarantee zero data loss during session or if storage fails
+const memoryTrackerCache: Record<string, TrackerMap> = {};
+
+// Hydration state flags for device-switch and initial cloud load
+let isRevisionHydrating = false;
+let isRevisionHydrated = false;
+
+export function getIsRevisionHydrating(): boolean {
+  return isRevisionHydrating;
+}
+
+export function getIsRevisionHydrated(): boolean {
+  return isRevisionHydrated;
+}
+
+export function setRevisionHydrationState(hydrating: boolean, hydrated: boolean): void {
+  isRevisionHydrating = hydrating;
+  isRevisionHydrated = hydrated;
+  try {
+    window.dispatchEvent(new CustomEvent('iic-revision-hydration-state', {
+      detail: { hydrating, hydrated, activeUserId }
+    }));
+  } catch {}
+}
+
+function getEffectiveUserId(): string | null {
+  if (activeUserId) return activeUserId;
+  try {
+    const cur = typeof localStorage !== 'undefined' ? localStorage.getItem('nst_current_user') : null;
+    if (cur) {
+      const u = JSON.parse(cur);
+      if (u?.id) return String(u.id);
+    }
+    const prof = typeof localStorage !== 'undefined' ? localStorage.getItem('nst_user_profile') : null;
+    if (prof) {
+      const p = JSON.parse(prof);
+      if (p?.id) return String(p.id);
+    }
+    const lastId = typeof localStorage !== 'undefined' ? localStorage.getItem('nst_last_user_id') : null;
+    if (lastId) return String(lastId);
+  } catch {}
+  return null;
+}
+
+function userStorageKey(userId?: string | null): string {
+  const uid = userId || activeUserId || getEffectiveUserId();
+  return uid ? `${STORAGE_KEY}_${encodeURIComponent(uid)}` : STORAGE_KEY;
 }
 
 /**
@@ -91,58 +140,190 @@ export function setRevisionTrackerUser(userId: string | null | undefined): void 
       const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
       if (legacy) {
         localStorage.setItem(scopedKey, legacy);
-        // The old unscoped record could otherwise be copied into a different
-        // account the next time that account logs in on this device.
-        localStorage.removeItem(LEGACY_STORAGE_KEY);
       }
     }
   } catch {}
 }
 
+/**
+ * Compacts a TrackerMap so it respects the 5MB browser quota:
+ * - Keeps at most 6 recent wrong questions per bucket with bounded string lengths
+ * - Keeps at most 5 recent session history records
+ */
+export function compactTrackerMap(map: TrackerMap, strict: boolean = false): TrackerMap {
+  const result: TrackerMap = {};
+  const maxWrong = strict ? 3 : 6;
+  const maxStrLen = strict ? 250 : 500;
+
+  for (const [key, bucket] of Object.entries(map || {})) {
+    if (!bucket) continue;
+    const wrongQuestions = Array.isArray(bucket.wrongQuestions)
+      ? bucket.wrongQuestions.slice(-maxWrong).map((wrong, idx) => ({
+          question: (wrong.question || '').slice(0, maxStrLen),
+          questionNumber: wrong.questionNumber,
+          statements: Array.isArray(wrong.statements)
+            ? wrong.statements.slice(0, 4).map(s => String(s || '').slice(0, 200))
+            : undefined,
+          correctOption: (wrong.correctOption || '').slice(0, 160),
+          allOptions: Array.isArray(wrong.allOptions)
+            ? wrong.allOptions.slice(0, 5).map(o => String(o || '').slice(0, 160))
+            : undefined,
+          correctAnswer: wrong.correctAnswer,
+          explanation: (wrong.explanation || '').slice(0, maxStrLen),
+          at: wrong.at || Date.now(),
+          wrongCycles: wrong.wrongCycles || 1,
+        }))
+      : [];
+
+    const sessionHistory = Array.isArray(bucket.sessionHistory)
+      ? bucket.sessionHistory.slice(-5)
+      : undefined;
+
+    result[key] = {
+      ...bucket,
+      key,
+      _key: key,
+      wrongQuestions,
+      sessionHistory,
+    };
+  }
+  return result;
+}
+
 function safeRead(): TrackerMap {
+  const currentKey = userStorageKey();
   try {
-    const raw = localStorage.getItem(userStorageKey());
-    if (!raw) return {};
+    let raw = localStorage.getItem(currentKey);
+    // If not found in user-scoped key, check legacy key and candidate keys
+    if (!raw && currentKey !== LEGACY_STORAGE_KEY) {
+      raw = localStorage.getItem(LEGACY_STORAGE_KEY);
+      if (raw) {
+        try { localStorage.setItem(currentKey, raw); } catch {}
+      }
+    }
+    if (!raw) {
+      // Fallback: check for any scoped tracker key
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && k.startsWith(`${STORAGE_KEY}_`)) {
+            const candidate = localStorage.getItem(k);
+            if (candidate && candidate.length > 2) {
+              raw = candidate;
+              break;
+            }
+          }
+        }
+      } catch {}
+      if (!raw) {
+        raw = localStorage.getItem(LEGACY_STORAGE_KEY);
+      }
+    }
+
+    if (!raw) {
+      // Fallback to in-memory cache if available
+      return memoryTrackerCache[currentKey] ? { ...memoryTrackerCache[currentKey] } : (memoryTrackerCache[LEGACY_STORAGE_KEY] ? { ...memoryTrackerCache[LEGACY_STORAGE_KEY] } : {});
+    }
+
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return {};
+    if (!parsed || typeof parsed !== 'object') {
+      return memoryTrackerCache[currentKey] ? { ...memoryTrackerCache[currentKey] } : {};
+    }
 
     // Backfill the structured MCQ fields when an older tracker entry is opened.
     // This keeps existing mistakes visible without requiring a destructive reset.
-    return Object.fromEntries(Object.entries(parsed).map(([key, value]) => {
+    const result = Object.fromEntries(Object.entries(parsed).map(([key, value]) => {
       const bucket = value as TopicBucket;
       const wrongQuestions = Array.isArray(bucket.wrongQuestions)
         ? bucket.wrongQuestions.map((wrong, index) => {
             const normalized = normalizeMcqForTracking({
-              question: wrong.question,
-              questionNumber: wrong.questionNumber,
-              statements: wrong.statements,
-              options: wrong.allOptions,
-              correctAnswer: wrong.correctAnswer,
-              explanation: wrong.explanation,
+              question: wrong?.question,
+              questionNumber: wrong?.questionNumber,
+              statements: wrong?.statements,
+              options: wrong?.allOptions,
+              correctAnswer: wrong?.correctAnswer,
+              explanation: wrong?.explanation,
             }, index);
             return {
               ...wrong,
-              questionNumber: wrong.questionNumber || normalized.questionNumber,
-              statements: wrong.statements?.length ? wrong.statements : normalized.statements,
+              questionNumber: wrong?.questionNumber || normalized.questionNumber,
+              statements: wrong?.statements?.length ? wrong.statements : normalized.statements,
               allOptions: normalized.allOptions,
-              correctAnswer: Number.isInteger(wrong.correctAnswer)
+              correctAnswer: Number.isInteger(wrong?.correctAnswer)
                 ? wrong.correctAnswer
-                : normalized.allOptions.findIndex(option => option === wrong.correctOption),
-              correctOption: wrong.correctOption || normalized.correctOption,
+                : normalized.allOptions.findIndex(option => option === (wrong?.correctOption || '')),
+              correctOption: wrong?.correctOption || normalized.correctOption,
             };
           })
         : [];
-      return [key, { ...bucket, wrongQuestions }];
+      return [key, { ...bucket, key, _key: key, wrongQuestions }];
     })) as TrackerMap;
-  } catch { return {}; }
+
+    memoryTrackerCache[currentKey] = result;
+    if (currentKey !== LEGACY_STORAGE_KEY) {
+      memoryTrackerCache[LEGACY_STORAGE_KEY] = result;
+    }
+    return result;
+  } catch {
+    return memoryTrackerCache[currentKey] ? { ...memoryTrackerCache[currentKey] } : {};
+  }
 }
 
 function safeWrite(map: TrackerMap) {
-  try { localStorage.setItem(userStorageKey(), JSON.stringify(map)); } catch {}
+  const currentKey = userStorageKey();
+  // Keep memory cache always updated immediately
+  memoryTrackerCache[currentKey] = map;
+  if (currentKey !== LEGACY_STORAGE_KEY) {
+    memoryTrackerCache[LEGACY_STORAGE_KEY] = map;
+  }
+
+  try {
+    const compacted = compactTrackerMap(map, false);
+    const serialized = JSON.stringify(compacted);
+    const ok = safeSetItem(currentKey, serialized);
+    if (!ok) {
+      // If quota failed, prune storage and try strict compaction
+      pruneLocalStorageForQuota();
+      const strictlyCompacted = compactTrackerMap(map, true);
+      localStorage.setItem(currentKey, JSON.stringify(strictlyCompacted));
+    }
+    // Also mirror to legacy unscoped key so all components stay in sync
+    if (currentKey !== LEGACY_STORAGE_KEY) {
+      try {
+        safeSetItem(LEGACY_STORAGE_KEY, serialized);
+      } catch (_) {}
+    }
+  } catch (err) {
+    try {
+      // Emergency: prune storage and write bare essential bucket state
+      pruneLocalStorageForQuota();
+      const minimalMap: TrackerMap = {};
+      for (const [k, b] of Object.entries(map)) {
+        if (!b) continue;
+        minimalMap[k] = {
+          ...b,
+          wrongQuestions: (b.wrongQuestions || []).slice(-2),
+          sessionHistory: undefined,
+        };
+      }
+      const minimalSerialized = JSON.stringify(minimalMap);
+      localStorage.setItem(currentKey, minimalSerialized);
+      if (currentKey !== LEGACY_STORAGE_KEY) {
+        try { localStorage.setItem(LEGACY_STORAGE_KEY, minimalSerialized); } catch (_) {}
+      }
+    } catch {
+      // In worst-case storage limit, preserve in sessionStorage & memory
+      try {
+        sessionStorage.setItem(currentKey, JSON.stringify(compactTrackerMap(map, true)));
+      } catch {}
+      console.warn('[revisionTrackerV2] LocalStorage full. Retained in memory & session cache.');
+    }
+  }
 }
 
 export function bucketKey(subjectId: string, chapterId: string, pageKey: string, topic: string) {
-  return `${subjectId}::${chapterId}::${pageKey}::${topic}`;
+  const p = pageKey || chapterId || '';
+  return `${subjectId || ''}::${chapterId || ''}::${p}::${topic || ''}`;
 }
 
 /** Returns the start-of-tomorrow (midnight) as a Unix ms timestamp. */
@@ -433,10 +614,36 @@ export function markNotesReviewed(key: string, config?: RevisionConfig) {
 }
 
 /** Mark an MCQ session done. accuracy = 0..1. Schedules next revision based on performance. */
-export function markMcqDone(key: string, accuracy: number, config?: RevisionConfig) {
+export function markMcqDone(
+  key: string,
+  accuracy: number,
+  config?: RevisionConfig,
+  sessionDetails?: {
+    total?: number;
+    got?: number;
+    correctQuestionTexts?: string[];
+  }
+) {
   const map = safeRead();
-  const b = map[key];
-  if (!b) return;
+  let targetKey = key;
+  let b = map[targetKey];
+  if (!b) {
+    // Robust key search: check if matching by topic or partial subject/chapter
+    const foundKey = Object.keys(map).find(k => {
+      if (k === key) return true;
+      const item = map[k];
+      if (item?.topic && key.endsWith(`::${item.topic}`)) return true;
+      const parts = k.split('::');
+      const keyParts = key.split('::');
+      if (parts[0] === keyParts[0] && parts[1] === keyParts[1] && parts[3] === keyParts[3]) return true;
+      if (item?.topic && (item.topic.trim().toLowerCase() === keyParts[3]?.trim().toLowerCase())) return true;
+      return false;
+    });
+    if (foundKey) {
+      targetKey = foundKey;
+      b = map[foundKey];
+    }
+  }
 
   const thresholds = config?.thresholds ?? { strong: 65, average: 50, mastery: 80 };
   const intervals = config?.intervals ?? {
@@ -463,30 +670,73 @@ export function markMcqDone(key: string, accuracy: number, config?: RevisionConf
     tier = 'weak';
   }
 
-  b.lastTier = tier;
-  b.lastSessionAccuracy = accuracy;
-  // ── Session history: last 3 sessions, newest first ────────────────────
-  b.sessionHistory = [
-    { accuracy, tier, at: Date.now() },
-    ...(b.sessionHistory || []),
-  ].slice(0, 3);
-  b.stage = 'NOTES';
-  b.cycleCount = (b.cycleCount || 0) + 1;
-  // Perfect run → enter the long-spacing maintenance window: notes resurface
-  // in 10 days, MCQ rerun resurfaces in 20 days. Otherwise fall back to the
-  // tier-based interval the admin configured.
-  if (accuracy >= 1) {
-    const TEN_DAYS_MS  = 10 * 24 * 3600 * 1000;
-    const TWENTY_DAYS_MS = 20 * 24 * 3600 * 1000;
-    b.wrongQuestions = [];
-    b.longSpacingNotesAt = Date.now() + TEN_DAYS_MS;
-    b.longSpacingMcqAt   = Date.now() + TWENTY_DAYS_MS;
-    b.nextDueAt = b.longSpacingNotesAt;
+  if (!b) {
+    // Bucket was not in tracker yet (e.g. routine-scheduled or reconstructed) — synthesize it so completion is NEVER lost
+    const parts = key.split('::');
+    b = {
+      subjectId: parts[0] || 'GENERAL',
+      chapterId: parts[1] || 'chapter',
+      pageKey: parts[2] || parts[1] || 'chapter',
+      topic: parts[3] || key,
+      total: sessionDetails?.total || 1,
+      correct: sessionDetails?.got ?? Math.round(accuracy * (sessionDetails?.total || 1)),
+      lastAttemptAt: Date.now(),
+      wrongQuestions: [],
+      stage: 'NOTES',
+      nextDueAt: Math.max(tomorrowMidnight(), Date.now() + Math.max(86400, nextRevisionSecs) * 1000),
+      cycleCount: 1,
+      lastTier: tier,
+      lastSessionAccuracy: accuracy,
+      updatedAt: Date.now(),
+    };
   } else {
-    b.nextDueAt = Date.now() + nextRevisionSecs * 1000;
+    b.lastTier = tier;
+    b.lastSessionAccuracy = accuracy;
+
+    // Filter out any wrong questions that the user answered correctly in this session
+    if (sessionDetails?.correctQuestionTexts && Array.isArray(b.wrongQuestions)) {
+      const correctNormalized = new Set(
+        sessionDetails.correctQuestionTexts.map(t => (t || '').trim().toLowerCase())
+      );
+      b.wrongQuestions = b.wrongQuestions.filter(
+        q => q && q.question && !correctNormalized.has((q.question || '').trim().toLowerCase())
+      );
+    }
+
+    // If 100% accuracy or no wrong questions left in the bucket, clear all wrong questions
+    if (accuracy >= 1 || (b.wrongQuestions?.length ?? 0) === 0) {
+      b.wrongQuestions = [];
+    }
+
+    // Replace previous score with latest session score as requested
+    if (sessionDetails?.total) {
+      b.total = sessionDetails.total;
+      b.correct = sessionDetails.got || 0;
+    }
+
+    // Session history: last 3 sessions, newest first
+    b.sessionHistory = [
+      { accuracy, tier, at: Date.now() },
+      ...(b.sessionHistory || []),
+    ].slice(0, 3);
+    b.stage = 'NOTES';
+    b.cycleCount = (b.cycleCount || 0) + 1;
+
+    // Perfect run → enter the long-spacing maintenance window
+    if (accuracy >= 1 || (b.wrongQuestions?.length ?? 0) === 0) {
+      const TEN_DAYS_MS  = 10 * 24 * 3600 * 1000;
+      const TWENTY_DAYS_MS = 20 * 24 * 3600 * 1000;
+      b.wrongQuestions = [];
+      b.longSpacingNotesAt = Date.now() + TEN_DAYS_MS;
+      b.longSpacingMcqAt   = Date.now() + TWENTY_DAYS_MS;
+      b.nextDueAt = b.longSpacingNotesAt;
+    } else {
+      b.nextDueAt = Math.max(tomorrowMidnight(), Date.now() + Math.max(86400, nextRevisionSecs) * 1000);
+    }
+    b.updatedAt = Date.now();
   }
-  b.updatedAt = Date.now();
-  map[key] = b;
+
+  map[targetKey] = b;
   safeWrite(map);
   // Notify RoutineRevisionBadge (and any other listeners) that revision state changed.
   try { window.dispatchEvent(new CustomEvent('iic-revision-updated')); } catch {}
@@ -625,6 +875,7 @@ export function applyInitialSchedule(
   b.updatedAt = Date.now();
   map[key] = b;
   safeWrite(map);
+  try { window.dispatchEvent(new CustomEvent('iic-revision-updated')); } catch {}
 }
 
 /**
@@ -696,9 +947,14 @@ export interface LessonRevisionStatus {
 export function getRevisionStatusForLesson(lessonId: string): LessonRevisionStatus | null {
   const map = safeRead();
   const todayStart = startOfToday();
-  // Buckets created by scheduleRoutineLessonForRevision always have
-  // chapterId === pageKey === lessonId.
-  const entry = Object.entries(map).find(([, b]) => b.chapterId === lessonId && b.pageKey === lessonId);
+  const normId = (lessonId || '').trim().toLowerCase();
+  const entry = Object.entries(map).find(([k, b]) => {
+    if (!b) return false;
+    if (b.chapterId === lessonId || b.pageKey === lessonId) return true;
+    if (k === lessonId || k.includes(`::${lessonId}::`) || k.endsWith(`::${lessonId}`)) return true;
+    if (b.topic && normId && b.topic.trim().toLowerCase() === normId) return true;
+    return false;
+  });
   if (!entry) return null;
   const [key, b] = entry;
   const dueDay = b.nextDueAt ? startOfDay(b.nextDueAt) : 0;

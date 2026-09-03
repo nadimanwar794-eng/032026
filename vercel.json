@@ -1,6 +1,6 @@
 {
-  "buildCommand": "pnpm --filter @workspace/iic-study-app-replit run build",
-  "outputDirectory": "artifacts/iic-study-app-replit/dist/public",
+  "buildCommand": "npm run build --workspace=@workspace/iic-study-app-replit",
+  "outputDirectory": "dist",
   "framework": "vite",
   "rewrites": [
     {

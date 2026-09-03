@@ -261,7 +261,7 @@ import { McqAnalysisOverlay } from "./McqAnalysisOverlay";
 import { shouldShowMcqOptions } from "../utils/mcqRender";
 import McqQuestionDisplay from "./McqQuestionDisplay";
 import McqPracticeCard from "./McqPracticeCard";
-import McqQuestionNavigator from "./McqQuestionNavigator";
+import { McqQuestionNavigator as McqQuestionNavigatorComponent } from "./McqQuestionNavigator";
 import { deferStudyCoins, deferCreditsFromXp, deferMcqCreditsFromXp } from "../utils/studyRewards";
 import { ChunkedNotesReader } from "./ChunkedNotesReader";
 import { WriteModeCorrection } from "./WriteModeCorrection";
@@ -635,6 +635,13 @@ export const StudentDashboard: React.FC<Props> = ({
   onOpenCoaching,
   onOpenMcqAnalysis,
 }) => {
+  const [themeRevision, setThemeRevision] = useState(0);
+  useEffect(() => {
+    const handler = () => setThemeRevision(v => v + 1);
+    window.addEventListener('nst-dark-theme-change', handler);
+    return () => window.removeEventListener('nst-dark-theme-change', handler);
+  }, []);
+
   const analysisLogs = (() => { try { return JSON.parse(localStorage.getItem("nst_universal_analysis_logs") || "[]"); } catch { return []; } })();
   const isGameEnabled = settings?.isGameEnabled !== false;
 
@@ -689,17 +696,21 @@ export const StudentDashboard: React.FC<Props> = ({
 
   // ── Tier Theme (Ultra=navy · Basic=blue · Free=sky) ─────────────────────
   // Priority:
-  //   1. personalTheme (granular, permanent — set by user themselves)  → FULLY replaces
-  //   2. customTheme with activeThemeAppliedUntil (24h, not expired) → FULLY replaces
-  //   3. adminAppliedTheme (global broadcast by admin, tier/level filtered, timed)
-  //   4. tempThemeColor (redeem code single-color, not expired)
-  //   5. admin tier/global color override
-  //   6. default tierTheme
+  //   1. user-selected/purchased theme → always wins over admin defaults
+  //   2. user's personal theme and custom theme
+  //   3. admin broadcast/scheduled themes
+  //   4. official tier theme and global color defaults
   const _personalThemeRaw = (user as any).personalTheme as import('../types').UserCustomTheme | undefined;
   const _personalThemeExpiry = (user as any).personalThemeExpiry as string | undefined;
   // personalTheme is valid if: no expiry set, OR expiry is in the future
   const _personalTheme = _personalThemeRaw && (!_personalThemeExpiry || new Date(_personalThemeExpiry) > new Date())
     ? _personalThemeRaw : undefined;
+  // Do not let a color copied from an expired purchase keep overriding the
+  // admin fallback theme. Permanent legacy colors remain supported.
+  const _personalThemeColor = (user as any).personalThemeColor as string | undefined;
+  const _activePersonalThemeColor = _personalThemeColor && (
+    !_personalThemeExpiry || new Date(_personalThemeExpiry) > new Date()
+  ) ? _personalThemeColor : undefined;
   const _customThemeRaw = (user as any).customTheme as (import('../types').UserCustomTheme & { activeThemeAppliedUntil?: string }) | undefined;
   const _customThemeActive = !!(_customThemeRaw && _customThemeRaw.activeThemeAppliedUntil && new Date(_customThemeRaw.activeThemeAppliedUntil) > new Date());
 
@@ -716,7 +727,7 @@ export const StudentDashboard: React.FC<Props> = ({
     return true;
   })();
 
-  // Official tier theme from admin settings — HIGHEST priority, overrides ALL user personal themes
+  // Official tier theme from admin settings — fallback when no user theme is active
   const _userTier = getUserTier(user);
   const _officialTierTheme =
     _userTier === 'ultra' ? settings?.officialUltraTheme :
@@ -733,6 +744,10 @@ export const StudentDashboard: React.FC<Props> = ({
     const entry = _themeHistory.find(e => e.id === _userActiveThemeId);
     if (!entry) return null;
     if (entry.expiresAt && new Date(entry.expiresAt) <= new Date()) return null;
+     if (entry.accessMode === 'CREDITS') {
+       const personalExpiry = (user as any).personalThemeExpiry as string | undefined;
+       if (!personalExpiry || new Date(personalExpiry) <= new Date()) return null;
+     }
     if (entry.targetTier !== 'all' && getUserTier(user) !== entry.targetTier) return null;
     return entry.themeData;
   })();
@@ -760,12 +775,21 @@ export const StudentDashboard: React.FC<Props> = ({
   const [showAdminBoard, setShowAdminBoard] = React.useState(false);
 
   const tierTheme =
-    // 1. Admin broadcast — skipped for admin users to prevent self-interference
-    (!_isAdminUser && _adminGlobalActive && _adminGlobal && _adminGlobal.theme)
-      ? buildGranularTierTheme(getTierTheme(user), _adminGlobal.theme)
-      // 1.5. Scheduled library theme — also skipped for admin users
-      : (!_isAdminUser && _scheduledThemeActive)
-        ? buildGranularTierTheme(getTierTheme(user), {
+    // 1. User-selected theme must win over admin defaults after purchase/apply.
+    _userHistoryTheme
+      ? buildGranularTierTheme(getTierTheme(user), _userHistoryTheme)
+      : _personalTheme
+        ? buildGranularTierTheme(getTierTheme(user), _personalTheme)
+        : _activePersonalThemeColor
+          ? buildOverrideTierTheme(getTierTheme(user), _activePersonalThemeColor, getUserTier(user))
+          : _customThemeActive && _customThemeRaw
+            ? buildGranularTierTheme(getTierTheme(user), _customThemeRaw)
+            // 2. Admin broadcast — skipped for admin users to prevent self-interference
+            : (!_isAdminUser && _adminGlobalActive && _adminGlobal && _adminGlobal.theme)
+              ? buildGranularTierTheme(getTierTheme(user), _adminGlobal.theme)
+              // 2.5. Scheduled library theme — also skipped for admin users
+              : (!_isAdminUser && _scheduledThemeActive)
+                ? buildGranularTierTheme(getTierTheme(user), {
             id: _scheduledThemeActive.id,
             userId: 'admin',
             userName: 'Admin',
@@ -787,26 +811,45 @@ export const StudentDashboard: React.FC<Props> = ({
             accentGlow: _scheduledThemeActive.themeColors.accentGlow,
             progressColor: _scheduledThemeActive.themeColors.progressColor,
             accentColor: _scheduledThemeActive.themeColors.btnStart,
-          } as import('../types').UserCustomTheme)
-      // 2. User's chosen theme from admin history (if not expired)
-      : _userHistoryTheme
-        ? buildGranularTierTheme(getTierTheme(user), _userHistoryTheme)
-        // 3. User's own personal theme (FULL theme object — highest user-level priority)
-        : _personalTheme
-          ? buildGranularTierTheme(getTierTheme(user), _personalTheme)
-          // 3b. User's personalThemeColor (single-color, also before official tier theme)
-          : (user as any).personalThemeColor
-            ? buildOverrideTierTheme(getTierTheme(user), (user as any).personalThemeColor, getUserTier(user))
-            : _customThemeActive && _customThemeRaw
-              ? buildGranularTierTheme(getTierTheme(user), _customThemeRaw)
-              // 4. Official tier theme — applies to ALL users including admins
-              : _officialTierTheme
-                ? buildGranularTierTheme(getTierTheme(user), _officialTierTheme)
-                // 5. Single-color override (tier/global) — applies to ALL users including admins
-                : _overrideColor
-                  ? buildOverrideTierTheme(getTierTheme(user), _overrideColor, getUserTier(user))
-                  // 6. Default tier theme
-                  : getTierTheme(user);
+                } as import('../types').UserCustomTheme)
+                // 3. Official tier theme — applies when no user theme is active
+                : _officialTierTheme
+                  ? buildGranularTierTheme(getTierTheme(user), _officialTierTheme)
+                  // 4. Single-color override (tier/global)
+                  : _overrideColor
+                    ? buildOverrideTierTheme(getTierTheme(user), _overrideColor, getUserTier(user))
+                    // 5. Default tier theme
+                    : getTierTheme(user);
+
+  const currentDarkType = localStorage.getItem('nst_dark_theme_type') || 'black';
+  const isCurrentBlue = isDarkMode && currentDarkType === 'blue';
+  const isCurrentDark = isDarkMode && !isCurrentBlue;
+  const isCurrentLight = !isDarkMode;
+
+  const activeTopBarGrad = (() => {
+    if (isCurrentBlue) {
+      if (settings?.blueThemeTopBarStart && settings?.blueThemeTopBarEnd) {
+        return `linear-gradient(135deg, ${settings.blueThemeTopBarStart} 0%, ${settings.blueThemeTopBarEnd} 100%)`;
+      }
+      if (settings?.blueThemeBackground) {
+        return `linear-gradient(135deg, ${settings.blueThemeBackground} 0%, #15294a 100%)`;
+      }
+      return 'linear-gradient(135deg, #091322 0%, #15294a 50%, #091322 100%)';
+    }
+    if (isCurrentDark) {
+      if (settings?.darkThemeTopBarStart && settings?.darkThemeTopBarEnd) {
+        return `linear-gradient(135deg, ${settings.darkThemeTopBarStart} 0%, ${settings.darkThemeTopBarEnd} 100%)`;
+      }
+      if (settings?.darkThemeBackground) {
+        return `linear-gradient(135deg, ${settings.darkThemeBackground} 0%, #1a2233 100%)`;
+      }
+      return 'linear-gradient(135deg, #0c1017 0%, #1a2233 50%, #0c1017 100%)';
+    }
+    if (settings?.lightThemeTopBarStart && settings?.lightThemeTopBarEnd) {
+      return `linear-gradient(135deg, ${settings.lightThemeTopBarStart} 0%, ${settings.lightThemeTopBarEnd} 100%)`;
+    }
+    return tierTheme.topBarGrad;
+  })();
 
   // ── App background: personalTheme bgColor → tier appBg → admin override → dark mode → white ──
   const _appBg = (() => {
@@ -816,8 +859,13 @@ export const StudentDashboard: React.FC<Props> = ({
     if (manual && manual !== '#ffffff') return manual;
     if (isDarkMode) {
       const themeType = localStorage.getItem('nst_dark_theme_type') || 'black';
-      return themeType === 'blue' ? '#050d1f' : '#000000';
+      const configuredBackground = themeType === 'blue'
+        ? (settings as any)?.blueThemeBackground
+        : (settings as any)?.darkThemeBackground;
+      return configuredBackground || (themeType === 'blue' ? '#050d1f' : '#000000');
     }
+    // Light mode: check if admin set lightThemeBackground
+    if ((settings as any)?.lightThemeBackground) return (settings as any).lightThemeBackground;
     // Use tier's own appBg (e.g. Ultra = #f8fafc light grey, others = white)
     const tierAppBg = (tierTheme as any).appBg as string | undefined;
     return manual || tierAppBg || '#ffffff';
@@ -908,6 +956,16 @@ export const StudentDashboard: React.FC<Props> = ({
     s.setProperty('--nst-accent-glow',      (tierTheme as any).accentGlowColor|| p);
     // Top bar gradient (for CSS-driven consumers)
     s.setProperty('--nst-top-bar-grad',     tierTheme.topBarGrad);
+    // Theme-responsive rotating card border color & inner background
+    const isCurrentBlue = document.documentElement.classList.contains('dark-mode-blue');
+    const isCurrentDark = document.documentElement.classList.contains('dark-mode') || document.documentElement.classList.contains('dark-mode-black');
+    const rotatingColor = isCurrentBlue
+      ? (settings?.blueThemeColor || '#38bdf8')
+      : isCurrentDark
+      ? (settings?.darkThemeColor || '#00e5ff')
+      : (settings?.lightThemeColor || p || '#3b82f6');
+    s.setProperty('--nst-rotating-border-color', rotatingColor);
+    s.setProperty('--nst-card-inner-bg', isCurrentBlue ? (settings?.blueThemeCardBg || '#071224') : isCurrentDark ? (settings?.darkThemeCardBg || '#0b0f17') : (settings?.lightThemeCardBg || '#ffffff'));
   }, [
     tierTheme.primary, tierTheme.topBarGrad, tierTheme.navBg, tierTheme.profileBg, tierTheme.btnGrad,
     tierTheme.profileCardBg,
@@ -916,6 +974,8 @@ export const StudentDashboard: React.FC<Props> = ({
     (tierTheme as any).cardBorderColor, (tierTheme as any).textPrimary,
     (tierTheme as any).textSecondary,(tierTheme as any).progressColor,
     (tierTheme as any).accentGlowColor, isDarkMode,
+    settings?.lightThemeColor, settings?.darkThemeColor, settings?.blueThemeColor,
+    settings?.lightThemeCardBg, settings?.darkThemeCardBg, settings?.blueThemeCardBg,
   ]);
 
   // ── Meta theme-color: profile tab → official tier color, others → statusBarColor (admin) or top bar start color ──
@@ -941,15 +1001,19 @@ export const StudentDashboard: React.FC<Props> = ({
   const _subValid      = SubscriptionEngine.isPremium(user); // true only if not expired
   const _isUltraUser   = _subValid && user.subscriptionLevel === 'ULTRA';
   const _isBasicUser   = _subValid && user.subscriptionLevel === 'BASIC';
-  // The first two loading-screen slots are available to every student.
-  // Subscription plans can still buy weekly access, but must not silently
-  // make the remaining slots appear unlocked in the selector.
-   const _splashBaseSlotLimit =
-     user.role === 'ADMIN' || user.role === 'SUB_ADMIN'
-       ? 5
-       : _isUltraUser ? 5 : _isBasicUser ? 4 : 3;
-   const _splashSlotPrices: Record<number, number> = { 2: 50, 3: 100, 4: 200, 5: 500 };
   const _todayKey      = new Date().toISOString().split('T')[0];
+    const _themeUserTier = user.isPremium && user.subscriptionLevel === 'ULTRA' ? 'ultra'
+      : user.isPremium && user.subscriptionLevel === 'BASIC' ? 'basic' : 'free';
+    const _publishedThemeLibrary = ((settings as any)?.adminThemeLibrary || []).filter((entry: any) =>
+      entry?.published !== false && (!entry?.targetTier || entry.targetTier === 'all' || entry.targetTier === _themeUserTier)
+    );
+    const _themeStudioSeenAt = (() => {
+      try { return Number(localStorage.getItem(`nst_theme_studio_seen_${user.id}`) || 0); } catch { return 0; }
+    })();
+    const _newThemeCount = _publishedThemeLibrary.filter((entry: any) => {
+      const publishedAt = Date.parse(entry?.publishedAt || entry?.createdAt || '');
+      return publishedAt > _themeStudioSeenAt;
+    }).length;
 
   // ── Level-based limit bonus ─────────────────────────────────────────────
   const _userLevelInfo  = getLevelInfo(user.totalScore || 0);
@@ -2241,13 +2305,14 @@ export const StudentDashboard: React.FC<Props> = ({
   const [profileWhite, setProfileWhite] = useState(() => localStorage.getItem(`nst_pw_${user.id}`) === '1');
   const [nameFxOff, setNameFxOff] = useState(() => { try { return localStorage.getItem('nst_name_fx_off') === '1'; } catch { return false; } });
   const [cardFxOff, setCardFxOff] = useState(() => { try { return localStorage.getItem('nst_card_fx_off') === '1'; } catch { return false; } });
+  const [cardBorderAnimOff, setCardBorderAnimOff] = useState(() => { try { return localStorage.getItem('nst_card_border_anim_off') === '1'; } catch { return false; } });
   const [hapticEnabled, setHapticEnabled] = useState(() => { try { return localStorage.getItem('nst_haptic_enabled') !== '0'; } catch { return true; } });
   const [displayLevel, setDisplayLevel] = useState<number | null>(() => { try { const v = localStorage.getItem('nst_display_level'); return v ? parseInt(v, 10) : null; } catch { return null; } });
   const splashPreferenceKey = `nst_splash_style_preference_${user.id}`;
-  const [splashStyle, setSplashStyle] = useState<number>(() => {
+   const [splashStyle, setSplashStyle] = useState<number>(() => {
     try {
       const savedForUser = localStorage.getItem(`nst_splash_style_preference_${user.id}`);
-      const value = parseInt(savedForUser || localStorage.getItem('nst_splash_style_preference') || '5', 10);
+      const value = parseInt(savedForUser || localStorage.getItem('nst_splash_style_preference') || '1', 10);
       return value >= 1 && value <= 4 ? value : 1;
     } catch { return 1; }
   });
@@ -2269,9 +2334,9 @@ export const StudentDashboard: React.FC<Props> = ({
     try {
       const saved = JSON.parse(localStorage.getItem(`nst_splash_slot_assignments_${user.id}`) || '{}');
       const synced = user.loadingScreenSlotAssignments;
-      return synced && Object.keys(synced).length ? synced : (saved && Object.keys(saved).length ? saved : { 1: 1 });
+       return synced && Object.keys(synced).length ? synced : (saved && Object.keys(saved).length ? saved : { 1: 1 });
     } catch {
-      return { 1: 1 };
+       return { 1: 1 };
     }
   });
 
@@ -2294,6 +2359,7 @@ export const StudentDashboard: React.FC<Props> = ({
     } catch {}
   }, [user.id, user.loadingScreenSlotUnlocks, user.loadingScreenUnlocks, user.loadingScreenSlotAssignments]);
   const [selectedSplashSlot, setSelectedSplashSlot] = useState(1);
+  const [splashPurchaseDuration, setSplashPurchaseDuration] = useState<1 | 7 | 30>(7);
   const [showLevelChooser, setShowLevelChooser] = useState(false);
   const [showProfileSettings, setShowProfileSettings] = useState(false);
   const [rewardSubTab, setRewardSubTab] = useState<'EARNED' | 'RULES' | 'HISTORY'>('EARNED');
@@ -2324,6 +2390,43 @@ export const StudentDashboard: React.FC<Props> = ({
     window.addEventListener('iic-loading-screen-access-updated', syncLoadingScreenAccess);
     return () => window.removeEventListener('iic-loading-screen-access-updated', syncLoadingScreenAccess);
   }, []);
+
+  const isSplashUnlocked = (styleId: number) => styleId >= 1 && styleId <= 4;
+  const splashStyles = [
+    { id: 1, label: 'Future Cards', description: '5 seconds · Free' },
+    { id: 2, label: 'Orbit', description: '4 seconds · Free' },
+    { id: 3, label: 'Algorithm Sort', description: '4 seconds · Free' },
+    { id: 4, label: 'Discovery Ring', description: '4 seconds · Free' },
+  ];
+
+  const persistSplashPreferences = (nextUnlocks: Record<number, number>, nextSlotUnlocks: Record<number, boolean>, nextAssignments: Record<number, number>) => {
+    setSplashUnlocks(nextUnlocks);
+    setSplashSlotUnlocks(nextSlotUnlocks);
+    setSplashSlotAssignments(nextAssignments);
+    try {
+      localStorage.setItem(`nst_splash_unlocks_${user.id}`, JSON.stringify(nextUnlocks));
+      localStorage.setItem(`nst_splash_slot_unlocks_${user.id}`, JSON.stringify(nextSlotUnlocks));
+      localStorage.setItem(`nst_splash_slot_assignments_${user.id}`, JSON.stringify(nextAssignments));
+    } catch {}
+  };
+
+  const toggleSplashRotation = (styleId: number) => {
+    if (!isSplashUnlocked(styleId)) return;
+    const values = Object.values(splashSlotAssignments).map(Number);
+    let nextValues: number[];
+    if (values.includes(styleId)) {
+      nextValues = values.filter(id => id !== styleId);
+      if (nextValues.length === 0) nextValues.push(1);
+    } else {
+      nextValues = [...values, styleId];
+    }
+    const nextAssignments = nextValues.reduce<Record<number, number>>((acc, id, index) => {
+      acc[index + 1] = id;
+      return acc;
+    }, {});
+    persistSplashPreferences(splashUnlocks, splashSlotUnlocks, nextAssignments);
+    handleUserUpdate({ ...user, loadingScreenSlotAssignments: nextAssignments } as User);
+  };
 
 
   const topBarScrollRef = useRef<HTMLDivElement>(null);
@@ -6763,19 +6866,26 @@ export const StudentDashboard: React.FC<Props> = ({
       }, 2000);
     }
 
-    // Ignore nst_users if empty, just save to live and current user directly
-    // since the system has moved away from 'nst_users' dependency.
-    if (!isImpersonating) {
-      if (!await saveUserToLive(updatedUser)) {
-        showAlert(
-          "Account update save nahi ho paya. Internet check karke dobara try karein.",
-          "ERROR",
-        );
-        return false;
-      }
+    // Always update local storage and state immediately (offline-first)
+    try {
       localStorage.setItem("nst_current_user", JSON.stringify(updatedUser));
-    }
+      if (updatedUser?.id) {
+        localStorage.setItem(`nst_user_profile_${updatedUser.id}`, JSON.stringify(updatedUser));
+        localStorage.setItem('nst_last_user_id', String(updatedUser.id));
+      }
+    } catch (_) {}
     onRedeemSuccess(updatedUser);
+
+    // Sync to cloud in background
+    if (!isImpersonating) {
+      saveUserToLive(updatedUser).then(saved => {
+        if (!saved) {
+          console.warn("[StudentDashboard] saveUserToLive returned false, saved in localStorage.");
+        }
+      }).catch(err => {
+        console.warn("[StudentDashboard] background saveUserToLive error:", err);
+      });
+    }
 
     // Also keep legacy 'nst_users' updated just in case it's used elsewhere
     const storedUsersStr = localStorage.getItem("nst_users");
@@ -9020,7 +9130,7 @@ export const StudentDashboard: React.FC<Props> = ({
                             </div>
                           </div>
                           {hwMcqNavigatorOpen[hwKey] && (
-                            <McqQuestionNavigator
+                            <McqQuestionNavigatorComponent
                               total={totalQ}
                               currentIndex={ci}
                               answers={hwNavigatorAnswers}
@@ -10607,7 +10717,7 @@ export const StudentDashboard: React.FC<Props> = ({
                   <button
                     key={c}
                     onClick={() => goToClassHome(c)}
-                    className="relative flex flex-col p-2.5 rounded-xl active:scale-95 transition-all text-left"
+                    className="nst-card-animated relative flex flex-col p-2.5 rounded-xl active:scale-95 transition-all text-left"
                     style={cardStyle3D}
                   >
                     {isBoard ? (
@@ -10648,7 +10758,7 @@ export const StudentDashboard: React.FC<Props> = ({
                       </div>
                       <button
                         onClick={() => { hapticStrong(); setSyllabusMode('COMPETITION'); setActiveSessionClass('COMPETITION'); setActiveSessionBoard(_board); setContentViewStep('SUBJECTS'); setInitialParentSubject(null); setClass612SubjectView(null); setHomeworkSubjectView(null); setLucentCategoryView(false); onTabChange('COURSES'); }}
-                        className="w-full relative overflow-hidden rounded-2xl text-left active:scale-[0.99] transition-all"
+                        className="nst-card-animated w-full relative overflow-hidden rounded-2xl text-left active:scale-[0.99] transition-all"
                         style={_cmp3D ? { background: _cmpBg, border: `2px solid ${_cmpBdr}`, boxShadow: `0 1px 0 rgba(255,255,255,0.85) inset, 0 4px 0 ${_cmpBdr}bb, 0 7px 18px ${_cmpBdr}28`, transform: 'translateY(-1px)' } : { background: _cmpBg, border: `2px solid ${_cmpBdr}`, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}
                       >
                         <div className="flex items-center justify-between px-4 py-4">
@@ -10728,7 +10838,7 @@ export const StudentDashboard: React.FC<Props> = ({
                         <button
                           key={item.label}
                           onClick={() => { hapticStrong(); item.onClick(); }}
-                          className="flex flex-col items-start gap-2 p-3 rounded-2xl active:scale-95 transition-all"
+                          className="nst-card-animated flex flex-col items-start gap-2 p-3 rounded-2xl active:scale-95 transition-all"
                           style={_qa3D ? { background: _qaBg, border: `2px solid ${_qaBdr}`, boxShadow: `0 1px 0 rgba(255,255,255,0.85) inset, 0 4px 0 ${_qaBdr}bb, 0 7px 18px ${_qaBdr}28`, transform: 'translateY(-1px)' } : { background: _qaBg, border: `2px solid ${_qaBdr}`, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}
                         >
                           <div className="flex items-center justify-between w-full">
@@ -10811,8 +10921,53 @@ export const StudentDashboard: React.FC<Props> = ({
           onUpdateUser={handleUserUpdate}
           onOpenChapter={(subjectId, chapterId, chapterTitle) => {
             try {
-              handleChapterSelect({ id: chapterId, title: chapterTitle || 'Chapter' } as any);
-            } catch {/* noop */}
+              const _b8 = activeSessionBoard || user.board;
+              const lang = (_b8 === "BSEB" || _b8 === "NCERT_HI") ? "Hindi" : "English";
+              const subjects = getSubjectsList(
+                (activeSessionClass as any) || user.classLevel || "10",
+                user.stream || "Science",
+                activeSessionBoard || user.board, settings
+              ).filter(s => !(settings?.hiddenSubjects || []).includes(s.id));
+              const targetSubject = subjects.find(s => s.id === subjectId || (s.name && s.name.toLowerCase() === (subjectId || '').toLowerCase())) || subjects[0];
+
+              if (targetSubject) {
+                fetchChapters(
+                  activeSessionBoard || user.board || "NCERT_EN",
+                  (activeSessionClass as any) || user.classLevel || "10",
+                  user.stream || "Science",
+                  targetSubject,
+                  lang,
+                ).then(allChapters => {
+                  // Resilient matching: ID match, exact title match, or fuzzy substring match (handles admin renames)
+                  const ch = (allChapters || []).find(c =>
+                    c.id === chapterId ||
+                    (chapterTitle && c.title.toLowerCase() === chapterTitle.toLowerCase()) ||
+                    (chapterTitle && c.title.toLowerCase().includes(chapterTitle.toLowerCase())) ||
+                    (chapterTitle && chapterTitle.toLowerCase().includes(c.title.toLowerCase()))
+                  ) || {
+                    id: chapterId,
+                    title: chapterTitle || 'Chapter',
+                    subject: targetSubject.name,
+                    board: activeSessionBoard || user.board || 'CBSE',
+                    classLevel: (activeSessionClass as any) || user.classLevel || '10',
+                  };
+                  setSelectedSubject(targetSubject);
+                  setSelectedChapter(ch as any);
+                  setChapterOpenedFrom('HOME');
+                  setContentViewStep('PLAYER');
+                  onTabChange('PDF');
+                  setFullScreen(true);
+                }).catch(() => {
+                  if (onNavigateToChapter) {
+                    onNavigateToChapter(chapterId, chapterTitle || 'Chapter', targetSubject?.name || 'Subject', user.classLevel);
+                  }
+                });
+              } else if (onNavigateToChapter) {
+                onNavigateToChapter(chapterId, chapterTitle || 'Chapter', 'Subject', user.classLevel);
+              }
+            } catch (err) {
+              console.warn('[StudentDashboard] Error opening chapter notes:', err);
+            }
           }}
           onOpenMcq={(subjectId, chapterId, chapterTitle, topic) => {
             try {
@@ -10823,7 +10978,7 @@ export const StudentDashboard: React.FC<Props> = ({
                 user.stream || "Science",
                 activeSessionBoard || user.board, settings
               ).filter(s => !(settings?.hiddenSubjects || []).includes(s.id));
-              const targetSubject = subjects.find(s => s.id === subjectId) || subjects[0];
+              const targetSubject = subjects.find(s => s.id === subjectId || (s.name && s.name.toLowerCase() === (subjectId || '').toLowerCase())) || subjects[0];
               if (targetSubject) {
                 fetchChapters(
                   activeSessionBoard || user.board || "NCERT_EN",
@@ -10832,18 +10987,30 @@ export const StudentDashboard: React.FC<Props> = ({
                   targetSubject,
                   lang,
                 ).then(allChapters => {
-                  const ch = allChapters.find(c => c.id === chapterId) || { id: chapterId, title: chapterTitle || 'Chapter' };
-                  onTabChange("MCQ");
+                  const ch = (allChapters || []).find(c =>
+                    c.id === chapterId ||
+                    (chapterTitle && c.title.toLowerCase() === chapterTitle.toLowerCase()) ||
+                    (chapterTitle && c.title.toLowerCase().includes(chapterTitle.toLowerCase())) ||
+                    (chapterTitle && chapterTitle.toLowerCase().includes(c.title.toLowerCase()))
+                  ) || { id: chapterId, title: chapterTitle || 'Chapter' };
                   setSelectedSubject(targetSubject);
                   setSelectedChapter(ch as any);
+                  setChapterOpenedFrom('HOME');
+                  setContentViewStep('PLAYER');
+                  onTabChange('MCQ');
+                  setFullScreen(true);
                   setCurrentLogicalTab("HOME");
                 }).catch(() => {
-                  handleChapterSelect({ id: chapterId, title: chapterTitle || 'Chapter' } as any);
+                  if (onNavigateToChapter) {
+                    onNavigateToChapter(chapterId, chapterTitle || 'Chapter', targetSubject?.name || 'Subject', user.classLevel);
+                  }
                 });
-              } else {
-                handleChapterSelect({ id: chapterId, title: chapterTitle || 'Chapter' } as any);
+              } else if (onNavigateToChapter) {
+                onNavigateToChapter(chapterId, chapterTitle || 'Chapter', 'Subject', user.classLevel);
               }
-            } catch {/* noop */}
+            } catch (err) {
+              console.warn('[StudentDashboard] Error opening MCQ:', err);
+            }
           }}
         />
       );
@@ -11164,12 +11331,6 @@ export const StudentDashboard: React.FC<Props> = ({
       return <AppStore settings={settings} user={user} onUserUpdate={handleUserUpdate} />;
     }
     if ((activeTab as string) === "THEME_CUSTOMIZER") {
-      // Only admins can access Theme Customizer — all other users are redirected
-      const _isAdminTC = user.role === 'ADMIN' || user.role === 'SUB_ADMIN' || isImpersonating;
-      if (!_isAdminTC) {
-        setTimeout(() => onTabChange('HOME' as any), 0);
-        return null;
-      }
       return (
         <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
           <ThemeCustomizer
@@ -12667,7 +12828,7 @@ export const StudentDashboard: React.FC<Props> = ({
           </div>
 
           {/* ── ACTIONS MENU ── */}
-          <div className="mx-3 rounded-2xl overflow-hidden mb-3" style={{ background: _pCard, border: _pBdrSoft }}>
+          <div className="nst-card-animated mx-3 rounded-2xl overflow-hidden mb-3" style={{ background: _pCard, border: _pBdrSoft }}>
 
             {/* Admin Panel */}
             {(user.role === 'ADMIN' || user.role === 'SUB_ADMIN' || isImpersonating) && (
@@ -12682,18 +12843,32 @@ export const StudentDashboard: React.FC<Props> = ({
               </button>
             )}
 
-            {/* Theme Studio — permanent for Admin */}
-            {(user.role === 'ADMIN' || user.role === 'SUB_ADMIN') && (
-              <button onClick={() => { themeOpenerRef.current = 'PROFILE'; onTabChange('THEME_CUSTOMIZER' as any); }}
+            {/* Theme Studio — custom colors for all; admin gets publishing controls */}
+            <button onClick={() => { themeOpenerRef.current = 'PROFILE'; onTabChange('THEME_CUSTOMIZER' as any); }}
                 className={`w-full px-4 py-4 flex items-center gap-3.5 ${_pHovCls} transition-colors`}
                 style={{ borderBottom: _pSep }}>
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'rgba(168,85,247,0.15)', border: '1px solid rgba(168,85,247,0.35)' }}>
                   <Palette size={17} style={{ color: '#a855f7' }} />
                 </div>
-                <p className={`flex-1 text-sm font-bold text-left ${_pTxt}`}>Theme Studio</p>
+                <div className="flex-1 text-left">
+                   <div className="flex items-center gap-2">
+                     <p className={`text-sm font-bold ${_pTxt}`}>Theme Studio</p>
+                     {!isImpersonating && _newThemeCount > 0 && (
+                       <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full text-fuchsia-200 bg-fuchsia-500/25">
+                         {_newThemeCount} NEW
+                       </span>
+                     )}
+                   </div>
+                   <p className="text-[9px]" style={{ color: _pTxtMutedColor }}>
+                     {user.role === 'ADMIN' || user.role === 'SUB_ADMIN'
+                       ? 'Create & publish themes'
+                       : _newThemeCount > 0
+                         ? `${_newThemeCount} new theme${_newThemeCount > 1 ? 's' : ''} available · Browse & buy`
+                         : 'Browse, preview & buy themes'}
+                   </p>
+                </div>
                 <ChevronRight size={15} style={{ color: _pTxtMutedColor }} className="shrink-0" />
-              </button>
-            )}
+            </button>
 
             {/* Teacher Store */}
             {user.role === 'TEACHER' && (
@@ -12937,6 +13112,46 @@ export const StudentDashboard: React.FC<Props> = ({
               </div>
             </button>
 
+            {/* ── Rotating Card Border Animation Toggle ── */}
+            <button
+              onClick={() => {
+                const next = !cardBorderAnimOff;
+                setCardBorderAnimOff(next);
+                try {
+                  localStorage.setItem('nst_card_border_anim_off', next ? '1' : '0');
+                  window.dispatchEvent(new Event('nst-card-border-anim-change'));
+                } catch {}
+                showAlert(next ? '✨ Card rotating border animation off kar di gayi' : '✨ Card rotating border animation on kar di gayi', 'SUCCESS');
+              }}
+              className={`w-full px-4 py-4 flex items-center gap-3.5 ${_pHovCls} transition-colors`}
+              style={{ borderBottom: _pSep }}>
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{
+                background: !cardBorderAnimOff && settings?.cardBorderAnimation !== false ? 'rgba(59,130,246,0.15)' : _pIconBg,
+                border: `1px solid ${!cardBorderAnimOff && settings?.cardBorderAnimation !== false ? 'rgba(59,130,246,0.45)' : 'rgba(255,255,255,0.10)'}`,
+              }}>
+                <span className="text-base leading-none">✨</span>
+              </div>
+              <div className="flex-1 text-left">
+                <p className={`text-sm font-bold ${_pTxt}`}>Card Border Animation</p>
+                <p className={`text-[10px] mt-0.5 ${_pTxtSub}`}>
+                  {!cardBorderAnimOff
+                    ? (settings?.cardBorderAnimation === false
+                        ? 'Admin dwara globally off hai'
+                        : 'Rotating border glow sabhi cards par active hai')
+                    : 'Rotating border animation off hai'}
+                </p>
+              </div>
+              <div className="shrink-0 w-10 h-5 rounded-full relative transition-all"
+                style={{ background: !cardBorderAnimOff && settings?.cardBorderAnimation !== false ? 'rgba(59,130,246,0.85)' : 'rgba(255,255,255,0.12)' }}>
+                <div className="absolute top-0.5 w-4 h-4 rounded-full transition-all"
+                  style={{
+                    background: '#fff',
+                    left: !cardBorderAnimOff && settings?.cardBorderAnimation !== false ? '1.375rem' : '0.125rem',
+                    boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
+                  }} />
+              </div>
+            </button>
+
 
             {/* ── Level Style Chooser ── */}
             {_pLvl.level >= 2 && (
@@ -12982,60 +13197,6 @@ export const StudentDashboard: React.FC<Props> = ({
               <ChevronRight size={15} style={{ color: _pTxtMutedColor }} className="shrink-0" />
             </button>
             </>)}
-
-             {/* Loading-screen controls were intentionally removed from Profile. */}
-             {false && (<div className={`w-full px-4 py-4 ${_pHovCls}`} style={{ borderBottom: _pSep }}>
-               <div className="flex items-center gap-3.5">
-                 <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-                   style={{ background: `${tierTheme.primary}18`, border: `1px solid ${tierTheme.primary}35` }}>
-                   <Sparkles size={17} style={{ color: tierTheme.primary }} />
-                 </div>
-                 <div className="flex-1 min-w-0">
-                   <p className={`text-sm font-bold ${_pTxt}`}>Loading Screen</p>
-                   <p className={`text-[10px] mt-0.5 ${_pTxtSub}`}>
-                       {`Screen ${splashStyle} selected — tap any design to preview`}
-                   </p>
-                 </div>
-               </div>
-                  <div className="mt-2 rounded-lg border border-white/10 bg-black/10 px-2.5 py-2 text-[9px] font-bold">
-                     <div className={_pTxtSub}>5 loading screens · Sabhi users ke liye free</div>
-                     <div className="mt-1 text-emerald-400/90">App khulne par ye 5 screens automatically alternate hongi.</div>
-                  </div>
-                 <div className="grid grid-cols-5 gap-1.5 mt-3">
-                 {[
-                    { id: 1, label: 'Cards' },
-                    { id: 2, label: 'Orbit' },
-                    { id: 3, label: 'Sort' },
-                    { id: 4, label: 'Discover' },
-                    { id: 5, label: 'Books' },
-                 ].map((style) => (
-                     <button
-                     key={style.id}
-                     type="button"
-                       onClick={() => {
-                        setSplashStyle(style.id);
-                          try { localStorage.setItem(splashPreferenceKey, String(style.id)); } catch {}
-                          handleUserUpdate({ ...user });
-                        try { sessionStorage.setItem('nst_splash_preview_style', String(style.id)); } catch {}
-                        window.dispatchEvent(new CustomEvent('iic-preview-loading-screen', { detail: { styleId: style.id } }));
-                     }}
-                      className="relative rounded-lg py-2 text-[10px] font-black transition-all active:scale-95"
-                     style={{
-                       background: splashStyle === style.id ? `${tierTheme.primary}25` : `${_pTxtMutedColor}08`,
-                       color: splashStyle === style.id ? tierTheme.primary : _pTxtMutedColor,
-                       border: `1px solid ${splashStyle === style.id ? tierTheme.primary + '70' : _pTxtMutedColor + '20'}`,
-                     }}
-                     aria-pressed={splashStyle === style.id}
-                   >
-                      <span className="block text-[9px] opacity-60 mb-0.5">0{style.id} · Preview</span>
-                        <span className="block truncate">{style.label}</span>
-                      <span className="block text-[8px] opacity-70 mt-0.5">
-                           Free — tap to preview
-                      </span>
-                   </button>
-                 ))}
-               </div>
-              </div>)}
 
             {/* App Guide */}
             <button onClick={() => setShowUserGuide(true)}
@@ -13455,7 +13616,7 @@ export const StudentDashboard: React.FC<Props> = ({
       <div
         id="top-banner-container"
         className={`sticky top-0 z-[100] w-full flex flex-col relative transition-all duration-150 ease-in-out ${isFullscreenMode ? "hidden" : ""} ${(isTopBarHidden || isLandscapeUiHidden || activeTab === 'STORE' || activeTab === 'CUSTOM_PAGE' || activeTab === 'PROFILE' || activeTab === 'UNIVERSAL_VIDEO') ? "-translate-y-full !h-0 overflow-hidden opacity-0 pointer-events-none" : "translate-y-0 opacity-100"}`}
-        style={{ background: tierTheme.topBarGrad }}
+        style={{ background: activeTopBarGrad }}
       >
         {/* Main Header Row */}
         <div className="flex items-center justify-between w-full px-3 pt-2.5 pb-1.5">
@@ -13502,6 +13663,7 @@ export const StudentDashboard: React.FC<Props> = ({
               const cfEnabled = settings?.creditFreeEvent?.enabled ?? (settings?.isCreditFreeEvent ?? false);
               pushActive('🪙 Credit Free', cfEnabled, (settings?.creditFreeEvent as any)?.startsAt, (settings?.creditFreeEvent as any)?.endsAt);
               pushActive('📈 Limit Boost', (settings as any)?.dailyLimitBoostEvent?.enabled ?? false, (settings as any)?.dailyLimitBoostEvent?.startsAt, (settings as any)?.dailyLimitBoostEvent?.endsAt);
+               pushActive(`🎨 ${settings?.themeStudioEvent?.eventName || 'Theme Studio'}`, settings?.themeStudioEvent?.enabled ?? false, settings?.themeStudioEvent?.startsAt, settings?.themeStudioEvent?.endsAt);
               pushActive(`🎁 ${settings?.creditBonusEvent?.eventName || 'Credit Bonus'}`, settings?.creditBonusEvent?.enabled ?? false, settings?.creditBonusEvent?.startsAt, settings?.creditBonusEvent?.endsAt);
               // ── 80% elapsed detection ──
               const elapsedPct = (s?: string, e?: string) => {
@@ -13521,6 +13683,7 @@ export const StudentDashboard: React.FC<Props> = ({
                   { label: '🌍 Free Access', startsAt: settings?.globalFreeAccessEvent?.startsAt, endsAt: settings?.globalFreeAccessEvent?.endsAt },
                   { label: '🪙 Credit Free', startsAt: (settings?.creditFreeEvent as any)?.startsAt, endsAt: (settings?.creditFreeEvent as any)?.endsAt },
                   { label: '📈 Limit Boost', startsAt: (settings as any)?.dailyLimitBoostEvent?.startsAt, endsAt: (settings as any)?.dailyLimitBoostEvent?.endsAt },
+                   { label: `🎨 ${settings?.themeStudioEvent?.eventName || 'Theme Studio'}`, startsAt: settings?.themeStudioEvent?.startsAt, endsAt: settings?.themeStudioEvent?.endsAt },
                   { label: `🎁 ${settings?.creditBonusEvent?.eventName || 'Credit Bonus'}`, startsAt: settings?.creditBonusEvent?.startsAt, endsAt: settings?.creditBonusEvent?.endsAt },
                 ];
                 const hist: any[] = JSON.parse(localStorage.getItem(EVT_HIST_KEY) || '[]').filter((h: any) => now - h.expiredAt < sevenDays);
@@ -13545,6 +13708,7 @@ export const StudentDashboard: React.FC<Props> = ({
               pushUpcoming('🌍 Free Access', settings?.globalFreeAccessEvent?.enabled ?? false, settings?.globalFreeAccessEvent?.startsAt, settings?.globalFreeAccessEvent?.endsAt);
               pushUpcoming('🪙 Credit Free', settings?.creditFreeEvent?.enabled ?? (settings?.isCreditFreeEvent ?? false), (settings?.creditFreeEvent as any)?.startsAt, (settings?.creditFreeEvent as any)?.endsAt);
               pushUpcoming('📈 Limit Boost', (settings as any)?.dailyLimitBoostEvent?.enabled ?? false, (settings as any)?.dailyLimitBoostEvent?.startsAt, (settings as any)?.dailyLimitBoostEvent?.endsAt);
+               pushUpcoming(`🎨 ${settings?.themeStudioEvent?.eventName || 'Theme Studio'}`, settings?.themeStudioEvent?.enabled ?? false, settings?.themeStudioEvent?.startsAt, settings?.themeStudioEvent?.endsAt);
               pushUpcoming(`🎁 ${settings?.creditBonusEvent?.eventName || 'Credit Bonus'}`, settings?.creditBonusEvent?.enabled ?? false, settings?.creditBonusEvent?.startsAt, settings?.creditBonusEvent?.endsAt);
 
               if (activeEvents.length === 0 && upcomingEvents.length === 0) return null;
@@ -13637,6 +13801,7 @@ export const StudentDashboard: React.FC<Props> = ({
                                 : ev.includes('Credit Free') ? EVENT_MIN_LEVELS.creditFree
                                 : ev.includes('Free Access') ? EVENT_MIN_LEVELS.globalFreeAccess
                                 : ev.includes('Limit Boost') ? EVENT_MIN_LEVELS.dailyLimitBoost
+                                 : ev.includes('Theme Studio') ? EVENT_MIN_LEVELS.themeStudio
                                 : 1;
                               const _evLocked = !meetsEventLevel(_evMinLvl);
                               if (_evLocked) {
@@ -13660,6 +13825,7 @@ export const StudentDashboard: React.FC<Props> = ({
                               })();
                               const isScoreBoost = ev.includes('Score Boost');
                               const isLimitBoost = ev.includes('Limit Boost');
+                               const isThemeStudio = ev.includes('Theme Studio');
                               if (isScoreBoost) {
                                 const bPct = (settings as any)?.scoreBoostEvent?.boostPercent || 0;
                                 const evName = (settings as any)?.scoreBoostEvent?.eventName || 'Score Boost Event';
@@ -13757,6 +13923,37 @@ export const StudentDashboard: React.FC<Props> = ({
                                   </div>
                                 );
                               }
+                               if (isThemeStudio) {
+                                 const studio = (settings as any)?.themeStudioEvent;
+                                 return (
+                                   <div key={i} className="rounded-2xl overflow-hidden" style={{ background: 'rgba(168,85,247,0.10)', border: '1px solid rgba(168,85,247,0.38)' }}>
+                                     <div className="px-4 pt-3.5 pb-2 flex items-center justify-between">
+                                       <div className="flex items-center gap-2">
+                                         <span className="text-xl">🎨</span>
+                                         <div>
+                                           <p className="font-black text-white text-sm">{studio?.eventName || 'Theme Studio'}</p>
+                                            <p className="text-[9px] text-fuchsia-300/70">
+                                              { _publishedThemeLibrary.length > 0
+                                                ? `${_publishedThemeLibrary.length} theme${_publishedThemeLibrary.length > 1 ? 's' : ''} available${_newThemeCount > 0 ? ` · ${_newThemeCount} NEW` : ''} — preview & buy`
+                                                : 'Custom colors, presets aur admin themes explore karo'}
+                                            </p>
+                                         </div>
+                                       </div>
+                                       <span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${isEndingSoon ? 'bg-red-500/20 text-red-400' : 'bg-fuchsia-500/20 text-fuchsia-300'}`}>
+                                         {isEndingSoon ? 'ENDING' : 'LIVE'}
+                                       </span>
+                                     </div>
+                                     <div className="px-4 pb-3">
+                                       {isEndingSoon && endCountdown && <p className="text-[9px] font-black text-red-400 mb-2">⏰ {endCountdown} — jaldi try karo</p>}
+                                       <button onClick={() => onTabChange('THEME_CUSTOMIZER' as any)}
+                                         className="w-full py-2.5 rounded-xl text-[10px] font-black text-white"
+                                         style={{ background: 'linear-gradient(135deg,#9333ea,#db2777)' }}>
+                                         🎨 Theme Studio kholo →
+                                       </button>
+                                     </div>
+                                   </div>
+                                 );
+                               }
                               return (
                                 <div key={i} className="rounded-2xl p-4 flex items-center gap-3"
                                   style={isEndingSoon
@@ -13929,9 +14126,27 @@ export const StudentDashboard: React.FC<Props> = ({
                       onTouchStart={() => setShowDotsMenu(false)}
                     />
                     {/* Dropdown panel — compact */}
-                    <div data-no-topbar-swipe className="fixed top-[100px] right-2 w-60 bg-white rounded-2xl shadow-2xl border border-slate-100 z-[99999] animate-in fade-in zoom-in-95 duration-150 overflow-y-auto max-h-[calc(100dvh-120px)]">
+                    <div
+                      data-no-topbar-swipe
+                      className={`fixed top-[100px] right-2 w-60 rounded-2xl shadow-2xl border z-[99999] animate-in fade-in zoom-in-95 duration-150 overflow-y-auto max-h-[calc(100dvh-120px)] ${
+                        isCurrentBlue
+                          ? 'bg-[#0d1726] border-[#1e2f4f] text-white'
+                          : isCurrentDark
+                          ? 'bg-[#111827] border-slate-800 text-white'
+                          : 'bg-white border-slate-100 text-slate-800'
+                      }`}
+                      style={
+                        isCurrentBlue && settings?.blueThemeBackground
+                          ? { backgroundColor: settings.blueThemeBackground }
+                          : isCurrentDark && settings?.darkThemeBackground
+                          ? { backgroundColor: settings.darkThemeBackground }
+                          : isCurrentLight && settings?.lightThemeBackground
+                          ? { backgroundColor: settings.lightThemeBackground }
+                          : undefined
+                      }
+                    >
                       {/* Header */}
-                      <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5 border-b border-slate-100">
+                      <div className={`flex items-center justify-between px-3 pt-2.5 pb-1.5 border-b ${isCurrentBlue ? 'border-[#1e2f4f]' : isCurrentDark ? 'border-slate-800' : 'border-slate-100'}`}>
                         {/* Level pill */}
                         {(() => {
                           const _ls = user.role === 'ADMIN' || user.role === 'SUB_ADMIN' ? 999999999 : (user.totalScore || 0);
@@ -13942,14 +14157,14 @@ export const StudentDashboard: React.FC<Props> = ({
                               className="flex items-center gap-1.5 active:opacity-70 transition-all"
                             >
                               <span className="text-[11px]">⭐</span>
-                              <span className="text-[11px] font-black text-indigo-700">Lv {_li.level}</span>
+                              <span className={`text-[11px] font-black ${isCurrentBlue ? 'text-blue-300' : isCurrentDark ? 'text-amber-400' : 'text-indigo-700'}`}>Lv {_li.level}</span>
                               <span className="text-[10px] text-slate-400 font-semibold">— {_li.label}</span>
                             </button>
                           );
                         })()}
                         <button
                           onClick={() => setShowDotsMenu(false)}
-                          className="p-1 rounded-full hover:bg-slate-100 text-slate-400 transition-colors"
+                          className={`p-1 rounded-full transition-colors ${isDarkMode ? 'hover:bg-white/10 text-slate-400' : 'hover:bg-slate-100 text-slate-400'}`}
                         >
                           <svg width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
                         </button>
@@ -13969,25 +14184,43 @@ export const StudentDashboard: React.FC<Props> = ({
                         });
                         const currentLabel = boardOptions.find(b => b.id === activeSessionBoard)?.label ?? activeSessionBoard;
                         return (
-                          <div className="px-3 pt-2.5 pb-2.5 border-b border-slate-100">
+                          <div className={`px-3 pt-2.5 pb-2.5 border-b ${isCurrentBlue ? 'border-[#1e2f4f]' : isCurrentDark ? 'border-slate-800' : 'border-slate-100'}`}>
                             <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-3">Board</p>
                             <button
                               onClick={() => setShowBoardDropdown(v => !v)}
-                              className="w-full flex items-center justify-between px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-[13px] font-bold text-slate-800 active:bg-slate-100 transition-all"
+                              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-[13px] font-bold transition-all border ${
+                                isCurrentBlue
+                                  ? 'bg-[#132038] border-[#1e3252] text-white active:bg-[#182744]'
+                                  : isCurrentDark
+                                  ? 'bg-slate-800/80 border-slate-700 text-white active:bg-slate-800'
+                                  : 'bg-slate-50 border-slate-200 text-slate-800 active:bg-slate-100'
+                              }`}
                             >
                               <span>{currentLabel}</span>
                               <ChevronDown size={14} className={`text-slate-400 transition-transform ${showBoardDropdown ? 'rotate-180' : ''}`} />
                             </button>
                             {showBoardDropdown && (
-                              <div className="mt-1.5 bg-white border border-slate-200 rounded-xl overflow-hidden shadow-md">
+                              <div className={`mt-1.5 rounded-xl overflow-hidden shadow-md border ${
+                                isCurrentBlue
+                                  ? 'bg-[#0b1329] border-[#1e3252]'
+                                  : isCurrentDark
+                                  ? 'bg-slate-900 border-slate-700'
+                                  : 'bg-white border-slate-200'
+                              }`}>
                                 {boardOptions.map(opt => (
                                   <button
                                     key={opt.id}
                                     onClick={() => { setActiveSessionBoard(opt.id as any); setShowBoardDropdown(false); }}
-                                    className="w-full flex items-center justify-between px-3 py-2.5 text-[13px] font-semibold text-slate-700 hover:bg-slate-50 active:bg-slate-100 transition-colors border-b border-slate-100 last:border-0"
+                                    className={`w-full flex items-center justify-between px-3 py-2.5 text-[13px] font-semibold transition-colors border-b last:border-0 ${
+                                      isCurrentBlue
+                                        ? 'text-slate-200 hover:bg-white/5 border-[#1e2f4f]'
+                                        : isCurrentDark
+                                        ? 'text-slate-200 hover:bg-slate-800 border-slate-800'
+                                        : 'text-slate-700 hover:bg-slate-50 border-slate-100'
+                                    }`}
                                   >
                                     <span>{opt.label}</span>
-                                    {activeSessionBoard === opt.id && <Check size={13} className="text-blue-600" />}
+                                    {activeSessionBoard === opt.id && <Check size={13} className="text-blue-500" />}
                                   </button>
                                 ))}
                               </div>
@@ -14000,15 +14233,40 @@ export const StudentDashboard: React.FC<Props> = ({
                       {(() => {
                         const redeemAccess = getFeatureAccess('REDEEM_CODE');
                         const requestAccess = getFeatureAccess('REQUEST_CONTENT');
-                        const themeType2 = localStorage.getItem("nst_dark_theme_type");
-                        const isBlue2 = isDarkMode && themeType2 === "blue";
-                        const themeLabel2 = isBlue2 ? 'Blue Dark' : isDarkMode ? 'Black Dark' : 'Light Mode';
 
-                        const themeChip = isBlue2
-                          ? { label: '🌙 Blue', cls: 'bg-blue-100 text-blue-700 border-blue-200' }
-                          : isDarkMode
-                            ? { label: '🌑 Dark', cls: 'bg-slate-800 text-slate-200 border-slate-700' }
-                            : { label: '☀️ Light', cls: 'bg-amber-50 text-amber-700 border-amber-200' };
+                        // 3 Themes Chip matching the exact screenshots
+                        const themeChip = isCurrentBlue
+                          ? { label: '🌙 Blue', cls: 'bg-blue-950/70 text-blue-300 border-blue-500/40' }
+                          : isCurrentDark
+                          ? { label: '🌐 Dark', cls: 'bg-slate-800 text-slate-200 border-slate-700' }
+                          : { label: '🔆 Light', cls: 'bg-amber-50 text-amber-700 border-amber-200' };
+
+                        const handleThemeCycle = () => {
+                          if (!isDarkMode) {
+                            // Light -> Dark (Black)
+                            localStorage.setItem("nst_dark_theme_type", "black");
+                            document.documentElement.classList.remove('dark-mode-blue', 'dark-mode-black');
+                            document.documentElement.classList.add('dark-mode', 'dark-mode-black');
+                            window.dispatchEvent(new Event('nst-dark-theme-change'));
+                            onToggleDarkMode?.(true);
+                          } else {
+                            const cur = localStorage.getItem("nst_dark_theme_type") || "black";
+                            if (cur === "black") {
+                              // Dark (Black) -> Blue Dark
+                              localStorage.setItem("nst_dark_theme_type", "blue");
+                              document.documentElement.classList.remove('dark-mode-black');
+                              document.documentElement.classList.add('dark-mode', 'dark-mode-blue');
+                              window.dispatchEvent(new Event('nst-dark-theme-change'));
+                              onToggleDarkMode?.(true);
+                            } else {
+                              // Blue Dark -> Light
+                              document.documentElement.classList.remove('dark-mode', 'dark-mode-blue', 'dark-mode-black');
+                              localStorage.removeItem("nst_dark_theme_type");
+                              window.dispatchEvent(new Event('nst-dark-theme-change'));
+                              onToggleDarkMode?.(false);
+                            }
+                          }
+                        };
 
                         type ListItem = { label: string; right?: string; locked?: boolean; isTheme?: boolean; action: () => void };
                         const items: ListItem[] = [
@@ -14035,25 +14293,7 @@ export const StudentDashboard: React.FC<Props> = ({
                           {
                             label: 'Theme',
                             isTheme: true,
-                            action: () => {
-                              if (!isDarkMode) {
-                                localStorage.setItem("nst_dark_theme_type", "black");
-                                document.documentElement.classList.remove('dark-mode-blue', 'dark-mode-black');
-                                document.documentElement.classList.add('dark-mode', 'dark-mode-black');
-                                onToggleDarkMode?.(true);
-                              } else {
-                                const cur = localStorage.getItem("nst_dark_theme_type");
-                                if (cur === "black") {
-                                  localStorage.setItem("nst_dark_theme_type", "blue");
-                                  document.documentElement.classList.remove('dark-mode-black');
-                                  document.documentElement.classList.add('dark-mode', 'dark-mode-blue');
-                                  onToggleDarkMode?.(true);
-                                } else {
-                                  document.documentElement.classList.remove('dark-mode', 'dark-mode-blue', 'dark-mode-black');
-                                  onToggleDarkMode?.(false);
-                                }
-                              }
-                            },
+                            action: handleThemeCycle,
                           },
                           {
                             label: 'App Guide',
@@ -14085,21 +14325,27 @@ export const StudentDashboard: React.FC<Props> = ({
                         ];
 
                         return (
-                          <div className="px-2 pt-1 pb-1 border-b border-slate-100">
+                          <div className={`px-2 pt-1 pb-1 border-b ${isCurrentBlue ? 'border-[#1e2f4f]' : isCurrentDark ? 'border-slate-800' : 'border-slate-100'}`}>
                             {items.map((item, idx) => (
                               <button
                                 key={item.label}
                                 onClick={item.action}
-                                className="w-full flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-slate-50 active:bg-slate-100 transition-all text-left"
+                                className={`w-full flex items-center gap-3 px-2 py-2.5 rounded-lg transition-all text-left ${
+                                  isCurrentBlue
+                                    ? 'hover:bg-white/5 active:bg-white/10'
+                                    : isCurrentDark
+                                    ? 'hover:bg-slate-800/60 active:bg-slate-800'
+                                    : 'hover:bg-slate-50 active:bg-slate-100'
+                                }`}
                               >
-                                <span className="text-[11px] font-black text-slate-400 w-4 shrink-0 text-right">{idx + 1}</span>
-                                <span className="text-[13px] font-semibold text-slate-800 flex-1 leading-tight">{item.label}</span>
+                                <span className={`text-[11px] font-black w-4 shrink-0 text-right ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{idx + 1}</span>
+                                <span className={`text-[13px] font-semibold flex-1 leading-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{item.label}</span>
                                 {item.isTheme && (
                                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 ${themeChip.cls}`}>
                                     {themeChip.label}
                                   </span>
                                 )}
-                                {!item.isTheme && item.right && <span className="text-[11px] font-medium text-slate-400">{item.right}</span>}
+                                {!item.isTheme && item.right && <span className={`text-[11px] font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-400'}`}>{item.right}</span>}
                                 {item.locked && <Lock size={10} className="text-red-400 shrink-0" />}
                               </button>
                             ))}
@@ -14109,7 +14355,7 @@ export const StudentDashboard: React.FC<Props> = ({
 
                       {/* Version */}
                       <div className="px-3 py-1.5 text-center">
-                        <span className="text-[9px] text-slate-300 font-medium">v{APP_VERSION}</span>
+                        <span className={`text-[9px] font-medium ${isDarkMode ? 'text-slate-500' : 'text-slate-300'}`}>v{APP_VERSION}</span>
                       </div>
 
                     </div>
@@ -16601,7 +16847,7 @@ export const StudentDashboard: React.FC<Props> = ({
                         </div>
 
                         {compHubNavigatorOpen && (
-                          <McqQuestionNavigator
+                          <McqQuestionNavigatorComponent
                             total={allMcqs.length}
                             currentIndex={safeIdx}
                             answers={compHubAnswers}
@@ -19184,6 +19430,7 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                         localStorage.setItem("nst_dark_theme_type", "black");
                         document.documentElement.classList.remove('dark-mode-blue', 'dark-mode-black');
                         document.documentElement.classList.add('dark-mode', 'dark-mode-black');
+                         window.dispatchEvent(new Event('nst-dark-theme-change'));
                         onToggleDarkMode?.(true);
                       } else {
                         const cur = localStorage.getItem("nst_dark_theme_type");
@@ -19191,6 +19438,7 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                           localStorage.setItem("nst_dark_theme_type", "blue");
                           document.documentElement.classList.remove('dark-mode-black');
                           document.documentElement.classList.add('dark-mode', 'dark-mode-blue');
+                          window.dispatchEvent(new Event('nst-dark-theme-change'));
                           onToggleDarkMode?.(true);
                         } else {
                           document.documentElement.classList.remove('dark-mode', 'dark-mode-blue', 'dark-mode-black');
@@ -20154,7 +20402,7 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                 return (
                   <div
                     key={idx}
-                    className="rounded-2xl overflow-hidden border"
+                    className="nst-page-card nst-card-animated rounded-2xl overflow-hidden border"
                     style={{
                       borderColor: pageMcqDone ? '#6ee7b7' : pageRead ? '#fdba74' : (settings?.contentListCardBorder ? `${settings.contentListCardBorder}55` : `${tierTheme.primary}33`),
                     }}
@@ -21698,7 +21946,7 @@ RULES:
 
                           {/* Submit & Review banner — appears after submitThreshold questions answered */}
                           {lucentMcqNavigatorOpen[pageKey] && (
-                            <McqQuestionNavigator
+                            <McqQuestionNavigatorComponent
                               total={totalQ}
                               currentIndex={ci}
                               answers={effectiveMcqs.reduce((acc: Record<number, number>, _q: any, i: number) => {
@@ -23732,7 +23980,7 @@ RULES:
                   </div>
 
                   {compMcqNavigatorOpen && (
-                    <McqQuestionNavigator
+                    <McqQuestionNavigatorComponent
                       total={totalQ}
                       currentIndex={ci}
                       answers={compMcqAnswers}

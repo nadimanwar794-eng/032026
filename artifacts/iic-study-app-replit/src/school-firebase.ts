@@ -41,10 +41,18 @@ export const getAllSchools = async (): Promise<School[]> => {
 };
 
 export const subscribeToSchool = (schoolId: string, cb: (s: School | null) => void) =>
-  onSnapshot(d(`schools/${schoolId}`), snap => cb(snap.exists() ? snap.data() as School : null));
+  onSnapshot(
+    d(`schools/${schoolId}`),
+    snap => cb(snap.exists() ? snap.data() as School : null),
+    err => { console.warn(`[school-firebase] subscribeToSchool error:`, err?.code || err); cb(null); }
+  );
 
 export const subscribeToAllSchools = (cb: (schools: School[]) => void) =>
-  onSnapshot(col("schools"), snap => cb(snap.docs.map(d => d.data() as School)));
+  onSnapshot(
+    col("schools"),
+    snap => cb(snap.docs.map(d => d.data() as School)),
+    err => { console.warn(`[school-firebase] subscribeToAllSchools error:`, err?.code || err); cb([]); }
+  );
 
 export const updateSchool = async (schoolId: string, data: Partial<School>) => {
   await updateDoc(d(`schools/${schoolId}`), sanitizeForFirestore(data));
@@ -70,8 +78,10 @@ export const getSessions = async (schoolId: string): Promise<SchoolSession[]> =>
 };
 
 export const subscribeToSessions = (schoolId: string, cb: (sessions: SchoolSession[]) => void) =>
-  onSnapshot(col(`schools/${schoolId}/sessions`), snap =>
-    cb(snap.docs.map(d => d.data() as SchoolSession))
+  onSnapshot(
+    col(`schools/${schoolId}/sessions`),
+    snap => cb(snap.docs.map(d => d.data() as SchoolSession)),
+    err => { console.warn(`[school-firebase] subscribeToSessions error:`, err?.code || err); cb([]); }
   );
 
 export const updateSession = async (schoolId: string, sessionId: string, data: Partial<SchoolSession>) => {
@@ -97,7 +107,8 @@ export const getClasses = async (schoolId: string, sessionId?: string): Promise<
 export const subscribeToClasses = (schoolId: string, sessionId: string, cb: (classes: SchoolClass[]) => void) =>
   onSnapshot(
     query(col(`schools/${schoolId}/classes`), where("sessionId", "==", sessionId)),
-    snap => cb(snap.docs.map(d => d.data() as SchoolClass))
+    snap => cb(snap.docs.map(d => d.data() as SchoolClass)),
+    err => { console.warn(`[school-firebase] subscribeToClasses error:`, err?.code || err); cb([]); }
   );
 
 export const updateClass = async (schoolId: string, classId: string, data: Partial<SchoolClass>) => {
@@ -123,7 +134,8 @@ export const getSubjects = async (schoolId: string, classId?: string): Promise<S
 export const subscribeToSubjects = (schoolId: string, classId: string, cb: (subjects: SchoolSubject[]) => void) =>
   onSnapshot(
     query(col(`schools/${schoolId}/subjects`), where("classId", "==", classId)),
-    snap => cb(snap.docs.map(d => d.data() as SchoolSubject))
+    snap => cb(snap.docs.map(d => d.data() as SchoolSubject)),
+    err => { console.warn(`[school-firebase] subscribeToSubjects error:`, err?.code || err); cb([]); }
   );
 
 export const deleteSubject = async (schoolId: string, subjectId: string) => {
@@ -148,7 +160,8 @@ export const getLessons = async (schoolId: string, subjectId?: string): Promise<
 export const subscribeToLessons = (schoolId: string, subjectId: string, cb: (lessons: SchoolLesson[]) => void) =>
   onSnapshot(
     query(col(`schools/${schoolId}/lessons`), where("subjectId", "==", subjectId)),
-    snap => cb(snap.docs.map(d => d.data() as SchoolLesson).sort((a, b) => a.order - b.order))
+    snap => cb(snap.docs.map(d => d.data() as SchoolLesson).sort((a, b) => a.order - b.order)),
+    err => { console.warn(`[school-firebase] subscribeToLessons error:`, err?.code || err); cb([]); }
   );
 
 export const updateLesson = async (schoolId: string, lessonId: string, data: Partial<SchoolLesson>) => {
@@ -171,8 +184,10 @@ export const getTeachers = async (schoolId: string): Promise<SchoolTeacher[]> =>
 };
 
 export const subscribeToTeachers = (schoolId: string, cb: (teachers: SchoolTeacher[]) => void) =>
-  onSnapshot(col(`schools/${schoolId}/teachers`), snap =>
-    cb(snap.docs.map(d => d.data() as SchoolTeacher))
+  onSnapshot(
+    col(`schools/${schoolId}/teachers`),
+    snap => cb(snap.docs.map(d => d.data() as SchoolTeacher)),
+    err => { console.warn(`[school-firebase] subscribeToTeachers error:`, err?.code || err); cb([]); }
   );
 
 export const updateTeacher = async (schoolId: string, teacherId: string, data: Partial<SchoolTeacher>) => {
@@ -198,13 +213,15 @@ export const getStudents = async (schoolId: string, classId?: string): Promise<S
 export const subscribeToStudents = (schoolId: string, classId: string, cb: (students: SchoolStudent[]) => void) =>
   onSnapshot(
     query(col(`schools/${schoolId}/students`), where("classId", "==", classId), where("active", "==", true)),
-    snap => cb(snap.docs.map(d => d.data() as SchoolStudent).sort((a, b) => a.rollNo.localeCompare(b.rollNo, undefined, { numeric: true })))
+    snap => cb(snap.docs.map(d => d.data() as SchoolStudent).sort((a, b) => a.rollNo.localeCompare(b.rollNo, undefined, { numeric: true }))),
+    err => { console.warn(`[school-firebase] subscribeToStudents error:`, err?.code || err); cb([]); }
   );
 
 export const subscribeToAllStudents = (schoolId: string, cb: (students: SchoolStudent[]) => void) =>
   onSnapshot(
     query(col(`schools/${schoolId}/students`), where("active", "==", true)),
-    snap => cb(snap.docs.map(d => d.data() as SchoolStudent))
+    snap => cb(snap.docs.map(d => d.data() as SchoolStudent)),
+    err => { console.warn(`[school-firebase] subscribeToAllStudents error:`, err?.code || err); cb([]); }
   );
 
 export const updateStudent = async (schoolId: string, studentId: string, data: Partial<SchoolStudent>) => {
@@ -242,8 +259,10 @@ export const subscribeToAttendance = (
   schoolId: string, classId: string, date: string, cb: (r: AttendanceRecord | null) => void
 ) => {
   const id = `${classId}_${date}`;
-  return onSnapshot(d(`schools/${schoolId}/attendance/${id}`), snap =>
-    cb(snap.exists() ? snap.data() as AttendanceRecord : null)
+  return onSnapshot(
+    d(`schools/${schoolId}/attendance/${id}`),
+    snap => cb(snap.exists() ? snap.data() as AttendanceRecord : null),
+    err => { console.warn(`[school-firebase] subscribeToAttendance error:`, err?.code || err); cb(null); }
   );
 };
 
@@ -262,7 +281,8 @@ export const getExams = async (schoolId: string, classId?: string): Promise<Exam
 export const subscribeToExams = (schoolId: string, classId: string, cb: (exams: ExamEntry[]) => void) =>
   onSnapshot(
     query(col(`schools/${schoolId}/exams`), where("classId", "==", classId)),
-    snap => cb(snap.docs.map(d => d.data() as ExamEntry))
+    snap => cb(snap.docs.map(d => d.data() as ExamEntry)),
+    err => { console.warn(`[school-firebase] subscribeToExams error:`, err?.code || err); cb([]); }
   );
 
 export const deleteExam = async (schoolId: string, examId: string) => {
@@ -294,7 +314,8 @@ export const getMonthlyFees = async (schoolId: string, month: string, classId?: 
 export const subscribeToClassFees = (schoolId: string, month: string, classId: string, cb: (fees: MonthlyFee[]) => void) =>
   onSnapshot(
     query(col(`schools/${schoolId}/fees`), where("month", "==", month), where("classId", "==", classId)),
-    snap => cb(snap.docs.map(d => d.data() as MonthlyFee))
+    snap => cb(snap.docs.map(d => d.data() as MonthlyFee)),
+    err => { console.warn(`[school-firebase] subscribeToClassFees error:`, err?.code || err); cb([]); }
   );
 
 export const markFeePaid = async (schoolId: string, studentId: string, month: string, paidBy: string) => {
@@ -347,8 +368,10 @@ export const getSchoolUserProfile = async (uid: string): Promise<SchoolUserProfi
 };
 
 export const subscribeToSchoolUserProfile = (uid: string, cb: (p: SchoolUserProfile | null) => void) =>
-  onSnapshot(d(`school_users/${uid}`), snap =>
-    cb(snap.exists() ? snap.data() as SchoolUserProfile : null)
+  onSnapshot(
+    d(`school_users/${uid}`),
+    snap => cb(snap.exists() ? snap.data() as SchoolUserProfile : null),
+    err => { console.warn(`[school-firebase] subscribeToSchoolUserProfile error:`, err?.code || err); cb(null); }
   );
 
 // ── LOCK CODE ────────────────────────────────────────────────────────────────

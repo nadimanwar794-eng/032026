@@ -129,6 +129,8 @@ export interface User {
   personalThemeColor?: string; // User's own permanently chosen theme color (from ThemeCustomizer)
   personalTheme?: UserCustomTheme; // Full granular permanent theme
   activeAppliedThemeId?: string; // 'default' | ThemeHistoryEntry.id — user's chosen theme from admin history
+  activeOwnedThemeId?: string; // Owned theme record currently selected in Theme Studio
+  ownedThemes?: OwnedTheme[]; // Purchased/free themes saved for this user
   useDefaultTheme?: boolean; // User explicitly chose default tier theme — skip all admin overrides
   themeBadgeColor?: string;
   themeAnimationId?: string;
@@ -603,6 +605,7 @@ export interface AppNotification {
 }
 
 export interface SystemSettings {
+  cardBorderAnimation?: boolean; // When true or undefined, rotating border animation on cards is active
   notifications?: AppNotification[];
   broadcastRedeemCodes?: BroadcastRedeemCode[];
   loadingScreenVideoUrl?: string; // NEW: Video to show before loading screen
@@ -758,7 +761,17 @@ export interface SystemSettings {
   contentListCardBorder?: string;
   statusBarColor?: string;
   darkThemeColor?: string;
+  darkThemeBackground?: string;
+  darkThemeTopBarStart?: string;
+  darkThemeTopBarEnd?: string;
+  blueThemeColor?: string;
+  blueThemeBackground?: string;
+  blueThemeTopBarStart?: string;
+  blueThemeTopBarEnd?: string;
   lightThemeColor?: string;
+  lightThemeBackground?: string;
+  lightThemeTopBarStart?: string;
+  lightThemeTopBarEnd?: string;
   ultraThemeColor?: string;
   basicThemeColor?: string;
   freeThemeColor?: string;
@@ -776,6 +789,7 @@ export interface SystemSettings {
   officialBasicTheme?: UserCustomTheme;
   officialFreeTheme?: UserCustomTheme;
   adminThemeLibrary?: AdminSavedTheme[];
+  adminLoadingScreenLibrary?: AdminLoadingScreen[];
   themeHistory?: ThemeHistoryEntry[];
   scheduledThemes?: ScheduledTheme[];
   levelScoreOverride?: Record<string, number>;
@@ -1667,12 +1681,48 @@ export interface UserCustomTheme {
   likes?: number;
 }
 
+export interface OwnedTheme {
+  id: string;
+  sourceThemeId: string;
+  name: string;
+  emoji?: string;
+  themeData: UserCustomTheme;
+  purchasedAt: string;
+  expiresAt?: string;
+  accessMode: 'FREE' | 'CREDITS';
+  accessDurationDays?: 1 | 7 | 30;
+  creditCost?: number;
+}
+
 export interface AdminSavedTheme {
   id: string;
   name: string;
   themeData: UserCustomTheme;
   createdAt: string;
   createdBy?: string;
+  targetTier?: 'all' | 'ultra' | 'basic' | 'free';
+  accessMode?: 'FREE' | 'CREDITS';
+  creditCost?: number;
+  accessDurationDays?: 1 | 7 | 30;
+  published?: boolean;
+  publishedAt?: string;
+}
+
+/** Safe, data-driven loading screen published by an admin. `code` is JSON
+ * configuration, never executable JavaScript. */
+export interface AdminLoadingScreen {
+  id: string;
+  slotId: number;
+  name: string;
+  emoji?: string;
+  code: string;
+  targetTier?: 'all' | 'ultra' | 'basic' | 'free';
+  accessMode?: 'FREE' | 'CREDITS';
+  creditCost?: number;
+  accessDurationDays?: 1 | 7 | 30;
+  published?: boolean;
+  publishedAt?: string;
+  createdAt?: string;
 }
 
 export interface ThemeHistoryEntry {
@@ -1682,6 +1732,11 @@ export interface ThemeHistoryEntry {
   targetTier: 'all' | 'ultra' | 'basic' | 'free';
   appliedAt: string;
   expiresAt: string | null;
+  accessMode?: 'FREE' | 'CREDITS';
+  creditCost?: number;
+  accessDurationDays?: 1 | 7 | 30;
+  source?: 'ADMIN_PUBLISHED' | 'ADMIN_APPLIED';
+  published?: boolean;
 }
 
 export interface ScheduledTheme {

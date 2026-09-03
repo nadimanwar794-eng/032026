@@ -3,11 +3,13 @@ import { User, UserCustomTheme, UserCustomAnimation, ScheduledTheme } from '../t
 import { TOP_BAR_EFFECTS, TopBarEffectsLayer } from '../utils/topBarEffects';
 import { ThemeBrowser } from './ThemeBrowser';
 import type { AppTheme } from '../utils/themeLibrary';
+import { doc, updateDoc } from 'firebase/firestore';
 import {
     saveUserTheme, saveUserAnimation,
     publishTheme, publishAnimation,
     subscribePublishedThemes, subscribePublishedAnimations,
-    likePublishedTheme, likePublishedAnimation
+    likePublishedTheme, likePublishedAnimation,
+    db
 } from '../firebase';
 import { applyDeduction, getTotalCredits } from '../utils/creditSystem';
 import {
@@ -499,8 +501,6 @@ export const ThemeAnimationBuilder: React.FC<Props> = ({ user, onUpdateUser, onB
             return;
         }
 
-        const { doc, updateDoc } = await import('firebase/firestore');
-        const { db } = await import('../firebase');
         const scheduledTheme: ScheduledTheme = {
             id: `sched_${Date.now()}`,
             themeId: appTheme.id,

@@ -316,23 +316,32 @@ export const EventManager: React.FC<Props> = ({ settings, onUpdate, onSave, isSa
               <span className="text-[10px] text-slate-400">extra multiplier</span>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <div
-              className="w-10 h-5 rounded-full cursor-pointer transition-colors"
-              style={{ background: settings.scoreBoostEvent?.themeStudioEnabled ? '#f59e0b' : '#cbd5e1' }}
-              onClick={() => upd({ scoreBoostEvent: { ...(settings.scoreBoostEvent || { enabled: false, eventName: '', boostPercent: 50 }), themeStudioEnabled: !settings.scoreBoostEvent?.themeStudioEnabled } })}>
-              <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform m-0.5 ${settings.scoreBoostEvent?.themeStudioEnabled ? 'translate-x-5' : ''}`} />
-            </div>
-            <span className="text-[10px] font-bold text-slate-600">Theme Studio bhi include karo</span>
-            {settings.scoreBoostEvent?.themeStudioEnabled && (
-              <div className="flex items-center gap-1 ml-1">
-                <input type="number" min={1} max={30}
-                  value={settings.scoreBoostEvent?.themeStudioDays ?? 3}
-                  onChange={e => upd({ scoreBoostEvent: { ...(settings.scoreBoostEvent || { enabled: false, eventName: '', boostPercent: 50 }), themeStudioDays: Number(e.target.value) } })}
-                  className="w-14 p-1.5 border rounded-lg text-xs font-bold" />
-                <span className="text-[10px] text-slate-400">days</span>
-              </div>
-            )}
+        </div>
+      ),
+    },
+    {
+      key: 'themeStudio',
+      title: 'Theme Studio',
+      icon: <Palette size={18} style={{ color: '#a855f7' }} />,
+      accentColor: '#a855f7',
+      description: 'Users ko custom aur published themes explore karne ka event',
+      enabled: settings.themeStudioEvent?.enabled ?? false,
+      eventName: settings.themeStudioEvent?.eventName,
+      startsAt: settings.themeStudioEvent?.startsAt,
+      endsAt: settings.themeStudioEvent?.endsAt,
+      onToggle: (v: boolean) => upd({ themeStudioEvent: { ...(settings.themeStudioEvent || { eventName: 'Theme Studio Event' }), enabled: v } }),
+      onNameChange: (n: string) => upd({ themeStudioEvent: { ...(settings.themeStudioEvent || { enabled: false }), eventName: n } }),
+      onStartChange: (s: string) => upd({ themeStudioEvent: { ...(settings.themeStudioEvent || { enabled: false, eventName: '' }), startsAt: s || undefined } }),
+      onEndChange: (e: string) => upd({ themeStudioEvent: { ...(settings.themeStudioEvent || { enabled: false, eventName: '' }), endsAt: e || undefined } }),
+      extraSettings: (
+        <div>
+          <label className="text-[10px] font-black text-slate-500 uppercase mb-1 block">Studio access window</label>
+          <div className="flex items-center gap-2">
+            <input type="number" min={1} max={30}
+              value={settings.themeStudioEvent?.days ?? 7}
+              onChange={e => upd({ themeStudioEvent: { ...(settings.themeStudioEvent || { enabled: false, eventName: 'Theme Studio Event' }), days: Number(e.target.value) } })}
+              className="w-24 p-2 border border-slate-200 rounded-xl text-sm font-bold" />
+            <span className="text-[10px] text-slate-400">days (info only; dates control event)</span>
           </div>
         </div>
       ),

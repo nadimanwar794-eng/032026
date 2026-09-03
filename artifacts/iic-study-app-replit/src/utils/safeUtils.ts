@@ -35,14 +35,90 @@ export function safeGetItem(key: string): string | null {
 }
 
 /**
- * Safe localStorage.setItem — fails silently instead of throwing QuotaExceededError.
+ * Safe localStorage.setItem — fails gracefully and attempts quota cleanup on QuotaExceededError.
  */
 export function safeSetItem(key: string, value: string): boolean {
   try {
     localStorage.setItem(key, value);
     return true;
-  } catch {
+  } catch (err: any) {
+    // Check if error is QuotaExceededError
+    const isQuota =
+      err?.name === 'QuotaExceededError' ||
+      err?.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+      err?.code === 22 ||
+      err?.code === 1014;
+
+    if (isQuota) {
+      try {
+        // Attempt automatic emergency storage cleanup
+        pruneLocalStorageForQuota();
+        localStorage.setItem(key, value);
+        return true;
+      } catch {
+        // Backup to sessionStorage if localStorage is completely exhausted
+        try {
+          sessionStorage.setItem(key, value);
+        } catch {}
+        console.warn(`[safeSetItem] LocalStorage quota exceeded for key "${key}". Cleaned up and preserved transiently.`);
+        window.dispatchEvent(new CustomEvent('nst_storage_quota_warning', { detail: { key } }));
+        return false;
+      }
+    }
     return false;
+  }
+}
+
+/**
+ * Emergency cleanup for localStorage: removes stale temp/preview keys and trims oversized historical logs.
+ */
+export function pruneLocalStorageForQuota(): void {
+  try {
+    const keysToRemove: string[] = [];
+    const keysToTrim: string[] = [];
+
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+
+      // Drop disposable temporary keys
+      if (
+        k.startsWith('nst_temp_') ||
+        k.startsWith('nst_preview_') ||
+        k.startsWith('nst_cached_search_') ||
+        k.includes('_preview') ||
+        k.startsWith('nst_draft_')
+      ) {
+        keysToRemove.push(k);
+      } else if (
+        k.startsWith('nst_app_notifications_') ||
+        k.startsWith('nst_activity_history_') ||
+        k.startsWith('nst_score_log_') ||
+        k.startsWith('nst_universal_analysis_logs')
+      ) {
+        keysToTrim.push(k);
+      }
+    }
+
+    // Remove temporary keys first
+    for (const k of keysToRemove) {
+      try { localStorage.removeItem(k); } catch {}
+    }
+
+    // Trim oversized array keys to the most recent 20 items
+    for (const k of keysToTrim) {
+      try {
+        const raw = localStorage.getItem(k);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 20) {
+            localStorage.setItem(k, JSON.stringify(parsed.slice(-20)));
+          }
+        }
+      } catch {}
+    }
+  } catch (e) {
+    console.warn('[pruneLocalStorageForQuota] Error during storage pruning:', e);
   }
 }
 
