@@ -644,13 +644,18 @@ function TrackingView({ subjectGroups, subjects, mcqHistory }: {
     const tp = l.pages?.length || 0;
     return s + Array.from({ length: tp }, (_, i) => !!snapshot.pageMcqDone?.[`${l.id}__${i}`] ? 1 : 0).reduce((a, b) => a + b, 0);
   }, 0);
-  const overallPct = totalPages > 0 ? Math.round((totalRead / totalPages) * 100) : 0;
+  const readPct = totalPages > 0 ? Math.round((totalRead / totalPages) * 100) : 0;
+  const mcqPct = totalPages > 0 ? Math.round((totalMcqDone / totalPages) * 100) : 0;
+  const syllabusMasteryPct = totalPages > 0 ? Math.round((readPct + mcqPct) / 2) : 0;
 
   return (
     <div className="space-y-4">
       {/* Overall stats card */}
-      <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl p-4 text-white">
-        <p className="text-[10px] font-black uppercase tracking-widest opacity-70 mb-2">📊 Overall Progress</p>
+      <div className="bg-gradient-to-br from-indigo-700 via-purple-700 to-blue-700 rounded-2xl p-4 text-white shadow-lg">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-[10px] font-black uppercase tracking-widest text-indigo-200">📖 My Syllabus Mastery</p>
+          <span className="text-xs font-black bg-white/20 px-2 py-0.5 rounded-full">{syllabusMasteryPct}% Mastered</span>
+        </div>
         <div className="grid grid-cols-4 gap-2 mb-3">
           {[
             { label: 'Subjects', value: subjects.length },
@@ -664,13 +669,18 @@ function TrackingView({ subjectGroups, subjects, mcqHistory }: {
             </div>
           ))}
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex-1 h-2 bg-white/20 rounded-full overflow-hidden">
-            <div className="h-full bg-white rounded-full transition-all" style={{ width: `${overallPct}%` }} />
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2">
+            <div className="flex-1 h-2.5 bg-black/20 rounded-full overflow-hidden">
+              <div className="h-full bg-gradient-to-r from-amber-300 via-emerald-300 to-teal-200 rounded-full transition-all" style={{ width: `${syllabusMasteryPct}%` }} />
+            </div>
+            <span className="text-xs font-black">{syllabusMasteryPct}%</span>
           </div>
-          <span className="text-xs font-black">{overallPct}%</span>
+          <div className="flex items-center justify-between text-[10px] text-white/80 font-semibold px-0.5">
+            <span>📖 Reading: {readPct}% ({totalRead}/{totalPages} pgs)</span>
+            <span>🧠 MCQ: {mcqPct}% ({totalMcqDone}/{totalPages} pgs)</span>
+          </div>
         </div>
-        <p className="text-[10px] opacity-60 mt-1 font-medium">{totalRead}/{totalPages} pages padhe hain</p>
       </div>
 
       {/* Per-subject breakdown */}
@@ -2237,7 +2247,7 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
           </button>
           <button onClick={() => setActiveView('tracking')}
             className={`flex-1 flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-black transition-all ${activeView === 'tracking' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>
-            📊 Tracking
+            📖 My Syllabus
           </button>
         </div>
       </div>

@@ -4,7 +4,8 @@ import { User, SystemSettings } from '../types';
 import { ADMIN_EMAIL } from '../constants';
 import { saveUserToLive, auth, getUserByEmail, getUserByMobileOrId, getUserData, getFreshUserData, getUserByLinkedGoogleUid } from '../firebase';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, setPersistence, browserLocalPersistence, signInAnonymously, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
-import { Lock, User as UserIcon, Phone, Mail, ShieldCheck, KeyRound, Copy, Check, XCircle, HelpCircle, Eye, EyeOff, ShieldQuestion, Loader2, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { Lock, User as UserIcon, Phone, Mail, ShieldCheck, KeyRound, Copy, Check, XCircle, HelpCircle, Eye, EyeOff, ShieldQuestion, Loader2, ArrowRight, CheckCircle2, Laptop, Smartphone } from 'lucide-react';
+import { rotateScreen } from '../utils/displayPrefs';
 import { LoginGuide } from './LoginGuide';
 import { CustomAlert } from './CustomDialogs';
 
@@ -23,7 +24,7 @@ const BLOCKED_DOMAINS = [
 
 const DEFAULT_QUESTIONS = [
   "Aapka favorite subject kaunsa hai?",
-  "Aapke primary school ka naam kya tha?",
+  "Aapka favorite sport ya game kya hai?",
   "Aapka favorite teacher kaun hai?",
   "Aapka birth city / gaon kaunsa hai?"
 ];
@@ -166,6 +167,17 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
   const [recoveryStep, setRecoveryStep] = useState<1 | 2>(1);
   const [userEnteredAnswer, setUserEnteredAnswer] = useState('');
 
+  const [isLandscape, setIsLandscape] = useState<boolean>(() => {
+    try { return window.matchMedia('(orientation: landscape)').matches; } catch { return false; }
+  });
+
+  useEffect(() => {
+    const mql = window.matchMedia('(orientation: landscape)');
+    const onChange = (e: MediaQueryListEvent) => setIsLandscape(e.matches);
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  }, []);
+
   useEffect(() => {
     const s = localStorage.getItem('nst_system_settings');
     if (s) { try { setSettings(JSON.parse(s)); } catch {} }
@@ -177,9 +189,9 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
   };
 
   const generateUserId = () => {
-    const timestampPart = Date.now().toString().slice(-4);
-    const randomPart = Math.floor(100000 + Math.random() * 900000);
-    return `${timestampPart}${randomPart}`;
+    const prefix = (appSettings?.appShortName || settings?.appShortName || 'NSTA').toUpperCase().replace(/[^A-Z0-9]/g, '') || 'NSTA';
+    const randomPart = String(Math.floor(100000 + Math.random() * 900000));
+    return `${prefix}-${randomPart}`;
   };
 
   const handleCopyId = () => {
@@ -197,10 +209,16 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
 
   const triggerLoginSuccess = (user: User) => {
     const validId = user.id || user.uid;
+    let displayId = user.displayId;
+    if (!displayId || displayId.startsWith('IIC-') || /^\d{8,12}$/.test(displayId)) {
+      const digits = displayId ? displayId.replace(/\D/g, '').slice(-6).padStart(6, '0') : String(Math.floor(100000 + Math.random() * 900000));
+      displayId = `NSTA-${digits}`;
+    }
     const safeUser = {
       ...user,
       id: validId,
       uid: validId,
+      displayId,
       profileCompleted: true
     };
     onLogin(safeUser);
@@ -230,6 +248,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
           ...appUser,
           id: uid,
           uid: uid,
+          displayId: appUser.displayId || generateUserId(),
           email: appUser.email || userEmail,
           name: appUser.name || userDisplayName,
           provider: 'google',
@@ -279,7 +298,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
           inbox: [
             {
               id: `welcome-bonus-${Date.now()}`,
-              text: `🎉 Welcome to IIC! Aapko ${signupCoins} Welcome Credits mil gaye hain.`,
+              text: `🎉 Welcome to NSTA! Aapko ${signupCoins} Welcome Credits mil gaye hain.`,
               date: new Date().toISOString(),
               read: false,
               type: 'GIFT',
@@ -377,8 +396,16 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
           return;
         }
 
-        const isGoogleUser = targetUser.provider === 'google' || (!targetUser.password && targetUser.email);
-        const passwordMatch = targetUser.password && (targetUser.password === pass || pass === settings?.adminCode || pass === appSettings?.adminCode);
+        // Try Firebase Auth with targetUser.email if present, OR check stored password
+        let authSuccess = false;
+        if (targetUser.email) {
+          try {
+            await signInWithEmailAndPassword(auth, targetUser.email, pass);
+            authSuccess = true;
+          } catch (_) {}
+        }
+
+        const passwordMatch = authSuccess || (targetUser.password && (targetUser.password === pass || pass === settings?.adminCode || pass === appSettings?.adminCode));
 
         if (passwordMatch) {
           // Restore the real Firebase account before reading user_data. This
@@ -395,6 +422,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
             ...raw,
             id: uid,
             uid: uid,
+            displayId: raw.displayId || targetUser.displayId,
             email: raw.email || "",
             mobile: raw.mobile || "",
             securityQuestion: raw.securityQuestion || DEFAULT_QUESTIONS[0],
@@ -406,10 +434,10 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
            localStorage.setItem('nst_current_user', JSON.stringify(finalUser));
            localStorage.setItem('nst_last_user_id', uid);
 
-          if (logActivity) logActivity("LOGIN", "Logged In via Mobile/UID", finalUser);
+          if (logActivity) logActivity("LOGIN", "Logged In via Student ID", finalUser);
           triggerLoginSuccess(finalUser);
 
-          if (finalUser.email) signInWithEmailAndPassword(auth, finalUser.email, pass).catch(() => {});
+          if (finalUser.email && !auth.currentUser?.email) signInWithEmailAndPassword(auth, finalUser.email, pass).catch(() => {});
           return;
         }
 
@@ -492,7 +520,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
         inbox: [
           {
             id: `welcome-bonus-${Date.now()}`,
-            text: `🎉 Welcome to IIC! Aapko ${signupCoins} Welcome Credits mil gaye hain.`,
+            text: `🎉 Welcome to NSTA! Aapko ${signupCoins} Welcome Credits mil gaye hain.`,
             date: new Date().toISOString(),
             read: false,
             type: 'GIFT',
@@ -527,7 +555,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
     const identifier = formData.id.trim().toLowerCase();
 
     if (!identifier) {
-      setError("Mobile, Email ya Account UID enter karein.");
+      setError("Mobile, Email ya Student ID (NSTA-XXXXXX) enter karein.");
       return;
     }
 
@@ -634,8 +662,41 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
 
   if (view === 'SUCCESS_ID') {
     return (
-      <div className="min-h-screen w-full flex items-center justify-center bg-[#eef1f5] px-4 select-none">
-        <div className="w-full max-w-md p-8 rounded-[2.5rem] bg-[#eef1f5] shadow-[20px_20px_60px_#caced5,-20px_-20px_60px_#ffffff] border border-white/60 text-center">
+      <div className="min-h-screen w-full flex flex-col items-center justify-between bg-[#eef1f5] px-4 py-6 select-none relative">
+        <header className="w-full max-w-md flex items-center justify-between px-2 pt-2">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center shadow-md p-1 border border-amber-400/40">
+              {settings?.appLogo ? (
+                <img src={settings.appLogo} alt="Logo" className="w-full h-full object-contain rounded-lg" />
+              ) : (
+                <span className="text-xs font-black text-amber-400">{settings?.appShortName || 'NSTA'}</span>
+              )}
+            </div>
+            <h1 className="text-xl font-black tracking-tight text-slate-900">{settings?.appName || 'NSTA'}</h1>
+          </div>
+
+          <button 
+            type="button"
+            onClick={async () => {
+              const result = await rotateScreen();
+              if (result === null) {
+                setAlertConfig({ isOpen: true, message: 'Screen rotation is not supported on this device/browser.' });
+              }
+            }} 
+            title={isLandscape ? "Rotate to Portrait" : "Rotate Screen"}
+            className={`w-8 h-8 rounded-full bg-[#eef1f5] shadow-[3px_3px_6px_#caced5,-3px_-3px_6px_#ffffff] active:shadow-[inset_2px_2px_4px_#caced5,inset_-2px_-2px_4px_#ffffff] flex items-center justify-center transition-all active:scale-95 ${
+              isLandscape ? 'text-amber-600 font-bold' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            {isLandscape ? (
+              <Smartphone size={17} className="text-amber-500" />
+            ) : (
+              <Laptop size={17} />
+            )}
+          </button>
+        </header>
+
+        <div className="w-full max-w-md p-8 rounded-[2.5rem] bg-[#eef1f5] shadow-[20px_20px_60px_#caced5,-20px_-20px_60px_#ffffff] border border-white/60 text-center my-auto">
           <div className="w-16 h-16 bg-[#eef1f5] text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-3 shadow-[6px_6px_12px_#caced5,-6px_-6px_12px_#ffffff]">
             <ShieldCheck size={32} />
           </div>
@@ -658,6 +719,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
             Start Learning
           </button>
         </div>
+        <div className="h-4" />
       </div>
     );
   }
@@ -684,19 +746,42 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
             {settings?.appLogo ? (
               <img src={settings.appLogo} alt="Logo" className="w-full h-full object-contain rounded-lg" />
             ) : (
-              <span className="text-xs font-black text-amber-400">{settings?.appShortName || 'IIC'}</span>
+              <span className="text-xs font-black text-amber-400">{settings?.appShortName || 'NSTA'}</span>
             )}
           </div>
-          <h1 className="text-xl font-black tracking-tight text-slate-900">{settings?.appName || 'IIC'}</h1>
+          <h1 className="text-xl font-black tracking-tight text-slate-900">{settings?.appName || 'NSTA'}</h1>
         </div>
 
-        <button 
-          type="button"
-          onClick={() => setShowGuide(true)} 
-          className="w-8 h-8 rounded-full bg-[#eef1f5] shadow-[3px_3px_6px_#caced5,-3px_-3px_6px_#ffffff] flex items-center justify-center text-slate-500 hover:text-slate-800 transition-colors"
-        >
-          <HelpCircle size={17} />
-        </button>
+        <div className="flex items-center gap-2">
+          {/* 💻 Rotate Screen / Desktop Mode Button */}
+          <button 
+            type="button"
+            onClick={async () => {
+              const result = await rotateScreen();
+              if (result === null) {
+                setAlertConfig({ isOpen: true, message: 'Screen rotation is not supported on this device/browser.' });
+              }
+            }} 
+            title={isLandscape ? "Rotate to Portrait" : "Rotate Screen"}
+            className={`w-8 h-8 rounded-full bg-[#eef1f5] shadow-[3px_3px_6px_#caced5,-3px_-3px_6px_#ffffff] active:shadow-[inset_2px_2px_4px_#caced5,inset_-2px_-2px_4px_#ffffff] flex items-center justify-center transition-all active:scale-95 ${
+              isLandscape ? 'text-amber-600 font-bold' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            {isLandscape ? (
+              <Smartphone size={17} className="text-amber-500" />
+            ) : (
+              <Laptop size={17} />
+            )}
+          </button>
+
+          <button 
+            type="button"
+            onClick={() => setShowGuide(true)} 
+            className="w-8 h-8 rounded-full bg-[#eef1f5] shadow-[3px_3px_6px_#caced5,-3px_-3px_6px_#ffffff] flex items-center justify-center text-slate-500 hover:text-slate-800 transition-colors"
+          >
+            <HelpCircle size={17} />
+          </button>
+        </div>
       </header>
 
       {/* ── 3D FLIP CONTAINER ── */}
@@ -726,7 +811,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
                     name="id"
                     type="text"
                     required
-                    placeholder="Mobile / Email / UID"
+                    placeholder="Mobile / Email / Student ID"
                     value={formData.id}
                     onChange={handleChange}
                     className="w-full bg-[#eef1f5] rounded-2xl pl-11 pr-4 py-3.5 text-xs sm:text-sm text-slate-800 placeholder-slate-400 outline-none shadow-[inset_4px_4px_8px_#caced5,inset_-4px_-4px_8px_#ffffff]"
@@ -828,7 +913,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
                     name="id"
                     type="text"
                     required
-                    placeholder="Mobile, Email ya Account ID"
+                    placeholder="Mobile, Email ya Student ID (NSTA-XXXXXX)"
                     value={formData.id}
                     onChange={handleChange}
                     className="w-full bg-[#eef1f5] rounded-2xl pl-11 pr-4 py-3.5 text-xs sm:text-sm text-slate-800 placeholder-slate-400 font-medium outline-none shadow-[inset_4px_4px_8px_#caced5,inset_-4px_-4px_8px_#ffffff]"
@@ -919,7 +1004,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
 
             {/* ── BACK: SIGN UP (180 DEGREE FLIPPED) ── */}
             <div
-              className="w-full rounded-[2.5rem] bg-[#eef1f5] shadow-[20px_20px_50px_#caced5,-20px_-20px_50px_#ffffff] border border-white/60 p-7 sm:p-8 flex flex-col items-center absolute inset-0"
+              className="w-full rounded-[2.5rem] bg-[#eef1f5] shadow-[20px_20px_50px_#caced5,-20px_-20px_50px_#ffffff] border border-white/60 p-6 sm:p-8 flex flex-col items-center absolute inset-0 overflow-y-auto"
               style={{
                 backfaceVisibility: 'hidden',
                 WebkitBackfaceVisibility: 'hidden',
@@ -988,30 +1073,32 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
                   />
                 </div>
 
-                <div className="space-y-1.5 pt-0.5">
+                <div className="relative flex items-center">
+                  <ShieldQuestion size={15} className="absolute left-3.5 text-slate-400 pointer-events-none" />
                   <select
                     name="securityQuestion"
                     value={formData.securityQuestion}
                     onChange={handleChange}
-                    className="w-full bg-[#eef1f5] rounded-xl px-3 py-1.5 text-xs text-slate-700 font-medium outline-none shadow-[inset_2px_2px_5px_#caced5,inset_-2px_-2px_5px_#ffffff]"
+                    className="w-full bg-[#eef1f5] rounded-2xl pl-10 pr-8 py-2.5 text-xs sm:text-sm text-slate-800 font-medium outline-none shadow-[inset_3px_3px_6px_#caced5,inset_-3px_-3px_6px_#ffffff] appearance-none cursor-pointer"
                   >
                     {DEFAULT_QUESTIONS.map((q, idx) => (
                       <option key={idx} value={q}>{q}</option>
                     ))}
                   </select>
-                  
-                  <div className="relative flex items-center">
-                    <ShieldQuestion size={15} className="absolute left-3.5 text-amber-600" />
-                    <input
-                      name="securityAnswer"
-                      type="text"
-                      required
-                      placeholder="Secret Answer (Recovery ke liye)"
-                      value={formData.securityAnswer}
-                      onChange={handleChange}
-                      className="w-full bg-[#eef1f5] rounded-xl pl-10 pr-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 outline-none shadow-[inset_2px_2px_5px_#caced5,inset_-2px_-2px_5px_#ffffff]"
-                    />
-                  </div>
+                  <div className="absolute right-3.5 pointer-events-none text-slate-400 text-xs">▼</div>
+                </div>
+                
+                <div className="relative flex items-center">
+                  <KeyRound size={15} className="absolute left-3.5 text-amber-600" />
+                  <input
+                    name="securityAnswer"
+                    type="text"
+                    required
+                    placeholder="Secret Answer (Recovery ke liye)"
+                    value={formData.securityAnswer}
+                    onChange={handleChange}
+                    className="w-full bg-[#eef1f5] rounded-2xl pl-10 pr-3.5 py-2.5 text-xs sm:text-sm text-slate-800 placeholder-slate-400 outline-none shadow-[inset_3px_3px_6px_#caced5,inset_-3px_-3px_6px_#ffffff]"
+                  />
                 </div>
 
                 <button

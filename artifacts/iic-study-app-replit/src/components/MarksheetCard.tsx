@@ -1438,7 +1438,7 @@ export const MarksheetCard: React.FC<Props> = ({
             <div>
               <p className="font-bold text-slate-800">{user.name}</p>
               <p className="text-[10px] text-slate-600 font-mono">
-                ID: {user.displayId || user.id.slice(0, 8)}
+                ID: {user.displayId || user.id}
               </p>
             </div>
           </div>

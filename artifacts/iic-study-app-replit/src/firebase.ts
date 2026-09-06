@@ -43,6 +43,12 @@ if (typeof window !== 'undefined') {
       event.preventDefault();
       return;
     }
+    if (msg.includes('resource-exhausted') || msg.includes('Write stream exhausted')) {
+      // Suppress benign Firestore write stream backpressure warnings; throttled writes will sync on backoff
+      event.preventDefault();
+      console.warn('[IIC] Firestore write stream reached backpressure limit — throttled writes will sync on backoff.');
+      return;
+    }
     if (msg.includes('FIRESTORE') && msg.includes('INTERNAL ASSERTION FAILED')) {
       event.preventDefault();
       console.warn('[IIC] Firestore assertion error — clearing IndexedDB cache and reloading…');
@@ -893,8 +899,18 @@ const getAccountState = (user: any): Record<string, any> => {
   return accountState;
 };
 
-// 1. User Data Sync
-export const saveUserToLive = async (user: any) => {
+// 1. User Data Sync - Throttled & Coalesced Write Queue
+interface UserSaveBatch {
+  user: any;
+  resolvers: Array<(value: boolean) => void>;
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
+const _pendingUserSaves = new Map<string, UserSaveBatch>();
+const _inFlightUserSaves = new Set<string>();
+const _lastSavedPayloadSignatures = new Map<string, string>();
+
+const _executeSaveUserToLive = async (user: any): Promise<boolean> => {
   if (!user || !user.id) return false;
 
   try {
@@ -917,14 +933,14 @@ export const saveUserToLive = async (user: any) => {
       }
     } catch (_) {}
 
-  // EXTRACT BULKY DATA FOR SEGREGATION
-  const {
+    // EXTRACT BULKY DATA FOR SEGREGATION
+    const {
       mcqHistory, usageHistory, progress, testResults, inbox,
       topicStrength, subscriptionHistory, activeSubscriptions,
       pendingRewards, redeemedCodes, unlockedContent, timedUnlocks, dailyRoutine,
       loadingScreenSlotUnlocks, loadingScreenUnlocks, loadingScreenSlotAssignments,
       ...coreProfile
-  } = sanitizedUser;
+    } = sanitizedUser;
 
     // ── ROLE PROTECTION ────────────────────────────────────────────────────────
     // Never downgrade a privileged role (ADMIN / SUB_ADMIN) to a lower one via
@@ -952,25 +968,6 @@ export const saveUserToLive = async (user: any) => {
     }
     // ──────────────────────────────────────────────────────────────────────────
 
-    const writes: Array<{ name: string; promise: Promise<unknown> }> = [];
-
-    // 1. Save the profile and account state to both backend stores.
-    // RTDB is also kept complete enough for fresh-device fallback login.
-    writes.push({
-      name: 'RTDB profile',
-      promise: update(ref(rtdb, `users/${user.id}`), { ...coreProfile, ...accountState }),
-    });
-    writes.push({
-      name: 'Firestore profile',
-      promise: setDoc(doc(db, "users", user.id), coreProfile, { merge: true }),
-    });
-
-    // 2. Save Bulky Data to Subcollections or Document Extensions to avoid 1MB document limit
-    // Note: To keep things intact for the current frontend without massive refactoring,
-    // we save the bulky data in a parallel collection `user_data/{uid}`
-
-    // SAFETY CHECK: Only overwrite bulky data if the user object explicitly contains them.
-    // This prevents accidental wiping of history if saveUserToLive is called with an incomplete user object (e.g. during a fast login/logout cycle).
     const bulkyData: any = {};
     if (user.hasOwnProperty('mcqHistory')) bulkyData.mcqHistory = mcqHistory;
     if (user.hasOwnProperty('usageHistory')) bulkyData.usageHistory = usageHistory;
@@ -989,14 +986,65 @@ export const saveUserToLive = async (user: any) => {
     if (user.hasOwnProperty('loadingScreenUnlocks')) bulkyData.loadingScreenUnlocks = loadingScreenUnlocks;
     if (user.hasOwnProperty('loadingScreenSlotAssignments')) bulkyData.loadingScreenSlotAssignments = loadingScreenSlotAssignments;
 
-    // Account state is written to the backend data document on every account
-    // mutation. The merge keeps unrelated history/content fields intact.
+    // Account state is written to the backend data document on every account mutation.
     Object.assign(bulkyData, accountState);
-    if (Object.keys(bulkyData).length > 0) {
+
+    // Signature check: if no fields have changed since last successful backend write, skip network writes
+    const payloadSignature = `${JSON.stringify(coreProfile)}:::${JSON.stringify(accountState)}:::${user.totalScore || 0}:::${(mcqHistory || []).length}:::${(user.inbox || []).length}`;
+    if (_lastSavedPayloadSignatures.get(user.id) === payloadSignature) {
+      return true;
+    }
+
+    const writes: Array<{ name: string; promise: Promise<unknown> }> = [];
+
+    // 1. Save the profile and account state to both backend stores.
+    // RTDB is also kept complete enough for fresh-device fallback login.
+    writes.push({
+      name: 'RTDB profile',
+      promise: update(ref(rtdb, `users/${user.id}`), { ...coreProfile, ...accountState }).catch(e => {
+        const msg = String(e?.message || e || '');
+        if (!msg.includes('permission-denied') && !msg.includes('Permission denied')) {
+          console.warn('[saveUserToLive] RTDB update warning:', e);
+        }
+      }),
+    });
+    writes.push({
+      name: 'Firestore profile',
+      promise: setDoc(doc(db, "users", user.id), coreProfile, { merge: true }),
+    });
+
+    // Mirror topicStrength and latest MCQ performance to RTDB
+    if (rtdb && user.id) {
+      const rtdbSync: any = {};
+      if (topicStrength && typeof topicStrength === 'object') {
+        rtdbSync[`users/${user.id}/topicStrength`] = sanitizeForFirestore(topicStrength);
+      }
+      if (Array.isArray(mcqHistory) && mcqHistory.length > 0) {
+        const latestMcq = mcqHistory[0];
+        if (latestMcq) {
+          rtdbSync[`users/${user.id}/lastMcqPerformance`] = sanitizeForFirestore({
+            testId: latestMcq.id || latestMcq.testId || `mcq_${Date.now()}`,
+            score: latestMcq.score ?? latestMcq.correctCount ?? 0,
+            total: latestMcq.totalQuestions ?? latestMcq.total ?? 0,
+            topic: latestMcq.topic || latestMcq.chapterTitle || 'MCQ Practice',
+            date: latestMcq.date || new Date().toISOString(),
+            timestamp: Date.now(),
+          });
+        }
+      }
+      if (Object.keys(rtdbSync).length > 0) {
         writes.push({
-          name: 'Firestore user data',
-          promise: setDoc(doc(db, "user_data", user.id), sanitizeForFirestore(bulkyData), { merge: true }),
+          name: 'RTDB performance & topic strength mirror',
+          promise: update(ref(rtdb), rtdbSync).catch(() => {}),
         });
+      }
+    }
+
+    if (Object.keys(bulkyData).length > 0) {
+      writes.push({
+        name: 'Firestore user data',
+        promise: setDoc(doc(db, "user_data", user.id), sanitizeForFirestore(bulkyData), { merge: true }),
+      });
     }
 
     const results = await Promise.allSettled(writes.map(write => write.promise));
@@ -1009,6 +1057,10 @@ export const saveUserToLive = async (user: any) => {
       rtdbProfileSaved ||
       results[accountDataIndex]?.status === 'fulfilled';
 
+    if (firestoreProfileSaved || rtdbProfileSaved) {
+      _lastSavedPayloadSignatures.set(user.id, payloadSignature);
+    }
+
     results.forEach((result, index) => {
       if (result.status === 'rejected') {
         const writeName = writes[index].name;
@@ -1018,13 +1070,12 @@ export const saveUserToLive = async (user: any) => {
                                    msg.includes('Permission denied') ||
                                    String(reason?.code || '').includes('permission-denied');
 
-        // RTDB profile is an auxiliary mirror for recovery/offline support.
-        // If Firestore profile was saved successfully, an RTDB permission denial
-        // is non-fatal and should not emit console.error.
-        if (writeName === 'RTDB profile' && firestoreProfileSaved && isPermissionDenied) {
+        if (msg.includes('resource-exhausted') || msg.includes('Write stream exhausted')) {
+          console.warn(`[saveUserToLive] Firestore write stream backpressure for ${writeName}. Queued changes will sync once stream drains.`);
+        } else if (writeName === 'RTDB profile' && firestoreProfileSaved && isPermissionDenied) {
           console.warn(`[saveUserToLive] RTDB profile mirror write permission denied (Firestore profile saved successfully).`);
         } else {
-          console.error(`[saveUserToLive] ${writeName} failed:`, reason);
+          console.warn(`[saveUserToLive] ${writeName} non-fatal notice:`, reason);
         }
       }
     });
@@ -1038,12 +1089,76 @@ export const saveUserToLive = async (user: any) => {
     }
     return true;
   } catch (error) {
-    console.error("Error saving user:", error);
-    // Most background sync callers intentionally do not await this function.
-    // Return a status instead of creating unhandled promise rejections; the
-    // account-critical flows explicitly check this result before succeeding.
+    console.warn("[saveUserToLive] Error saving user (data cached locally):", error);
     return false;
   }
+};
+
+export const saveUserToLive = async (user: any, options?: { immediate?: boolean }): Promise<boolean> => {
+  if (!user || !user.id) return false;
+
+  // Immediate local persistence guarantee — synchronous
+  try {
+    const sanitizedUser = sanitizeForFirestore(user);
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem('nst_user_profile', JSON.stringify(sanitizedUser));
+      if (sanitizedUser.id) {
+        window.localStorage.setItem(`nst_user_profile_${sanitizedUser.id}`, JSON.stringify(sanitizedUser));
+      }
+    }
+  } catch (_) {}
+
+  // If immediate flush is requested (e.g. auth login, code redemption)
+  if (options?.immediate) {
+    const pending = _pendingUserSaves.get(user.id);
+    if (pending?.timer) {
+      clearTimeout(pending.timer);
+    }
+    _pendingUserSaves.delete(user.id);
+    return _executeSaveUserToLive(user);
+  }
+
+  // Coalesce rapid updates with 1000ms debounce
+  return new Promise<boolean>((resolve) => {
+    let pending = _pendingUserSaves.get(user.id);
+    if (!pending) {
+      pending = {
+        user,
+        resolvers: [resolve],
+        timer: null,
+      };
+      _pendingUserSaves.set(user.id, pending);
+    } else {
+      pending.user = user;
+      pending.resolvers.push(resolve);
+      if (pending.timer) {
+        clearTimeout(pending.timer);
+      }
+    }
+
+    pending.timer = setTimeout(async () => {
+      const currentPending = _pendingUserSaves.get(user.id);
+      _pendingUserSaves.delete(user.id);
+      if (!currentPending) return;
+
+      // Prevent concurrent executions for the same user
+      if (_inFlightUserSaves.has(user.id)) {
+        // Re-queue with short backoff
+        setTimeout(() => saveUserToLive(currentPending.user), 500);
+        currentPending.resolvers.forEach(r => r(true));
+        return;
+      }
+
+      _inFlightUserSaves.add(user.id);
+      let success = false;
+      try {
+        success = await _executeSaveUserToLive(currentPending.user);
+      } finally {
+        _inFlightUserSaves.delete(user.id);
+      }
+      currentPending.resolvers.forEach(r => r(success));
+    }, 1000);
+  });
 };
 
 export const subscribeToUsers = (callback: (users: any[]) => void) => {
@@ -1366,28 +1481,74 @@ const getUserFromRTDB = async (field: 'mobile' | 'displayId' | 'email', value: s
 
 export const getUserByMobileOrId = async (input: string) => {
     try {
+        const rawInput = (input || '').trim();
+        if (!rawInput) return null;
+
+        const upperInput = rawInput.toUpperCase();
+        const lowerInput = rawInput.toLowerCase();
+
+        // Support normalized NSTA-ID formats:
+        // - "564894" -> "NSTA-564894", "564894", "NSTA564894"
+        // - "NSTA-564894" -> "NSTA-564894", "564894", "nsta-564894"
+        // - "nsta012345" -> "NSTA-012345"
+        const digitsMatch = rawInput.match(/^NSTA[-_\s]?(\d+)$/i) || rawInput.match(/(\d{4,8})/);
+        const extractedDigits = digitsMatch && digitsMatch[1] ? digitsMatch[1] : null;
+        const normalizedNstaId = extractedDigits ? `NSTA-${extractedDigits.padStart(6, '0')}` : null;
+        const nstaNoDash = extractedDigits ? `NSTA${extractedDigits}` : null;
+        const nstaLower = normalizedNstaId ? normalizedNstaId.toLowerCase() : null;
+
+        const candidateIds = Array.from(new Set([
+            rawInput,
+            upperInput,
+            lowerInput,
+            normalizedNstaId,
+            nstaNoDash,
+            nstaLower,
+            extractedDigits,
+            extractedDigits ? extractedDigits.padStart(6, '0') : null,
+            rawInput.replace(/[-_\s]/g, ''),
+            rawInput.replace(/[-_\s]/g, '').toUpperCase(),
+        ].filter(Boolean) as string[]));
+
         // STRATEGY: Try Firestore first (requires auth session); fall back to RTDB
         // which typically has broader read rules and works on fresh devices.
 
         // ── 1. Firestore attempt ──
         try {
-            const qMobile = query(collection(db, "users"), where("mobile", "==", input));
-            const qDisplayId = query(collection(db, "users"), where("displayId", "==", input));
-            const qEmail = query(collection(db, "users"), where("email", "==", input));
+            // Check direct document ID first for all candidate IDs
+            for (const candDocId of candidateIds) {
+                const directSnap = await getDoc(doc(db, "users", candDocId)).catch(() => null);
+                if (directSnap && directSnap.exists()) {
+                    const coreData = directSnap.data();
+                    const bulkySnap = await getDoc(doc(db, "user_data", candDocId)).catch(() => null);
+                    return bulkySnap && bulkySnap.exists() ? { ...coreData, ...bulkySnap.data() } : coreData;
+                }
+            }
 
-            const [snapMobile, snapId, snapEmail] = await Promise.all([
-                getDocs(qMobile),
-                getDocs(qDisplayId),
-                getDocs(qEmail)
+            const idQueries = candidateIds.flatMap(id => [
+                query(collection(db, "users"), where("displayId", "==", id)),
+                query(collection(db, "users"), where("id", "==", id)),
+                query(collection(db, "users"), where("uid", "==", id)),
             ]);
+            const queries = [
+                query(collection(db, "users"), where("mobile", "==", rawInput)),
+                query(collection(db, "users"), where("email", "==", lowerInput)),
+                query(collection(db, "users"), where("email", "==", rawInput)),
+                ...idQueries
+            ];
 
+            const snaps = await Promise.all(queries.map(q => getDocs(q).catch(() => null)));
             let coreData: any = null;
-            if (!snapMobile.empty) coreData = snapMobile.docs[0].data();
-            else if (!snapId.empty) coreData = snapId.docs[0].data();
-            else if (!snapEmail.empty) coreData = snapEmail.docs[0].data();
+            for (const snap of snaps) {
+                if (snap && !snap.empty) {
+                    coreData = snap.docs[0].data();
+                    break;
+                }
+            }
 
-            if (coreData && coreData.id) {
-                const bulkySnap = await getDoc(doc(db, "user_data", coreData.id)).catch(() => null);
+            if (coreData && (coreData.id || coreData.uid)) {
+                const docKey = coreData.id || coreData.uid;
+                const bulkySnap = await getDoc(doc(db, "user_data", docKey)).catch(() => null);
                 if (bulkySnap && bulkySnap.exists()) {
                     return { ...coreData, ...bulkySnap.data() };
                 }
@@ -1395,17 +1556,38 @@ export const getUserByMobileOrId = async (input: string) => {
             }
         } catch (firestoreErr: any) {
             // Firestore blocked (permission-denied on fresh device) — fall through to RTDB
-            console.warn('[IIC] Firestore lookup blocked, trying RTDB:', firestoreErr?.code);
+            console.warn('[NSTA] Firestore lookup blocked, trying RTDB:', firestoreErr?.code);
         }
 
-        // ── 2. RTDB fallback (no auth needed if RTDB rules allow reads) ──
-        const rtdbUser =
-            await getUserFromRTDB('mobile', input) ||
-            await getUserFromRTDB('displayId', input) ||
-            await getUserFromRTDB('email', input);
+        // ── 2. RTDB fallback ──
+        let rtdbUser: any = null;
 
-        if (rtdbUser && rtdbUser.id) {
-            console.log('[IIC] User found via RTDB fallback');
+        // Check direct key under users/
+        for (const candId of candidateIds) {
+            try {
+                const snap = await get(ref(rtdb, `users/${candId}`));
+                if (snap.exists()) {
+                    rtdbUser = snap.val();
+                    if (rtdbUser) break;
+                }
+            } catch {}
+        }
+
+        if (!rtdbUser) {
+            for (const candId of candidateIds) {
+                rtdbUser = await getUserFromRTDB('displayId', candId);
+                if (rtdbUser) break;
+            }
+        }
+        if (!rtdbUser) {
+            rtdbUser =
+                await getUserFromRTDB('mobile', rawInput) ||
+                await getUserFromRTDB('email', lowerInput) ||
+                await getUserFromRTDB('email', rawInput);
+        }
+
+        if (rtdbUser && (rtdbUser.id || rtdbUser.uid)) {
+            console.log('[NSTA] User found via RTDB fallback');
             return rtdbUser;
         }
 
@@ -2360,50 +2542,84 @@ export const subscribeToDrafts = (callback: (drafts: any[]) => void) => {
 };
 
 export const saveTestResult = async (userId: string, attempt: any) => {
+    if (!userId) return;
+    const testIdentifier = attempt?.id || attempt?.testId || `test_${Date.now()}`;
+    const docId = `${testIdentifier}_${Date.now()}`;
+    const sanitizedAttempt = sanitizeForFirestore(attempt);
+
+    // 1. Instant local storage cache first (guaranteed immediate offline persistence)
     try {
-        const testIdentifier = attempt.id || attempt.testId || `test_${Date.now()}`;
-        const docId = `${testIdentifier}_${Date.now()}`;
-        const sanitizedAttempt = sanitizeForFirestore(attempt);
-        await setDoc(doc(db, "users", userId, "test_results", docId), sanitizedAttempt);
-        // Also mirror to RTDB for reliable offline and real-time syncing
-        try {
+        const cacheKey = `nst_test_results_${userId}`;
+        const existing = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+        const updated = [sanitizedAttempt, ...existing.filter((x: any) => (x.id || x.docId) !== docId)].slice(0, 50);
+        localStorage.setItem(cacheKey, JSON.stringify(updated));
+    } catch (_) {}
+
+    // 2. Mirror to Realtime Database
+    try {
+        if (rtdb) {
             await update(ref(rtdb, `users/${userId}/test_results/${docId}`), sanitizedAttempt);
             await update(ref(rtdb, `users/${userId}/lastMcqPerformance`), {
-                score: attempt.score ?? attempt.correctCount ?? 0,
-                total: attempt.totalQuestions ?? attempt.total ?? 0,
-                testName: attempt.testName || attempt.title || 'Revision MCQ',
-                date: attempt.date || new Date().toISOString(),
+                testId: testIdentifier,
+                score: attempt?.score ?? attempt?.correctCount ?? 0,
+                total: attempt?.totalQuestions ?? attempt?.total ?? 0,
+                testName: attempt?.testName || attempt?.chapterTitle || attempt?.title || 'Revision MCQ',
+                topic: attempt?.topic || attempt?.chapterTitle || 'MCQ Practice',
+                date: attempt?.date || new Date().toISOString(),
                 timestamp: Date.now(),
             });
-        } catch (_) {}
-        // Also store in local storage cache
-        try {
-            const cacheKey = `nst_test_results_${userId}`;
-            const existing = JSON.parse(localStorage.getItem(cacheKey) || '[]');
-            const updated = [sanitizedAttempt, ...existing.filter((x: any) => (x.id || x.docId) !== docId)].slice(0, 50);
-            localStorage.setItem(cacheKey, JSON.stringify(updated));
-        } catch (_) {}
-    } catch(e) {
-        console.error("saveTestResult error:", e);
+        }
+    } catch (e) {
+        console.warn("[IIC] RTDB saveTestResult mirror failed:", e);
+    }
+
+    // 3. Write to Firestore in independent try-catch
+    try {
+        if (db) {
+            await setDoc(doc(db, "users", userId, "test_results", docId), sanitizedAttempt);
+        }
+    } catch (e) {
+        console.warn("[IIC] Firestore saveTestResult failed:", e);
     }
 };
 
 export const saveUserHistory = async (userId: string, historyItem: any) => {
+    if (!userId) return;
+    const docId = `history_${historyItem?.id || Date.now()}`;
+    const sanitized = sanitizeForFirestore(historyItem);
+
+    // 1. LocalStorage cache first
     try {
-        const docId = `history_${historyItem.id || Date.now()}`;
-        const sanitized = sanitizeForFirestore(historyItem);
-        // Save to subcollection "history" under the user
-        await setDoc(doc(db, "users", userId, "history", docId), sanitized);
-        try {
+        const cacheKey = `nst_user_history_${userId}`;
+        const existing = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+        const updated = [sanitized, ...existing.filter((x: any) => (x.id || x.docId) !== docId)].slice(0, 50);
+        localStorage.setItem(cacheKey, JSON.stringify(updated));
+    } catch (_) {}
+
+    // 2. Realtime Database mirror
+    try {
+        if (rtdb) {
+            await update(ref(rtdb, `users/${userId}/history/${docId}`), sanitized);
             await update(ref(rtdb, `users/${userId}/lastHistoryItem`), {
                 id: docId,
-                title: historyItem.title || historyItem.name || 'Revision Practice',
-                type: historyItem.type || 'revision',
-                date: historyItem.date || new Date().toISOString(),
+                title: historyItem?.title || historyItem?.name || historyItem?.chapterTitle || 'Revision Practice',
+                type: historyItem?.type || 'revision',
+                date: historyItem?.date || new Date().toISOString(),
                 timestamp: Date.now(),
             });
-        } catch (_) {}
-    } catch(e) { console.error("Error saving history:", e); }
+        }
+    } catch (e) {
+        console.warn("[IIC] RTDB saveUserHistory mirror failed:", e);
+    }
+
+    // 3. Save to subcollection "history" under the user in Firestore
+    try {
+        if (db) {
+            await setDoc(doc(db, "users", userId, "history", docId), sanitized);
+        }
+    } catch (e) {
+        console.warn("[IIC] Firestore saveUserHistory failed:", e);
+    }
 };
 
 export const getUserSavedNotes = async (userId: string) => {

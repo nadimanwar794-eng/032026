@@ -39,7 +39,7 @@ export const LessonActionModal: React.FC<Props> = ({ chapter, onClose, onSelect,
                             onError={(e) => (e.currentTarget.src = 'https://cdn-icons-png.flaticon.com/512/3426/3426653.png')}
                         />
                     </div>
-                    <h2 className="text-white font-black text-lg tracking-tight leading-tight">{appName || 'IIC'}</h2>
+                    <h2 className="text-white font-black text-lg tracking-tight leading-tight">{appName || 'NSTA'}</h2>
                     <p className="text-white/70 text-[10px] uppercase font-bold tracking-widest mt-1">Premium Learning</p>
                 </div>
 

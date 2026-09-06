@@ -516,7 +516,11 @@ export function mergeTrackerMaps(local: TrackerMap, cloud: TrackerMap): TrackerM
     }
     const localTime = localBucket.updatedAt || localBucket.lastAttemptAt || 0;
     const cloudTime = cloudBucket.updatedAt || cloudBucket.lastAttemptAt || 0;
-    if (localTime > cloudTime) merged[key] = localBucket;
+    const localHasAdvanced = (localBucket.stage === 'NOTES' && cloudBucket.stage === 'MCQ') ||
+                             ((localBucket.cycleCount || 0) > (cloudBucket.cycleCount || 0));
+    if (localTime >= cloudTime || localHasAdvanced) {
+      merged[key] = localBucket;
+    }
   }
   return merged;
 }

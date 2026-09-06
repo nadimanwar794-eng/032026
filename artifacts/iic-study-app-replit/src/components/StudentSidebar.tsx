@@ -71,7 +71,7 @@ export const StudentSidebar: React.FC<Props> = ({ isOpen, onClose, onNavigate, u
                             {(user.name || 'S').charAt(0)}
                         </div>
                         <h2 className="font-bold text-lg leading-tight">{user.name}</h2>
-                        <p className="text-xs text-slate-500 font-mono mt-1">ID: {user.displayId || user.id.slice(0, 8)}</p>
+                        <p className="text-xs text-slate-400 font-mono mt-1">ID: {user.displayId || user.id}</p>
                     </div>
                     <button
                         onClick={onClose}

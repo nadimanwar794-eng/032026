@@ -232,3 +232,24 @@ export const addSubscription = (user: User, newSub: ActiveSubscription, settings
     // Recalculate the effective status
     return recalculateSubscriptionStatus(updatedUser, settings);
 };
+
+export const isSubscriptionFromCoins = (user?: any): boolean => {
+    if (!user) return false;
+    if (user.subscriptionSource === 'CREDITS') return true;
+    if (user.activeSubscriptions && Array.isArray(user.activeSubscriptions)) {
+        const now = Date.now();
+        const activeSub = user.activeSubscriptions.find((s: any) => {
+            const exp = new Date(s.endDate).getTime();
+            return !isNaN(exp) && exp > now;
+        });
+        if (activeSub && activeSub.source === 'CREDITS') return true;
+    }
+    if (user.subscriptionHistory && Array.isArray(user.subscriptionHistory)) {
+        const latest = user.subscriptionHistory[0];
+        if (latest && (latest.grantSource === 'CREDITS' || (latest as any).source === 'CREDITS')) {
+            const exp = new Date(latest.endDate).getTime();
+            if (!isNaN(exp) && exp > Date.now()) return true;
+        }
+    }
+    return false;
+};

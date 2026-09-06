@@ -16,7 +16,7 @@ import { TodayAllNotesModal } from './TodayAllNotesModal';
 import { TodayMcqSession } from './TodayMcqSession';
 import type { TopicItem } from '../types';
 import { getMistakeBankSync } from '../utils/mistakeBank';
-import { getAutoTrackSnapshot, getLessonStats, isLessonRewarded } from '../utils/routineAutoTrack';
+import { getAutoTrackSnapshot, getLessonStats, isLessonRewarded, calculatePageRequiredReadingSec } from '../utils/routineAutoTrack';
 import { RoutineRevisionBadge } from './RoutineRevisionBadge';
 import { getMistakeSessions } from '../utils/mistakeAnalytics';
 import { tryEarnScore, getDailyScoreEarned } from '../utils/scoreSystem';
@@ -269,16 +269,10 @@ export const DailyEventPage: React.FC<Props> = ({
       const mcqDone = pageCount > 0 && mcqDoneCount >= pageCount;
       const done = readingDone && mcqDone;
 
-      // Extract required reading time for the active/next page
+      // Extract required reading time for the active/next page based on real content
       const nextPageIdx = Math.min(stats.pagesRead, pageCount - 1);
-      const activePageContent = lesson?.pages?.[nextPageIdx]?.text || '';
-
-      const tmp = document.createElement('div');
-      tmp.innerHTML = activePageContent;
-      const wordCount = (tmp.textContent || tmp.innerText || '').trim().split(/\s+/).filter(Boolean).length;
-      let reqSec = Math.round(wordCount / 2.5);
-      if (reqSec < 10) reqSec = 10;
-      if (reqSec > 300) reqSec = 300;
+      const activePage = lesson?.pages?.[nextPageIdx];
+      const reqSec = calculatePageRequiredReadingSec(activePage);
 
       // Get elapsed reading time (if any)
       const storedTime = Math.round(Number(localStorage.getItem(`iic_routine_page_time_${lesson.id}_${nextPageIdx}`)) || 0);
@@ -734,7 +728,7 @@ export const DailyEventPage: React.FC<Props> = ({
                       </p>
                       {!slot.readingDone && slot.reqSec > 0 && (
                          <p className="text-[9px] text-slate-400 font-medium ml-1">
-                           (~{Math.ceil(slot.reqSec / 60)} min per page)
+                           (~{slot.reqSec < 60 ? `${slot.reqSec}s` : `${Math.floor(slot.reqSec / 60)}m${slot.reqSec % 60 ? ` ${slot.reqSec % 60}s` : ''}`} per page)
                          </p>
                       )}
                       <p className={`text-[9px] font-black ${slot.readingDone ? 'text-emerald-600' : 'text-indigo-600'} ml-auto`}>

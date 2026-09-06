@@ -5,7 +5,7 @@ import { User, MCQItem, MCQResult, TopicItem, SystemSettings } from '../types';
 import { X, CheckCircle, ArrowRight, Loader2, BrainCircuit, AlertCircle, List, Tag, Trophy, TrendingDown, Minus, TrendingUp, Star, Calendar, ChevronRight, Tv, RotateCw, Maximize2, Minimize2 } from 'lucide-react';
 import { renderMathInHtml, formatExplanationHtml } from '../utils/mathUtils';
 import { rotateScreen } from '../utils/displayPrefs';
-import { getChapterData, saveUserToLive, saveTestResult, saveDemand } from '../firebase';
+import { getChapterData, saveUserToLive, saveTestResult, saveUserHistory, saveDemand } from '../firebase';
 import { storage } from '../utils/storage';
 import { generateAnalysisJson } from '../utils/analysisUtils';
 import { recordAttempt as recordRevisionAttempt, applyInitialSchedule, markMcqDone, bucketKey, getTrackerMap } from '../utils/revisionTrackerV2';
@@ -474,9 +474,11 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
             s.percentage = s.total > 0 ? Math.round((s.correct / s.total) * 100) : 0;
         });
 
+        const effUserId = String(user?.id || (user as any)?.uid || (user as any)?._id || localStorage.getItem('nst_last_user_id') || 'anonymous');
+
         const megaResult: MCQResult = {
             id: `mcq-mega-${Date.now()}`,
-            userId: user.id,
+            userId: effUserId,
             chapterId: sessionResults[0]?.chapterId || 'revision',
             chapterTitle: `Revision Analysis (${Object.keys(topicGroups).length} Topics)`,
             subjectId: 'REVISION',
@@ -494,6 +496,16 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
             wrongQuestions: megaWrongQuestions,
         };
 
+        // Immediate background persistence to localStorage and Firebase
+        if (effUserId && effUserId !== 'anonymous') {
+            try {
+                const existing = JSON.parse(localStorage.getItem(`nst_test_results_${effUserId}`) || '[]');
+                localStorage.setItem(`nst_test_results_${effUserId}`, JSON.stringify([megaResult, ...existing].slice(0, 50)));
+            } catch (_) {}
+            saveTestResult(effUserId, megaResult).catch(e => console.warn('[IIC] TodayMcqSession saveTestResult error:', e));
+            saveUserHistory(effUserId, megaResult).catch(e => console.warn('[IIC] TodayMcqSession saveUserHistory error:', e));
+        }
+
         // Enrich topicSummary with sessionHistory from revision tracker
         // (applyInitialSchedule above has already written sessionHistory[0] = current attempt)
         try {
@@ -504,8 +516,8 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                     item.sessionHistory = trackerMap[bk]?.sessionHistory;
                 }
             });
-            if (user?.id) {
-                syncAllRevisionBuckets(user.id, trackerMap);
+            if (effUserId && effUserId !== 'anonymous') {
+                syncAllRevisionBuckets(effUserId, trackerMap);
             }
             window.dispatchEvent(new CustomEvent('iic-revision-updated'));
         } catch (_) {}

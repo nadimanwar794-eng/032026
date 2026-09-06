@@ -241,6 +241,59 @@ export function getPageTime(lessonId: string, pageIdx: number): number {
   return d.timings[`${lessonId}__${pageIdx}`] || 0;
 }
 
+/** Reset accumulated reading seconds (and unmark read) for a specific page */
+export function resetPageTime(lessonId: string, pageIdx: number): void {
+  if (!lessonId) return;
+  const d = load();
+  const key = `${lessonId}__${pageIdx}`;
+  delete d.timings[key];
+  delete d.pageReads[key];
+  save(d);
+}
+
+/** Calculate minimum required reading seconds based on exact word count (120 WPM / 2 words per second) */
+export function calculatePageRequiredReadingSec(pageOrContent: any): number {
+  if (!pageOrContent) return 15;
+  if (typeof pageOrContent === 'object' && typeof pageOrContent.requiredReadingSec === 'number' && pageOrContent.requiredReadingSec > 0) {
+    return Math.max(10, pageOrContent.requiredReadingSec);
+  }
+
+  let rawText = '';
+  if (typeof pageOrContent === 'string') {
+    rawText = pageOrContent;
+  } else if (typeof pageOrContent === 'object') {
+    rawText = pageOrContent.chunkNotes || pageOrContent.content || pageOrContent.notes || pageOrContent.htmlNotes || pageOrContent.text || '';
+  }
+
+  if (!rawText || typeof rawText !== 'string') return 15;
+
+  const textOnly = rawText
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<svg[^>]*>[\s\S]*?<\/svg>/gi, ' ')
+    .replace(/data:image\/[^;]+;base64,[a-zA-Z0-9+/=]+/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&#\d+;/g, ' ')
+    .replace(/&[a-z]+;/gi, ' ');
+
+  const words = textOnly.trim().split(/\s+/).filter(w => w.length > 0 && !/^[\W_]+$/.test(w));
+  const wordCount = words.length;
+
+  if (wordCount <= 10) return 15;
+
+  // Realistic reading speed: 120 words/min (2 words per second -> Math.round((wordCount / 120) * 60) = Math.round(wordCount / 2))
+  // Dynamically scales with page content: short pages = less time (e.g. 45s, 1m 20s), long pages = more time (e.g. 2m 40s, 3m 30s, 6m+)
+  let dynamicReqSec = Math.round((wordCount / 120) * 60);
+  if (dynamicReqSec < 15) dynamicReqSec = 15;
+
+  return dynamicReqSec;
+}
+
 /** Get total reading seconds for an entire lesson */
 export function getLessonTotalTime(lessonId: string, totalPages: number): number {
   const d = load();
@@ -332,11 +385,12 @@ export function getProgressColor5(pct: number): { bg: string; text: string; bord
   return { bg: '#f1f5f9', text: '#94a3b8', border: '#e2e8f0', label: 'Not Started' };
 }
 
-/** Tick marks: ✓=1%, ✓✓=25%, ✓✓✓=50%, ✓✓✓✓=100% */
+/** 5 Tick marks based on %: 100%=✓✓✓✓✓, 80%=✓✓✓✓, 60%=✓✓✓, 40%=✓✓, 1-39%=✓ */
 export function getProgressTicks(pct: number): string {
-  if (pct >= 100) return '✓✓✓✓';
-  if (pct >= 50)  return '✓✓✓';
-  if (pct >= 25)  return '✓✓';
+  if (pct >= 100) return '✓✓✓✓✓';
+  if (pct >= 80)  return '✓✓✓✓';
+  if (pct >= 60)  return '✓✓✓';
+  if (pct >= 40)  return '✓✓';
   if (pct >= 1)   return '✓';
   return '';
 }

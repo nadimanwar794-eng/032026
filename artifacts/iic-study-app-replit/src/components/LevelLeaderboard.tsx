@@ -332,7 +332,7 @@ export const LevelLeaderboard: React.FC<Props> = ({ user, settings, onBack }) =>
                   style={{ background: `linear-gradient(135deg, ${lvl.color}15, ${lvl.color}06)`, border: `1px solid ${lvl.color}40`, boxShadow: `0 0 28px ${lvl.glowColor}` }}>
                   <div className="text-4xl mb-2" style={{ filter: `drop-shadow(0 0 10px ${lvl.glowColor})` }}>{lvl.emoji}</div>
                   <p className="font-black text-xl mb-0.5" style={{ color: lvl.nameColor || lvl.color }}>{selectedUser.name}</p>
-                  <p className="text-[10px] text-slate-500 mb-2">{selectedUser.displayId || selectedUser.id.substring(0, 8)}</p>
+                  <p className="text-[10px] text-slate-500 mb-2">{selectedUser.displayId || selectedUser.id}</p>
                   <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border mb-2"
                     style={{ background: `${lvl.color}20`, borderColor: `${lvl.color}50` }}>
                     <span className="text-sm font-black text-white">Level {lvl.level}</span>

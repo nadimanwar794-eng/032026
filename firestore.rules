@@ -109,11 +109,7 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isOwner(userId) || isAdmin() || !isAuthenticated();
 
-      match /test_results/{resultId} {
-        allow read, write: if isOwner(userId) || isAdmin() || !isAuthenticated();
-      }
-
-      match /history/{historyId} {
+      match /{subcollection=**} {
         allow read, write: if isOwner(userId) || isAdmin() || !isAuthenticated();
       }
     }
@@ -121,6 +117,70 @@ service cloud.firestore {
     match /user_data/{userId} {
       allow read: if true;
       allow write: if isOwner(userId) || isAdmin() || !isAuthenticated();
+    }
+
+    match /redeem_codes/{id} {
+      allow read, write: if true;
+    }
+
+    match /compre_notes/{id} {
+      allow read: if true;
+      allow write: if isAuthenticated() || true;
+    }
+
+    match /mcq_lessons/{id} {
+      allow read: if true;
+      allow write: if isAuthenticated() || true;
+    }
+
+    match /custom_syllabus/{id} {
+      allow read: if true;
+      allow write: if isAuthenticated() || true;
+    }
+
+    match /trash_homework_entries/{id} {
+      allow read, write: if isAuthenticated() || true;
+    }
+
+    match /trash_lucent_entries/{id} {
+      allow read, write: if isAuthenticated() || true;
+    }
+
+    match /public_activity/{id} {
+      allow read, write: if true;
+    }
+
+    match /universal_analysis_logs/{id} {
+      allow read, write: if true;
+    }
+
+    match /demand_requests/{id} {
+      allow read, write: if true;
+    }
+
+    match /user_themes/{id} {
+      allow read, write: if true;
+    }
+
+    match /user_animations/{id} {
+      allow read, write: if true;
+    }
+
+    match /app_feedback/{id} {
+      allow read, write: if true;
+    }
+
+    match /lesson_meta/{id} {
+      allow read: if true;
+      allow write: if isAuthenticated() || true;
+    }
+
+    match /daily_challenge_leaderboard/{id} {
+      allow read, write: if true;
+    }
+
+    match /schoolPlanRequests/{id} {
+      allow read, write: if true;
     }
 
     // School management

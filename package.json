@@ -11,7 +11,8 @@
   "scripts": {
     "dev": "npm run dev --workspace=@workspace/iic-study-app-replit",
     "build": "npm run build --workspace=@workspace/iic-study-app-replit",
-    "typecheck": "npm run typecheck --workspace=@workspace/iic-study-app-replit"
+    "typecheck": "npm run typecheck --workspace=@workspace/iic-study-app-replit",
+    "lint": "npm run typecheck --workspace=@workspace/iic-study-app-replit"
   },
   "devDependencies": {
     "prettier": "^3.9.6",

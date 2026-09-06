@@ -71,7 +71,7 @@ import { renderMathInHtml, formatExplanationHtml } from "../utils/mathUtils";
 import { recordLogin, updateSessionDuration, getLoginHistory, formatDuration, formatLoginTime, type LoginSession } from "../utils/loginHistory";
 import { getNewContentItems, markContentItemSeen, markAllContentItemsSeen, formatContentDate, type ContentNotifItem } from "../utils/contentNotifications";
 import { clearAllRecentReads, saveRecentHomework, getRecentHomeworks, removeRecentHomework, getRecentChapters, removeRecentChapter, saveRecentLucent, getRecentLucent, removeRecentLucent, markNoteFullyRead, getFullyReadMap, markReadToday, getReadingStreak, getReadDates, getBestReadingDay, getTodayItemCount, type RecentChapterEntry, type RecentHwEntry, type RecentLucentEntry, type StreakInfo, type BestDay } from "../utils/recentReads";
-import { markRoutinePageRead, markRoutineMcqDone, isRoutinePageRead, isRoutineMcqDone, updateRoutineMcqScore, recordMistake, addPageTime, isLessonAutoComplete, isLessonRewarded, markLessonRewarded, markRoutinePageMcqDone, updateRoutinePageMcqScore, isRoutinePageMcqDone, getRoutinePageMcqScore, getAutoPageBoxState, getPageTime, getLessonStats, getMultiLessonStats, getProgressColor5, getProgressTicks } from "../utils/routineAutoTrack";
+import { markRoutinePageRead, markRoutineMcqDone, isRoutinePageRead, isRoutineMcqDone, updateRoutineMcqScore, recordMistake, addPageTime, resetPageTime, calculatePageRequiredReadingSec, isLessonAutoComplete, isLessonRewarded, markLessonRewarded, markRoutinePageMcqDone, updateRoutinePageMcqScore, isRoutinePageMcqDone, getRoutinePageMcqScore, getAutoPageBoxState, getPageTime, getLessonStats, getMultiLessonStats, getProgressColor5, getProgressTicks } from "../utils/routineAutoTrack";
 import { loadRoutineData, saveRoutineData, checkAndResetDaily, generateDailyTask, advanceLessonInCycle, getDiscountFactor, hasActiveDiscount, getPageReadReward, LESSON_COMPLETE_REWARD, unlockRevisionLesson } from "../utils/routineStorage";
 import { SubscriptionEngine } from "../utils/engines/subscriptionEngine";
 import { recalculateSubscriptionStatus } from "../utils/subscriptionUtils";
@@ -99,6 +99,7 @@ import {
   getTrackerMap,
 } from "../utils/revisionTrackerV2";
 import { syncRevisionBucket } from "../utils/revisionFirebase";
+import { SyllabusPageCard } from "./SyllabusPageCard";
 import { StudyCardExpandable, StudyModeButtons, StudyStatsPanel, type StudyCardMode } from "./StudyModeCardTools";
 import { generateMorningInsight } from "../services/morningInsight";
 import { LessonActionModal } from "./LessonActionModal";
@@ -122,6 +123,8 @@ import {
   Play,
   Pause,
   RotateCcw,
+  RotateCw,
+  Laptop,
   Shuffle,
   ExternalLink,
   MessageCircle,
@@ -230,7 +233,6 @@ import TeacherStore from "./TeacherStore";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { reportCrash } from "../utils/maintenanceManager";
 import { Leaderboard } from "./Leaderboard";
-import { SpinWheel } from "./SpinWheel";
 import { fetchChapters, generateCustomNotes } from "../services/groq"; // Needed for Video Flow
 import { LoadingOverlay } from "./LoadingOverlay";
 import { CreditConfirmationModal } from "./CreditConfirmationModal";
@@ -2840,10 +2842,10 @@ export const StudentDashboard: React.FC<Props> = ({
   const handleSupportEmail = () => {
     const email = SUPPORT_EMAIL;
     const subject = encodeURIComponent(
-      `Support Request: ${user.name} (ID: ${user.id})`,
+      `Support Request: ${user.name} (ID: ${user.displayId || user.id})`,
     );
     const body = encodeURIComponent(
-      `Student Details:\nName: ${user.name}\nUID: ${user.id}\nEmail: ${user.email}\n\nIssue Description:\n`,
+      `Student Details:\nName: ${user.name}\nID: ${user.displayId || user.id}\nEmail: ${user.email}\n\nIssue Description:\n`,
     );
     window.open(`mailto:${email}?subject=${subject}&body=${body}`, '_self');
   };
@@ -2902,13 +2904,62 @@ export const StudentDashboard: React.FC<Props> = ({
   // Competition MCQ Practice lessons (from admin-added mcq_lessons collection)
   const [compMcqPracticeLessons, setCompMcqPracticeLessons] = useState<any[]>([]);
   // Standalone interactive MCQ session for competition MCQ practice sets
-  const [compMcqSession, setCompMcqSession] = useState<{ items: any[]; title: string; subtitle: string } | null>(null);
+  const [compMcqSession, setCompMcqSession] = useState<{ items: any[]; title: string; subtitle: string; lessonId?: string; isMistakeMode?: boolean; rawIndices?: number[] } | null>(null);
   const [compMcqAnswers, setCompMcqAnswers] = useState<Record<number, number>>({});
   const [compMcqSubmitted, setCompMcqSubmitted] = useState<Record<number, boolean>>({});
   const [compMcqCurrentIdx, setCompMcqCurrentIdx] = useState(0);
   const [compMcqShowReview, setCompMcqShowReview] = useState(false);
   const [compMcqNavigatorOpen, setCompMcqNavigatorOpen] = useState(false);
   const [compMcqSkipped, setCompMcqSkipped] = useState<Set<number>>(new Set());
+
+  const getCompLessonStats = (lessonId: string) => {
+    try {
+      const raw = localStorage.getItem(`comp_mcq_stats_${user?.id || 'guest'}_${lessonId}`);
+      if (raw) return JSON.parse(raw);
+    } catch {}
+    return null;
+  };
+
+  const saveCompLessonStats = (lessonId: string, stats: { total: number; attempted: number; score: number; wrongIndices: number[] }) => {
+    try {
+      localStorage.setItem(`comp_mcq_stats_${user?.id || 'guest'}_${lessonId}`, JSON.stringify(stats));
+    } catch {}
+  };
+
+  const handleStartCompMcq = (lesson: any, mistakeOnly?: boolean) => {
+    const rawMcqs = lesson.mcqs || [];
+    if (!rawMcqs.length) return;
+
+    let targetMcqs = rawMcqs;
+    let targetRawIndices: number[] | undefined = undefined;
+
+    if (mistakeOnly) {
+      const saved = getCompLessonStats(lesson.id);
+      if (saved?.wrongIndices?.length) {
+        targetRawIndices = saved.wrongIndices;
+        targetMcqs = saved.wrongIndices.map((idx: number) => rawMcqs[idx]).filter(Boolean);
+      }
+    }
+
+    if (!targetMcqs.length) return;
+
+    if (compMcqAutoNextRef.current) clearTimeout(compMcqAutoNextRef.current);
+    stopSpeech();
+    setCompMcqAnswers({});
+    setCompMcqSubmitted({});
+    setCompMcqCurrentIdx(0);
+    setCompMcqShowReview(false);
+    setCompMcqNavigatorOpen(false);
+    setCompMcqSkipped(new Set());
+    setCompMcqSession({
+      lessonId: lesson.id,
+      items: targetMcqs,
+      title: lesson.lessonTitle || 'MCQ Practice',
+      subtitle: mistakeOnly ? `Mistakes Practice · ${targetMcqs.length} Questions` : `${targetMcqs.length} Questions`,
+      isMistakeMode: !!mistakeOnly,
+      rawIndices: targetRawIndices,
+    });
+  };
   const [class612SubjectView, setClass612SubjectView] = useState<{ classLevel: string; subject: Subject } | null>(null);
   const [lucentCategoryView, setLucentCategoryView] = useState(false);
   // Which book is selected inside the Lucent category view (null = book-selection screen)
@@ -2917,6 +2968,13 @@ export const StudentDashboard: React.FC<Props> = ({
   const [lucentNoteViewer, setLucentNoteViewer] = useState<LucentNoteEntry | null>(null);
   const [lucentPageIndex, setLucentPageIndex] = useState(0);
   const [lucentPageListViewer, setLucentPageListViewer] = useState<LucentNoteEntry | null>(null);
+  // Reading Resume / Restart prompt when re-opening a page with stored reading time
+  const [pageResumePrompt, setPageResumePrompt] = useState<{
+    entry: LucentNoteEntry;
+    pageIdx: number;
+    storedSecs: number;
+    reqSec: number;
+  } | null>(null);
   // Lesson IDs the student chose "Ignore Routine and Start" for — the My Routine
   // gate is skipped for these for the rest of the session, but the normal
   // per-page coin gate (full price, no routine discount) still applies.
@@ -3795,6 +3853,8 @@ export const StudentDashboard: React.FC<Props> = ({
   const [hwMcqMode, setHwMcqMode] = useState<Record<string, 'interactive' | 'reveal'>>({});
   const [hwQaRevealed, setHwQaRevealed] = useState<Record<string, boolean>>({});
   const [hwMcqCurrentIdx, setHwMcqCurrentIdx] = useState<Record<string, number>>({});
+  const [hwMcqMistakeFilter, setHwMcqMistakeFilter] = useState<Record<string, number[]>>({});
+  const hwMcqSessionStartTsRef = useRef<Record<string, number>>({});
   const [hwShowAnalysis, setHwShowAnalysis] = useState<string | null>(null);
   // Per-question selected option for Lucent interactive-mode MCQs (key = `${pageKey}_${qi}`)
   const [lucentMcqAnswers, setLucentMcqAnswers] = useState<Record<string, number>>({});
@@ -4149,19 +4209,7 @@ export const StudentDashboard: React.FC<Props> = ({
 
     // 1. Get current page content and calculate required time
     const pageObj = lucentNoteViewer.pages?.[_pi];
-    const htmlContent = pageObj?.text || '';
-
-    // Strip HTML to count pure words
-    const tmp = document.createElement('div');
-    tmp.innerHTML = htmlContent;
-    const textOnly = tmp.textContent || tmp.innerText || '';
-    const wordCount = textOnly.trim().split(/\s+/).filter(Boolean).length;
-
-    // Calculate required time: 150 words per minute (WPM) = 2.5 words per second
-    // Min 10 seconds, Max 300 seconds (5 mins)
-    let dynamicReqSec = Math.round(wordCount / 2.5);
-    if (dynamicReqSec < 10) dynamicReqSec = 10;
-    if (dynamicReqSec > 300) dynamicReqSec = 300;
+    const dynamicReqSec = calculatePageRequiredReadingSec(pageObj);
 
     if (isRoutinePageRead(_lid, _pi)) {
       setReadingProgressInfo({ pct: 100, leftSec: 0, reqSec: dynamicReqSec });
@@ -4175,12 +4223,15 @@ export const StudentDashboard: React.FC<Props> = ({
       }
       // Stored time from previous visits on this page
       const storedSecs = getPageTime(_lid, _pi);
+      const _pgAct = user?.id ? getStudyActivity(user.id, getStudyActivityKey(_lid, _pi)) : undefined;
+      const writeSecs = _pgAct?.WRITING?.seconds || 0;
+      const readActSecs = _pgAct?.READING?.seconds || 0;
       // Live time in current session (since page opened)
       const enterTs = (window as any).__routinePageEnterTs;
       const liveSecs = (enterTs && (window as any).__routinePageLid === _lid && (window as any).__routinePageIdx === _pi)
         ? Math.round((Date.now() - enterTs) / 1000)
         : 0;
-      const totalSecs = storedSecs + liveSecs;
+      const totalSecs = Math.max(storedSecs, readActSecs) + liveSecs + writeSecs;
 
       const pct = Math.min(100, Math.round((totalSecs / dynamicReqSec) * 100));
       const leftSec = Math.max(0, dynamicReqSec - totalSecs);
@@ -4974,25 +5025,47 @@ export const StudentDashboard: React.FC<Props> = ({
     return { ...e, pages: sorted };
   };
 
-  const tryOpenLucentNote = (entry: any, pageIdx = 0, extraOpts?: { force?: boolean }) => {
+  const handlePageResumeAction = (restart: boolean) => {
+    if (!pageResumePrompt) return;
+    const { entry, pageIdx } = pageResumePrompt;
+    if (restart) {
+      resetPageTime(entry.id, pageIdx);
+      (window as any).__routinePageEnterTs = Date.now();
+      (window as any).__routinePageLid = entry.id;
+      (window as any).__routinePageIdx = pageIdx;
+      showAlert('⏱️ Reading time naye sire se (0s) shuru hoga.', 'INFO');
+    } else {
+      (window as any).__routinePageEnterTs = Date.now();
+      (window as any).__routinePageLid = entry.id;
+      (window as any).__routinePageIdx = pageIdx;
+    }
+    setPageResumePrompt(null);
+    tryOpenLucentNote(entry, pageIdx, { force: true, skipResumePrompt: true });
+  };
+
+  const tryOpenLucentNote = (entry: any, pageIdx = 0, extraOpts?: { force?: boolean; skipResumePrompt?: boolean }) => {
     if (!entry) return;
     entry = _withSortedPages(entry);
     const isAdmin = user.role === 'ADMIN' || user.role === 'SUB_ADMIN';
 
-    // Always show page list if it is not mcqOnly, force bypasses the admin "always list" mode.
+    // Show page list viewer when tapping a multi-page note from syllabus / list
     if (!extraOpts?.force && !entry.mcqOnly) {
       setLucentPageListViewer(entry);
       return;
     }
-    if (!extraOpts?.force && entry.mcqOnly) {
-       setLucentNoteViewer(entry);
-       setLucentPageIndex(pageIdx);
-       return;
-    }
-    if (extraOpts?.force) {
-       setLucentNoteViewer(entry);
-       setLucentPageIndex(pageIdx);
-       return;
+
+    // Check if student has previously spent reading time on this page
+    const _storedSecs = getPageTime(entry.id, pageIdx);
+    if (!extraOpts?.skipResumePrompt && _storedSecs > 0) {
+      const _pgObj = entry.pages?.[pageIdx];
+      const _reqSec = calculatePageRequiredReadingSec(_pgObj);
+      setPageResumePrompt({
+        entry,
+        pageIdx,
+        storedSecs: _storedSecs,
+        reqSec: _reqSec,
+      });
+      return;
     }
 
     // Check content lock — requires valid redeem code
@@ -5000,15 +5073,22 @@ export const StudentDashboard: React.FC<Props> = ({
       showAlert('🔒 This lesson is locked! Get a Redeem Code from your Admin and enter it in Profile → Redeem tab.', 'INFO');
       return;
     }
+
+    const doOpen = () => {
+      setLucentNoteViewer(entry);
+      setLucentPageIndex(pageIdx);
+    };
+
     // Sample lesson — permanently free for everyone, no daily limit
-    if (entry.isSampleLesson && !entry.mcqOnly) {
-      setLucentPageListViewer(entry);
+    if (entry.isSampleLesson) {
+      doOpen();
       return;
     }
-    if (entry.isSampleLesson && entry.mcqOnly) {
-       setLucentNoteViewer(entry);
-       setLucentPageIndex(pageIdx);
-       return;
+
+    // Admins bypass coin gates
+    if (isAdmin) {
+      doOpen();
+      return;
     }
 
     // ── My Routine gate ────────────────────────────────────────────────────────
@@ -5055,46 +5135,47 @@ export const StudentDashboard: React.FC<Props> = ({
       }
     } catch {}
     // ────────────────────────────────────────────────────────────────────────────
-    // ── Coin gate: 20 coins per page (reading) or 40 per lesson (MCQ), once each ──
+    // ── Coin gate: 20 coins per page (reading, writing, mcq), once each ──
     const _intendedTab  = lucentInitialTabRef.current?.tab;
+    const _intendedVm   = lucentInitialTabRef.current?.viewMode;
     const _isMcqIntent  = _intendedTab === 'MCQS';
-    const doOpen = () => { setLucentNoteViewer(entry); setLucentPageIndex(pageIdx); };
+    const _isWriteIntent = _intendedTab === 'NOTES' && _intendedVm === 'html';
+
+    const _allPgs = (entry.pages || []);
+    const _pgLabelOpen = (_allPgs[pageIdx]?.topicName || '').trim() || `Page ${pageIdx + 1}`;
+    const _hasMcqOpen = ((_allPgs[pageIdx] as any)?.mcqs?.length ?? 0) > 0;
+    const _hasPdfOpen = !!(_allPgs[pageIdx] as any)?.pdfUrl;
+    const _hasVidOpen = !!(_allPgs[pageIdx] as any)?.videoUrl;
+    const _hasAudOpen = !!(_allPgs[pageIdx] as any)?.audioUrl;
+    const _openPgInfo = {
+      pageLabel: _pgLabelOpen,
+      availableModes: [
+        { mode: 'READING',  label: 'Reading Mode',  emoji: '📖', cost: 20,
+          isUnlocked: isPgReadUnlocked(entry.id, pageIdx), isAccessible: true, requiredTier: 'free'  as const, unlockAction: () => markPgReadUnlocked(entry.id, pageIdx) },
+        { mode: 'WRITING',  label: 'Writing Mode',  emoji: '✍️', cost: 20,
+          isUnlocked: isPgWriteUnlocked(entry.id, pageIdx), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markPgWriteUnlocked(entry.id, pageIdx) },
+        { mode: 'PROJECTOR', label: 'Projector Mode', emoji: '📽️', cost: 20,
+          isUnlocked: isProjectorUnlocked(entry.id, pageIdx), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markProjectorUnlocked(entry.id, pageIdx) },
+        ...(_hasMcqOpen ? [
+          { mode: 'MCQ', label: 'MCQ Practice', emoji: '🧠', cost: 20,
+            isUnlocked: isMcqPageUnlocked(entry.id, pageIdx), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markMcqPageUnlocked(entry.id, pageIdx) },
+          { mode: 'FLASHCARD', label: 'Flashcard', emoji: '🃏', cost: 20,
+            isUnlocked: isFcPageUnlocked(entry.id, pageIdx), isAccessible: _isUltraUser, requiredTier: 'ultra' as const, unlockAction: () => markFcPageUnlocked(entry.id, pageIdx) },
+        ] : []),
+        ...(_hasPdfOpen ? [{ mode: 'PDF',   label: 'PDF',   emoji: '📄', cost: 0, isUnlocked: true, isAccessible: _isBasicUser || _isUltraUser, requiredTier: 'basic' as const, unlockAction: undefined }] : []),
+        ...(_hasVidOpen ? [{ mode: 'VIDEO', label: 'Video', emoji: '🎬', cost: 0, isUnlocked: true, isAccessible: _isUltraUser, requiredTier: 'ultra' as const, unlockAction: undefined }] : []),
+        ...(_hasAudOpen ? [{ mode: 'AUDIO', label: 'Audio', emoji: '🎵', cost: 0, isUnlocked: true, isAccessible: _isUltraUser, requiredTier: 'ultra' as const, unlockAction: undefined }] : []),
+      ],
+    };
 
     if (_isMcqIntent) {
       if (isMcqPageUnlocked(entry.id, pageIdx)) { doOpen(); return; }
-      showCoinGate(20, 'MCQ Practice', () => { markMcqPageUnlocked(entry.id, pageIdx); doOpen(); });
+      showCoinGate(20, 'MCQ Practice', () => { markMcqPageUnlocked(entry.id, pageIdx); doOpen(); }, undefined, undefined, _openPgInfo);
+    } else if (_isWriteIntent) {
+      if (isPgWriteUnlocked(entry.id, pageIdx)) { doOpen(); return; }
+      showCoinGate(20, 'Writing Mode', () => { markPgWriteUnlocked(entry.id, pageIdx); doOpen(); }, undefined, undefined, _openPgInfo);
     } else {
       if (isPgReadUnlocked(entry.id, pageIdx)) { doOpen(); return; }
-      const _allPgs = (entry.pages || []);
-      const _pgLabelOpen = (_allPgs[pageIdx]?.topicName || '').trim() || `Page ${pageIdx + 1}`;
-      const _hasMcqOpen = ((_allPgs[pageIdx] as any)?.mcqs?.length ?? 0) > 0;
-      const _hasPdfOpen = !!(_allPgs[pageIdx] as any)?.pdfUrl;
-      const _hasVidOpen = !!(_allPgs[pageIdx] as any)?.videoUrl;
-      const _hasAudOpen = !!(_allPgs[pageIdx] as any)?.audioUrl;
-      const _openPgInfo = {
-        pageLabel: _pgLabelOpen,
-        availableModes: [
-          { mode: 'READING',  label: 'Reading Mode',  emoji: '📖', cost: 20,
-            isUnlocked: false, isAccessible: true, requiredTier: 'free'  as const, unlockAction: () => markPgReadUnlocked(entry.id, pageIdx) },
-          { mode: 'WRITING',  label: 'Writing Mode',  emoji: '✍️', cost: 20,
-            isUnlocked: isPgWriteUnlocked(entry.id, pageIdx), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markPgWriteUnlocked(entry.id, pageIdx) },
-          ...(_hasMcqOpen ? [
-            { mode: 'MCQ', label: 'MCQ Practice', emoji: '🧠', cost: 20,
-              isUnlocked: isMcqPageUnlocked(entry.id, pageIdx), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markMcqPageUnlocked(entry.id, pageIdx) },
-            { mode: 'QA', label: 'Q&A Mode', emoji: '💬', cost: 20,
-              isUnlocked: isQaPageUnlocked(entry.id, pageIdx), isAccessible: _isBasicUser || _isUltraUser, requiredTier: 'basic' as const, unlockAction: () => markQaPageUnlocked(entry.id, pageIdx) },
-            { mode: 'FLASHCARD', label: 'Flashcard', emoji: '🃏', cost: 20,
-              isUnlocked: isFcPageUnlocked(entry.id, pageIdx), isAccessible: _isUltraUser, requiredTier: 'ultra' as const, unlockAction: () => markFcPageUnlocked(entry.id, pageIdx) },
-          ] : []),
-          ...(_hasPdfOpen ? [{ mode: 'PDF',   label: 'PDF',   emoji: '📄', cost: 0, isUnlocked: true, isAccessible: _isBasicUser || _isUltraUser, requiredTier: 'basic' as const, unlockAction: undefined }] : []),
-          ...(_hasVidOpen ? [{ mode: 'VIDEO', label: 'Video', emoji: '🎬', cost: 0, isUnlocked: true, isAccessible: _isUltraUser, requiredTier: 'ultra' as const, unlockAction: undefined }] : []),
-          ...(_hasAudOpen ? [{ mode: 'AUDIO', label: 'Audio', emoji: '🎵', cost: 0, isUnlocked: true, isAccessible: _isUltraUser, requiredTier: 'ultra' as const, unlockAction: undefined }] : []),
-        ],
-      };
-      const _lockedPgIdxs: number[] = [];
-      for (let _pi = pageIdx; _pi < _allPgs.length; _pi++) {
-        if (!isPgReadUnlocked(entry.id, _pi)) _lockedPgIdxs.push(_pi);
-      }
       showCoinGate(20, 'Reading Mode',
         () => { markPgReadUnlocked(entry.id, pageIdx); doOpen(); },
         undefined,
@@ -5226,37 +5307,152 @@ export const StudentDashboard: React.FC<Props> = ({
     setRecentLucent([]);
   };
 
-  // Open a competition homework lesson with a Reading Mode coin gate (20 CR, once per lesson).
-  // Admin and already-unlocked lessons bypass the gate. Pass doOpen as the callback that
+  // Open a competition homework lesson with a mode-specific coin gate (20 CR, once per mode/lesson).
+  // Admin and already-unlocked modes bypass the gate. Pass doOpen as the callback that
   // actually sets hwActiveHwId + view mode so the lesson opens.
-  const openHwWithReadGate = (
+  const openHwWithModeGate = (
     hw: { id?: string | null; title?: string; parsedMcqs?: any[]; audioUrl?: string; videoUrl?: string; pdfUrl?: string },
+    mode: 'READING' | 'WRITING' | 'MCQ' | 'FLASHCARD' | 'QA' | 'PROJECTOR' | 'PDF' | 'VIDEO' | 'AUDIO',
     doOpen: () => void
   ) => {
     const _lid = hw.id || '';
-    if (_isAdminUser || isPgReadUnlocked(_lid, 0)) { doOpen(); return; }
+    if (_isAdminUser) { doOpen(); return; }
     const _hasMcq = (hw.parsedMcqs || []).length > 0;
     const _pgInfo = {
       pageLabel: hw.title || 'Competition Lesson',
       availableModes: [
         { mode: 'READING',   label: 'Reading Mode', emoji: '📖', cost: 20,
-          isUnlocked: false, isAccessible: true, requiredTier: 'free'  as const, unlockAction: () => markPgReadUnlocked(_lid, 0) },
+          isUnlocked: isPgReadUnlocked(_lid, 0), isAccessible: true, requiredTier: 'free'  as const, unlockAction: () => markPgReadUnlocked(_lid, 0) },
         { mode: 'WRITING',   label: 'Writing Mode', emoji: '✍️', cost: 20,
           isUnlocked: isPgWriteUnlocked(_lid, 0), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markPgWriteUnlocked(_lid, 0) },
         ...(_hasMcq ? [
           { mode: 'MCQ',       label: 'MCQ Practice', emoji: '🧠', cost: 20,
             isUnlocked: isMcqPageUnlocked(_lid, 0), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markMcqPageUnlocked(_lid, 0) },
-          { mode: 'QA',        label: 'Q&A Mode',     emoji: '💬', cost: 20,
-            isUnlocked: isQaPageUnlocked(_lid, 0), isAccessible: _isBasicUser || _isUltraUser, requiredTier: 'basic' as const, unlockAction: () => markQaPageUnlocked(_lid, 0) },
-          { mode: 'FLASHCARD', label: 'Flashcard',    emoji: '🃏', cost: 20,
-            isUnlocked: isFcPageUnlocked(_lid, 0), isAccessible: _isUltraUser, requiredTier: 'ultra' as const, unlockAction: () => markFcPageUnlocked(_lid, 0) },
         ] : []),
         ...(hw.pdfUrl   ? [{ mode: 'PDF',   label: 'PDF',   emoji: '📄', cost: 0, isUnlocked: true, isAccessible: _isBasicUser || _isUltraUser, requiredTier: 'basic' as const, unlockAction: undefined as undefined }] : []),
         ...(hw.videoUrl ? [{ mode: 'VIDEO', label: 'Video', emoji: '🎬', cost: 0, isUnlocked: true, isAccessible: _isUltraUser,                 requiredTier: 'ultra' as const, unlockAction: undefined as undefined }] : []),
         ...(hw.audioUrl ? [{ mode: 'AUDIO', label: 'Audio', emoji: '🎵', cost: 0, isUnlocked: true, isAccessible: _isUltraUser,                 requiredTier: 'ultra' as const, unlockAction: undefined as undefined }] : []),
       ],
     };
-    showCoinGate(20, 'Reading Mode', () => { markPgReadUnlocked(_lid, 0); doOpen(); }, undefined, undefined, _pgInfo);
+
+    if (mode === 'WRITING') {
+      if (isPgWriteUnlocked(_lid, 0)) { doOpen(); return; }
+      showCoinGate(20, 'Writing Mode', () => { markPgWriteUnlocked(_lid, 0); doOpen(); }, undefined, undefined, _pgInfo);
+    } else if (mode === 'MCQ') {
+      if (isMcqPageUnlocked(_lid, 0)) { doOpen(); return; }
+      showCoinGate(20, 'MCQ Practice', () => { markMcqPageUnlocked(_lid, 0); doOpen(); }, undefined, undefined, _pgInfo);
+    } else if (mode === 'QA') {
+      if (!_isBasicUser && !_isUltraUser) { showAlert('🔒 Q&A ke liye BASIC subscription chahiye! Store se upgrade karein.', 'INFO'); return; }
+      if (isQaPageUnlocked(_lid, 0)) { doOpen(); return; }
+      showCoinGate(20, 'Q&A Mode', () => { markQaPageUnlocked(_lid, 0); doOpen(); }, undefined, undefined, _pgInfo);
+    } else if (mode === 'FLASHCARD') {
+      if (!_isUltraUser) { showAlert('🔒 Flashcard ke liye ULTRA subscription chahiye! Store se upgrade karein.', 'INFO'); return; }
+      if (isFcPageUnlocked(_lid, 0)) { doOpen(); return; }
+      showCoinGate(20, 'Flashcard', () => { markFcPageUnlocked(_lid, 0); doOpen(); }, undefined, undefined, _pgInfo);
+    } else if (mode === 'PROJECTOR') {
+      if (isProjectorUnlocked(_lid, 0)) { doOpen(); return; }
+      showCoinGate(20, 'Projector Mode', () => { markProjectorUnlocked(_lid, 0); doOpen(); }, undefined, undefined, _pgInfo);
+    } else if (mode === 'PDF') {
+      if (!_isBasicUser && !_isUltraUser) { showAlert('🔒 PDF ke liye BASIC subscription chahiye! Store se upgrade karein.', 'INFO'); return; }
+      doOpen();
+    } else if (mode === 'VIDEO') {
+      if (!_isUltraUser) { showAlert('🔒 Video ke liye ULTRA subscription chahiye! Store se upgrade karein.', 'INFO'); return; }
+      doOpen();
+    } else if (mode === 'AUDIO') {
+      if (!_isUltraUser) { showAlert('🔒 Audio ke liye ULTRA subscription chahiye! Store se upgrade karein.', 'INFO'); return; }
+      doOpen();
+    } else {
+      // READING
+      if (isPgReadUnlocked(_lid, 0)) { doOpen(); return; }
+      showCoinGate(20, 'Reading Mode', () => { markPgReadUnlocked(_lid, 0); doOpen(); }, undefined, undefined, _pgInfo);
+    }
+  };
+
+  const openHwWithReadGate = (
+    hw: { id?: string | null; title?: string; parsedMcqs?: any[]; audioUrl?: string; videoUrl?: string; pdfUrl?: string },
+    doOpen: () => void
+  ) => {
+    openHwWithModeGate(hw, 'READING', doOpen);
+  };
+
+  const handlePracticeHwMistakes = (hw: { id?: string | null; title?: string; parsedMcqs?: any[]; [key: string]: any }) => {
+    if (!hw?.id) return;
+    const hwKey = hw.id;
+    const pgMcqs = (hw.parsedMcqs || []) as any[];
+    if (pgMcqs.length === 0) return;
+
+    // Identify mistake question indices
+    let mistakeIndices: number[] = [];
+
+    // 1. From hwAnswers
+    pgMcqs.forEach((q, i) => {
+      const ans = hwAnswers[`${hwKey}_${i}`];
+      if (ans !== undefined && ans !== q.correctAnswer) {
+        mistakeIndices.push(i);
+      }
+    });
+
+    // 2. From user.mcqHistory
+    if (mistakeIndices.length === 0 && user.mcqHistory && user.mcqHistory.length > 0) {
+      const histItem = user.mcqHistory.find(h =>
+        (h.id && h.id.includes(hw.id!)) ||
+        (h.chapterId === hw.id && (h as any).userAnswers)
+      );
+      if (histItem && (histItem as any).userAnswers) {
+        pgMcqs.forEach((q, i) => {
+          const ans = (histItem as any).userAnswers[i];
+          if (ans !== undefined && ans !== q.correctAnswer) {
+            mistakeIndices.push(i);
+          }
+        });
+      }
+    }
+
+    // 3. From global mistake bank
+    if (mistakeIndices.length === 0) {
+      const mBank = getMistakeBankSync();
+      pgMcqs.forEach((q, i) => {
+        const qText = (q.question || '').trim().toLowerCase();
+        if (mBank.some(m => (m.question || '').trim().toLowerCase() === qText)) {
+          mistakeIndices.push(i);
+        }
+      });
+    }
+
+    // 4. Fallback if cannot pinpoint exact indices: show all
+    if (mistakeIndices.length === 0) {
+      mistakeIndices = pgMcqs.map((_, i) => i);
+    }
+
+    // Reset answers only for the mistake questions
+    setHwAnswers(prev => {
+      const n = { ...prev };
+      mistakeIndices.forEach(i => delete n[`${hwKey}_${i}`]);
+      return n;
+    });
+    setHwPendingAnswers(prev => {
+      const n = { ...prev };
+      mistakeIndices.forEach(i => delete n[`${hwKey}_${i}`]);
+      return n;
+    });
+    setHwManualSubmitted(prev => {
+      const n = { ...prev };
+      delete n[hwKey];
+      return n;
+    });
+    setHwShowAnalysis(null);
+
+    // Set filter so only mistake questions are presented
+    setHwMcqMistakeFilter(prev => ({ ...prev, [hwKey]: mistakeIndices }));
+    setHwMcqCurrentIdx(prev => ({ ...prev, [hwKey]: 0 }));
+    setHwMcqNavigatorOpen(prev => ({ ...prev, [hwKey]: false }));
+    setHwMcqSkipped(prev => ({ ...prev, [hwKey]: new Set() }));
+    hwMcqSessionStartTsRef.current[hwKey] = Date.now();
+
+    openHwWithModeGate(hw, 'MCQ', () => {
+      setHwViewMode('mcq');
+      setHwActiveHwId(hw.id!);
+    });
   };
 
   // Restore last-read scroll position for the active homework note
@@ -7741,54 +7937,74 @@ export const StudentDashboard: React.FC<Props> = ({
                     <p className={`text-[10px] font-black ${theme.text} uppercase tracking-widest`}>📝 MCQ Practice Sets</p>
                     <span className={`text-[10px] font-bold ${theme.chip} px-2 py-0.5 rounded-full`}>{compMcqPracticeLessons.length}</span>
                   </div>
-                  <div className="grid grid-cols-1 gap-2">
-                    {compMcqPracticeLessons.map((lesson: any) => (
-                      <button
-                        key={lesson.id}
-                        onClick={() => {
-                          if (!lesson.mcqs?.length) return;
-                         handleProjectorModeGate(lesson.id, 0, () => {
-                           stopSpeech();
-                           setFlashcardMcqs({
-                             items: lesson.mcqs,
-                             title: lesson.lessonTitle || 'MCQ Practice',
-                             subtitle: `${lesson.mcqCount || lesson.mcqs.length} Questions`,
-                             subject: '',
-                             startInProjectorMode: true,
-                             hideProjectorLabel: true,
-                             // fromLesson omitted: no tab bar, no mode buttons — only projector mode.
-                           });
-                         });
-                        }}
-                        className={`w-full text-left ${theme.cardBg || 'bg-white'} border ${theme.border} rounded-2xl p-3.5 active:scale-[0.99] transition-all shadow-sm hover:shadow-md`}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1 min-w-0">
-                            <p className={`font-black text-sm ${theme.textDeep} leading-snug truncate`}>
-                              {lesson.lessonTitle}
-                            </p>
-                            <div className="flex flex-wrap gap-1.5 mt-1.5">
-                              <span className={`text-[9px] font-bold ${theme.chip} px-2 py-0.5 rounded-full`}>
-                                {lesson.mcqCount || lesson.mcqs?.length || 0} MCQs
-                              </span>
-                              {lesson.pageNo && (
-                                <span className="text-[9px] font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
-                                  Page {lesson.pageNo}
+                  <div className="grid grid-cols-1 gap-3">
+                    {compMcqPracticeLessons.map((lesson: any) => {
+                      const stats = getCompLessonStats(lesson.id);
+                      const hasAttempted = !!stats && stats.attempted > 0;
+                      const hasMistakes = !!stats && Array.isArray(stats.wrongIndices) && stats.wrongIndices.length > 0;
+                      const totalCount = lesson.mcqCount || lesson.mcqs?.length || 0;
+                      const pct = hasAttempted && stats.total > 0 ? Math.round((stats.score / stats.total) * 100) : 0;
+
+                      return (
+                        <div
+                          key={lesson.id}
+                          className={`w-full text-left ${theme.cardBg || 'bg-white'} border ${theme.border} rounded-2xl p-4 transition-all shadow-sm`}
+                        >
+                          <div className="flex items-start justify-between gap-3 mb-2.5">
+                            <div className="flex-1 min-w-0">
+                              <p className={`font-black text-sm ${theme.textDeep} leading-snug`}>
+                                {lesson.lessonTitle}
+                              </p>
+                              <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                                <span className={`text-[10px] font-bold ${theme.chip} px-2.5 py-0.5 rounded-full`}>
+                                  🧠 {totalCount} MCQs
                                 </span>
-                              )}
-                              {lesson.date && (
-                                <span className="text-[9px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
-                                  {lesson.date}
-                                </span>
-                              )}
+                                {lesson.pageNo && (
+                                  <span className="text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200/60 px-2 py-0.5 rounded-full">
+                                    Page {lesson.pageNo}
+                                  </span>
+                                )}
+                                {lesson.date && (
+                                  <span className="text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/60 px-2 py-0.5 rounded-full">
+                                    {lesson.date}
+                                  </span>
+                                )}
+                              </div>
                             </div>
+                            {hasAttempted && (
+                              <div className="text-right shrink-0">
+                                <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${pct >= 70 ? 'bg-emerald-100 text-emerald-800' : pct >= 40 ? 'bg-amber-100 text-amber-800' : 'bg-rose-100 text-rose-800'}`}>
+                                  {pct}% Score
+                                </span>
+                                <p className="text-[9px] text-slate-400 font-bold mt-0.5">{stats.score}/{stats.total} correct</p>
+                              </div>
+                            )}
                           </div>
-                          <div className={`shrink-0 w-8 h-8 rounded-full ${theme.bgSoft} flex items-center justify-center`}>
-                            <ChevronRight size={16} className={theme.text} />
+
+                          {/* Action Buttons: Lucent Style */}
+                          <div className="flex items-center gap-2 pt-2 border-t border-slate-100/80">
+                            <button
+                              type="button"
+                              onClick={() => handleStartCompMcq(lesson, false)}
+                              className="flex-1 min-h-[38px] py-2 px-3 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-1.5 active:scale-95 bg-purple-600 hover:bg-purple-700 text-white shadow-sm"
+                            >
+                              <Brain size={13} />
+                              {hasAttempted ? 'Re-attempt MCQ' : 'Start MCQ Test'}
+                            </button>
+                            {hasMistakes && (
+                              <button
+                                type="button"
+                                onClick={() => handleStartCompMcq(lesson, true)}
+                                className="flex-1 min-h-[38px] py-2 px-3 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-1.5 active:scale-95 bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100"
+                              >
+                                <RotateCcw size={12} />
+                                Practice Mistakes ({stats.wrongIndices.length})
+                              </button>
+                            )}
                           </div>
                         </div>
-                      </button>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -7869,7 +8085,9 @@ export const StudentDashboard: React.FC<Props> = ({
           const tMcq = !!(target.parsedMcqs && target.parsedMcqs.length > 0);
           const tAudio = !!(target as any).audioUrl;
           const tVideo = !!(target as any).videoUrl;
-          const doNav = () => {
+          const currentMode = effectiveMode;
+          const currentVm = hwNotesViewMode;
+          const doNav = (intendedVm: 'notes' | 'mcq' | 'audio' | 'video', intendedNm?: 'html' | 'chunk') => {
             const d = new Date(target.date);
             setHwYear(d.getFullYear());
             setHwMonth(d.getMonth());
@@ -7877,15 +8095,25 @@ export const StudentDashboard: React.FC<Props> = ({
             setHwActiveHwId(target.id || '');
             setHwScrollProgress(0);
             hwScrollRestoredRef.current = false;
-            if (tNotes) setHwViewMode('notes');
-            else if (tMcq) setHwViewMode('mcq');
-            else if (tAudio) setHwViewMode('audio');
-            else if (tVideo) setHwViewMode('video');
-            else setHwViewMode('notes');
+            setHwViewMode(intendedVm);
+            if (intendedNm) setHwNotesViewMode(intendedNm);
           };
-          // Gate reading on nav to a new lesson (only when it would default to notes)
-          if (tNotes) { openHwWithReadGate(target, doNav); return; }
-          doNav();
+          // Preserve current mode if possible
+          if (currentMode === 'notes' && currentVm === 'html' && (target as any).htmlNotes) {
+            openHwWithModeGate(target, 'WRITING', () => doNav('notes', 'html'));
+          } else if (currentMode === 'mcq' && tMcq) {
+            openHwWithModeGate(target, 'MCQ', () => doNav('mcq'));
+          } else if (tNotes) {
+            openHwWithModeGate(target, 'READING', () => doNav('notes', 'chunk'));
+          } else if (tMcq) {
+            openHwWithModeGate(target, 'MCQ', () => doNav('mcq'));
+          } else if (tAudio) {
+            openHwWithModeGate(target, 'AUDIO', () => doNav('audio'));
+          } else if (tVideo) {
+            openHwWithModeGate(target, 'VIDEO', () => doNav('video'));
+          } else {
+            openHwWithModeGate(target, 'READING', () => doNav('notes'));
+          }
         };
         // Expose filtered list + goToHw to the back-navigation popstate handler
         hwFilteredRef.current = filteredHw as any[];
@@ -8121,15 +8349,9 @@ export const StudentDashboard: React.FC<Props> = ({
                     isUnlocked: isPgReadUnlocked(activeHw.id, 0),  isAccessible: true,                           requiredTier: 'free'  as const, unlockAction: () => markPgReadUnlocked(activeHw.id, 0) },
                   { mode: 'WRITING',   label: 'Writing Mode', emoji: '✍️', cost: 20,
                     isUnlocked: isPgWriteUnlocked(activeHw.id, 0), isAccessible: true,                           requiredTier: 'free'  as const, unlockAction: () => markPgWriteUnlocked(activeHw.id, 0) },
-                  { mode: 'PROJECTOR', label: 'Projector Mode', emoji: '📽️', cost: 20,
-                    isUnlocked: isProjectorUnlocked(activeHw.id, 0), isAccessible: true,                           requiredTier: 'free'  as const, unlockAction: () => markProjectorUnlocked(activeHw.id, 0) },
                   ...(hasMcq ? [
                     { mode: 'MCQ',       label: 'MCQ Practice', emoji: '🧠', cost: 20,
                       isUnlocked: isMcqPageUnlocked(activeHw.id, 0), isAccessible: true,                         requiredTier: 'free'  as const, unlockAction: () => markMcqPageUnlocked(activeHw.id, 0) },
-                    { mode: 'QA',        label: 'Q&A Mode',     emoji: '💬', cost: 20,
-                      isUnlocked: isQaPageUnlocked(activeHw.id, 0),  isAccessible: _isBasicUser || _isUltraUser, requiredTier: 'basic' as const, unlockAction: () => markQaPageUnlocked(activeHw.id, 0) },
-                    { mode: 'FLASHCARD', label: 'Flashcard',    emoji: '🃏', cost: 20,
-                      isUnlocked: isFcPageUnlocked(activeHw.id, 0),  isAccessible: _isUltraUser,                 requiredTier: 'ultra' as const, unlockAction: () => markFcPageUnlocked(activeHw.id, 0) },
                   ] : []),
                   ...(hasPdf   ? [{ mode: 'PDF',   label: 'PDF',   emoji: '📄', cost: 0, isUnlocked: true, isAccessible: _isBasicUser || _isUltraUser, requiredTier: 'basic' as const, unlockAction: undefined }] : []),
                   ...(hasVideo ? [{ mode: 'VIDEO', label: 'Video', emoji: '🎬', cost: 0, isUnlocked: true, isAccessible: _isUltraUser,                 requiredTier: 'ultra' as const, unlockAction: undefined }] : []),
@@ -8138,17 +8360,10 @@ export const StudentDashboard: React.FC<Props> = ({
               };
 
               // _switchHwMcq — Lucent ke _switchMcq jaisa, coin gate ke saath
-              const _switchHwMcq = (tab: 'mcq' | 'qa' | 'flashcard') => {
+              const _switchHwMcq = (tab: 'mcq' | 'qa') => {
                 const _doSwitch = () => {
                   stopSpeech();
-                  if (tab === 'flashcard') {
-                    // Flashcard is a full-screen overlay, NOT a persistent mode.
-                    // Don't set hwViewMode — when overlay closes, previous mode stays intact.
-                    // isCompetition:true so the fromLesson tab bar uses setHwViewMode (not setLucentActiveTab).
-                    setFlashcardMcqs({ items: _hwMcqs, title: activeHw.title || 'MCQs', subtitle: `${_hwMcqs.length} Questions`, subject: activeHw.targetSubject || '', fromLesson: { hasMcq: true, isAdmin: _isAdminUser, activeMode: 'flashcard', hasPdf, hasVideo, hasAudio, isCompetition: true, unlockId: activeHw.id, unlockPageIndex: 0 } });
-                  } else {
-                    setHwViewMode(tab); _hwSave(tab);
-                  }
+                  setHwViewMode(tab); _hwSave(tab);
                 };
                 if (_isAdminUser) { _doSwitch(); return; }
                 if (tab === 'mcq') {
@@ -8158,10 +8373,6 @@ export const StudentDashboard: React.FC<Props> = ({
                   if (_qaLocked) { showAlert('🔒 Q&A ke liye BASIC subscription chahiye! Store se upgrade karein.', 'INFO'); return; }
                   if (isQaPageUnlocked(activeHw.id, 0)) { _doSwitch(); return; }
                   showCoinGate(20, 'Q&A Mode', () => { markQaPageUnlocked(activeHw.id, 0); _doSwitch(); }, undefined, undefined, _hwPgInfo);
-                } else if (tab === 'flashcard') {
-                  if (_fcLocked) { showAlert('🔒 Flashcard ke liye ULTRA subscription chahiye! Store se upgrade karein.', 'INFO'); return; }
-                  if (isFcPageUnlocked(activeHw.id, 0)) { _doSwitch(); return; }
-                  showCoinGate(20, 'Flashcard', () => { markFcPageUnlocked(activeHw.id, 0); _doSwitch(); }, undefined, undefined, _hwPgInfo);
                 }
               };
               return (
@@ -8187,35 +8398,6 @@ export const StudentDashboard: React.FC<Props> = ({
                         className={_hwTabCls(effectiveMode === 'mcq', 'bg-purple-600', 'text-white')}
                         onClick={() => _switchHwMcq('mcq')}>
                         MCQ Practice
-                      </button>
-                    )}
-                    {/* Projector — Sab users ke liye */}
-                    {hasMcq && _canProjector && (
-                      <button style={_hwTabStyle} className={_hwTabCls(false, 'bg-amber-500', 'text-white')}
-                       onClick={() => handleProjectorModeGate(activeHw.id, 0, () => { stopSpeech(); setFlashcardMcqs({ items: _hwMcqs, title: activeHw.title || 'MCQs', subtitle: `${_hwMcqs.length} Questions`, subject: activeHw.targetSubject || '', startInProjectorMode: true, fromLesson: { hasMcq: true, isAdmin: _isAdminUser, activeMode: 'projector', hasPdf, hasVideo, hasAudio, isCompetition: true, returnMode: hwViewMode, unlockId: activeHw.id, unlockPageIndex: 0 } }); }, _hwPgInfo)}>
-                        📽️ Projector Mode
-                      </button>
-                    )}
-                    {/* Flashcard — ULTRA locked shown with badge, coin gate jaisa Lucent */}
-                    {hasMcq && (
-                      <button
-                        data-tab-active={String(effectiveMode === 'flashcard')}
-                        onClick={() => _switchHwMcq('flashcard')}
-                        style={_hwTabStyle}
-                        className={_hwTabCls(effectiveMode === 'flashcard', 'bg-amber-500', 'text-white') + (_fcLocked ? ' opacity-60' : '')}
-                      >
-                        {_fcLocked ? '🔒' : '🃏'} Flashcard{_fcLocked ? ' · ULTRA' : ''}
-                      </button>
-                    )}
-                    {/* Q&A — BASIC locked shown with badge, coin gate jaisa Lucent */}
-                    {hasMcq && (
-                      <button
-                        data-tab-active={String(effectiveMode === 'qa')}
-                        onClick={() => _switchHwMcq('qa')}
-                        style={_hwTabStyle}
-                        className={_hwTabCls(effectiveMode === 'qa', 'bg-indigo-600', 'text-white') + (_qaLocked ? ' opacity-60' : '')}
-                      >
-                        {_qaLocked ? '🔒' : '💬'} Q&amp;A{_qaLocked ? ' · BASIC' : ''}
                       </button>
                     )}
                     {/* PDF — BASIC locked, inline viewer (Lucent jaisa, window.open nahi) */}
@@ -8723,6 +8905,31 @@ export const StudentDashboard: React.FC<Props> = ({
                         } : undefined}
                       />
                       )}
+                      {/* Agla Vishay / Next Lesson button — Lucent jaisa */}
+                      {(() => {
+                        const _tgt = effectiveNextHw || nextHw;
+                        if (!_tgt) return null;
+                        const _tgtPg = (_tgt as any).pageNo ? `Page ${(_tgt as any).pageNo}` : '';
+                        return (
+                          <div className="mt-6 mb-4 px-1">
+                            <button
+                              onClick={() => { stopSpeech(); goToHw(_tgt); }}
+                              className="w-full flex items-center gap-3.5 px-4 py-3.5 rounded-2xl bg-slate-900 border border-slate-700/70 active:scale-[0.98] transition-all group shadow-lg"
+                            >
+                              <div className="w-9 h-9 rounded-xl bg-indigo-500/20 flex items-center justify-center shrink-0 group-hover:bg-indigo-500/30 transition-colors">
+                                <BookOpen size={16} className="text-indigo-400" />
+                              </div>
+                              <div className="flex-1 text-left min-w-0">
+                                <p className="text-[9px] font-semibold text-slate-400 uppercase tracking-[0.14em]">Agla Vishay</p>
+                                <p className="text-sm font-semibold text-white truncate mt-0.5">
+                                  {_tgtPg}{_tgtPg && _tgt.title ? ' — ' : ''}{_tgt.title || ''}
+                                </p>
+                              </div>
+                              <ChevronRight size={17} className="text-slate-500 shrink-0 group-hover:text-indigo-400 transition-colors" />
+                            </button>
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
 
@@ -8854,8 +9061,11 @@ export const StudentDashboard: React.FC<Props> = ({
                   <div>
                     {(() => {
                       const hwMode = hwMcqMode[hwKey] || 'interactive';
-                      const mcqs = activeHw.parsedMcqs!;
+                      const rawMcqs = activeHw.parsedMcqs || [];
+                      const _mistakeFilter = hwMcqMistakeFilter[hwKey];
+                      const mcqs = _mistakeFilter && _mistakeFilter.length > 0 ? _mistakeFilter.map(ri => rawMcqs[ri]).filter(Boolean) : rawMcqs;
                       const totalQ = mcqs.length;
+                      if (totalQ === 0) return null;
 
                       // ── Q&A REVEAL MODE: qualifying questions also show options ──
                       if (hwMode === 'reveal') {
@@ -8888,9 +9098,13 @@ export const StudentDashboard: React.FC<Props> = ({
                       }
 
                       // ── INTERACTIVE MCQ MODE: ALL QUESTIONS AT ONCE ──
-                      const attempted = mcqs.reduce((acc, _, i) => hwAnswers[`${hwKey}_${i}`] !== undefined ? acc + 1 : acc, 0);
+                      const attempted = mcqs.reduce((acc, _, i) => {
+                        const rIdx = _mistakeFilter && _mistakeFilter.length > 0 ? _mistakeFilter[i] : i;
+                        return hwAnswers[`${hwKey}_${rIdx}`] !== undefined ? acc + 1 : acc;
+                      }, 0);
                       const right = mcqs.reduce((acc, m, i) => {
-                        const s = hwAnswers[`${hwKey}_${i}`];
+                        const rIdx = _mistakeFilter && _mistakeFilter.length > 0 ? _mistakeFilter[i] : i;
+                        const s = hwAnswers[`${hwKey}_${rIdx}`];
                         return s !== undefined && s === m.correctAnswer ? acc + 1 : acc;
                       }, 0);
                       const wrong = attempted - right;
@@ -8903,12 +9117,14 @@ export const StudentDashboard: React.FC<Props> = ({
                       // ── REVIEW MODE (shown after all submitted) ──
                       if (allSubmitted && hwShowAnalysis === hwKey) {
                          const analysisAnswers = mcqs.reduce((acc: Record<number, number>, _q: any, i: number) => {
-                           const value = hwAnswers[`${hwKey}_${i}`];
+                           const rIdx = _mistakeFilter && _mistakeFilter.length > 0 ? _mistakeFilter[i] : i;
+                           const value = hwAnswers[`${hwKey}_${rIdx}`];
                            if (value !== undefined) acc[i] = value;
                            return acc;
                          }, {});
                          const analysisSubmitted = mcqs.reduce((acc: Record<number, boolean>, _q: any, i: number) => {
-                           acc[i] = hwAnswers[`${hwKey}_${i}`] !== undefined;
+                           const rIdx = _mistakeFilter && _mistakeFilter.length > 0 ? _mistakeFilter[i] : i;
+                           acc[i] = hwAnswers[`${hwKey}_${rIdx}`] !== undefined;
                            return acc;
                          }, {});
                          return (
@@ -8926,7 +9142,10 @@ export const StudentDashboard: React.FC<Props> = ({
                                setHwShowAnalysis(null);
                                setHwAnswers(prev => {
                                  const next = { ...prev };
-                                 mcqs.forEach((_m: any, qi: number) => { delete next[`${hwKey}_${qi}`]; });
+                                 mcqs.forEach((_m: any, qi: number) => {
+                                   const rIdx = _mistakeFilter && _mistakeFilter.length > 0 ? _mistakeFilter[qi] : qi;
+                                   delete next[`${hwKey}_${rIdx}`];
+                                 });
                                  return next;
                                });
                                setHwPendingAnswers({});
@@ -8937,101 +9156,6 @@ export const StudentDashboard: React.FC<Props> = ({
                              }}
                            />
                          );
-                         const pct = attempted > 0 ? Math.round((right / attempted) * 100) : 0;
-                        const grade = pct >= 80 ? { label: 'Excellent! 🌟', color: 'from-emerald-500 to-green-600', ring: 'ring-emerald-200' }
-                                    : pct >= 60 ? { label: 'Good Job! 👍', color: 'from-blue-500 to-indigo-600', ring: 'ring-blue-200' }
-                                    : pct >= 40 ? { label: 'Keep Practising 💪', color: 'from-amber-500 to-orange-500', ring: 'ring-amber-200' }
-                                    : { label: 'Need More Practice 📚', color: 'from-rose-500 to-red-600', ring: 'ring-rose-200' };
-                        return (
-                          <div>
-                            {/* Score card */}
-                            <div className={`rounded-2xl bg-gradient-to-r ${grade.color} p-4 text-white mb-4 ring-4 ${grade.ring}`}>
-                              <p className="text-[10px] font-black uppercase tracking-widest opacity-80 mb-1">📊 Result</p>
-                              <div className="flex items-end gap-3">
-                                <span className="text-5xl font-black leading-none">{pct}%</span>
-                                <span className="text-base font-bold opacity-90 mb-1">{right}/{totalQ} Correct</span>
-                              </div>
-                              <p className="text-sm font-black mt-1 opacity-90">{grade.label}</p>
-                              <div className="grid grid-cols-3 gap-2 mt-3">
-                                <div className="bg-white/20 rounded-xl py-2 text-center">
-                                  <div className="text-[9px] font-black uppercase opacity-80">Total</div>
-                                  <div className="text-lg font-black">{totalQ}</div>
-                                </div>
-                                <div className="bg-white/20 rounded-xl py-2 text-center">
-                                  <div className="text-[9px] font-black uppercase opacity-80">✅ Correct</div>
-                                  <div className="text-lg font-black">{right}</div>
-                                </div>
-                                <div className="bg-white/20 rounded-xl py-2 text-center">
-                                  <div className="text-[9px] font-black uppercase opacity-80">❌ Wrong</div>
-                                  <div className="text-lg font-black">{wrong}</div>
-                                </div>
-                              </div>
-                            </div>
-                            {/* Per-question review */}
-                            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest text-center mb-3">📋 Per-Question Review</p>
-                            <div className="space-y-3">
-                              {mcqs.map((mq, qi) => {
-                                const sel = hwAnswers[`${hwKey}_${qi}`];
-                                const isCorrect = sel !== undefined && sel === mq.correctAnswer;
-                                return (
-                                  <div key={qi} className={`rounded-2xl border-2 overflow-hidden ${isCorrect ? 'border-emerald-300 bg-emerald-50' : 'border-rose-300 bg-rose-50'}`}>
-                                    {/* Question header */}
-                                    <div className={`px-4 py-2 flex items-center gap-2 ${isCorrect ? 'bg-emerald-100' : 'bg-rose-100'}`}>
-                                      <span className="text-lg">{isCorrect ? '✅' : '❌'}</span>
-                                      <span className={`text-[10px] font-black uppercase tracking-wider ${isCorrect ? 'text-emerald-700' : 'text-rose-700'}`}>
-                                        Q{qi + 1} — {isCorrect ? 'Correct' : 'Wrong'}
-                                      </span>
-                                    </div>
-                                    <div className="px-4 py-3 space-y-2">
-                                      <McqQuestionDisplay q={mq as any} questionClassName="text-[13px] font-bold text-slate-800 leading-snug" />
-                                      {/* Options */}
-                                      <div className="space-y-1.5">
-                                        {mq.options.map((opt, oi) => {
-                                          const isCorrectOpt = oi === mq.correctAnswer;
-                                          const isUserPick = oi === sel;
-                                          let optCls = 'w-full text-left text-[12px] px-3 py-2 rounded-xl border-2 font-medium flex items-center gap-2 ';
-                                          if (isCorrectOpt) optCls += 'bg-green-100 border-green-400 text-green-800 font-black';
-                                          else if (isUserPick && !isCorrectOpt) optCls += 'bg-red-100 border-red-400 text-red-800';
-                                          else optCls += 'bg-white border-slate-200 text-slate-400 opacity-60';
-                                          return (
-                                            <div key={oi} className={optCls}>
-                                              <span className="font-black shrink-0">{String.fromCharCode(65+oi)}.</span>
-                                              <span className="flex-1">{opt}</span>
-                                              {isCorrectOpt && <span className="text-green-600 font-black text-xs shrink-0">✓ Correct</span>}
-                                              {isUserPick && !isCorrectOpt && <span className="text-red-600 font-black text-xs shrink-0">✗ Your pick</span>}
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                      {/* Explanation / Notes */}
-                                      {mq.explanation && (
-                                        <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mt-1">
-                                          <p className="text-[11px] text-amber-800 leading-relaxed"><span className="font-black">💡 Note:</span> {mq.explanation}</p>
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                            {/* Bottom actions */}
-                            <div className="mt-4 flex gap-2">
-                              <button
-                                onClick={() => {
-                                  setHwShowAnalysis(null);
-                                  setHwAnswers(prev => {
-                                    const next = { ...prev };
-                                    mcqs.forEach((_m, qi) => { delete next[`${hwKey}_${qi}`]; });
-                                    return next;
-                                  });
-                                  setHwPendingAnswers({});
-                                  setHwManualSubmitted(prev => { const n = { ...prev }; delete n[hwKey]; return n; });
-                                }}
-                                className={`flex-1 text-[13px] font-black ${theme.text} ${theme.bgSoft} py-3 rounded-2xl active:scale-95 transition-all`}
-                              >🔄 Try Again</button>
-                            </div>
-                          </div>
-                        );
                       }
 
                       // ── PRACTICE MODE: one question at a time ──
@@ -9081,19 +9205,53 @@ export const StudentDashboard: React.FC<Props> = ({
                                 onClick={() => setHwShowAnalysis(hwKey)}
                                 className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-black text-sm flex items-center justify-center gap-2 shadow-lg active:scale-95 transition"
                               >📋 Review — Per-Question Details</button>
+                              {wrong > 0 && (
+                                <button
+                                  onClick={() => {
+                                    const wrongIndices: number[] = [];
+                                    mcqs.forEach((q: any, i: number) => {
+                                      const rIdx = _mistakeFilter && _mistakeFilter.length > 0 ? _mistakeFilter[i] : i;
+                                      const sel = hwAnswers[`${hwKey}_${rIdx}`];
+                                      if (sel !== undefined && sel !== q.correctAnswer) {
+                                        wrongIndices.push(rIdx);
+                                      }
+                                    });
+                                    if (wrongIndices.length > 0) {
+                                      setHwAnswers(prev => {
+                                        const next = { ...prev };
+                                        wrongIndices.forEach(qi => { delete next[`${hwKey}_${qi}`]; });
+                                        return next;
+                                      });
+                                      setHwPendingAnswers({});
+                                      setHwManualSubmitted(prev => { const n = { ...prev }; delete n[hwKey]; return n; });
+                                      setHwShowAnalysis(null);
+                                      setHwMcqMistakeFilter(prev => ({ ...prev, [hwKey]: wrongIndices }));
+                                      setHwMcqCurrentIdx(prev => ({ ...prev, [hwKey]: 0 }));
+                                      setHwMcqNavigatorOpen(prev => ({ ...prev, [hwKey]: false }));
+                                      setHwMcqSkipped(prev => ({ ...prev, [hwKey]: new Set() }));
+                                      hwMcqSessionStartTsRef.current[hwKey] = Date.now();
+                                    }
+                                  }}
+                                  className="w-full py-3.5 rounded-2xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-black text-sm flex items-center justify-center gap-2 active:scale-95 transition shadow-sm"
+                                >🎯 Practice Mistakes ({wrong})</button>
+                              )}
                               <div className="flex gap-2">
                                 <button
                                   onClick={() => {
                                     setHwAnswers(prev => {
                                       const next = { ...prev };
-                                      mcqs.forEach((_m, qi) => { delete next[`${hwKey}_${qi}`]; });
+                                      mcqs.forEach((_m, qi) => {
+                                        const rIdx = _mistakeFilter && _mistakeFilter.length > 0 ? _mistakeFilter[qi] : qi;
+                                        delete next[`${hwKey}_${rIdx}`];
+                                      });
                                       return next;
                                     });
                                     setHwPendingAnswers({});
                                     setHwMcqCurrentIdx(prev => ({ ...prev, [hwKey]: 0 }));
                                     setHwManualSubmitted(prev => { const n = { ...prev }; delete n[hwKey]; return n; });
-                                  setHwMcqNavigatorOpen(prev => ({ ...prev, [hwKey]: false }));
-                                  setHwMcqSkipped(prev => ({ ...prev, [hwKey]: new Set() }));
+                                    setHwMcqMistakeFilter(prev => { const n = { ...prev }; delete n[hwKey]; return n; });
+                                    setHwMcqNavigatorOpen(prev => ({ ...prev, [hwKey]: false }));
+                                    setHwMcqSkipped(prev => ({ ...prev, [hwKey]: new Set() }));
                                   }}
                                   className={`flex-1 text-[13px] font-black ${theme.text} ${theme.bgSoft} py-3 rounded-2xl active:scale-95 transition-all`}
                                 >🔄 Try Again</button>
@@ -9105,21 +9263,40 @@ export const StudentDashboard: React.FC<Props> = ({
                       }
 
                       // One-at-a-time question view
-                      const ci = hwMcqCurrentIdx[hwKey] ?? 0;
+                      const ci = Math.max(0, Math.min(hwMcqCurrentIdx[hwKey] ?? 0, totalQ - 1));
                       const mcq = mcqs[ci];
                       if (!mcq) return null;
-                      const ansKey = `${hwKey}_${ci}`;
+                      const realIdx = _mistakeFilter && _mistakeFilter.length > 0 ? _mistakeFilter[ci] : ci;
+                      const ansKey = `${hwKey}_${realIdx}`;
                       const selected = hwAnswers[ansKey];
                       const isAnswered = selected !== undefined;
                       const pendingOpt = hwPendingAnswers[ansKey];
                       const hwNavigatorAnswers = mcqs.reduce((acc: Record<number, number>, _q: any, i: number) => {
-                        const value = hwPendingAnswers[`${hwKey}_${i}`] ?? hwAnswers[`${hwKey}_${i}`];
+                        const rIdx = _mistakeFilter && _mistakeFilter.length > 0 ? _mistakeFilter[i] : i;
+                        const value = hwPendingAnswers[`${hwKey}_${rIdx}`] ?? hwAnswers[`${hwKey}_${rIdx}`];
                         if (value !== undefined) acc[i] = value;
                         return acc;
                       }, {});
 
                       return (
                         <div>
+                          {_mistakeFilter && _mistakeFilter.length > 0 && (
+                            <div className="flex items-center justify-between gap-2 mb-3 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2">
+                              <span className="text-[11px] font-black text-rose-700 flex items-center gap-1.5">
+                                🎯 Mistake Practice ({mcqs.length} Questions)
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setHwMcqMistakeFilter(prev => { const n = { ...prev }; delete n[hwKey]; return n; });
+                                  setHwMcqCurrentIdx(prev => ({ ...prev, [hwKey]: 0 }));
+                                }}
+                                className="text-[10px] font-bold text-slate-500 hover:text-slate-800 underline"
+                              >
+                                Show All ({rawMcqs.length})
+                              </button>
+                            </div>
+                          )}
                           {/* Progress */}
                           <div className="flex items-center gap-2 mb-2">
                             <span className="text-[11px] font-black text-slate-600 shrink-0">
@@ -9163,7 +9340,8 @@ export const StudentDashboard: React.FC<Props> = ({
                                 setHwAnswers(answersForSubmit);
                                 try {
                                   const wrongEntries = mcqs.reduce((acc: any[], q: any, qi: number) => {
-                                    const sel = answersForSubmit[`${hwKey}_${qi}`];
+                                    const rIdx = _mistakeFilter && _mistakeFilter.length > 0 ? _mistakeFilter[qi] : qi;
+                                    const sel = answersForSubmit[`${hwKey}_${rIdx}`];
                                     if (sel !== undefined && sel !== q.correctAnswer) {
                                       acc.push({
                                         question: q.question,
@@ -9181,8 +9359,15 @@ export const StudentDashboard: React.FC<Props> = ({
                                   if (wrongEntries.length > 0) addMistakes(wrongEntries).catch(() => {});
                                 } catch {}
                                 // Award MCQ pts on submit: 2 pts correct, 1 pt wrong (base before multiplier)
-                                const _hwRight = mcqs.reduce((a: number, m: any, i: number) => { const s = answersForSubmit[`${hwKey}_${i}`]; return (s !== undefined && s === m.correctAnswer) ? a + 1 : a; }, 0);
-                                const _hwAttempted = mcqs.reduce((a: number, _m: any, i: number) => answersForSubmit[`${hwKey}_${i}`] !== undefined ? a + 1 : a, 0);
+                                const _hwRight = mcqs.reduce((a: number, m: any, i: number) => {
+                                  const rIdx = _mistakeFilter && _mistakeFilter.length > 0 ? _mistakeFilter[i] : i;
+                                  const s = answersForSubmit[`${hwKey}_${rIdx}`];
+                                  return (s !== undefined && s === m.correctAnswer) ? a + 1 : a;
+                                }, 0);
+                                const _hwAttempted = mcqs.reduce((a: number, _m: any, i: number) => {
+                                  const rIdx = _mistakeFilter && _mistakeFilter.length > 0 ? _mistakeFilter[i] : i;
+                                  return answersForSubmit[`${hwKey}_${rIdx}`] !== undefined ? a + 1 : a;
+                                }, 0);
                                 const _hwBaseScore = _hwRight * 2 + (_hwAttempted - _hwRight) * 1;
                                 if (_hwBaseScore > 0) {
                                   const _freshU = userRef.current;
@@ -9195,8 +9380,11 @@ export const StudentDashboard: React.FC<Props> = ({
                                     triggerRewardEffect(_hwEarned, `+${_hwEarned} pts 🧠 Competition MCQ!`);
                                   }
                                 }
+                                const _pct = totalQ > 0 ? Math.round((_hwRight / totalQ) * 100) : 0;
+                                const _newHist = { score: _pct, timestamp: Date.now(), total: totalQ, correct: _hwRight };
+                                recordMcqScore((activeHw as any).id || hwKey, _newHist);
                                 setHwManualSubmitted(prev => ({ ...prev, [hwKey]: true }));
-                                 setHwShowAnalysis(hwKey);
+                                setHwShowAnalysis(hwKey);
                               }}
                               className="mb-3 w-full py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-green-600 text-white font-black text-sm flex items-center justify-center gap-2 shadow-lg active:scale-95 transition animate-pulse"
                             >🏁 Submit Quiz — Result Dekho</button>
@@ -9403,54 +9591,100 @@ export const StudentDashboard: React.FC<Props> = ({
                   <h2 className={`text-xl font-black ${theme.textDeep}`}>Week {hwWeek}</h2>
                 </div>
               </div>
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {weekHw.map((hw, idx) => {
-                  const d = new Date(hw.date);
-                  const dayName = d.toLocaleDateString('default', { weekday: 'long' });
-                  const openHw = () => {
-                    // For MCQ subject, jump directly into the full-screen player
-                    if (homeworkSubjectView === 'mcq' && ((hw.parsedMcqs && hw.parsedMcqs.length > 0) || hw.notes)) {
-                      setHomeworkPlayerHwId(hw.id || String(idx));
-                      setPlayerCurrentIndex(0);
-                      setPlayerIsReadingAll(false);
-                      setPlayerRevealAll(true);
-                    } else {
-                      openHwWithReadGate(hw, () => setHwActiveHwId(hw.id || ''));
-                    }
-                  };
+                  const pageNum = parseInt(String((hw as any).pageNo ?? ''), 10) || (idx + 1);
+                  const mcqCount = (Array.isArray((hw as any).mcqs) ? (hw as any).mcqs.length : 0) || (Array.isArray(hw.parsedMcqs) ? hw.parsedMcqs.length : 0);
+                  const hwContentId = hw.id || `hw_w_${idx}`;
+                  const hasWriting = !!(hw as any).htmlNotes;
+                  const hasMcq = mcqCount > 0;
+                  const _mcqs = (hw.parsedMcqs || (hw as any).mcqs || []) as any[];
+
                   return (
-                    <div
-                      key={hw.id || idx}
-                      role="button"
-                      tabIndex={0}
-                      onClick={openHw}
-                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') openHw(); }}
-                      className={`w-full text-left border-2 rounded-2xl p-4 flex items-center gap-3 hover:shadow-md transition-all active:scale-[0.98] cursor-pointer`}
-                      style={{ background: tierTheme.profileCardBg, borderColor: tierTheme.primary }}
-                    >
-                      <div className={`${theme.bgSoft} ${theme.textDeep} w-14 h-14 rounded-xl flex flex-col items-center justify-center shrink-0`}>
-                        <span className="text-xl font-black leading-none">{d.getDate()}</span>
-                        <span className="text-[9px] font-bold uppercase mt-0.5">{dayName.slice(0,3)}</span>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className={`text-[10px] font-bold ${theme.text} uppercase tracking-widest`}>{dayName}</p>
-                        <div className="flex items-center gap-1.5">
-                          <p className="font-black text-slate-800 text-sm leading-snug truncate flex-1">{hw.title}</p>
-                        </div>
-                        <div className="flex gap-1 mt-1">
-                          {(hw.notes || (hw as any).chunkNotes || (hw as any).htmlNotes) && <span className={`text-[9px] font-bold ${theme.chip} px-1.5 py-0.5 rounded`}>NOTES</span>}
-                          {hw.parsedMcqs && hw.parsedMcqs.length > 0 && <span className={`text-[9px] font-bold ${theme.chip} px-1.5 py-0.5 rounded`}>{hw.parsedMcqs.length} MCQ</span>}
-                          {hw.audioUrl && <span className={`text-[9px] font-bold ${theme.chip} px-1.5 py-0.5 rounded`}>AUDIO</span>}
-                          {hw.videoUrl && <span className={`text-[9px] font-bold ${theme.chip} px-1.5 py-0.5 rounded`}>VIDEO</span>}
-                          {hw.pdfUrl && <span className={`text-[9px] font-bold ${theme.chip} px-1.5 py-0.5 rounded`}>PDF</span>}
-                        </div>
-                      </div>
-                      <div className="flex flex-col items-end gap-1 shrink-0">
-                        <ChevronRight size={18} className={`${theme.text}`} />
-                        {user.role === 'ADMIN' && (
-                          <button onClick={(e) => { e.stopPropagation(); openContentCodeModal(hw.id || '', hw.title || ''); }} className="text-[9px] font-black bg-amber-50 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5 active:scale-95 transition">🎫 Code</button>
-                        )}
-                      </div>
+                    <div key={hw.id || idx} className="space-y-1">
+                      <SyllabusPageCard
+                        page={hw}
+                        pageIndex={pageNum > 0 ? pageNum - 1 : idx}
+                        lessonId={hw.id || `hw_w_${idx}`}
+                        lessonTitle={hw.title || `Page ${pageNum}`}
+                        user={user}
+                        settings={settings}
+                        tierTheme={tierTheme}
+                        isOpen={openStudyStatsKeyHw === hwContentId}
+                        onToggle={() => setOpenStudyStatsKeyHw(cur => cur === hwContentId ? null : hwContentId)}
+                        onOpenReading={() => {
+                          if (hw?.id) {
+                            openHwWithModeGate(hw, 'READING', () => {
+                              setHwViewMode('notes');
+                              setHwNotesViewMode('chunk');
+                              setHwActiveHwId(hw.id!);
+                            });
+                          }
+                        }}
+                        onOpenWriting={hasWriting ? () => {
+                          if (hw?.id) {
+                            openHwWithModeGate(hw, 'WRITING', () => {
+                              setHwViewMode('notes');
+                              setHwNotesViewMode('html');
+                              setHwActiveHwId(hw.id!);
+                            });
+                          }
+                        } : undefined}
+                        onOpenMcq={() => {
+                          if (hw?.id) {
+                            openHwWithModeGate(hw, 'MCQ', () => {
+                              setHwViewMode('mcq');
+                              setHwActiveHwId(hw.id!);
+                            });
+                          }
+                        }}
+                        onOpenPdf={(hw as any).pdfUrl ? () => {
+                          if (hw?.id) {
+                            openHwWithModeGate(hw, 'PDF', () => {
+                              setHwViewMode('pdf');
+                              setHwActiveHwId(hw.id!);
+                            });
+                          }
+                        } : undefined}
+                        onOpenVideo={hw.videoUrl ? () => {
+                          if (hw?.id) {
+                            openHwWithModeGate(hw, 'VIDEO', () => {
+                              setHwViewMode('video');
+                              setHwActiveHwId(hw.id!);
+                            });
+                          }
+                        } : undefined}
+                        onOpenAudio={hw.audioUrl ? () => {
+                          if (hw?.id) {
+                            openHwWithModeGate(hw, 'AUDIO', () => {
+                              setHwViewMode('audio');
+                              setHwActiveHwId(hw.id!);
+                            });
+                          }
+                        } : undefined}
+                        onPracticeMistakes={hasMcq ? () => handlePracticeHwMistakes(hw) : undefined}
+                        adminAction={
+                          <div className="flex items-center gap-2">
+                            {user.role === 'ADMIN' && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); openContentCodeModal(hw.id || '', hw.title || `Page ${pageNum}`); }}
+                                className="flex items-center gap-0.5 px-2 py-0.5 rounded text-[9px] font-black bg-amber-50 text-amber-700 border border-amber-200 active:scale-95 transition-all"
+                              >
+                                🎫 Code
+                              </button>
+                            )}
+                            {_isAdminUser && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); openHwEntryEdit(hw); }}
+                                className="flex items-center gap-0.5 px-2 py-0.5 rounded text-[9px] font-black bg-amber-50 text-amber-600 border border-amber-200 active:scale-95 transition-all"
+                              >
+                                <Pencil size={9} /> Edit
+                              </button>
+                            )}
+                          </div>
+                        }
+                        showAlert={showAlert}
+                      />
                     </div>
                   );
                 })}
@@ -9486,49 +9720,101 @@ export const StudentDashboard: React.FC<Props> = ({
               {monthHw.length === 0 ? (
                 <div className="text-center text-slate-500 text-sm py-12">No notes for this month.</div>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-2">
                   {monthHw.map((hw, idx) => {
-                    const d = new Date(hw.date);
-                    const dayName = d.toLocaleDateString('default', { weekday: 'long' });
-                    const openHw = () => {
-                      if (homeworkSubjectView === 'mcq' && ((hw.parsedMcqs && hw.parsedMcqs.length > 0) || hw.notes)) {
-                        setHomeworkPlayerHwId(hw.id || String(idx));
-                        setPlayerCurrentIndex(0);
-                        setPlayerIsReadingAll(false);
-                        setPlayerRevealAll(true);
-                      } else {
-                        openHwWithReadGate(hw, () => setHwActiveHwId(hw.id || ''));
-                      }
-                    };
+                    const pageNum = parseInt(String((hw as any).pageNo ?? ''), 10) || (idx + 1);
+                    const mcqCount = (Array.isArray((hw as any).mcqs) ? (hw as any).mcqs.length : 0) || (Array.isArray(hw.parsedMcqs) ? hw.parsedMcqs.length : 0);
+                    const hwContentId = hw.id || `hw_m_${idx}`;
+                    const hasWriting = !!(hw as any).htmlNotes;
+                    const hasMcq = mcqCount > 0;
+                    const _mcqs = (hw.parsedMcqs || (hw as any).mcqs || []) as any[];
+
                     return (
-                      <button
-                        key={hw.id || idx}
-                        onClick={openHw}
-                        className={`w-full text-left border-2 rounded-2xl p-4 flex items-center gap-3 hover:shadow-md transition-all active:scale-[0.98]`}
-                        style={{ background: tierTheme.profileCardBg, borderColor: tierTheme.primary }}
-                      >
-                        <div className={`${theme.bgSoft} ${theme.textDeep} w-14 h-14 rounded-xl flex flex-col items-center justify-center shrink-0`}>
-                          <span className="text-xl font-black leading-none">{d.getDate()}</span>
-                          <span className="text-[9px] font-bold uppercase mt-0.5">{dayName.slice(0,3)}</span>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className={`text-[10px] font-bold ${theme.text} uppercase tracking-widest`}>{dayName}</p>
-                          <p className="font-black text-slate-800 text-sm leading-snug truncate">{hw.title}</p>
-                          <div className="flex gap-1 mt-1">
-                            {(hw.notes || (hw as any).chunkNotes || (hw as any).htmlNotes) && <span className={`text-[9px] font-bold ${theme.chip} px-1.5 py-0.5 rounded`}>NOTES</span>}
-                            {hw.parsedMcqs && hw.parsedMcqs.length > 0 && <span className={`text-[9px] font-bold ${theme.chip} px-1.5 py-0.5 rounded`}>{hw.parsedMcqs.length} MCQ</span>}
-                            {hw.audioUrl && <span className={`text-[9px] font-bold ${theme.chip} px-1.5 py-0.5 rounded`}>AUDIO</span>}
-                            {hw.videoUrl && <span className={`text-[9px] font-bold ${theme.chip} px-1.5 py-0.5 rounded`}>VIDEO</span>}
-                            {hw.pdfUrl && <span className={`text-[9px] font-bold ${theme.chip} px-1.5 py-0.5 rounded`}>PDF</span>}
-                          </div>
-                        </div>
-                        <div className="flex flex-col items-end gap-1 shrink-0">
-                          <ChevronRight size={18} className={`${theme.text}`} />
-                          {user.role === 'ADMIN' && (
-                            <button onClick={(e) => { e.stopPropagation(); openContentCodeModal(hw.id || '', hw.title || ''); }} className="text-[9px] font-black bg-amber-50 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5 active:scale-95 transition">🎫 Code</button>
-                          )}
-                        </div>
-                      </button>
+                      <div key={hw.id || idx} className="space-y-1">
+                        <SyllabusPageCard
+                          page={hw}
+                          pageIndex={pageNum > 0 ? pageNum - 1 : idx}
+                          lessonId={hw.id || `hw_m_${idx}`}
+                          lessonTitle={hw.title || `Page ${pageNum}`}
+                          user={user}
+                          settings={settings}
+                          tierTheme={tierTheme}
+                          isOpen={openStudyStatsKeyHw === hwContentId}
+                          onToggle={() => setOpenStudyStatsKeyHw(cur => cur === hwContentId ? null : hwContentId)}
+                          onOpenReading={() => {
+                            if (hw?.id) {
+                              openHwWithModeGate(hw, 'READING', () => {
+                                setHwViewMode('notes');
+                                setHwNotesViewMode('chunk');
+                                setHwActiveHwId(hw.id!);
+                              });
+                            }
+                          }}
+                          onOpenWriting={hasWriting ? () => {
+                            if (hw?.id) {
+                              openHwWithModeGate(hw, 'WRITING', () => {
+                                setHwViewMode('notes');
+                                setHwNotesViewMode('html');
+                                setHwActiveHwId(hw.id!);
+                              });
+                            }
+                          } : undefined}
+                          onOpenMcq={() => {
+                            if (hw?.id) {
+                              openHwWithModeGate(hw, 'MCQ', () => {
+                                setHwViewMode('mcq');
+                                setHwActiveHwId(hw.id!);
+                              });
+                            }
+                          }}
+                          onOpenPdf={(hw as any).pdfUrl ? () => {
+                            if (hw?.id) {
+                              openHwWithModeGate(hw, 'PDF', () => {
+                                setHwViewMode('pdf');
+                                setHwActiveHwId(hw.id!);
+                              });
+                            }
+                          } : undefined}
+                          onOpenVideo={hw.videoUrl ? () => {
+                            if (hw?.id) {
+                              openHwWithModeGate(hw, 'VIDEO', () => {
+                                setHwViewMode('video');
+                                setHwActiveHwId(hw.id!);
+                              });
+                            }
+                          } : undefined}
+                          onOpenAudio={hw.audioUrl ? () => {
+                            if (hw?.id) {
+                              openHwWithModeGate(hw, 'AUDIO', () => {
+                                setHwViewMode('audio');
+                                setHwActiveHwId(hw.id!);
+                              });
+                            }
+                          } : undefined}
+                          onPracticeMistakes={hasMcq ? () => handlePracticeHwMistakes(hw) : undefined}
+                          adminAction={
+                            <div className="flex items-center gap-2">
+                              {user.role === 'ADMIN' && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); openContentCodeModal(hw.id || '', hw.title || `Page ${pageNum}`); }}
+                                  className="flex items-center gap-0.5 px-2 py-0.5 rounded text-[9px] font-black bg-amber-50 text-amber-700 border border-amber-200 active:scale-95 transition-all"
+                                >
+                                  🎫 Code
+                                </button>
+                              )}
+                              {_isAdminUser && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); openHwEntryEdit(hw); }}
+                                  className="flex items-center gap-0.5 px-2 py-0.5 rounded text-[9px] font-black bg-amber-50 text-amber-600 border border-amber-200 active:scale-95 transition-all"
+                                >
+                                  <Pencil size={9} /> Edit
+                                </button>
+                              )}
+                            </div>
+                          }
+                          showAlert={showAlert}
+                        />
+                      </div>
                     );
                   })}
                 </div>
@@ -9622,80 +9908,99 @@ export const StudentDashboard: React.FC<Props> = ({
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {withPage.map((hw) => {
-                    const pageNum = parseInt(String((hw as any).pageNo ?? ''), 10);
-                    const mcqCount = Array.isArray((hw as any).mcqs) ? (hw as any).mcqs.length : 0;
-                    const d = new Date(hw.date);
-                    const monthYear = `${monthNames[d.getMonth()]} ${d.getFullYear()}`;
-                    const hwContentId = hw.id || '';
-                    const hwStudyModes: StudyCardMode[] = [
-                      ...((((hw as any).chunkNotes || (hw as any).htmlNotes || hw.notes)) ? [{ mode: 'READING' as const, label: 'Read', emoji: '📖' }] : []),
-                      ...((hw as any).htmlNotes ? [{ mode: 'WRITING' as const, label: 'Write', emoji: '✍️' }] : []),
-                      ...(mcqCount > 0 ? [
-                        { mode: 'MCQ' as const, label: 'MCQ', emoji: '🧠' },
-                        { mode: 'FLASHCARD' as const, label: 'Flash', emoji: '🃏' },
-                        { mode: 'QA' as const, label: 'Q&A', emoji: '💬' },
-                      ] : []),
-                      ...((hw as any).pdfUrl ? [{ mode: 'PDF' as const, label: 'PDF', emoji: '📄' }] : []),
-                      ...(hw.videoUrl ? [{ mode: 'VIDEO' as const, label: 'Video', emoji: '🎬' }] : []),
-                      ...(hw.audioUrl ? [{ mode: 'AUDIO' as const, label: 'Audio', emoji: '🔊' }] : []),
-                    ];
-                    const openHwStudyMode = (mode: StudyActivityMode) => {
-                      const vm = mode === 'MCQ' ? 'mcq' : mode === 'FLASHCARD' ? 'flashcard' : mode === 'QA' ? 'qa' : mode === 'PDF' ? 'pdf' : mode === 'VIDEO' ? 'video' : mode === 'AUDIO' ? 'audio' : 'notes';
-                      const nm: 'html' | 'chunk' = mode === 'WRITING' ? 'html' : 'chunk';
-                      if (hw?.id) openHwWithReadGate(hw, () => { setHwViewMode(vm as any); setHwNotesViewMode(nm); setHwActiveHwId(hw.id!); });
-                    };
+                  {withPage.map((hw, idx) => {
+                    const pageNum = parseInt(String((hw as any).pageNo ?? ''), 10) || (idx + 1);
+                    const mcqCount = (Array.isArray((hw as any).mcqs) ? (hw as any).mcqs.length : 0) || (Array.isArray(hw.parsedMcqs) ? hw.parsedMcqs.length : 0);
+                    const hwContentId = hw.id || `hw_${idx}`;
+                    const hasWriting = !!(hw as any).htmlNotes;
+                    const hasMcq = mcqCount > 0;
+                    const _mcqs = (hw.parsedMcqs || (hw as any).mcqs || []) as any[];
+
                     return (
-                      <div key={hw.id} className="rounded-2xl overflow-hidden border" style={{ borderColor: `${tierTheme.primary}55` }}>
-                        {/* ── Main tap area ── */}
-                        <div
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => { if (hw?.id) openHwWithReadGate(hw, () => { setHwViewMode('notes'); setHwNotesViewMode('chunk'); setHwActiveHwId(hw.id!); }); }}
-                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { if (hw?.id) openHwWithReadGate(hw, () => { setHwViewMode('notes'); setHwNotesViewMode('chunk'); setHwActiveHwId(hw.id!); }); } }}
-                          className="w-full p-2 text-left hover:shadow-md transition-all active:scale-[0.99] flex items-center gap-2.5 cursor-pointer"
-                          style={{ background: tierTheme.profileCardBg }}
-                        >
-                          <div className={`${theme.bgSoft} ${theme.textDeep} w-10 h-10 rounded-lg shrink-0 flex flex-col items-center justify-center`}>
-                            <span className="text-[8px] font-bold uppercase tracking-wider opacity-60">Pg</span>
-                            <span className="text-base font-black leading-none">{pageNum}</span>
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className={`text-sm font-black ${theme.textDeep} truncate`}>{hw.title || `Page ${pageNum}`}</p>
-                            <div className="flex items-center gap-1 mt-1 flex-wrap">
-                              {((hw as any).isUltra || (hw as any).tier === 'ULTRA') && <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-purple-600 text-white"><Crown size={9}/> ULTRA</span>}
-                              <span className={`text-[9px] font-bold ${theme.text} opacity-50`}>{monthYear}</span>
-                              {hw.id && (() => { const _ht = getLessonStats(hw.id, 1); return _ht.totalTime > 0 ? <span className="flex items-center gap-[3px] text-[9px] font-black px-1.5 py-[3px] rounded-full" style={{ background: `${tierTheme.primary}1a`, color: tierTheme.primary }}><Clock size={8} strokeWidth={2.5} />{formatDuration(_ht.totalTime)}</span> : null; })()}
+                      <div key={hw.id || idx} className="space-y-1">
+                        <SyllabusPageCard
+                          page={hw}
+                          pageIndex={pageNum > 0 ? pageNum - 1 : idx}
+                          lessonId={hw.id || `hw_${idx}`}
+                          lessonTitle={hw.title || `Page ${pageNum}`}
+                          user={user}
+                          settings={settings}
+                          tierTheme={tierTheme}
+                          isOpen={openStudyStatsKeyHw === hwContentId}
+                          onToggle={() => setOpenStudyStatsKeyHw(cur => cur === hwContentId ? null : hwContentId)}
+                          onOpenReading={() => {
+                            if (hw?.id) {
+                              openHwWithModeGate(hw, 'READING', () => {
+                                setHwViewMode('notes');
+                                setHwNotesViewMode('chunk');
+                                setHwActiveHwId(hw.id!);
+                              });
+                            }
+                          }}
+                          onOpenWriting={hasWriting ? () => {
+                            if (hw?.id) {
+                              openHwWithModeGate(hw, 'WRITING', () => {
+                                setHwViewMode('notes');
+                                setHwNotesViewMode('html');
+                                setHwActiveHwId(hw.id!);
+                              });
+                            }
+                          } : undefined}
+                          onOpenMcq={() => {
+                            if (hw?.id) {
+                              openHwWithModeGate(hw, 'MCQ', () => {
+                                setHwViewMode('mcq');
+                                setHwActiveHwId(hw.id!);
+                              });
+                            }
+                          }}
+                          onOpenPdf={(hw as any).pdfUrl ? () => {
+                            if (hw?.id) {
+                              openHwWithModeGate(hw, 'PDF', () => {
+                                setHwViewMode('pdf');
+                                setHwActiveHwId(hw.id!);
+                              });
+                            }
+                          } : undefined}
+                          onOpenVideo={hw.videoUrl ? () => {
+                            if (hw?.id) {
+                              openHwWithModeGate(hw, 'VIDEO', () => {
+                                setHwViewMode('video');
+                                setHwActiveHwId(hw.id!);
+                              });
+                            }
+                          } : undefined}
+                          onOpenAudio={hw.audioUrl ? () => {
+                            if (hw?.id) {
+                              openHwWithModeGate(hw, 'AUDIO', () => {
+                                setHwViewMode('audio');
+                                setHwActiveHwId(hw.id!);
+                              });
+                            }
+                          } : undefined}
+                          onPracticeMistakes={hasMcq ? () => handlePracticeHwMistakes(hw) : undefined}
+                          adminAction={
+                            <div className="flex items-center gap-2">
                               {user.role === 'ADMIN' && (
-                                <button onClick={(e) => { e.stopPropagation(); openContentCodeModal(hw.id || '', hw.title || `Page ${pageNum}`); }} className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-50 text-amber-700 border border-amber-200 active:scale-95 transition-all">🎫 Code</button>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); openContentCodeModal(hw.id || '', hw.title || `Page ${pageNum}`); }}
+                                  className="flex items-center gap-0.5 px-2 py-0.5 rounded text-[9px] font-black bg-amber-50 text-amber-700 border border-amber-200 active:scale-95 transition-all"
+                                >
+                                  🎫 Code
+                                </button>
+                              )}
+                              {_isAdminUser && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); openHwEntryEdit(hw); }}
+                                  className="flex items-center gap-0.5 px-2 py-0.5 rounded text-[9px] font-black bg-amber-50 text-amber-600 border border-amber-200 active:scale-95 transition-all"
+                                >
+                                  <Pencil size={9} /> Edit
+                                </button>
                               )}
                             </div>
-                          </div>
-                          <ChevronRight size={15} className={`${theme.text} shrink-0`} />
-                        </div>
-                        {/* ── Expandable: mode buttons + stats ── */}
-                        {hwStudyModes.length > 0 && (
-                          <StudyCardExpandable
-                            modes={hwStudyModes}
-                            onModeClick={openHwStudyMode}
-                            userId={user.id}
-                            contentId={hwContentId}
-                            totalMcqs={mcqCount}
-                            open={openStudyStatsKeyHw === hwContentId}
-                            onToggle={() => setOpenStudyStatsKeyHw(cur => cur === hwContentId ? null : hwContentId)}
-                          />
-                        )}
-                        {/* ── Admin edit ── */}
-                        {_isAdminUser && (
-                          <div className="flex justify-end px-3 py-1.5 border-t border-slate-100 bg-slate-50/70">
-                            <button
-                              onClick={(e) => { e.stopPropagation(); openHwEntryEdit(hw); }}
-                              className="flex items-center gap-0.5 px-2 py-0.5 rounded text-[9px] font-black bg-amber-50 text-amber-600 border border-amber-200 active:scale-95 transition-all"
-                            >
-                              <Pencil size={9} /> Edit
-                            </button>
-                          </div>
-                        )}
+                          }
+                          showAlert={showAlert}
+                        />
                       </div>
                     );
                   })}
@@ -9703,32 +10008,100 @@ export const StudentDashboard: React.FC<Props> = ({
                   {withoutPage.length > 0 && (
                     <>
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-4 mb-1 px-1">Without page number</p>
-                      {withoutPage.map((hw) => {
-                        const mcqCount = Array.isArray((hw as any).mcqs) ? (hw as any).mcqs.length : 0;
-                        const d = new Date(hw.date);
-                        const monthYear = `${monthNames[d.getMonth()]} ${d.getFullYear()}`;
+                      {withoutPage.map((hw, idx) => {
+                        const pageNum = withPage.length + idx + 1;
+                        const mcqCount = (Array.isArray((hw as any).mcqs) ? (hw as any).mcqs.length : 0) || (Array.isArray(hw.parsedMcqs) ? hw.parsedMcqs.length : 0);
+                        const hwContentId = hw.id || `hw_wp_${idx}`;
+                        const hasWriting = !!(hw as any).htmlNotes;
+                        const hasMcq = mcqCount > 0;
+                        const _mcqs = (hw.parsedMcqs || (hw as any).mcqs || []) as any[];
+
                         return (
-                          <button
-                            key={hw.id}
-                            onClick={() => openHwWithReadGate(hw, () => setHwActiveHwId(hw.id || null))}
-                            className={`w-full bg-white border-2 border-slate-200 rounded-2xl p-3 text-left hover:shadow-md transition-all active:scale-[0.99] flex items-center gap-3`}
-                          >
-                            <div className="bg-slate-100 text-slate-600 w-14 h-14 rounded-xl shrink-0 flex items-center justify-center">
-                              <FileText size={20} />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-black text-slate-700 truncate">{hw.title || 'Untitled'}</p>
-                              <div className="flex items-center gap-2 mt-1 flex-wrap">
-                                {mcqCount > 0 ? (
-                                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700`}><HelpCircle size={9} className="inline mr-0.5"/>{mcqCount} MCQ</span>
-                                ) : (
-                                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-400"><HelpCircle size={9} className="inline mr-0.5"/>0 MCQ</span>
-                                )}
-                                <span className={`text-[10px] font-bold ${theme.text} bg-slate-50 px-1.5 py-0.5 rounded`}>{monthYear}</span>
-                              </div>
-                            </div>
-                            <ChevronRight size={18} className="text-slate-400" />
-                          </button>
+                          <div key={hw.id || idx} className="space-y-1">
+                            <SyllabusPageCard
+                              page={hw}
+                              pageIndex={pageNum - 1}
+                              lessonId={hw.id || `hw_wp_${idx}`}
+                              lessonTitle={hw.title || `Note ${idx + 1}`}
+                              user={user}
+                              settings={settings}
+                              tierTheme={tierTheme}
+                              isOpen={openStudyStatsKeyHw === hwContentId}
+                              onToggle={() => setOpenStudyStatsKeyHw(cur => cur === hwContentId ? null : hwContentId)}
+                              onOpenReading={() => {
+                                if (hw?.id) {
+                                  openHwWithModeGate(hw, 'READING', () => {
+                                    setHwViewMode('notes');
+                                    setHwNotesViewMode('chunk');
+                                    setHwActiveHwId(hw.id!);
+                                  });
+                                }
+                              }}
+                              onOpenWriting={hasWriting ? () => {
+                                if (hw?.id) {
+                                  openHwWithModeGate(hw, 'WRITING', () => {
+                                    setHwViewMode('notes');
+                                    setHwNotesViewMode('html');
+                                    setHwActiveHwId(hw.id!);
+                                  });
+                                }
+                              } : undefined}
+                              onOpenMcq={() => {
+                                if (hw?.id) {
+                                  openHwWithModeGate(hw, 'MCQ', () => {
+                                    setHwViewMode('mcq');
+                                    setHwActiveHwId(hw.id!);
+                                  });
+                                }
+                              }}
+                              onOpenPdf={(hw as any).pdfUrl ? () => {
+                                if (hw?.id) {
+                                  openHwWithModeGate(hw, 'PDF', () => {
+                                    setHwViewMode('pdf');
+                                    setHwActiveHwId(hw.id!);
+                                  });
+                                }
+                              } : undefined}
+                              onOpenVideo={hw.videoUrl ? () => {
+                                if (hw?.id) {
+                                  openHwWithModeGate(hw, 'VIDEO', () => {
+                                    setHwViewMode('video');
+                                    setHwActiveHwId(hw.id!);
+                                  });
+                                }
+                              } : undefined}
+                              onOpenAudio={hw.audioUrl ? () => {
+                                if (hw?.id) {
+                                  openHwWithModeGate(hw, 'AUDIO', () => {
+                                    setHwViewMode('audio');
+                                    setHwActiveHwId(hw.id!);
+                                  });
+                                }
+                              } : undefined}
+                              onPracticeMistakes={hasMcq ? () => handlePracticeHwMistakes(hw) : undefined}
+                              adminAction={
+                                <div className="flex items-center gap-2">
+                                  {user.role === 'ADMIN' && (
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); openContentCodeModal(hw.id || '', hw.title || `Note ${idx + 1}`); }}
+                                      className="flex items-center gap-0.5 px-2 py-0.5 rounded text-[9px] font-black bg-amber-50 text-amber-700 border border-amber-200 active:scale-95 transition-all"
+                                    >
+                                      🎫 Code
+                                    </button>
+                                  )}
+                                  {_isAdminUser && (
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); openHwEntryEdit(hw); }}
+                                      className="flex items-center gap-0.5 px-2 py-0.5 rounded text-[9px] font-black bg-amber-50 text-amber-600 border border-amber-200 active:scale-95 transition-all"
+                                    >
+                                      <Pencil size={9} /> Edit
+                                    </button>
+                                  )}
+                                </div>
+                              }
+                              showAlert={showAlert}
+                            />
+                          </div>
                         );
                       })}
                     </>
@@ -10472,7 +10845,13 @@ export const StudentDashboard: React.FC<Props> = ({
                     className="rounded-xl overflow-hidden"
                     style={cardStyle}
                   >
-                    <button onClick={() => openRecentChapter(entry)} className="w-full text-left px-3 pt-2.5 pb-1 flex items-center gap-2 min-w-0">
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => openRecentChapter(entry)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openRecentChapter(entry); } }}
+                      className="w-full text-left px-3 pt-2.5 pb-1 flex items-center gap-2 min-w-0 cursor-pointer"
+                    >
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5 min-w-0">
                           <span className="text-[8px] font-black px-1.5 py-0.5 rounded-md shrink-0 uppercase tracking-wide"
@@ -10492,7 +10871,7 @@ export const StudentDashboard: React.FC<Props> = ({
                           <X size={10} />
                         </button>
                       </div>
-                    </button>
+                    </div>
                     <div className="h-[2px] mx-3 mb-2 rounded-full bg-slate-100 overflow-hidden">
                       <div className="h-full rounded-full" style={{ width: `${Math.max(2, entry.scrollPct)}%`, background: `linear-gradient(to right,${tierTheme.btnStart || tierTheme.primary},${tierTheme.btnEnd || tierTheme.primary})` }} />
                     </div>
@@ -10509,7 +10888,13 @@ export const StudentDashboard: React.FC<Props> = ({
                     className="rounded-xl overflow-hidden"
                     style={cardStyle}
                   >
-                    <button onClick={() => openRecentLucent(entry)} className="w-full text-left px-3 pt-2.5 pb-1 flex items-center gap-2 min-w-0">
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => openRecentLucent(entry)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openRecentLucent(entry); } }}
+                      className="w-full text-left px-3 pt-2.5 pb-1 flex items-center gap-2 min-w-0 cursor-pointer"
+                    >
                       <div className="flex-1 min-w-0 flex items-center gap-1.5">
                         <span className="text-[8px] font-black px-1.5 py-0.5 rounded-md shrink-0 bg-teal-50 text-teal-700">📗 Lucent{entry.pageNo ? ` · P.${entry.pageNo}` : ''}</span>
                         <p className="text-[12px] font-black truncate leading-none flex-1" style={{ color: tierTheme.textColor || '#0f172a' }}>{entry.lessonTitle}</p>
@@ -10522,7 +10907,7 @@ export const StudentDashboard: React.FC<Props> = ({
                           <X size={10} />
                         </button>
                       </div>
-                    </button>
+                    </div>
                     <div className="h-[2px] mx-3 mb-2 rounded-full bg-slate-100 overflow-hidden">
                       <div className="h-full rounded-full" style={{ width: `${Math.max(2, entry.scrollPct)}%`, background: `linear-gradient(to right,${tierTheme.btnStart || tierTheme.primary},${tierTheme.btnEnd || tierTheme.primary})` }} />
                     </div>
@@ -10540,7 +10925,13 @@ export const StudentDashboard: React.FC<Props> = ({
                   className="rounded-xl overflow-hidden"
                   style={cardStyle}
                 >
-                  <button onClick={() => openRecentHw(entry)} className="w-full text-left px-3 pt-2.5 pb-1 flex items-center gap-2 min-w-0">
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => openRecentHw(entry)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openRecentHw(entry); } }}
+                    className="w-full text-left px-3 pt-2.5 pb-1 flex items-center gap-2 min-w-0 cursor-pointer"
+                  >
                     <div className="flex-1 min-w-0 flex items-center gap-1.5">
                       <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-md shrink-0 ${meta.chipBg} ${meta.chipText}`}>
                         {meta.label}{entry.hw?.pageNo ? ` · P.${entry.hw.pageNo}` : ''}
@@ -10557,7 +10948,7 @@ export const StudentDashboard: React.FC<Props> = ({
                         <X size={10} />
                       </button>
                     </div>
-                  </button>
+                  </div>
                   <div className="h-[2px] mx-3 mb-2 rounded-full bg-slate-100 overflow-hidden">
                     <div className={`h-full rounded-full bg-gradient-to-r ${meta.barFrom} ${meta.barTo}`} style={{ width: `${Math.max(2, entry.scrollPct)}%` }} />
                   </div>
@@ -11251,23 +11642,11 @@ export const StudentDashboard: React.FC<Props> = ({
         </div>
       );
     if (activeTab === "GAME")
-      return isGameEnabled ? (
-        user.isGameBanned ? (
-          <div className="text-center py-20 bg-red-50 rounded-2xl border border-red-100">
-            <Ban size={48} className="mx-auto text-red-500 mb-4" />
-            <h3 className="text-lg font-bold text-red-700">Access Denied</h3>
-            <p className="text-sm text-red-600">
-              Admin has disabled the game for your account.
-            </p>
-          </div>
-        ) : (
-          <SpinWheel
-            user={user}
-            onUpdateUser={handleUserUpdate}
-            settings={settings}
-          />
-        )
-      ) : null;
+      return (
+        <div className="text-center py-20 bg-slate-900/40 rounded-2xl border border-slate-800 text-slate-400">
+          <p className="text-sm font-semibold">Spin Game feature has been retired.</p>
+        </div>
+      );
     if (activeTab === "REDEEM")
       return (
         <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
@@ -11284,29 +11663,6 @@ export const StudentDashboard: React.FC<Props> = ({
           onBack={() => onTabChange('HOME')}
           themeColor={(tierTheme as any).primary}
           tierTheme={tierTheme}
-          renderEarnContent={
-            isGameEnabled
-              ? user.isGameBanned
-                ? (
-                  <div className="mx-4 text-center py-10 bg-red-50 rounded-2xl border border-red-200">
-                    <Ban size={36} className="mx-auto text-red-400 mb-3" />
-                    <p className="text-sm font-bold text-red-500">Game has been disabled by admin.</p>
-                  </div>
-                )
-                : (
-                  <SpinWheel
-                    user={user}
-                    onUpdateUser={handleUserUpdate}
-                    settings={settings}
-                  />
-                )
-              : (
-                <div className="mx-4 text-center py-14 bg-slate-50 rounded-2xl border border-slate-200">
-                  <Gamepad2 size={36} className="mx-auto text-slate-300 mb-3" />
-                  <p className="text-sm font-bold text-slate-400">Game is currently disabled by admin.</p>
-                </div>
-              )
-          }
         />
       );
     }
@@ -12115,17 +12471,17 @@ export const StudentDashboard: React.FC<Props> = ({
                   border: `1px solid ${user.securityAnswer ? 'rgba(34,197,94,0.28)' : 'rgba(148,163,184,0.2)'}`,
                 }}>{user.securityAnswer ? '✓ Active' : 'Inactive'}</span>
               </div>
-              {/* UID row */}
+              {/* Student ID row */}
               <div className="flex items-center gap-3 px-4 py-3.5">
-                <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'rgba(234,179,8,0.12)', border: '1px solid rgba(234,179,8,0.2)' }}>
-                  <span style={{ fontSize: 16 }}>🔑</span>
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.2)' }}>
+                  <span style={{ fontSize: 16 }}>🪪</span>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="font-bold uppercase tracking-wider" style={{ fontSize: 9, color: _pTxtSubColor, marginBottom: 2 }}>Account UID</p>
-                  <p className="font-mono font-bold truncate" style={{ fontSize: 10.5, color: _pTxtMutedColor }}>{user.id}</p>
+                  <p className="font-bold uppercase tracking-wider" style={{ fontSize: 9, color: _pTxtSubColor, marginBottom: 2 }}>Student ID</p>
+                  <p className="font-mono font-bold truncate tracking-wider" style={{ fontSize: 12, color: _pTxtColor }}>{user.displayId || user.id}</p>
                 </div>
                 <button
-                  onClick={() => { try { navigator.clipboard.writeText(user.id); showAlert('UID copied!', 'SUCCESS'); } catch {} }}
+                  onClick={() => { try { navigator.clipboard.writeText(user.displayId || user.id); showAlert('Student ID copied!', 'SUCCESS'); } catch {} }}
                   className="shrink-0 px-2.5 py-1.5 rounded-xl font-black active:opacity-60 transition-opacity"
                   style={{ background: `${tierTheme.primary}14`, border: `1px solid ${tierTheme.primary}22`, fontSize: 12 }}
                 >📋</button>
@@ -12518,6 +12874,14 @@ export const StudentDashboard: React.FC<Props> = ({
             const _userSchoolId   = (user as any).schoolId as string | undefined;
             const _userCoachingId = (user as any).coachingId as string | undefined;
             const _userCoachingNm = (user as any).coachingName as string | undefined;
+
+            const hasSchool = !!(_userSchoolId && String(_userSchoolId).trim() !== '');
+            const hasCoaching = !!(_userCoachingId && String(_userCoachingId).trim() !== '') || isCoachingAdmin;
+
+            // Agar school aur coaching dono nahi hai to Profile page me Affiliations section hide rahega
+            if (!hasSchool && !hasCoaching) {
+              return null;
+            }
 
             const _joinSchool = async (school: any) => {
               const updated = { ...user, schoolId: school.id } as any;
@@ -13235,7 +13599,7 @@ export const StudentDashboard: React.FC<Props> = ({
             <div className="px-5 pt-4 pb-3 flex items-center justify-between" style={{ borderBottom: `1px solid ${_light ? 'rgba(0,0,0,0.07)' : 'rgba(255,255,255,0.09)'}` }}>
               <div className="flex flex-col gap-0.5">
                 <span className="text-[11px] font-black" style={{ color: _light ? '#1e293b' : 'rgba(255,255,255,0.85)' }}>
-                  {settings?.appName || "IIC Study App"}
+                  {settings?.appName || "NSTA"}
                 </span>
                 <span className="text-[10px]" style={{ color: _light ? '#64748b' : 'rgba(255,255,255,0.4)' }}>
                   Developed by Nadim Anwar
@@ -13255,7 +13619,7 @@ export const StudentDashboard: React.FC<Props> = ({
              </span>
              <div className="grid grid-cols-4 gap-2 mt-2.5">
                <a
-                 href="https://wa.me/918227070298?text=Hello%20Support,%20I%20need%20help%20with%20IIC%20App"
+                 href="https://wa.me/918227070298?text=Hello%20Support,%20I%20need%20help%20with%20NSTA%20App"
                  target="_blank"
                  rel="noopener noreferrer"
                  aria-label="WhatsApp support"
@@ -13623,7 +13987,7 @@ export const StudentDashboard: React.FC<Props> = ({
           {/* LEFT: logo + app name + verified badge — only the badge tap opens What's New */}
           <div className="flex items-center gap-2 shrink-0">
             <span className="font-black text-[23px] leading-tight tracking-tight uppercase text-white whitespace-nowrap">
-              {settings?.appShortName || settings?.appName || "IIC"}
+              {settings?.appShortName || settings?.appName || "NSTA"}
             </span>
             <button
               className="active:opacity-70 transition-opacity"
@@ -14098,14 +14462,23 @@ export const StudentDashboard: React.FC<Props> = ({
               );
             })()}
 
-            {/* 💡 Suggestions & Corrections */}
+            {/* 💻 Rotate Screen / Desktop Mode Button (Directly in top bar) */}
             <button
-              onClick={() => setShowSuggestionsPanel(true)}
-              className="p-[3px] rounded-xl transition-colors relative text-white shrink-0 active:scale-95"
-              title="Suggestions & Corrections"
-              style={{ color: 'rgba(255,255,255,0.85)' }}
+              onClick={async () => {
+                rotateFullscreenRef.current = true;
+                const result = await rotateScreen();
+                rotateFullscreenRef.current = false;
+                if (result === null) showAlert('Screen rotation is not supported on this device/browser.', 'WARNING');
+              }}
+              className={`p-[3px] rounded-xl transition-colors relative text-white shrink-0 active:scale-95${topBarBtnGlow ? ' nst-topbar-btn-glow' : ''}`}
+              title={isLandscape ? "Rotate to Portrait" : "Rotate Screen"}
+              style={{ color: isLandscape ? '#fde047' : 'rgba(255,255,255,0.92)' }}
             >
-              <Lightbulb size={19} />
+              {isLandscape ? (
+                <Smartphone size={19} className="text-amber-300" />
+              ) : (
+                <Laptop size={19} />
+              )}
             </button>
 
             {/* 3-dot menu */}
@@ -14300,23 +14673,12 @@ export const StudentDashboard: React.FC<Props> = ({
                             action: () => { setShowUserGuide(true); setShowDotsMenu(false); },
                           },
                           {
-                            label: 'Leaderboard',
-                            action: () => { setShowLevelLeaderboard(true); setShowDotsMenu(false); },
+                            label: 'Suggestions',
+                            action: () => { setShowSuggestionsPanel(true); setShowDotsMenu(false); },
                           },
                           {
                             label: 'Daily Limits',
                             action: () => { setShowDotsMenu(false); setShowScorePanel(true); setScorePanelTab('DAILY'); },
-                          },
-                          {
-                            label: 'Rotate Screen',
-                            right: isLandscape ? 'On' : undefined,
-                            action: async () => {
-                              setShowDotsMenu(false);
-                              rotateFullscreenRef.current = true;
-                              const result = await rotateScreen();
-                              rotateFullscreenRef.current = false;
-                              if (result === null) showAlert('Screen rotation is not supported on this device/browser.', 'WARNING');
-                            },
                           },
                           {
                             label: 'Profile',
@@ -15956,8 +16318,11 @@ export const StudentDashboard: React.FC<Props> = ({
             setHwSubjectOpenedFrom('HOMEWORK');
             onTabChange('COURSES');
           };
-          // Gate reading mode — only shown when lesson would open in notes/reading mode
-          if (hasNotes) { openHwWithReadGate(hw, doOpen); return; }
+          // Gate according to which mode will open
+          if (hasNotes) { openHwWithModeGate(hw, 'READING', doOpen); return; }
+          if (hasMcq) { openHwWithModeGate(hw, 'MCQ', doOpen); return; }
+          if (hasAudioDirect) { openHwWithModeGate(hw, 'AUDIO', doOpen); return; }
+          if (hasVideoDirect) { openHwWithModeGate(hw, 'VIDEO', doOpen); return; }
           doOpen();
         };
 
@@ -16719,10 +17084,8 @@ export const StudentDashboard: React.FC<Props> = ({
                       </div>
                     ) : (
                       <div className="space-y-4">
-                        {/* Mode selector — MCQ · Q&A · Flashcard (same pattern as
-                            Homework MCQs / Lucent MCQs). Flashcard button overlay
-                            launch karta hai, baaki dono inline render hote hain. */}
-                        <div className="bg-white border border-slate-200 rounded-2xl p-1.5 grid grid-cols-3 gap-1 shadow-sm">
+                        {/* Mode selector — MCQ · Flashcard */}
+                        <div className="bg-white border border-slate-200 rounded-2xl p-1.5 grid grid-cols-2 gap-1 shadow-sm">
                           <button
                             onClick={() => setCompMcqMode('mcq')}
                             className={`text-[11px] font-black uppercase tracking-wider py-2 rounded-xl transition-all ${
@@ -16732,16 +17095,6 @@ export const StudentDashboard: React.FC<Props> = ({
                             }`}
                           >
                             📝 MCQ
-                          </button>
-                          <button
-                            onClick={() => { setCompMcqMode('qa'); setCompQaRevealed({}); }}
-                            className={`text-[11px] font-black uppercase tracking-wider py-2 rounded-xl transition-all ${
-                              compMcqMode === 'qa'
-                                ? 'bg-purple-600 text-white shadow-sm'
-                                : 'bg-transparent text-slate-500 hover:bg-slate-50'
-                            }`}
-                          >
-                            💬 Q&amp;A
                           </button>
                           <button
                             onClick={() => {
@@ -18584,7 +18937,7 @@ export const StudentDashboard: React.FC<Props> = ({
         aria-hidden="true"
       >
         <h1 style={{ fontSize: '28px', fontWeight: 900, marginBottom: '4px' }}>
-          {settings?.appName || 'IIC'} — Competition MCQs
+          {settings?.appName || 'NSTA'} — Competition MCQs
         </h1>
         <p style={{ fontSize: '12px', color: '#64748b', marginBottom: '24px' }}>
           Downloaded: {new Date().toLocaleString()}
@@ -18649,7 +19002,7 @@ export const StudentDashboard: React.FC<Props> = ({
             <>
               <h1 style={{ fontSize: '28px', fontWeight: 900, marginBottom: '4px' }}>{hw.title}</h1>
               <p style={{ fontSize: '12px', color: '#64748b', marginBottom: '24px' }}>
-                {new Date(hw.date).toLocaleDateString('default', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · {settings?.appName || 'IIC'}
+                {new Date(hw.date).toLocaleDateString('default', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · {settings?.appName || 'NSTA'}
               </p>
               {hw.notes && (
                 <div style={{ fontSize: '14px', lineHeight: 1.7, whiteSpace: 'pre-wrap', marginBottom: '24px' }}>
@@ -18714,7 +19067,7 @@ export const StudentDashboard: React.FC<Props> = ({
                 {lv.lessonTitle} — Page {pg.pageNo}
               </h1>
               <p style={{ fontSize: '12px', color: '#64748b', marginBottom: '24px' }}>
-                {lv.subject} · Page {idx + 1} of {lv.pages.length} · {settings?.appName || 'IIC'} · Saved {new Date().toLocaleString()}
+                {lv.subject} · Page {idx + 1} of {lv.pages.length} · {settings?.appName || 'NSTA'} · Saved {new Date().toLocaleString()}
               </p>
               <div style={{ fontSize: '14px', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
                 {(pg as any).chunkNotes || pg.content || (pg as any).htmlNotes || ''}
@@ -18747,7 +19100,7 @@ export const StudentDashboard: React.FC<Props> = ({
                 {lv.lessonTitle} — Page {pg.pageNo} · MCQs
               </h1>
               <p style={{ fontSize: '12px', color: '#64748b', marginBottom: '24px' }}>
-                {lv.subject} · Page {idx + 1} of {lv.pages.length} · {mcqs.length} question{mcqs.length === 1 ? '' : 's'} · {settings?.appName || 'IIC'} · Saved {new Date().toLocaleString()}
+                {lv.subject} · Page {idx + 1} of {lv.pages.length} · {mcqs.length} question{mcqs.length === 1 ? '' : 's'} · {settings?.appName || 'NSTA'} · Saved {new Date().toLocaleString()}
               </p>
               {mcqs.length === 0 ? (
                 <p style={{ fontSize: '14px', color: '#64748b' }}>No MCQs available for this page.</p>
@@ -20345,162 +20698,190 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                 <ChevronLeft size={18} />
               </button>
               <div className="flex-1 min-w-0">
-                <p className="text-[13px] font-black text-white truncate leading-tight">{plEntry.lessonTitle}</p>
-                <p className="text-[10px] font-bold text-amber-300 uppercase tracking-wide">
-                  📘 {pages.length} page{pages.length !== 1 ? 's' : ''}
-                  {topicNames.length > 0 ? ` · ${topicNames.length} topic${topicNames.length > 1 ? 's' : ''}` : ''}
-                </p>
+                {(() => {
+                  const _isPremUser = !!(user.isPremium || user.subscriptionLevel === 'BASIC' || user.subscriptionLevel === 'ULTRA' || user.subscriptionTier === 'BASIC' || user.subscriptionTier === 'ULTRA');
+                  let _sumR = 0;
+                  let _sumM = 0;
+                  let _mcqCount = 0;
+                  pages.forEach((p, i) => {
+                    const _rSec = calculatePageRequiredReadingSec(p);
+                    const _st = getPageTime(plEntry.id, i);
+                    const _a = getStudyActivity(user.id, getStudyActivityKey(plEntry.id, i));
+                    const _cb = Math.max(_st, _a?.READING?.seconds || 0) + (_a?.WRITING?.seconds || 0);
+                    const _isDone = isRoutinePageRead(plEntry.id, i) || _cb >= _rSec;
+                    _sumR += _isDone ? 100 : (_isPremUser ? 0 : Math.min(99, Math.round((_cb / Math.max(_rSec, 1)) * 100)));
+                    if ((p.mcqs?.length || 0) > 0) {
+                      _mcqCount++;
+                      const _sh = (_a?.MCQ?.scoreHistory || []) as import('../utils/activityTracker').McqScoreAttempt[];
+                      const _bst = _sh.length > 0 ? _sh.reduce((b, s) => s.total > 0 && s.correct / s.total > b.correct / Math.max(b.total, 1) ? s : b, _sh[0]) : undefined;
+                      if (_bst && _bst.total > 0) {
+                        _sumM += Math.round((_bst.correct / _bst.total) * 100);
+                      }
+                    }
+                  });
+                  const _avgR = pages.length > 0 ? Math.round(_sumR / pages.length) : 0;
+                  const _avgM = _mcqCount > 0 ? Math.round(_sumM / _mcqCount) : 0;
+                  const _overallMastery = _mcqCount > 0 ? Math.round((_avgR + _avgM) / 2) : _avgR;
+                  return (
+                    <div>
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[13px] font-black text-white truncate leading-tight">{plEntry.lessonTitle}</p>
+                        <span className="text-[10px] font-black bg-white/20 text-white px-2 py-0.5 rounded-full shrink-0">
+                          {_overallMastery}% Mastered
+                        </span>
+                      </div>
+                      <div className="w-full h-1.5 bg-white/20 rounded-full overflow-hidden mt-1">
+                        <div className="h-full bg-gradient-to-r from-amber-300 to-emerald-400 rounded-full transition-all" style={{ width: `${_overallMastery}%` }} />
+                      </div>
+                      <p className="text-[9px] font-bold text-amber-200 uppercase tracking-wide mt-0.5">
+                        📘 {pages.length} pages · 📖 Read: {_avgR}% · 🧠 MCQ: {_avgM}%
+                      </p>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
 
             {/* Page list */}
-            <div className="flex-1 overflow-y-auto px-4 pt-3 pb-24 space-y-2">
+            <div className="flex-1 overflow-y-auto px-4 pt-3 pb-24 space-y-3">
               {pages.map((pg, idx) => {
-                const pgNo = pg.pageNo ? `Pg ${pg.pageNo}` : `Page ${idx + 1}`;
-                const topic = (pg.topicName || '').trim();
-                const preview = ((pg as any).chunkNotes || pg.content || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
-                const totalMcq = (pg.mcqs?.length || 0);
-                const pageMcqDone = isRoutinePageMcqDone(plEntry.id, idx);
-                const pageMcqScoreData = getRoutinePageMcqScore(plEntry.id, idx);
-                const pageRead = isRoutinePageRead(plEntry.id, idx);
-                // MCQ Latest + Best scores from full history
-                const _pgActKey = getStudyActivityKey(plEntry.id, idx);
-                const _pgAct = getStudyActivity(user.id, _pgActKey);
-                const _pgScoreHist = (_pgAct?.MCQ?.scoreHistory || []) as import('../utils/activityTracker').McqScoreAttempt[];
-                const _pgLatest = _pgScoreHist.at(-1);
-                const _pgBest = _pgScoreHist.length > 0
-                  ? _pgScoreHist.reduce((b, s) => (s.total > 0 && s.correct / s.total > b.correct / Math.max(b.total, 1)) ? s : b, _pgScoreHist[0])
-                  : undefined;
-                const _pgBestIsDiff = _pgBest && _pgLatest && (_pgBest.correct !== _pgLatest.correct || _pgBest.total !== _pgLatest.total);
-                // Box color: green = read+mcq done, orange = read only, gray = unread
-                const boxBg = pageMcqDone ? '#d1fae5' : pageRead ? '#fed7aa' : `${tierTheme.primary}20`;
-                const boxColor = pageMcqDone ? '#059669' : pageRead ? '#ea580c' : tierTheme.primary;
                 const _isAdminUser = user.role === 'ADMIN' || user.role === 'SUB_ADMIN';
-                const studyModes: StudyCardMode[] = [
-                  ...(((pg as any).chunkNotes || (pg as any).htmlNotes || pg.content) ? [{ mode: 'READING' as const, label: 'Read', emoji: '📖' }] : []),
-                  ...((pg as any).htmlNotes ? [{ mode: 'WRITING' as const, label: 'Write', emoji: '✍️' }] : []),
-                  ...(totalMcq > 0 ? [
-                    { mode: 'MCQ' as const, label: 'MCQ', emoji: '🧠' },
-                    { mode: 'PROJECTOR' as const, label: 'Projector', emoji: '📽️' },
-                    { mode: 'FLASHCARD' as const, label: 'Flash', emoji: '🃏' },
-                    { mode: 'QA' as const, label: 'Q&A', emoji: '💬' },
-                  ] : []),
-                  ...((pg as any).pdfUrl ? [{ mode: 'PDF' as const, label: 'PDF', emoji: '📄' }] : []),
-                  ...((pg as any).videoUrl ? [{ mode: 'VIDEO' as const, label: 'Video', emoji: '🎬' }] : []),
-                  ...((pg as any).audioUrl ? [{ mode: 'AUDIO' as const, label: 'Audio', emoji: '🔊' }] : []),
-                ];
-                const openStudyMode = (mode: StudyActivityMode) => {
-                  const tab = mode === 'READING' || mode === 'WRITING' ? 'NOTES' : mode;
-                  lucentInitialTabRef.current = {
-                    tab,
-                    ...(mode === 'READING' ? { viewMode: 'chunk' as const } : {}),
-                    ...(mode === 'WRITING' ? { viewMode: 'html' as const } : {}),
-                  };
-                  setLucentPageListViewer(null);
-                  tryOpenLucentNote(plEntry, idx);
-                };
+                const cardKey = getStudyActivityKey(plEntry.id, idx);
                 return (
-                  <div
-                    key={idx}
-                    className="nst-page-card nst-card-animated rounded-2xl overflow-hidden border"
-                    style={{
-                      borderColor: pageMcqDone ? '#6ee7b7' : pageRead ? '#fdba74' : (settings?.contentListCardBorder ? `${settings.contentListCardBorder}55` : `${tierTheme.primary}33`),
-                    }}
-                  >
-                    {/* ── Main tap area (students + admin) ── */}
-                    <button
-                      onClick={() => { lucentInitialTabRef.current = { tab: "NOTES", viewMode: "chunk" }; tryOpenLucentNote(plEntry, idx, { force: true }); }}
-                      className="w-full text-left px-4 py-3 flex items-center gap-3 active:scale-[0.98] transition-all"
-                      style={{ background: settings?.contentListCardBg || '#ffffff' }}
-                    >
-                      <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: boxBg }}>
-                        <span className="text-[11px] font-black" style={{ color: boxColor }}>{idx + 1}</span>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-xs font-black text-slate-700">{pgNo}</span>
-                          {topic && (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: `${tierTheme.primary}15`, color: tierTheme.primary }}>
-                              📌 {topic}
-                            </span>
-                          )}
-                          {totalMcq > 0 && (
-                            pageMcqDone ? (
-                              <span className="inline-flex items-center gap-1">
-                                {_pgLatest ? (
-                                  <>
-                                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${_pgLatest.correct / Math.max(_pgLatest.total, 1) >= 0.7 ? 'bg-emerald-50 text-emerald-700' : _pgLatest.correct / Math.max(_pgLatest.total, 1) >= 0.4 ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-600'}`}>
-                                      ✅ {_pgLatest.correct}/{_pgLatest.total}
-                                    </span>
-                                    {_pgBestIsDiff && _pgBest && (
-                                      <span className="text-[10px] font-bold bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded-full">
-                                        🏆 {_pgBest.correct}/{_pgBest.total}
-                                      </span>
-                                    )}
-                                  </>
-                                ) : (
-                                  <span className="text-[10px] font-bold bg-emerald-50 text-emerald-600 px-2 py-0.5 rounded-full">
-                                    ✅ {pageMcqScoreData ? `${pageMcqScoreData.correct}/${pageMcqScoreData.total}` : `${totalMcq}`} MCQ
-                                  </span>
-                                )}
-                              </span>
-                            ) : (
-                              <span className="text-[10px] font-bold bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full">
-                                ⏳ {totalMcq} MCQ
-                              </span>
-                            )
-                          )}
-                          {pageRead && !pageMcqDone && totalMcq === 0 && (
-                            <span className="text-[10px] font-bold bg-blue-50 text-blue-500 px-2 py-0.5 rounded-full">✓ Padha</span>
-                          )}
-                        </div>
-                        {preview && (
-                          <p className="text-[11px] text-slate-400 mt-1 truncate">{preview}…</p>
-                        )}
-                        {(() => {
-                          const _pt = getPageTime(plEntry.id, idx);
-                          if (_pt <= 0) return null;
-                          const _tks = getProgressTicks(pageMcqDone ? 100 : pageRead ? 50 : 0);
-                          return (
-                            <div className="flex items-center gap-2 mt-1">
-                              <span className="flex items-center gap-[3px] text-[9px] font-black px-1.5 py-[3px] rounded-full" style={{ background: `${tierTheme.primary}1a`, color: tierTheme.primary }}><Clock size={8} strokeWidth={2.5} />{formatDuration(_pt)}</span>
-                              {_tks && <span className="text-[9px] font-bold text-emerald-600">{_tks}</span>}
-                            </div>
+                  <div key={idx} className="space-y-1">
+                    <SyllabusPageCard
+                      page={pg}
+                      pageIndex={idx}
+                      lessonId={plEntry.id}
+                      lessonTitle={plEntry.lessonTitle || ''}
+                      user={user}
+                      settings={settings}
+                      tierTheme={tierTheme}
+                      isOpen={openStudyStatsKey === cardKey}
+                      onToggle={() => setOpenStudyStatsKey(current => current === cardKey ? null : cardKey)}
+                      onOpenReading={() => {
+                        lucentInitialTabRef.current = { tab: 'NOTES', viewMode: 'chunk' };
+                        setLucentActiveTab('NOTES');
+                        setLucentNotesViewMode('chunk');
+                        tryOpenLucentNote(plEntry, idx, { force: true, skipResumePrompt: true });
+                      }}
+                      onOpenWriting={(pg as any).htmlNotes ? () => {
+                        lucentInitialTabRef.current = { tab: 'NOTES', viewMode: 'html' };
+                        setLucentActiveTab('NOTES');
+                        setLucentNotesViewMode('html');
+                        tryOpenLucentNote(plEntry, idx, { force: true, skipResumePrompt: true });
+                      } : undefined}
+                      onOpenMcq={() => {
+                        const pk = `${plEntry.id}_${idx}`;
+                        const pgMcqs = (plEntry.pages?.[idx]?.mcqs || []) as MCQItem[];
+                        // Clean reset answers for this page so student can re-attempt freshly
+                        setLucentMcqAnswers(prev => {
+                          const n = { ...prev };
+                          pgMcqs.forEach((_, i) => delete n[`${pk}_${i}`]);
+                          return n;
+                        });
+                        setLucentMcqSubmitted(prev => {
+                          const n = { ...prev };
+                          pgMcqs.forEach((_, i) => delete n[`${pk}_${i}`]);
+                          return n;
+                        });
+                        setLucentMcqCurrentIdx(prev => ({ ...prev, [pk]: 0 }));
+                        setLucentMcqShowReview(prev => ({ ...prev, [pk]: false }));
+                        setLucentMcqHurriedFilter(prev => { const n = { ...prev }; delete n[pk]; return n; });
+                        lucentMcqTimingsRef.current[pk] = [];
+                        lucentMcqSessionStartTsRef.current[pk] = Date.now();
+                        lucentMcqQStartTsRef.current[pk] = Date.now();
+
+                        lucentInitialTabRef.current = { tab: 'MCQS' };
+                        setLucentActiveTab('MCQS');
+                        tryOpenLucentNote(plEntry, idx, { force: true, skipResumePrompt: true });
+                      }}
+                      onPracticeMistakes={() => {
+                        const pk = `${plEntry.id}_${idx}`;
+                        const pgMcqs = (plEntry.pages?.[idx]?.mcqs || []) as MCQItem[];
+
+                        // Identify mistake question indices
+                        let mistakeIndices: number[] = [];
+
+                        // 1. From lucentMcqAnswers & lucentMcqSubmitted
+                        pgMcqs.forEach((q, i) => {
+                          const isSub = lucentMcqSubmitted[`${pk}_${i}`];
+                          const ans = lucentMcqAnswers[`${pk}_${i}`];
+                          if (isSub && ans !== undefined && ans !== q.correctAnswer) {
+                            mistakeIndices.push(i);
+                          }
+                        });
+
+                        // 2. From user.mcqHistory
+                        if (mistakeIndices.length === 0 && user.mcqHistory && user.mcqHistory.length > 0) {
+                          const histItem = user.mcqHistory.find(h =>
+                            (h.id && h.id.includes(pk)) ||
+                            (h.chapterId === plEntry.id && (h as any).userAnswers)
                           );
-                        })()}
-                      </div>
-                      <ChevronRight size={16} className="shrink-0" style={{ color: tierTheme.primary }} />
-                    </button>
-                    <StudyCardExpandable
-                      modes={studyModes}
-                      onModeClick={openStudyMode}
-                      userId={user.id}
-                      contentId={getStudyActivityKey(plEntry.id, idx)}
-                      totalMcqs={totalMcq}
-                      open={openStudyStatsKey === getStudyActivityKey(plEntry.id, idx)}
-                      onToggle={() => setOpenStudyStatsKey(current =>
-                        current === getStudyActivityKey(plEntry.id, idx)
-                          ? null
-                          : getStudyActivityKey(plEntry.id, idx)
-                      )}
+                          if (histItem && histItem.userAnswers) {
+                            pgMcqs.forEach((q, i) => {
+                              const ans = histItem.userAnswers[i];
+                              if (ans !== undefined && ans !== q.correctAnswer) {
+                                mistakeIndices.push(i);
+                              }
+                            });
+                          }
+                        }
+
+                        // 3. From global mistake bank
+                        if (mistakeIndices.length === 0) {
+                          const mBank = getMistakeBankSync();
+                          pgMcqs.forEach((q, i) => {
+                            const qText = (q.question || '').trim().toLowerCase();
+                            if (mBank.some(m => (m.question || '').trim().toLowerCase() === qText)) {
+                              mistakeIndices.push(i);
+                            }
+                          });
+                        }
+
+                        // 4. Fallback if cannot pinpoint exact indices: show all questions
+                        if (mistakeIndices.length === 0) {
+                          mistakeIndices = pgMcqs.map((_, i) => i);
+                        }
+
+                        // Reset answers only for the mistake questions
+                        setLucentMcqAnswers(prev => {
+                          const n = { ...prev };
+                          mistakeIndices.forEach(i => delete n[`${pk}_${i}`]);
+                          return n;
+                        });
+                        setLucentMcqSubmitted(prev => {
+                          const n = { ...prev };
+                          mistakeIndices.forEach(i => delete n[`${pk}_${i}`]);
+                          return n;
+                        });
+
+                        // Set filter so only mistake questions are presented
+                        setLucentMcqHurriedFilter(prev => ({ ...prev, [pk]: mistakeIndices }));
+                        setLucentMcqCurrentIdx(prev => ({ ...prev, [pk]: 0 }));
+                        setLucentMcqShowReview(prev => ({ ...prev, [pk]: false }));
+                        lucentMcqTimingsRef.current[pk] = [];
+                        lucentMcqSessionStartTsRef.current[pk] = Date.now();
+                        lucentMcqQStartTsRef.current[pk] = Date.now();
+
+                        lucentInitialTabRef.current = { tab: 'MCQS' };
+                        setLucentActiveTab('MCQS');
+                        tryOpenLucentNote(plEntry, idx, { force: true, skipResumePrompt: true });
+                      }}
+                      showAlert={(msg, type, title) => showAlert(msg, type as any, title)}
                     />
-                    {/* ── Admin-only: content mode badges + edit button ── */}
+
+                    {/* Admin-only quick edit */}
                     {_isAdminUser && (
-                      <div className="px-3 py-1.5 border-t border-slate-100 flex items-center gap-1.5 flex-wrap bg-slate-50/70">
-                        <div className="flex items-center gap-1 flex-wrap flex-1 min-w-0">
+                      <div className="px-3 py-1 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-[9px] font-bold text-slate-500">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           {pg.chunkNotes ? <span className="text-[8px] font-black px-1.5 py-[2px] rounded bg-indigo-100 text-indigo-700">CHUNK</span> : null}
                           {(pg as any).htmlNotes ? <span className="text-[8px] font-black px-1.5 py-[2px] rounded bg-violet-100 text-violet-700">HTML</span> : null}
                           {(pg.mcqs?.length || 0) > 0 ? <span className="text-[8px] font-black px-1.5 py-[2px] rounded bg-emerald-100 text-emerald-700">{pg.mcqs!.length} MCQ</span> : null}
-                          {(pg as any).videoUrl ? <span className="text-[8px] font-black px-1.5 py-[2px] rounded bg-red-100 text-red-700">VIDEO</span> : null}
-                          {(pg as any).audioUrl ? <span className="text-[8px] font-black px-1.5 py-[2px] rounded bg-purple-100 text-purple-700">AUDIO</span> : null}
-                          {(pg as any).pdfUrl ? <span className="text-[8px] font-black px-1.5 py-[2px] rounded bg-blue-100 text-blue-700">PDF</span> : null}
-                          {!pg.chunkNotes && !(pg as any).htmlNotes && !(pg.mcqs?.length) && !(pg as any).videoUrl && !(pg as any).audioUrl && !(pg as any).pdfUrl && (
-                            <span className="text-[8px] font-bold text-slate-400 italic">koi content nahi</span>
-                          )}
                         </div>
                         <button
                           onClick={(e) => { e.stopPropagation(); openAdminPageEdit(plEntry, idx); }}
-                          className="flex items-center gap-[3px] px-2 py-1 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-[9px] font-black active:scale-95 transition-all shrink-0"
+                          className="flex items-center gap-[3px] px-2 py-0.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-[9px] font-black active:scale-95 transition-all"
                         >
                           <Pencil size={9} /> Edit
                         </button>
@@ -20517,9 +20898,11 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
       {/* LUCENT PAGE-WISE NOTES VIEWER */}
       {lucentNoteViewer && (() => {
         const entry = lucentNoteViewer;
-        const totalPages = entry.pages.length;
+        const totalPages = entry.pages?.length || 0;
+        if (totalPages === 0) return null;
         const safeIndex = Math.min(Math.max(0, lucentPageIndex), Math.max(0, totalPages - 1));
         const currentPage = entry.pages[safeIndex];
+        if (!currentPage) return null;
         // Sibling Lucent lessons (same subject) sorted by lessonNumber/title — for
         // cross-lesson Prev/Next when at the very first / last page.
         const _siblingMinPg = (l: any): number => {
@@ -20876,6 +21259,25 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                           <RotateCcw size={14} />
                         </button>
                       )}
+                      {readingProgressInfo && lucentActiveTab === 'NOTES' && (() => {
+                        const _pct = readingProgressInfo.pct;
+                        const _tks = getProgressTicks(_pct);
+                        return readingProgressInfo.leftSec > 0 ? (
+                          <span
+                            className="bg-amber-400/25 text-amber-200 border border-amber-400/40 px-2 py-0.5 rounded-full text-[10px] font-black flex items-center gap-1.5 whitespace-nowrap"
+                            title={`Padhne ke liye ${formatDuration(readingProgressInfo.leftSec) || `${readingProgressInfo.leftSec}s`} aur baaki hai (${_pct}%)`}
+                          >
+                            <Clock size={10} />
+                            {_tks && <span className="text-amber-300 font-extrabold tracking-tighter">{_tks}</span>}
+                            <span>{formatDuration(readingProgressInfo.leftSec) || `${readingProgressInfo.leftSec}s`} baaki ({_pct}%)</span>
+                          </span>
+                        ) : (
+                          <span className="bg-emerald-500/25 text-emerald-300 border border-emerald-400/40 px-2.5 py-0.5 rounded-full text-[10px] font-black flex items-center gap-1.5 whitespace-nowrap">
+                            <span className="font-extrabold tracking-tighter text-emerald-300">✓✓✓✓✓</span>
+                            <span>✓ Padha (100%)</span>
+                          </span>
+                        );
+                      })()}
                       <span className="bg-white/20 px-2.5 py-1 rounded-full text-[11px] font-black whitespace-nowrap">
                         {safeIndex + 1}/{totalPages}
                       </span>
@@ -20914,8 +21316,6 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                 ...(_hasMcqTb ? [
                   { mode: 'MCQ',      label: 'MCQ Practice',  emoji: '🧠', cost: 20,
                     isUnlocked: isMcqPageUnlocked(entry.id, safeIndex), isAccessible: true,                       requiredTier: 'free'  as const, unlockAction: () => markMcqPageUnlocked(entry.id, safeIndex) },
-                  { mode: 'QA',       label: 'Q&A Mode',      emoji: '💬', cost: 20,
-                    isUnlocked: isQaPageUnlocked(entry.id, safeIndex),  isAccessible: _isBasicUser || _isUltraUser, requiredTier: 'basic' as const, unlockAction: () => markQaPageUnlocked(entry.id, safeIndex) },
                   { mode: 'FLASHCARD',label: 'Flashcard',     emoji: '🃏', cost: 20,
                     isUnlocked: isFcPageUnlocked(entry.id, safeIndex),  isAccessible: _isUltraUser,               requiredTier: 'ultra' as const, unlockAction: () => markFcPageUnlocked(entry.id, safeIndex) },
                 ] : []),
@@ -20949,6 +21349,35 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                    _save(tab === 'FLASHCARD' ? 'MCQS' : tab);
                 };
                 if (_isAdm) { _doSwitch(); return; }
+
+                // Free vs Premium reading requirement gate:
+                // Free users MUST complete required reading time (Reading Mode + Writing Mode) before accessing MCQ or Flashcards!
+                const _isPremUser = !!(
+                  user.isPremium ||
+                  user.subscriptionLevel === 'BASIC' ||
+                  user.subscriptionLevel === 'ULTRA' ||
+                  user.subscriptionTier === 'BASIC' ||
+                  user.subscriptionTier === 'ULTRA'
+                );
+                if (tab === 'MCQS' || tab === 'FLASHCARD') {
+                  if (!_isPremUser) {
+                    const _reqSec = calculatePageRequiredReadingSec(currentPage);
+                    const _storedSec = getPageTime(entry.id, safeIndex);
+                    const _pgAct = getStudyActivity(user.id, getStudyActivityKey(entry.id, safeIndex));
+                    const _combSec = Math.max(_storedSec, (_pgAct?.READING?.seconds || 0)) + (_pgAct?.WRITING?.seconds || 0);
+                    const _isReadDone = isRoutinePageRead(entry.id, safeIndex) || _combSec >= _reqSec;
+                    if (!_isReadDone) {
+                      const _remSec = Math.max(0, _reqSec - _combSec);
+                      showAlert(
+                        `🔒 Free users ke liye pehle reading complete karna zaroori hai!\nReading Mode ya Writing Mode me ${formatDuration(_remSec)} aur padhein, uske baad hi MCQ unlock hoga.`,
+                        'INFO',
+                        'MCQ Locked'
+                      );
+                      return;
+                    }
+                  }
+                }
+
                 if (tab === 'MCQS') {
                   if (isMcqPageUnlocked(entry.id, safeIndex)) { _doSwitch(); return; }
                   showCoinGate(20, 'MCQ Practice', () => { markMcqPageUnlocked(entry.id, safeIndex); _doSwitch(); }, undefined, undefined, _pgInfo);
@@ -20973,10 +21402,14 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
               return (
                  <div ref={lucentTabBarRef} className="border-b border-[#30315a] shadow-[0_2px_8px_rgba(10,12,45,0.22)] shrink-0 overflow-x-auto bg-[#17183a]" style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' } as any}>
                    <div className="flex min-w-max bg-[#17183a]">
-                    <button data-tab-active={String(_isReadActive)} onClick={() => { stopSpeech(); setLucentActiveTab('NOTES'); setLucentNotesViewMode('chunk'); _save('NOTES', 'chunk'); }} style={_tabStyle} className={_tabCls(_isReadActive, 'bg-indigo-600', 'text-white')}>
+                    <button data-tab-active={String(_isReadActive)} onClick={() => {
+                      const _doRead = () => { stopSpeech(); setLucentActiveTab('NOTES'); setLucentNotesViewMode('chunk'); _save('NOTES', 'chunk'); };
+                      if (_isAdm || isPgReadUnlocked(entry.id, safeIndex)) { _doRead(); return; }
+                      showCoinGate(20, 'Reading Mode', () => { markPgReadUnlocked(entry.id, safeIndex); _doRead(); }, undefined, undefined, _pgInfo);
+                    }} style={_tabStyle} className={_tabCls(_isReadActive, 'bg-indigo-600', 'text-white')}>
                       Reading Mode
                     </button>
-                    <button data-tab-active={String(_isWriteActive)} onClick={() => handleWriteModeGate(() => { setLucentActiveTab('NOTES'); setLucentNotesViewMode('html'); _save('NOTES', 'html'); }, _pgInfo)} style={_tabStyle} className={_tabCls(_isWriteActive, 'bg-teal-600', 'text-white')}>
+                    <button data-tab-active={String(_isWriteActive)} onClick={() => handleWriteModeGate(() => { setLucentActiveTab('NOTES'); setLucentNotesViewMode('html'); _save('NOTES', 'html'); }, _pgInfo, entry.id, safeIndex)} style={_tabStyle} className={_tabCls(_isWriteActive, 'bg-teal-600', 'text-white')}>
                       Writing Mode
                     </button>
                     {_hasMcqTb && (
@@ -20988,7 +21421,22 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                       <button
                         style={_tabStyle}
                         className={_tabCls(false, 'bg-amber-500', 'text-white')}
-                          onClick={() => handleProjectorModeGate(entry.id, safeIndex, () => { stopSpeech(); setFlashcardMcqs({ items: _mcqItemsTb as any[], title: entry.lessonTitle || 'MCQs', subtitle: `Page ${currentPage?.pageNo || safeIndex + 1} · ${_mcqItemsTb.length} Questions`, subject: entry.subject || '', sourceKey: getStudyActivityKey(entry.id, safeIndex), startInProjectorMode: true, fromLesson: { hasMcq: _hasMcqTb, isAdmin: _isAdm, activeMode: 'projector', hasPdf: _hasPdfTb, hasVideo: _hasVideoTb, hasAudio: _hasAudioTb, returnMode: lucentActiveTab, unlockId: entry.id, unlockPageIndex: safeIndex } }); }, _pgInfo)}
+                          onClick={() => {
+                            const _isPremUser = !!(user.isPremium || user.subscriptionLevel === 'BASIC' || user.subscriptionLevel === 'ULTRA' || user.subscriptionTier === 'BASIC' || user.subscriptionTier === 'ULTRA');
+                            if (!_isAdm && !_isPremUser) {
+                              const _reqSec = calculatePageRequiredReadingSec(currentPage);
+                              const _storedSec = getPageTime(entry.id, safeIndex);
+                              const _pgAct = getStudyActivity(user.id, getStudyActivityKey(entry.id, safeIndex));
+                              const _combSec = Math.max(_storedSec, (_pgAct?.READING?.seconds || 0)) + (_pgAct?.WRITING?.seconds || 0);
+                              const _isReadDone = isRoutinePageRead(entry.id, safeIndex) || _combSec >= _reqSec;
+                              if (!_isReadDone) {
+                                const _remSec = Math.max(0, _reqSec - _combSec);
+                                showAlert(`🔒 Free users ke liye pehle reading complete karna zaroori hai!\nReading Mode ya Writing Mode me ${formatDuration(_remSec)} aur padhein, uske baad hi Projector unlock hoga.`, 'INFO', 'Projector Locked');
+                                return;
+                              }
+                            }
+                            handleProjectorModeGate(entry.id, safeIndex, () => { stopSpeech(); setFlashcardMcqs({ items: _mcqItemsTb as any[], title: entry.lessonTitle || 'MCQs', subtitle: `Page ${currentPage?.pageNo || safeIndex + 1} · ${_mcqItemsTb.length} Questions`, subject: entry.subject || '', sourceKey: getStudyActivityKey(entry.id, safeIndex), startInProjectorMode: true, fromLesson: { hasMcq: _hasMcqTb, isAdmin: _isAdm, activeMode: 'projector', hasPdf: _hasPdfTb, hasVideo: _hasVideoTb, hasAudio: _hasAudioTb, returnMode: lucentActiveTab, unlockId: entry.id, unlockPageIndex: safeIndex } }); }, _pgInfo);
+                          }}
                       >
                          📽️ Projector Mode
                       </button>
@@ -20998,14 +21446,6 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                       return (
                         <button data-tab-active={String(lucentActiveTab === 'FLASHCARD')} onClick={() => _switchMcq('FLASHCARD')} style={_tabStyle} className={_tabCls(lucentActiveTab === 'FLASHCARD', 'bg-amber-500', 'text-white') + (_fcLocked ? ' opacity-60' : '')}>
                           {_fcLocked ? '🔒' : '🃏'} Flashcard{_fcLocked ? ' · ULTRA' : ''}
-                        </button>
-                      );
-                    })()}
-                    {_hasMcqTb && (() => {
-                      const _qaLocked = !_isAdm && !_isBasicUser && !_isUltraUser;
-                      return (
-                        <button data-tab-active={String(lucentActiveTab === 'QA')} onClick={() => _switchMcq('QA')} style={_tabStyle} className={_tabCls(lucentActiveTab === 'QA', 'bg-indigo-600', 'text-white') + (_qaLocked ? ' opacity-60' : '')}>
-                          {_qaLocked ? '🔒' : '💬'} Q&amp;A{_qaLocked ? ' · BASIC' : ''}
                         </button>
                       );
                     })()}
@@ -21332,7 +21772,7 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                         .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/[ \t]+/g, ' ')
                         .replace(/\n{3,}/g, '\n\n').trim();
                     })()}`}
-                    topBarLabel={`${entry.lessonTitle || 'Notes'} · Page ${currentPage.pageNo}${totalPages > 1 ? ` (${safeIndex + 1}/${totalPages})` : ''}`}
+                    topBarLabel={`${entry.lessonTitle || 'Notes'} · Page ${currentPage?.pageNo ?? safeIndex + 1}${totalPages > 1 ? ` (${safeIndex + 1}/${totalPages})` : ''}`}
                     hideTopBar={lucentImmersive}
                     onReadingActive={setLucentIsReading}
                     suppressStickyControls={lucentImmersive}
@@ -21364,7 +21804,7 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                           lessonTitle: entry.lessonTitle,
                           subject: entry.subject,
                           pageIndex: safeIndex,
-                          pageNo: currentPage.pageNo,
+                          pageNo: currentPage?.pageNo ?? (safeIndex + 1),
                           totalPages,
                           scrollY: 0,
                           scrollPct: 5,
@@ -21383,7 +21823,7 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                         markNoteFullyRead({
                           id: recId,
                           kind: 'lucent',
-                          title: `${entry.lessonTitle} — Page ${currentPage.pageNo}`,
+                          title: `${entry.lessonTitle} — Page ${currentPage?.pageNo ?? (safeIndex + 1)}`,
                           subtitle: entry.subject,
                         });
                       } catch {}
@@ -21448,7 +21888,18 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                     <div className="mt-6 mb-3 px-1">
                       {lucentNextPageAfterTopic ? (
                         <button
-                          onClick={() => { stopSpeech(); setLucentPageIndex(lucentEffectiveNextIdx); }}
+                          onClick={() => {
+                            stopSpeech();
+                            const _isAdm = user.role === 'ADMIN' || user.role === 'SUB_ADMIN';
+                            if (_isAdm || isPgReadUnlocked(entry.id, lucentEffectiveNextIdx)) {
+                              setLucentPageIndex(lucentEffectiveNextIdx);
+                            } else {
+                              showCoinGate(20, 'Next Topic Page', () => {
+                                markPgReadUnlocked(entry.id, lucentEffectiveNextIdx);
+                                setLucentPageIndex(lucentEffectiveNextIdx);
+                              });
+                            }
+                          }}
                           className="w-full flex items-center gap-3.5 px-4 py-3.5 rounded-2xl bg-slate-900 border border-slate-700/70 active:scale-[0.98] transition-all group shadow-lg"
                         >
                           <div className="w-9 h-9 rounded-xl bg-indigo-500/20 flex items-center justify-center shrink-0 group-hover:bg-indigo-500/30 transition-colors">
@@ -21466,7 +21917,7 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                       ) : safeIndex < totalPages - 1 ? (
                         /* Within same lesson — next page */
                         <button
-                          onClick={() => { stopSpeech(); setLucentPageIndex(safeIndex + 1); }}
+                          onClick={() => { stopSpeech(); goNext(); }}
                           className="w-full flex items-center gap-3.5 px-4 py-3.5 rounded-2xl bg-slate-900 border border-slate-700/70 active:scale-[0.98] transition-all group shadow-lg"
                         >
                           <div className="w-9 h-9 rounded-xl bg-indigo-500/20 flex items-center justify-center shrink-0 group-hover:bg-indigo-500/30 transition-colors">
@@ -21499,6 +21950,22 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
               const usingAdminMcqs = adminMcqs.length > 0;
               const revealedCount = lucentMcqRevealed[pageKey] || 0;
               const pageText = (currentPage?.content || '').trim();
+
+              const pageAttempted = mcqs.reduce((acc: number, _: any, i: number) => {
+                return lucentMcqSubmitted[`${pageKey}_${i}`] ? acc + 1 : acc;
+              }, 0);
+
+              const doPageRestart = () => {
+                if (lucentAutoNextTimerRef.current) clearTimeout(lucentAutoNextTimerRef.current);
+                setLucentMcqAnswers(prev => { const n = { ...prev }; mcqs.forEach((_: any, i: number) => delete n[`${pageKey}_${i}`]); return n; });
+                setLucentMcqSubmitted(prev => { const n = { ...prev }; mcqs.forEach((_: any, i: number) => delete n[`${pageKey}_${i}`]); return n; });
+                setLucentMcqCurrentIdx(prev => ({ ...prev, [pageKey]: 0 }));
+                setLucentMcqShowReview(prev => ({ ...prev, [pageKey]: false }));
+                setLucentMcqHurriedFilter(prev => { const n = { ...prev }; delete n[pageKey]; return n; });
+                lucentMcqTimingsRef.current[pageKey] = [];
+                lucentMcqSessionStartTsRef.current[pageKey] = Date.now();
+                lucentMcqQStartTsRef.current[pageKey] = Date.now();
+              };
 
               const generateMcqs = async () => {
                 if (!pageText || pageText.length < 30) {
@@ -21583,19 +22050,50 @@ RULES:
               return (
                 <div className="flex-1 overflow-y-auto bg-slate-50">
                   <div className="px-4 py-4 space-y-3">
-                    {/* Re-generate button for AI MCQs only */}
-                    {!usingAdminMcqs && mcqs.length > 0 && (
-                      <div className="flex justify-end">
-                        <button
-                          onClick={generateMcqs}
-                          disabled={lucentMcqLoading}
-                          className="text-[11px] font-black px-3 py-1.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 active:scale-95 transition disabled:opacity-50"
-                          title="Re-generate"
-                        >
-                          {lucentMcqLoading ? '...' : '↻ Re-make'}
-                        </button>
+                    {/* Top control bar: Re-attempt & Re-generate buttons */}
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      {lucentMcqHurriedFilter[pageKey] && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-black px-2.5 py-1 rounded-full bg-rose-100 text-rose-700">
+                            🎯 Mistake Practice ({lucentMcqHurriedFilter[pageKey].length} Qs)
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setLucentMcqHurriedFilter(prev => { const n = { ...prev }; delete n[pageKey]; return n; })}
+                            className="text-[10px] font-black text-indigo-600 hover:text-indigo-800 underline ml-1"
+                          >
+                            All Questions
+                          </button>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2 ml-auto">
+                        {pageAttempted > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (window.confirm('Kya aap phir se MCQ solve karna chahte hain? Sabhi answers reset ho jayenge.')) {
+                                doPageRestart();
+                              }
+                            }}
+                            className="text-[11px] font-black px-3 py-1.5 rounded-xl bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 active:scale-95 transition flex items-center gap-1 shadow-sm"
+                            title="Phir se banayein (Re-attempt)"
+                          >
+                            <RefreshCw size={12} /> Re-attempt
+                          </button>
+                        )}
+                        {!usingAdminMcqs && mcqs.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={generateMcqs}
+                            disabled={lucentMcqLoading}
+                            className="text-[11px] font-black px-3 py-1.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 active:scale-95 transition disabled:opacity-50"
+                            title="Re-generate"
+                          >
+                            {lucentMcqLoading ? '...' : '↻ Re-make'}
+                          </button>
+                        )}
                       </div>
-                    )}
+                    </div>
 
 
                     {/* Empty / loading / generate state — only when no admin MCQs are present */}
@@ -21693,19 +22191,15 @@ RULES:
                       // ── INTERACTIVE (MCQ) MODE — one-at-a-time ──
                       // ── Hurried reattempt filter — only show hurried questions ──
                       const _hurriedFilter = lucentMcqHurriedFilter[pageKey];
-                      const effectiveMcqs = _hurriedFilter ? _hurriedFilter.map((ri: number) => mcqs[ri]) : mcqs;
+                      const effectiveMcqs = _hurriedFilter
+                        ? _hurriedFilter.map((ri: number) => mcqs[ri]).filter(Boolean)
+                        : mcqs;
 
-                      const ci = lucentMcqCurrentIdx[pageKey] ?? 0;
                       const totalQ = effectiveMcqs.length;
-                      const cq = effectiveMcqs[ci];
-                      if (!cq) return null;
-                      // realIdx maps virtual ci → actual mcqs index for answer key lookups
-                      const realIdx = _hurriedFilter ? _hurriedFilter[ci] : ci;
-                      const ansKey = `${pageKey}_${realIdx}`;
-                      const selected = lucentMcqAnswers[ansKey];
-                      const isAnswered = lucentMcqSubmitted[ansKey] === true;
-                      const isCorrect = isAnswered && selected === cq.correctAnswer;
+                      const rawCi = lucentMcqCurrentIdx[pageKey] ?? 0;
+                      const ci = Math.max(0, Math.min(rawCi, Math.max(0, totalQ - 1)));
                       const showReview = lucentMcqShowReview[pageKey] === true;
+                      const doRestart = doPageRestart;
 
                       // Stats — only submitted questions (over effective set)
                       const attempted = effectiveMcqs.reduce((acc: number, _: any, i: number) => {
@@ -21719,9 +22213,64 @@ RULES:
                         return (s !== undefined && s === q2.correctAnswer) ? acc + 1 : acc;
                       }, 0);
                       const wrong = attempted - right;
-                       // No fixed 20-question lock: submit after any one answer.
-                       const submitThreshold = 1;
+                      // No fixed 20-question lock: submit after any one answer.
+                      const submitThreshold = 1;
                       const canShowReview = attempted >= submitThreshold;
+
+                      // ── REVIEW SCREEN ──
+                      if (showReview) {
+                        const analysisAnswers = effectiveMcqs.reduce((acc: Record<number, number>, _q2: any, i: number) => {
+                          const rIdx = _hurriedFilter ? _hurriedFilter[i] : i;
+                          const qKey = `${pageKey}_${rIdx}`;
+                          if (lucentMcqSubmitted[qKey] && lucentMcqAnswers[qKey] !== undefined) acc[i] = lucentMcqAnswers[qKey];
+                          return acc;
+                        }, {});
+                        const analysisSubmitted = effectiveMcqs.reduce((acc: Record<number, boolean>, _q2: any, i: number) => {
+                          const rIdx = _hurriedFilter ? _hurriedFilter[i] : i;
+                          acc[i] = lucentMcqSubmitted[`${pageKey}_${rIdx}`] === true;
+                          return acc;
+                        }, {});
+                        return (
+                          <McqAnalysisOverlay
+                            questions={effectiveMcqs}
+                            answers={analysisAnswers}
+                            submitted={analysisSubmitted}
+                            title={(entry as any).title || (currentPage as any)?.title || 'Lucent Competition MCQ'}
+                            subtitle="Lucent Competition · MCQ Analysis"
+                            subject="Lucent Competition"
+                            user={user}
+                            settings={settings}
+                            onClose={() => setLucentMcqShowReview(prev => ({ ...prev, [pageKey]: false }))}
+                            onRestart={doRestart}
+                          />
+                        );
+                      }
+
+                      if (totalQ === 0) {
+                        return (
+                          <div className="bg-white rounded-2xl p-6 text-center border border-slate-200">
+                            <p className="text-sm font-bold text-slate-600">No questions available for this practice.</p>
+                            {_hurriedFilter && (
+                              <button
+                                type="button"
+                                onClick={() => setLucentMcqHurriedFilter(prev => { const n = { ...prev }; delete n[pageKey]; return n; })}
+                                className="mt-3 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black transition"
+                              >
+                                View All Questions
+                              </button>
+                            )}
+                          </div>
+                        );
+                      }
+
+                      const cq = effectiveMcqs[ci];
+                      if (!cq) return null;
+                      // realIdx maps virtual ci → actual mcqs index for answer key lookups
+                      const realIdx = _hurriedFilter ? _hurriedFilter[ci] : ci;
+                      const ansKey = `${pageKey}_${realIdx}`;
+                      const selected = lucentMcqAnswers[ansKey];
+                      const isAnswered = lucentMcqSubmitted[ansKey] === true;
+                      const isCorrect = isAnswered && selected === cq.correctAnswer;
 
                       // ── Initialise session/question start times (first render of this pageKey) ──
                       if (!lucentMcqSessionStartTsRef.current[pageKey]) {
@@ -21800,137 +22349,6 @@ RULES:
                         }
                       };
 
-                      const doRestart = () => {
-                        if (lucentAutoNextTimerRef.current) clearTimeout(lucentAutoNextTimerRef.current);
-                        setLucentMcqAnswers(prev => { const n = { ...prev }; mcqs.forEach((_: any, i: number) => delete n[`${pageKey}_${i}`]); return n; });
-                        setLucentMcqSubmitted(prev => { const n = { ...prev }; mcqs.forEach((_: any, i: number) => delete n[`${pageKey}_${i}`]); return n; });
-                        setLucentMcqCurrentIdx(prev => ({ ...prev, [pageKey]: 0 }));
-                        setLucentMcqShowReview(prev => ({ ...prev, [pageKey]: false }));
-                        // Clear hurried filter so full question set shows again
-                        setLucentMcqHurriedFilter(prev => { const n = { ...prev }; delete n[pageKey]; return n; });
-                        // Reset all timing refs for this pageKey
-                        lucentMcqTimingsRef.current[pageKey] = [];
-                        lucentMcqSessionStartTsRef.current[pageKey] = Date.now();
-                        lucentMcqQStartTsRef.current[pageKey] = Date.now();
-                      };
-
-                      // ── REVIEW SCREEN ──
-                      if (showReview) {
-                         const analysisAnswers = effectiveMcqs.reduce((acc: Record<number, number>, _q2: any, i: number) => {
-                           const rIdx = _hurriedFilter ? _hurriedFilter[i] : i;
-                           const qKey = `${pageKey}_${rIdx}`;
-                           if (lucentMcqSubmitted[qKey] && lucentMcqAnswers[qKey] !== undefined) acc[i] = lucentMcqAnswers[qKey];
-                           return acc;
-                         }, {});
-                         const analysisSubmitted = effectiveMcqs.reduce((acc: Record<number, boolean>, _q2: any, i: number) => {
-                           const rIdx = _hurriedFilter ? _hurriedFilter[i] : i;
-                           acc[i] = lucentMcqSubmitted[`${pageKey}_${rIdx}`] === true;
-                           return acc;
-                         }, {});
-                         return (
-                           <McqAnalysisOverlay
-                             questions={effectiveMcqs}
-                             answers={analysisAnswers}
-                             submitted={analysisSubmitted}
-                             title={(entry as any).title || (currentPage as any)?.title || 'Lucent Competition MCQ'}
-                             subtitle="Lucent Competition · MCQ Analysis"
-                             subject="Lucent Competition"
-                             user={user}
-                             settings={settings}
-                             onClose={() => setLucentMcqShowReview(prev => ({ ...prev, [pageKey]: false }))}
-                             onRestart={doRestart}
-                           />
-                         );
-                        const pct = attempted > 0 ? Math.round((right / attempted) * 100) : 0;
-                        const grade = pct >= 80 ? { label: '🏆 Excellent!', color: 'text-emerald-700', bg: 'from-emerald-400 to-teal-500' }
-                          : pct >= 60 ? { label: '👍 Good Job!', color: 'text-indigo-700', bg: 'from-indigo-400 to-blue-500' }
-                          : pct >= 40 ? { label: '💪 Keep Trying!', color: 'text-amber-700', bg: 'from-amber-400 to-orange-500' }
-                          : { label: '📚 Study More', color: 'text-rose-700', bg: 'from-rose-400 to-pink-500' };
-                        return (
-                          <div>
-                            {/* Result card */}
-                            <div className="bg-white border border-indigo-100 rounded-2xl p-5 shadow-sm text-center mb-3">
-                              <div className={`w-14 h-14 mx-auto rounded-full bg-gradient-to-br ${grade.bg} flex items-center justify-center text-2xl mb-2 shadow-md`}>
-                                {pct >= 80 ? '🏆' : pct >= 60 ? '⭐' : pct >= 40 ? '💪' : '📚'}
-                              </div>
-                              <p className={`text-base font-black ${grade.color} mb-0.5`}>{grade.label}</p>
-                              <p className="text-3xl font-black text-slate-800 mb-0.5">{pct}%</p>
-                              <p className="text-[11px] text-slate-500 mb-3">You got {right} correct out of {attempted}</p>
-                              <div className="grid grid-cols-3 gap-2 mb-3">
-                                <div className="bg-slate-50 rounded-xl py-2"><div className="text-[9px] font-bold text-slate-500 uppercase">Tried</div><div className="text-lg font-black text-slate-800">{attempted}</div></div>
-                                <div className="bg-emerald-50 rounded-xl py-2"><div className="text-[9px] font-bold text-emerald-600 uppercase">✅ Correct</div><div className="text-lg font-black text-emerald-700">{right}</div></div>
-                                <div className="bg-rose-50 rounded-xl py-2"><div className="text-[9px] font-bold text-rose-600 uppercase">❌ Wrong</div><div className="text-lg font-black text-rose-700">{wrong}</div></div>
-                              </div>
-                              {wrong > 0 && <p className="text-[10px] text-rose-600 font-bold bg-rose-50 rounded-xl px-3 py-2 mb-3">⚠️ {wrong} wrong answers saved to "My Mistake"!</p>}
-                              <div className="flex gap-2">
-                                <button onClick={() => setLucentMcqShowReview(prev => ({ ...prev, [pageKey]: false }))}
-                                  className="flex-1 py-2.5 rounded-2xl bg-slate-100 text-slate-700 font-black text-sm active:scale-95 transition">
-                                  ▶ Continue
-                                </button>
-                                <button onClick={doRestart}
-                                  className="flex-1 py-2.5 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-black text-sm flex items-center justify-center gap-1.5 active:scale-95 transition shadow-md">
-                                  <RefreshCw size={13} /> Restart
-                                </button>
-                              </div>
-                            </div>
-                            {/* Review — only answered questions */}
-                            <p className="text-[11px] font-black text-slate-500 uppercase tracking-wide mb-2">📋 Answer Review ({attempted} questions)</p>
-                            <div className="space-y-3">
-                              {effectiveMcqs.map((q2: any, i: number) => {
-                                const rIdx = _hurriedFilter ? _hurriedFilter[i] : i;
-                                const qKey = `${pageKey}_${rIdx}`;
-                                if (!lucentMcqSubmitted[qKey]) return null;
-                                const userAns = lucentMcqAnswers[qKey];
-                                const isQ2Correct = userAns === q2.correctAnswer;
-                                return (
-                                  <div key={rIdx} className={`bg-white rounded-2xl p-3 border-2 ${isQ2Correct ? 'border-emerald-200' : 'border-rose-200'}`}>
-                                    <div className="flex items-start gap-2 mb-2">
-                                      <span className={`text-[10px] font-black px-2 py-0.5 rounded-full shrink-0 ${isQ2Correct ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>Q{rIdx + 1} {isQ2Correct ? '✅' : '❌'}</span>
-                                      <div className="flex-1">
-                                        <McqQuestionDisplay q={q2 as any} questionClassName="text-xs font-bold text-slate-800 leading-snug" />
-                                      </div>
-                                      {/* TTS button */}
-                                      <button
-                                        onClick={() => {
-                                          const _ttsId = `lucent_rev_${pageKey}_${rIdx}`;
-                                          if (speakingId === _ttsId) { stopSpeech(); setSpeakingId(null); return; }
-                                          const _stmts = (q2.statements || []).join(' ');
-                                          const _opts = (q2.options || []).map((o: string, oi: number) => `Option ${String.fromCharCode(65 + oi)}: ${o}`).join('. ');
-                                          const _exp = q2.explanation ? `Explanation: ${q2.explanation.replace(/<[^>]+>/g, '')}` : '';
-                                          speakText([q2.question, _stmts, _opts, _exp].filter(Boolean).join(' '), null, 1.0, 'hi-IN', () => setSpeakingId(_ttsId), () => setSpeakingId(null));
-                                        }}
-                                        className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center transition-all ${speakingId === `lucent_rev_${pageKey}_${rIdx}` ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500'}`}
-                                      >
-                                        {speakingId === `lucent_rev_${pageKey}_${rIdx}` ? <Square size={10} className="fill-current" /> : <Volume2 size={11} />}
-                                      </button>
-                                    </div>
-                                    <div className="space-y-1 ml-1">
-                                      {(q2.options || []).map((opt: string, oi: number) => {
-                                        const isOpt = oi === q2.correctAnswer;
-                                        const isSel = userAns === oi;
-                                        let cls = 'text-[11px] font-bold px-2 py-1 rounded-lg flex items-center gap-1.5 ';
-                                        if (isOpt) cls += 'bg-emerald-50 text-emerald-800';
-                                        else if (isSel && !isOpt) cls += 'bg-rose-50 text-rose-800 line-through';
-                                        else cls += 'text-slate-400';
-                                        return (
-                                          <div key={oi} className={cls}>
-                                            <span className="w-4 h-4 rounded-full bg-slate-200 flex items-center justify-center text-[9px] font-black shrink-0">{String.fromCharCode(65+oi)}</span>
-                                            {opt}
-                                            {isOpt && <span className="ml-auto text-emerald-600">✅</span>}
-                                            {isSel && !isOpt && <span className="ml-auto text-rose-600">❌</span>}
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                    {q2.explanation && <div className="mt-1.5 text-[10px] bg-slate-50 rounded-lg px-2 py-1 text-slate-600"><span className="font-black">💡</span> <span dangerouslySetInnerHTML={{ __html: formatExplanationHtml(q2.explanation) }} /></div>}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        );
-                      }
-
                       return (
                         <div>
                           {/* Progress */}
@@ -21993,13 +22411,47 @@ RULES:
                                       saveRoutineData(_fu.id, { ..._rd, dailyTasks: { ..._rd.dailyTasks, [_td]: _tu } });
                                   }
                                 } catch {}
-                                // ── Record MCQ session score to activityTracker ──
+                                // ── Record MCQ session score to activityTracker and user.mcqHistory ──
                                 try {
                                   const _correct = mcqs.reduce((acc: number, q: any, qi: number) => {
                                     if (!lucentMcqSubmitted[`${pageKey}_${qi}`]) return acc;
                                     return acc + (lucentMcqAnswers[`${pageKey}_${qi}`] === q.correctAnswer ? 1 : 0);
                                   }, 0);
                                   recordMcqScore(user.id, getStudyActivityKey(entry.id, safeIndex), _correct, attempted, _totalElapsed);
+
+                                  // Also store full MCQResult in user.mcqHistory so Activity/History page displays it
+                                  const _wrong = Math.max(0, attempted - _correct);
+                                  const _pct = attempted > 0 ? Math.round((_correct / attempted) * 100) : 0;
+                                  const _tag: 'EXCELLENT' | 'GOOD' | 'BAD' | 'VERY_BAD' = _pct >= 80 ? 'EXCELLENT' : _pct >= 60 ? 'GOOD' : _pct >= 40 ? 'BAD' : 'VERY_BAD';
+                                  const _userAnswers: Record<number, number> = {};
+                                  mcqs.forEach((_: any, qi: number) => {
+                                    if (lucentMcqSubmitted[`${pageKey}_${qi}`] && lucentMcqAnswers[`${pageKey}_${qi}`] !== undefined) {
+                                      _userAnswers[qi] = lucentMcqAnswers[`${pageKey}_${qi}`];
+                                    }
+                                  });
+                                  const newMcqResult: MCQResult = {
+                                    id: `mcq_lucent_${pageKey}_${Date.now()}`,
+                                    userId: user.id,
+                                    chapterId: entry.id,
+                                    subjectId: (entry as any).subjectId || 'lucent',
+                                    subjectName: (entry as any).subject || (entry as any).subjectName || 'Lucent Competition',
+                                    chapterTitle: (entry as any).title || (currentPage as any)?.title || `Page ${safeIndex + 1}`,
+                                    date: new Date().toISOString(),
+                                    totalQuestions: totalQ,
+                                    correctCount: _correct,
+                                    wrongCount: _wrong,
+                                    score: _pct,
+                                    totalTimeSeconds: Math.round(_totalElapsed),
+                                    averageTimePerQuestion: attempted > 0 ? Math.round(_totalElapsed / attempted) : 0,
+                                    performanceTag: _tag,
+                                    questions: mcqs,
+                                    userAnswers: _userAnswers,
+                                    createdAt: new Date().toISOString(),
+                                  };
+                                  if (onUpdateUser) {
+                                    const updatedHistory = [newMcqResult, ...(user.mcqHistory || [])];
+                                    onUpdateUser({ ...user, mcqHistory: updatedHistory });
+                                  }
                                 } catch {}
                                 setLucentMcqShowReview(prev => ({ ...prev, [pageKey]: true }));
                               }}
@@ -22605,6 +23057,108 @@ RULES:
         />
       )}
 
+      {/* ── PAGE READING RESUME / RESTART PROMPT MODAL ────────────────────── */}
+      {pageResumePrompt && (() => {
+        const { entry, pageIdx, storedSecs, reqSec } = pageResumePrompt;
+        const page = entry.pages?.[pageIdx];
+        const pageNoStr = page?.pageNo ? `Pg ${page.pageNo}` : `Page ${pageIdx + 1}`;
+        const topic = (page?.topicName || '').trim() || entry.lessonTitle || 'Notes';
+        const pct = Math.min(100, Math.round((storedSecs / Math.max(reqSec, 1)) * 100));
+
+        return (
+          <div className="fixed inset-0 z-[99999] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+            <div className="bg-white w-full max-w-sm rounded-3xl p-5 shadow-2xl border border-slate-100 flex flex-col items-center text-center relative animate-in zoom-in-95 duration-200">
+              {/* Close button */}
+              <button
+                onClick={() => setPageResumePrompt(null)}
+                className="absolute top-4 right-4 w-8 h-8 rounded-full bg-slate-100 text-slate-400 hover:text-slate-600 hover:bg-slate-200 flex items-center justify-center transition-all"
+                title="Band karein"
+              >
+                <X size={16} />
+              </button>
+
+              {/* Icon badge */}
+              <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-100 flex items-center justify-center text-amber-600 mb-3 shadow-inner">
+                <Clock size={28} className="animate-pulse" />
+              </div>
+
+              {/* Title & Subtitle */}
+              <h3 className="text-base font-black text-slate-800">
+                Padhai Jari Rakhein?
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Resume or Restart Reading
+              </p>
+
+              {/* Page info card */}
+              <div className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3.5 mt-3.5 text-left">
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <span className="text-xs font-black text-slate-800">{pageNoStr}</span>
+                  <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full truncate max-w-[150px]">
+                    {topic}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-slate-200/60 text-center">
+                  <div className="bg-white rounded-xl p-2 border border-slate-100">
+                    <span className="text-[10px] font-bold text-slate-400 block">Pehle Padha:</span>
+                    <span className="text-xs font-black text-amber-600 mt-0.5 block">
+                      ⏱️ {formatDuration(storedSecs) || `${storedSecs}s`}
+                    </span>
+                  </div>
+                  <div className="bg-white rounded-xl p-2 border border-slate-100">
+                    <span className="text-[10px] font-bold text-slate-400 block">Required Time:</span>
+                    <span className="text-xs font-black text-indigo-600 mt-0.5 block">
+                      🎯 {formatDuration(reqSec) || `${reqSec}s`}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Progress bar */}
+                <div className="mt-3">
+                  <div className="flex justify-between items-center text-[10px] font-bold text-slate-500 mb-1">
+                    <span>Progress</span>
+                    <span className="font-black text-slate-700">{pct}%</span>
+                  </div>
+                  <div className="w-full h-2 bg-slate-200/70 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-amber-500 to-emerald-500 rounded-full transition-all duration-300"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Explanatory notice */}
+              <p className="text-[11px] text-slate-500 mt-3 leading-relaxed">
+                <strong>Continue</strong> karne par pichla time judega aur aage ka count hoga. <strong>Restart</strong> karne par time shuru (0s) se measure hoga.
+              </p>
+
+              {/* Action buttons */}
+              <div className="w-full flex flex-col gap-2 mt-4">
+                {/* Continue button */}
+                <button
+                  onClick={() => handlePageResumeAction(false)}
+                  className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-black text-xs shadow-md shadow-indigo-200 hover:opacity-95 active:scale-98 transition-all flex items-center justify-center gap-2"
+                >
+                  <Play size={14} fill="currentColor" />
+                  Continue (Jari Rakhein)
+                </button>
+
+                {/* Restart button */}
+                <button
+                  onClick={() => handlePageResumeAction(true)}
+                  className="w-full py-2.5 px-4 rounded-xl border border-slate-200 bg-white text-slate-700 font-bold text-xs hover:bg-slate-50 active:scale-98 transition-all flex items-center justify-center gap-2"
+                >
+                  <RotateCcw size={14} />
+                  Restart (0s se Shuru Karein)
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── MY ROUTINE GATE POPUP ──────────────────────────────────────────── */}
       {routineGate && (() => {
         const _rg       = loadRoutineData(user.id);
@@ -23059,16 +23613,6 @@ RULES:
                 }`}
               >
                 📝 MCQ
-              </button>
-              <button
-                onClick={() => { setPlayerMode('qa'); setPlayerRevealAll(false); setPlayerQaRevealed({}); }}
-                className={`text-[10px] font-black uppercase tracking-wider px-3 py-1.5 rounded-lg transition-all ${
-                  playerMode === 'qa'
-                    ? 'bg-purple-600 text-white shadow-sm'
-                    : 'bg-transparent text-slate-500 hover:bg-slate-50'
-                }`}
-              >
-                💬 Q&amp;A
               </button>
               <button
                 onClick={() => {
@@ -23621,7 +24165,6 @@ RULES:
              { mode: 'PROJECTOR', label: 'Projector Mode', emoji: '📽️', cost: 20, isUnlocked: isProjectorUnlocked(_overlayUnlockId, _overlayUnlockPage), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markProjectorUnlocked(_overlayUnlockId, _overlayUnlockPage) },
              ...(fl.hasMcq ? [
                { mode: 'MCQ', label: 'MCQ Practice', emoji: '🧠', cost: 20, isUnlocked: isMcqPageUnlocked(_overlayUnlockId, _overlayUnlockPage), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markMcqPageUnlocked(_overlayUnlockId, _overlayUnlockPage) },
-               { mode: 'QA', label: 'Q&A Mode', emoji: '💬', cost: 20, isUnlocked: isQaPageUnlocked(_overlayUnlockId, _overlayUnlockPage), isAccessible: _isBasicUser || _isUltraUser, requiredTier: 'basic' as const, unlockAction: () => markQaPageUnlocked(_overlayUnlockId, _overlayUnlockPage) },
                { mode: 'FLASHCARD', label: 'Flashcard', emoji: '🃏', cost: 20, isUnlocked: isFcPageUnlocked(_overlayUnlockId, _overlayUnlockPage), isAccessible: _isUltraUser, requiredTier: 'ultra' as const, unlockAction: () => markFcPageUnlocked(_overlayUnlockId, _overlayUnlockPage) },
              ] : []),
              ...(fl.hasPdf ? [{ mode: 'PDF', label: 'PDF', emoji: '📄', cost: 0, isUnlocked: true, isAccessible: _isBasicUser || _isUltraUser, requiredTier: 'basic' as const, unlockAction: undefined }] : []),
@@ -23702,20 +24245,6 @@ RULES:
                      }
                   }}>
                   {!_isUltraUser && !_isAdminUser ? '🔒' : '🃏'} Flashcard
-                </button>
-              )}
-              {fl.hasMcq && (
-                <button style={_ts}
-                  className={_tcls(false, 'bg-indigo-600') + (!_isBasicUser && !_isUltraUser && !_isAdminUser ? ' opacity-60' : '')}
-                  onClick={() => {
-                    if (!_isBasicUser && !_isUltraUser && !_isAdminUser) { showAlert('🔒 Q&A ke liye BASIC subscription chahiye!', 'INFO'); return; }
-                     _gateOverlayMode('QA', () => {
-                       setFlashcardMcqs(null);
-                       if (fl?.isCompetition) { setHwViewMode('qa'); }
-                       else { setLucentActiveTab('QA'); }
-                     });
-                  }}>
-                  {!_isBasicUser && !_isUltraUser && !_isAdminUser ? '🔒' : '💬'} Q&amp;A
                 </button>
               )}
               {fl.hasPdf && (
@@ -23826,7 +24355,46 @@ RULES:
         const canShowReview = attempted >= submitThreshold;
 
         const handleCompOption = (oi: number) => {
-          setCompMcqAnswers(prev => ({ ...prev, [ansKey]: oi }));
+          setCompMcqAnswers(prev => {
+            const nextAnswers = { ...prev, [ansKey]: oi };
+            if (compMcqSession.lessonId) {
+              const lessonId = compMcqSession.lessonId;
+              const nextSubmitted = { ...compMcqSubmitted, [ansKey]: true };
+              const currentSaved = getCompLessonStats(lessonId);
+
+              if (compMcqSession.isMistakeMode && compMcqSession.rawIndices) {
+                const rawIdx = compMcqSession.rawIndices[ansKey];
+                const isCorrect = oi === cq.correctAnswer;
+                if (isCorrect && currentSaved && Array.isArray(currentSaved.wrongIndices)) {
+                  const updatedWrong = currentSaved.wrongIndices.filter((idx: number) => idx !== rawIdx);
+                  saveCompLessonStats(lessonId, {
+                    ...currentSaved,
+                    wrongIndices: updatedWrong,
+                    score: Math.min(currentSaved.total, (currentSaved.score || 0) + 1),
+                  });
+                }
+              } else {
+                const wrongIndices: number[] = [];
+                let rightCount = 0;
+                mcqs.forEach((q: any, i: number) => {
+                  if (nextSubmitted[i]) {
+                    if (nextAnswers[i] === q.correctAnswer) {
+                      rightCount++;
+                    } else {
+                      wrongIndices.push(i);
+                    }
+                  }
+                });
+                saveCompLessonStats(lessonId, {
+                  total: totalQ,
+                  attempted: Object.keys(nextSubmitted).length,
+                  score: rightCount,
+                  wrongIndices,
+                });
+              }
+            }
+            return nextAnswers;
+          });
           setCompMcqSubmitted(prev => ({ ...prev, [ansKey]: true }));
         };
 
@@ -23854,24 +24422,6 @@ RULES:
               {attempted > 0 && !compMcqShowReview && (
                 <span className="text-[11px] font-black text-white/80 shrink-0">{attempted}/{totalQ}</span>
               )}
-              {/* Projector button */}
-              <button
-                onClick={() => {
-                  if (compMcqAutoNextRef.current) clearTimeout(compMcqAutoNextRef.current);
-                  stopSpeech();
-                  setFlashcardMcqs({
-                    items: mcqs,
-                    title: compMcqSession.title,
-                    subtitle: compMcqSession.subtitle,
-                    subject: 'Competition',
-                    startInProjectorMode: true,
-                  });
-                }}
-                className="w-8 h-8 flex items-center justify-center rounded-full bg-white/20 text-white active:scale-90 transition-all shrink-0"
-                title="Projector Mode"
-              >
-                <Presentation size={16} />
-              </button>
             </div>
 
             {/* Body */}
@@ -25031,7 +25581,7 @@ RULES:
       {showSuggestionsPanel && (
         <SuggestionsPanel
           user={user}
-          isAdmin={!!(user as any)?.isAdmin}
+          isAdmin={!!(user as any)?.isAdmin || user.role === 'ADMIN' || user.role === 'SUB_ADMIN'}
           onClose={() => setShowSuggestionsPanel(false)}
         />
       )}
@@ -25709,9 +26259,6 @@ RULES:
                         </div>
                         {/* Data rows */}
                         {(() => {
-                          const _spinF = settings?.spinLimitFree  ?? 2;
-                          const _spinB = settings?.spinLimitBasic ?? 5;
-                          const _spinU = settings?.spinLimitUltra ?? 10;
                           // usageMap: label → today's used count (only tracked features)
                           const _usageMap: Record<string, number> = {
                             'MCQ Practice':  _mcqUsed,
@@ -25721,7 +26268,6 @@ RULES:
                             'Notes Reading': _cnUsed,
                             'Flashcards':    _fcUsed,
                             'Write Mode':    _writeUsed,
-                            'Spin Wheel':    _spinUsed,
                           };
                           const rows = [
                             { icon: '❓', label: 'MCQ Practice',   f: _ld.mcq.free,       b: _ld.mcq.basic,       u: _ld.mcq.ultra },
@@ -25732,7 +26278,6 @@ RULES:
                             { icon: '🃏', label: 'Flashcards',     f: _ld.flashcard.free, b: _ld.flashcard.basic, u: _ld.flashcard.ultra },
                             { icon: '✍️', label: 'Write Mode',     f: _ld.write.free,     b: _ld.write.basic,     u: _ld.write.ultra },
                             { icon: '💡', label: 'Concept Notes',  f: _ld.concept.free,   b: _ld.concept.basic,   u: _ld.concept.ultra },
-                            { icon: '🎰', label: 'Spin Wheel',     f: _spinF,             b: _spinB,              u: _spinU },
                           ];
                           const fmt = (v: number) => v >= UNLIMITED ? '∞' : v === 0 ? '🔒' : String(v);
                           const clr = (v: number, base: string) => v >= UNLIMITED ? '#10b981' : v === 0 ? '#334155' : base;
@@ -27088,12 +27633,12 @@ RULES:
               </div>
             </div>
 
-            {/* MCQ / Q&A / FLASHCARD */}
+            {/* MCQ / FLASHCARD */}
             <div className="bg-white border border-green-200 rounded-2xl overflow-hidden shadow-sm">
               <div className="bg-green-50 px-4 py-2.5 flex items-center gap-2">
                 <span className="text-lg">❓</span>
                 <div>
-                  <p className="font-black text-sm text-slate-800">MCQ · Q&A · Flashcard</p>
+                  <p className="font-black text-sm text-slate-800">MCQ · Flashcard</p>
                   <p className="text-[10px] text-slate-500">Daily practice aur question bank</p>
                 </div>
               </div>
@@ -27101,17 +27646,17 @@ RULES:
                 <div className="p-3 text-center">
                   <p className="text-xs font-black text-blue-600">{freeMcq}/day</p>
                   <p className="text-[9px] text-slate-400 mt-1">Hard limit</p>
-                  <p className="text-[9px] text-slate-400">MCQ+Q&A+Flash</p>
+                  <p className="text-[9px] text-slate-400">MCQ+Flash</p>
                 </div>
                 <div className="p-3 text-center">
                   <p className="text-xs font-black text-green-600">{basicMcq}/day</p>
                   <p className="text-[9px] text-slate-400 mt-1">Phir 5 coins/30 Qs</p>
-                  <p className="text-[9px] text-slate-400">MCQ+Q&A+Flash</p>
+                  <p className="text-[9px] text-slate-400">MCQ+Flash</p>
                 </div>
                 <div className="p-3 text-center">
                   <p className="text-xs font-black text-violet-600">{ultraMcq}/day</p>
                   <p className="text-[9px] text-slate-400 mt-1">Phir 5 coins/30 Qs</p>
-                  <p className="text-[9px] text-slate-400">MCQ+Q&A+Flash</p>
+                  <p className="text-[9px] text-slate-400">MCQ+Flash</p>
                 </div>
               </div>
             </div>
@@ -27954,7 +28499,7 @@ RULES:
         const isAdd = creditDeductToast.type === 'ADD';
         const sign = isAdd ? '+' : '−';
         const deltaColor = isAdd ? '#34d399' : '#fb923c';
-        const appName = settings?.appShortName || settings?.appName || 'IIC';
+        const appName = settings?.appShortName || settings?.appName || 'NSTA';
         return (
           <div
             className="fixed left-0 right-0 z-[99999] pointer-events-none animate-in slide-in-from-top duration-300"

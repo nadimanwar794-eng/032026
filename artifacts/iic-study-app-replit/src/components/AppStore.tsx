@@ -21,12 +21,13 @@ import {
   type UserSubTier,
 } from "../utils/routineStorage";
 import { saveUserToLive } from "../firebase";
+import { isSubscriptionFromCoins } from "../utils/subscriptionUtils";
 
 function getToday() { return new Date().toISOString().split('T')[0]; }
 
 // ── Daily Claim Card ──────────────────────────────────────────────────────────
-function DailyClaimCard({ tier, unclaimed, todayClaimed, dailyAmt, onClaim }: {
-  tier: UserSubTier; unclaimed: number; todayClaimed: boolean; dailyAmt: number; onClaim: () => void;
+function DailyClaimCard({ tier, unclaimed, todayClaimed, dailyAmt, onClaim, isCoinSub }: {
+  tier: UserSubTier; unclaimed: number; todayClaimed: boolean; dailyAmt: number; onClaim: () => void; isCoinSub?: boolean;
 }) {
   if (tier === 'NONE') return (
     <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-5">
@@ -58,7 +59,22 @@ function DailyClaimCard({ tier, unclaimed, todayClaimed, dailyAmt, onClaim }: {
           🪙 {dailyAmt.toLocaleString()}
         </span>
       </div>
-      {unclaimed > 0 ? (
+      {isCoinSub ? (
+        <div>
+          <button disabled className="w-full py-3 rounded-xl bg-slate-200 text-slate-500 font-black text-xs cursor-not-allowed opacity-75 flex items-center justify-center gap-2 border border-slate-300">
+            🔒 Claim Off (Coins Subscription)
+          </button>
+          <div className="mt-3 p-3 rounded-xl bg-amber-50 border border-amber-200 text-left">
+            <div className="flex items-center gap-1.5 text-amber-800 font-bold text-xs">
+              <span>📢</span>
+              <span>Official Notice:</span>
+            </div>
+            <p className="text-[11px] text-amber-700 mt-1 leading-relaxed">
+              Credits/Coins se activate kiye gaye subscription plan me Daily Coin Claim ki suvidha uplabdh nahi hai. Yeh reward keval direct cash/UPI subscription plan ke sath diya jata hai.
+            </p>
+          </div>
+        </div>
+      ) : unclaimed > 0 ? (
         <>
           {unclaimed > dailyAmt && (
             <div className="bg-amber-100 border border-amber-200 rounded-xl px-3 py-2 mb-3 flex items-center gap-2">
@@ -163,7 +179,13 @@ export const AppStore: React.FC<Props> = ({ settings, user, onUserUpdate }) => {
   const unclaimedCoins = getUnclaimedCoins(routineData, subTier);
   const todayClaimed = routineData.dailyClaims?.[getToday()]?.claimed ?? false;
   const dailyAmount = getDailyClaimAmount(subTier);
+  const isCoinSub = isSubscriptionFromCoins(user);
+
   const handleClaim = async () => {
+    if (isCoinSub) {
+      window.alert("Coins se activate kiye gaye subscription plan me Daily Coin Claim uplabdh nahi hai.");
+      return;
+    }
     const { data: updated, earned } = claimAllPendingCoins(routineData, subTier);
     // Add earned coins to main app credits
     if (earned > 0 && onUserUpdate && user) {
@@ -230,6 +252,7 @@ export const AppStore: React.FC<Props> = ({ settings, user, onUserUpdate }) => {
         todayClaimed={todayClaimed}
         dailyAmt={dailyAmount}
         onClaim={handleClaim}
+        isCoinSub={isCoinSub}
       />
 
       {/* SEARCH */}

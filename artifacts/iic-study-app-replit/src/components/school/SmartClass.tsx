@@ -171,7 +171,7 @@ export const SmartClass: React.FC<Props> = ({
   const [pdfImmersive, setPdfImmersive] = useState(false);
 
   // MCQ state
-  const [mcqViewMode, setMcqViewMode]     = useState<McqViewMode>("reveal");
+  const [mcqViewMode, setMcqViewMode]     = useState<McqViewMode>("interactive");
   const [mcqRevealed, setMcqRevealed]     = useState(0);
   const [mcqAnswers, setMcqAnswers]       = useState<Record<number, number>>({});
   const [mcqSubmitted, setMcqSubmitted]   = useState<Record<number, boolean>>({});
@@ -748,28 +748,6 @@ export const SmartClass: React.FC<Props> = ({
                 <RefreshCw size={11} /> Restart
               </button>
             </div>
-
-            {/* Mode selector */}
-            {totalQ > 0 && (
-              <div className="bg-white border border-green-100 rounded-2xl p-1.5 grid grid-cols-2 gap-1 shadow-sm">
-                <button
-                  onClick={() => setMcqViewMode("reveal")}
-                  className={`text-[11px] font-black uppercase tracking-wider py-2 rounded-xl transition-all ${
-                    mcqViewMode === "reveal" ? "bg-purple-600 text-white shadow-sm" : "bg-transparent text-slate-500 hover:bg-slate-50"
-                  }`}
-                >
-                  💬 Q&amp;A
-                </button>
-                <button
-                  onClick={() => setMcqViewMode("interactive")}
-                  className={`text-[11px] font-black uppercase tracking-wider py-2 rounded-xl transition-all ${
-                    mcqViewMode === "interactive" ? "bg-indigo-600 text-white shadow-sm" : "bg-transparent text-slate-500 hover:bg-slate-50"
-                  }`}
-                >
-                  📝 MCQ
-                </button>
-              </div>
-            )}
 
             {totalQ === 0 && (
               <div className="bg-white border border-green-100 rounded-2xl p-6 text-center">

@@ -1098,7 +1098,7 @@ export const LessonView: React.FC<Props> = ({
               if (!wasDesktop) { setDesktopMode(true); setIsDesktopMode(true); }
               await new Promise(r => setTimeout(r, 300));
               await downloadAsMHTML('notes-maker-printable', `${content.title}_Notes`, {
-                  appName: 'IIC',
+                  appName: 'NSTA',
                   pageTitle: content.title,
                   subtitle: chapter?.subject || 'Notes',
               });

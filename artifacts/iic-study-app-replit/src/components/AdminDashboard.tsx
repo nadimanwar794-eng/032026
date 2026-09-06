@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { User, ViewState, SystemSettings, Subject, Chapter, MCQItem, RecoveryRequest, ActivityLogEntry, LeaderboardEntry, RecycleBinItem, Stream, Board, ClassLevel, GiftCode, SubscriptionPlan, CreditPackage, SpinReward, SpinGameType, HtmlModule, PremiumNoteSlot, ContentInfoConfig, ContentInfoItem, SubscriptionHistoryEntry, UniversalAnalysisLog, ContentType, LessonContent, DeepDiveEntry, AdditionalNoteEntry, TeacherStorePlan, TeacherCode, HomeworkItem, LucentNoteEntry, LucentPageNote, AppNotification, BroadcastRedeemCode, LoginBonusRandomGiftOption } from '../types';
-import { List, GraduationCap, LayoutDashboard, Users, Search, Trash2, Save, X, Eye, EyeOff, Shield, Megaphone, CheckCircle, ListChecks, Database, FileText, Monitor, Sparkles, Banknote, BrainCircuit, AlertOctagon, ArrowLeft, ArrowRight, Key, Bell, ShieldCheck, Lock, Globe, Layers, Zap, PenTool, RefreshCw, RotateCcw, Plus, LogOut, Download, Upload, CreditCard, Ticket, Video, Image as ImageIcon, Type, Link, FileJson, Activity, AlertTriangle, Gift, Book, Mail, Edit3, MessageSquare, ShoppingBag, Cloud, Rocket, Code2, Layers as LayersIcon, Wifi, WifiOff, Copy, Crown, Gamepad2, Calendar, BookOpen, Image, HelpCircle, Youtube, Play, Star, Trophy, Palette, Settings, Headphones, Layout, Bot, LayoutDashboard as DashboardIcon, Loader2, Gauge, LayoutGrid, ArrowUpCircle, KeyRound, Award, Send, GitCompare, Lightbulb, ThumbsUp, ThumbsDown, Building2, TrendingUp } from 'lucide-react';
+import { List, GraduationCap, LayoutDashboard, Users, Search, Trash2, Save, X, Eye, EyeOff, Shield, Megaphone, CheckCircle, ListChecks, Database, FileText, Monitor, Sparkles, Banknote, BrainCircuit, AlertOctagon, ArrowLeft, ArrowRight, Key, Bell, ShieldCheck, Lock, Globe, Layers, Zap, PenTool, RefreshCw, RotateCcw, Plus, LogOut, Download, Upload, CreditCard, Ticket, Video, Image as ImageIcon, Type, Link, FileJson, Activity, AlertTriangle, Gift, Book, Mail, Edit3, MessageSquare, ShoppingBag, Cloud, Rocket, Code2, Layers as LayersIcon, Wifi, WifiOff, Copy, Crown, Gamepad2, Calendar, BookOpen, Image, HelpCircle, Youtube, Play, Star, Trophy, Palette, Settings, Headphones, Layout, Bot, LayoutDashboard as DashboardIcon, Loader2, Gauge, LayoutGrid, ArrowUpCircle, KeyRound, Award, Send, GitCompare, Lightbulb, ThumbsUp, ThumbsDown, Building2, TrendingUp, Coins } from 'lucide-react';
 import { getSubjectsList, DEFAULT_SUBJECTS, DEFAULT_APP_FEATURES, ALL_APP_FEATURES, STUDENT_APP_FEATURES, DEFAULT_CONTENT_INFO_CONFIG, ADMIN_PERMISSIONS, APP_VERSION, STATIC_SYLLABUS, LEVEL_UNLOCKABLE_FEATURES, LUCENT_SUBJECT_OPTIONS_BASE, getClassSubjectOptions, SUPPORT_PHONE } from '../constants';
 import { AdminClassMcqManager } from './AdminClassMcqManager';
 import { AdminCompetitionMcqManager } from './AdminCompetitionMcqManager';
@@ -13,7 +13,7 @@ import { parseMCQText } from '../utils/mcqParser';
 import { saveTopicNotes } from '../utils/revisionTrackerV2';
 import { TOP_BAR_EFFECTS, EFFECT_CATEGORIES, TopBarEffectsLayer } from '../utils/topBarEffects';
 import { generateSecureRandomString, generateSecureRandomId } from '../utils/cryptoUtils';
-import { saveChapterData, bulkSaveLinks, checkFirebaseConnection, saveSystemSettings, subscribeToUsers, getUsersPage, subscribeToRecentUsers, rtdb, saveUserToLive, db, getChapterData, saveCustomSyllabus, deleteCustomSyllabus, subscribeToUniversalAnalysis, saveAiInteraction, saveSecureKeys, getSecureKeys, subscribeToApiUsage, subscribeToDrafts, resetAllContent, recoverContentFromCache, checkRecoveryStatus, backupAllContentToFirebase, restoreContentFromFirebaseBackup, rebuildContentIndex, deleteHomeworkEntry, deleteLucentEntry, subscribeToDemands, updateDemandStatus, subscribeGlobalChat, subscribeSupportChat, deleteGlobalMessage, deleteSupportMessage, subscribeAllSupportThreads, sendGlobalMessage, sendSupportMessage, subscribeToCompareAnalytics, deleteCompareAnalyticsByQuery, addCompreBookNote, deleteCompreBookNote, getCompreBookNotes, updateCompreBookNote, getAppFeedbacks, exportBackupAsJson, importBackupFromJson, subscribeSuggestions, adminReplySuggestion, deleteSuggestion, reactToSuggestion, resolvesuggestion, applyNoteCorrection, applyMcqCorrection, applyMcqFullEdit, saveMcqLesson, deleteMcqLesson } from '../firebase'; // IMPORT FIREBASE
+import { saveChapterData, bulkSaveLinks, checkFirebaseConnection, saveSystemSettings, subscribeToUsers, getUsersPage, subscribeToRecentUsers, rtdb, saveUserToLive, db, getChapterData, saveCustomSyllabus, deleteCustomSyllabus, subscribeToUniversalAnalysis, saveAiInteraction, saveSecureKeys, getSecureKeys, subscribeToApiUsage, subscribeToDrafts, resetAllContent, recoverContentFromCache, checkRecoveryStatus, backupAllContentToFirebase, restoreContentFromFirebaseBackup, rebuildContentIndex, deleteHomeworkEntry, deleteLucentEntry, subscribeToDemands, updateDemandStatus, subscribeGlobalChat, subscribeSupportChat, deleteGlobalMessage, deleteSupportMessage, subscribeAllSupportThreads, sendGlobalMessage, sendSupportMessage, subscribeToCompareAnalytics, deleteCompareAnalyticsByQuery, addCompreBookNote, deleteCompreBookNote, getCompreBookNotes, updateCompreBookNote, getAppFeedbacks, exportBackupAsJson, importBackupFromJson, subscribeSuggestions, adminReplySuggestion, deleteSuggestion, reactToSuggestion, resolvesuggestion, applyNoteCorrection, applyMcqCorrection, applyMcqFullEdit, saveMcqLesson, deleteMcqLesson, getUserByMobileOrId } from '../firebase'; // IMPORT FIREBASE
 import { subscribeToMaintenance, saveMaintenance, clearMaintenance, markCrashFixed, MaintenanceState, MaintenanceTarget } from '../utils/maintenanceManager';
 import { ref, set, onValue, update, push, get, query as rtdbQueryAdmin, orderByChild as obcAdmin, limitToLast as ltlAdmin } from "firebase/database";
 import { doc, deleteDoc, setDoc, getDocs, collection, writeBatch, deleteField } from "firebase/firestore";
@@ -59,7 +59,7 @@ const DEFAULT_BASIC_FEATURES = [
     'Audio Library (Standard)',
     'AI Videos (2D Basic)',
     'Team Support',
-    'Spin Wheel (5 Spins/Day)'
+    'Daily Coin Claim (50 Coins/Day)'
 ];
 
 const DEFAULT_ULTRA_FEATURES = [
@@ -69,7 +69,7 @@ const DEFAULT_ULTRA_FEATURES = [
     'Ultra Podcast (Studio HD)',
     'AI Videos (2D + 3D Deep Dive)',
     'Competitive Mode Unlocked 🏆',
-    'Spin Wheel (10 Spins/Day)'
+    'Daily Coin Claim (100 Coins/Day)'
 ];
 
 const QUESTION_START_REGEX = /^(\*\*)?(\*\*Question\s*\d+\*\*|Q\s*\d+[.:)]?|\d+[.:)]|Question\s*\d+[.:)]?)(\*\*)?\s*/i;
@@ -652,6 +652,107 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   const [showChat, setShowChat] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [cloudSearching, setCloudSearching] = useState(false);
+  const [cloudSearchMessage, setCloudSearchMessage] = useState<string | null>(null);
+
+  // Robust student ID & user search matching across displayId (e.g. NSTA-564894), UID, Name, Email, Phone
+  const matchesUserSearch = (u: User, queryStr: string): boolean => {
+      if (!queryStr || !queryStr.trim()) return true;
+      const term = queryStr.trim().toLowerCase();
+      const termNoHyphen = term.replace(/[-_\s]/g, '');
+      const termDigits = term.replace(/\D/g, '');
+
+      // 1. Name
+      const name = (u.name || '').toLowerCase();
+      if (name.includes(term)) return true;
+
+      // 2. Email
+      const email = (u.email || '').toLowerCase();
+      if (email.includes(term)) return true;
+
+      // 3. Display ID (e.g. NSTA-564894, 564894, nsta-564894)
+      const dispId = (u.displayId || '').toLowerCase();
+      const dispIdNoHyphen = dispId.replace(/[-_\s]/g, '');
+      const dispIdDigits = dispId.replace(/\D/g, '');
+
+      if (dispId) {
+          if (dispId.includes(term) || term.includes(dispId)) return true;
+          if (dispIdNoHyphen.includes(termNoHyphen) || termNoHyphen.includes(dispIdNoHyphen)) return true;
+      }
+
+      if (termDigits && termDigits.length >= 3 && dispIdDigits) {
+          if (dispIdDigits.includes(termDigits) || termDigits.includes(dispIdDigits)) return true;
+      }
+
+      // 4. Firebase Auth UID (u.id or u.uid)
+      const id = (u.id || '').toLowerCase();
+      const uid = ((u as any).uid || '').toLowerCase();
+      if (id.includes(term) || term.includes(id)) return true;
+      if (uid && (uid.includes(term) || term.includes(uid))) return true;
+
+      // 5. Mobile
+      const mobile = (u.mobile || '').replace(/\D/g, '');
+      if (termDigits && termDigits.length >= 4 && mobile && mobile.includes(termDigits)) return true;
+
+      return false;
+  };
+
+  const searchUserInCloud = async (queryTerm?: string) => {
+      const q = (queryTerm !== undefined ? queryTerm : searchTerm).trim();
+      if (!q || q.length < 2) {
+          setCloudSearchMessage('Kripya kam se kam 2 characters ya pura Student ID enter karein.');
+          return;
+      }
+      setCloudSearching(true);
+      setCloudSearchMessage(null);
+      try {
+          const found = await getUserByMobileOrId(q);
+          if (found && (found.id || (found as any).uid)) {
+              const resolvedUser: User = {
+                  ...found,
+                  id: found.id || (found as any).uid,
+                  displayId: found.displayId || found.id,
+              };
+              setUsers(prev => {
+                  const idx = prev.findIndex(u => u.id === resolvedUser.id || (resolvedUser.displayId && u.displayId === resolvedUser.displayId));
+                  if (idx >= 0) {
+                      const updated = [...prev];
+                      updated[idx] = { ...updated[idx], ...resolvedUser };
+                      return updated;
+                  }
+                  return [resolvedUser, ...prev];
+              });
+              setCloudSearchMessage(`✅ User mil gaya: ${resolvedUser.name} (${resolvedUser.displayId || resolvedUser.id})`);
+              adminToast(`User mil gaya: ${resolvedUser.name} (${resolvedUser.displayId || resolvedUser.id})`, 'SUCCESS');
+          } else {
+              setCloudSearchMessage(`❌ Database mein "${q}" ID / Name / Mobile ka koi user nahi mila.`);
+              adminToast(`"${q}" ka user database mein nahi mila`, 'INFO');
+          }
+      } catch (err: any) {
+          console.error('Cloud search error:', err);
+          setCloudSearchMessage(`Khojne mein error: ${err?.message || 'Network error'}`);
+      } finally {
+          setCloudSearching(false);
+      }
+  };
+
+  // Auto-search in cloud database if typed query looks like an ID / Email / Phone and 0 local matches exist
+  useEffect(() => {
+      const q = searchTerm.trim();
+      if (!q || q.length < 3) {
+          setCloudSearchMessage(null);
+          return;
+      }
+      const isLikelyId = /^NSTA/i.test(q) || /^\d{4,8}$/.test(q) || q.includes('@');
+      const hasLocal = users.some(u => matchesUserSearch(u, q));
+
+      if (!hasLocal && isLikelyId) {
+          const timer = setTimeout(() => {
+              searchUserInCloud(q);
+          }, 600);
+          return () => clearTimeout(timer);
+      }
+  }, [searchTerm]);
   const [usersLastDoc, setUsersLastDoc] = useState<any>(null);
   const [usersHasMore, setUsersHasMore] = useState(false);
   const [usersLoadingMore, setUsersLoadingMore] = useState(false);
@@ -1039,7 +1140,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
         "📄 Basic Subject Notes",
         "❓ Chapter MCQs (Limit: 50)",
         "📈 Daily Study Streak Tracker",
-        "🎮 2 Daily Spin Wheel Games",
+        "🪙 Daily Coin Claim Bonus",
         "📱 Mobile Access Anywhere",
         "🏆 Global Leaderboard View",
         "📅 Academic Calendar Support",
@@ -1051,7 +1152,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
         "🎞️ Animated Educational Content",
         "📚 Detailed Multi-Part Notes",
         "🖼️ Diagrams & Visual Figures",
-        "🎰 Unlimited Spin (100+ daily)",
+        "⚡ 10x Daily Coins Claim & Full Notes",
         "❓ Full Chapter MCQs Access",
         "🏆 Weekly Pro Mock Tests & Prizes",
         "🏅 VIP Badge & Custom Profile",
@@ -1899,13 +2000,6 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   const [broadcastTargetTier, setBroadcastTargetTier] = useState<'ALL' | 'FREE' | 'BASIC' | 'ULTRA'>('ALL');
   const [broadcastExpiryHours, setBroadcastExpiryHours] = useState(168);
   const [isSendingBroadcast, setIsSendingBroadcast] = useState(false);
-
-  // --- SPIN GAME CONFIG STATE ---
-  const [newReward, setNewReward] = useState<SpinReward>({ id: '', type: 'COINS', value: 10, label: '10 Coins', color: '#3b82f6' });
-  const [editingGameType, setEditingGameType] = useState<SpinGameType | null>(null);
-  const [newGameType, setNewGameType] = useState<Partial<SpinGameType>>({ name: '', cost: 0, emoji: '🎰', description: '', dailyLimitFree: 2, dailyLimitBasic: 5, dailyLimitUltra: 10, color: '#6366f1', rewards: [] });
-  const [newGameTypeReward, setNewGameTypeReward] = useState<SpinReward>({ id: '', type: 'COINS', value: 10, label: '10 Coins', color: '#3b82f6', probability: 20 });
-  const [showNewGameTypeForm, setShowNewGameTypeForm] = useState(false);
 
   // --- CHAT MANAGER STATE ---
   const [newRoomName, setNewRoomName] = useState('');
@@ -5021,6 +5115,10 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                   <input type="number" value={plan.basicPrice} onChange={e => updatePlan('basicPrice', Number(e.target.value))} className="w-full p-1.5 border border-blue-300 rounded text-xs font-bold text-blue-700 bg-blue-50" />
                                               </div>
                                           </div>
+                                          <div className="mt-2">
+                                              <label className="text-[9px] font-bold text-amber-700 block">🪙 Pro Credit Price (CR)</label>
+                                              <input type="number" placeholder="Default duration price use hogi" value={plan.creditPriceBasic ?? ''} onChange={e => updatePlan('creditPriceBasic', e.target.value === '' ? undefined : Number(e.target.value))} className="w-full p-1.5 border border-amber-300 rounded text-xs font-bold text-amber-900 bg-amber-50/70" />
+                                          </div>
                                       </div>
 
                                       {/* ULTRA TIER CONFIG */}
@@ -5035,6 +5133,10 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                   <label className="text-[9px] font-bold text-purple-600 block">Selling Price (₹)</label>
                                                   <input type="number" value={plan.ultraPrice} onChange={e => updatePlan('ultraPrice', Number(e.target.value))} className="w-full p-1.5 border border-purple-300 rounded text-xs font-bold text-purple-700 bg-purple-50" />
                                               </div>
+                                          </div>
+                                          <div className="mt-2">
+                                              <label className="text-[9px] font-bold text-amber-700 block">🪙 Max Credit Price (CR)</label>
+                                              <input type="number" placeholder="Default duration price use hogi" value={plan.creditPriceUltra ?? ''} onChange={e => updatePlan('creditPriceUltra', e.target.value === '' ? undefined : Number(e.target.value))} className="w-full p-1.5 border border-amber-300 rounded text-xs font-bold text-amber-900 bg-amber-50/70" />
                                           </div>
                                       </div>
                                   </div>
@@ -8030,304 +8132,222 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                </button>
                            </div>
 
-                           {/* Show/Hide toggle for the entire game */}
-                           <div className="flex items-center justify-between bg-white rounded-xl border border-slate-200 p-3">
-                               <div className="flex items-center gap-3">
-                                   <Gamepad2 size={18} className="text-indigo-500" />
-                                   <div>
-                                       <p className="font-bold text-sm text-slate-800">Store me Game Dikhao</p>
-                                       <p className="text-[10px] text-slate-500">Band karne par Store page se Spin Game hat jayega</p>
-                                   </div>
-                               </div>
-                               <label className="relative inline-flex items-center cursor-pointer">
-                                   <input
-                                       type="checkbox"
-                                       className="sr-only peer"
-                                       checked={localSettings.isGameEnabled !== false}
-                                       onChange={(e) => setLocalSettings({ ...localSettings, isGameEnabled: e.target.checked })}
-                                   />
-                                   <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
-                               </label>
-                           </div>
-                           <div className="flex items-center justify-between">
-                               <h4 className="font-bold text-slate-800 flex items-center gap-2"><Gamepad2 size={18} /> Spin Game Types</h4>
-                               <button
-                                   onClick={() => { setShowNewGameTypeForm(true); setEditingGameType(null); setNewGameType({ name: '', cost: 0, emoji: '🎰', description: '', dailyLimitFree: 2, dailyLimitBasic: 5, dailyLimitUltra: 10, color: '#6366f1', rewards: [] }); }}
-                                   className="flex items-center gap-1 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700"
-                               >
-                                   <Plus size={12} /> New Game Type
-                               </button>
-                           </div>
-                           <p className="text-[11px] text-slate-500 -mt-3">Create multiple spin game types (e.g., Free Spin, Premium Spin) each with its own cost, daily limits, prizes, and win probabilities.</p>
+                           {/* SUBSCRIPTION BY CREDITS & DAILY COINS MANAGER */}
+                            <div className="bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent rounded-2xl border-2 border-amber-300/80 p-5 space-y-6 shadow-sm">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-amber-200">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-md">
+                                            <Coins size={22} />
+                                        </div>
+                                        <div>
+                                            <h4 className="text-base font-black text-slate-800 flex items-center gap-2">
+                                                Subscription by Credits & Daily Claims
+                                                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                                                    Store Controls
+                                                </span>
+                                            </h4>
+                                            <p className="text-xs text-slate-500">
+                                                Credit subscription toggle, plan credit pricing, aur daily claim coins configure karein
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={handleSaveSettings}
+                                        disabled={isSettingsSaving}
+                                        className="inline-flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-black text-xs rounded-xl shadow transition-all active:scale-95 disabled:opacity-50 shrink-0"
+                                    >
+                                        {isSettingsSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                                        Save Credit Settings
+                                    </button>
+                                </div>
 
-                           {/* LIST OF EXISTING GAME TYPES */}
-                           <div className="space-y-2">
-                               {((localSettings.spinGameTypes || []) as SpinGameType[]).map((gt, idx) => (
-                                   <div key={gt.id} className="bg-white rounded-xl border-2 p-3 shadow-sm" style={{ borderColor: gt.color || '#e2e8f0' }}>
-                                       <div className="flex items-center justify-between">
-                                           <div className="flex items-center gap-2">
-                                               <span className="text-xl">{gt.emoji || '🎰'}</span>
-                                               <div>
-                                                   <p className="font-black text-sm text-slate-800">{gt.name}</p>
-                                                   <div className="flex items-center gap-1.5 mt-0.5">
-                                                       <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${gt.cost === 0 ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
-                                                           {gt.cost === 0 ? 'FREE' : `${gt.cost} CR`}
-                                                       </span>
-                                                       <span className="text-[9px] text-slate-500">{gt.rewards?.length || 0} prizes</span>
-                                                       <span className="text-[9px] text-slate-400">• Free:{gt.dailyLimitFree || 2} Basic:{gt.dailyLimitBasic || 5} Ultra:{gt.dailyLimitUltra || 10}</span>
-                                                   </div>
-                                               </div>
-                                           </div>
-                                           <div className="flex items-center gap-1">
-                                               <button
-                                                   onClick={() => { setEditingGameType(gt); setNewGameType({...gt}); setShowNewGameTypeForm(true); }}
-                                                   className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg"
-                                               ><Edit3 size={13} /></button>
-                                               <button
-                                                   onClick={() => {
-                                                       const updated = [...(localSettings.spinGameTypes || [])];
-                                                       updated.splice(idx, 1);
-                                                       setLocalSettings({ ...localSettings, spinGameTypes: updated });
-                                                   }}
-                                                   className="p-1.5 text-red-400 hover:bg-red-50 rounded-lg"
-                                               ><Trash2 size={13} /></button>
-                                           </div>
-                                       </div>
-                                   </div>
-                               ))}
-                               {!(localSettings.spinGameTypes?.length) && (
-                                   <div className="text-center py-6 text-slate-400 text-xs border-2 border-dashed border-slate-200 rounded-xl">
-                                       No game types configured yet. Click "New Game Type" to create one.<br/>
-                                       <span className="text-[10px]">If none are set, the legacy single-game config below is used.</span>
-                                   </div>
-                               )}
-                           </div>
+                                {/* 1. ON/OFF TOGGLE: Subscription by Credits */}
+                                <div className="bg-white rounded-xl border border-amber-200 p-4 flex items-center justify-between gap-4">
+                                    <div className="space-y-1">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-sm font-black text-slate-800">Allow Subscription Purchase via Credits</span>
+                                            {localSettings.allowCreditSubscription !== false ? (
+                                                <span className="text-[10px] font-black uppercase bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md border border-emerald-300">
+                                                    Active (On)
+                                                </span>
+                                            ) : (
+                                                <span className="text-[10px] font-black uppercase bg-rose-100 text-rose-800 px-2 py-0.5 rounded-md border border-rose-300">
+                                                    Disabled (Off)
+                                                </span>
+                                            )}
+                                        </div>
+                                        <p className="text-xs text-slate-500 leading-relaxed">
+                                            Agar ise <strong>OFF</strong> karenge to Store me credits se subscription purchase band ho jayega. Student sirf WhatsApp/QR se hi subscription le payenge.
+                                        </p>
+                                    </div>
+                                    <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                                        <input
+                                            type="checkbox"
+                                            className="sr-only peer"
+                                            checked={localSettings.allowCreditSubscription !== false}
+                                            onChange={(e) => setLocalSettings({ ...localSettings, allowCreditSubscription: e.target.checked })}
+                                        />
+                                        <div className="w-12 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
+                                    </label>
+                                </div>
 
-                           {/* NEW / EDIT GAME TYPE FORM */}
-                           {showNewGameTypeForm && (
-                               <div className="bg-white border-2 border-indigo-200 rounded-xl p-4 space-y-3">
-                                   <div className="flex items-center justify-between mb-1">
-                                       <h5 className="font-bold text-slate-800 text-sm">{editingGameType ? 'Edit Game Type' : 'New Game Type'}</h5>
-                                       <button onClick={() => setShowNewGameTypeForm(false)} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
-                                   </div>
+                                {/* 2. DAILY CREDIT CLAIM SETTINGS */}
+                                <div className="space-y-3">
+                                    <div className="flex items-center gap-2">
+                                        <Gift size={16} className="text-amber-600" />
+                                        <h5 className="text-xs font-black text-slate-800 uppercase tracking-wider">
+                                            Daily Claim Coins (Subscription Tiers ke liye)
+                                        </h5>
+                                    </div>
+                                    <p className="text-xs text-slate-500 -mt-1">
+                                        User ko roz daily reward me kitne credits milenge (Free, Pro aur Max users ke liye alag alag set karein):
+                                    </p>
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                        {/* Free User */}
+                                        <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm space-y-1.5">
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-xs font-black text-slate-700">Free User</span>
+                                                <span className="text-[10px] font-bold text-slate-400">Regular</span>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    value={localSettings.dailyClaimFree ?? localSettings.dailyCoinsReward ?? 10}
+                                                    onChange={(e) => setLocalSettings({
+                                                        ...localSettings,
+                                                        dailyClaimFree: Number(e.target.value),
+                                                        dailyCoinsReward: Number(e.target.value)
+                                                    })}
+                                                    className="w-full p-2 border border-slate-200 rounded-lg text-sm font-black text-slate-800 focus:ring-2 focus:ring-amber-400 focus:outline-none"
+                                                />
+                                                <span className="text-xs font-bold text-slate-500 shrink-0">CR / Day</span>
+                                            </div>
+                                            <p className="text-[10px] text-slate-400">Default: 10 Coins/day</p>
+                                        </div>
 
-                                   <div className="grid grid-cols-2 gap-2">
-                                       <div>
-                                           <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Name</label>
-                                           <input type="text" placeholder="e.g. Free Spin" value={newGameType.name || ''} onChange={e => setNewGameType({...newGameType, name: e.target.value})} className="w-full p-2 border rounded-lg text-xs" />
-                                       </div>
-                                       <div>
-                                           <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Emoji</label>
-                                           <input type="text" placeholder="🎰" value={newGameType.emoji || ''} onChange={e => setNewGameType({...newGameType, emoji: e.target.value})} className="w-full p-2 border rounded-lg text-xs" />
-                                       </div>
-                                   </div>
+                                        {/* PRO (Basic) User */}
+                                        <div className="bg-blue-50/70 p-3.5 rounded-xl border border-blue-200 shadow-sm space-y-1.5">
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-xs font-black text-blue-900">PRO (Basic) User</span>
+                                                <span className="text-[10px] font-bold text-blue-600 uppercase">Subscribed</span>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    value={localSettings.dailyClaimPro ?? 50}
+                                                    onChange={(e) => setLocalSettings({
+                                                        ...localSettings,
+                                                        dailyClaimPro: Number(e.target.value)
+                                                    })}
+                                                    className="w-full p-2 border border-blue-300 bg-white rounded-lg text-sm font-black text-blue-900 focus:ring-2 focus:ring-blue-400 focus:outline-none"
+                                                />
+                                                <span className="text-xs font-bold text-blue-700 shrink-0">CR / Day</span>
+                                            </div>
+                                            <p className="text-[10px] text-blue-600">Default: 50 Coins/day</p>
+                                        </div>
 
-                                   <div>
-                                       <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Description (optional)</label>
-                                       <input type="text" placeholder="e.g. Spin for free and win coins!" value={newGameType.description || ''} onChange={e => setNewGameType({...newGameType, description: e.target.value})} className="w-full p-2 border rounded-lg text-xs" />
-                                   </div>
+                                        {/* MAX (Ultra) User */}
+                                        <div className="bg-purple-50/70 p-3.5 rounded-xl border border-purple-200 shadow-sm space-y-1.5">
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-xs font-black text-purple-900">MAX (Ultra) User</span>
+                                                <span className="text-[10px] font-bold text-purple-600 uppercase">VIP Tier</span>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    value={localSettings.dailyClaimMaxPro ?? 100}
+                                                    onChange={(e) => setLocalSettings({
+                                                        ...localSettings,
+                                                        dailyClaimMaxPro: Number(e.target.value)
+                                                    })}
+                                                    className="w-full p-2 border border-purple-300 bg-white rounded-lg text-sm font-black text-purple-900 focus:ring-2 focus:ring-purple-400 focus:outline-none"
+                                                />
+                                                <span className="text-xs font-bold text-purple-700 shrink-0">CR / Day</span>
+                                            </div>
+                                            <p className="text-[10px] text-purple-600">Default: 100 Coins/day</p>
+                                        </div>
+                                    </div>
+                                </div>
 
-                                   <div className="grid grid-cols-2 gap-2">
-                                       <div>
-                                           <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Cost (Credits, 0=Free)</label>
-                                           <input type="number" min="0" value={newGameType.cost ?? 0} onChange={e => setNewGameType({...newGameType, cost: Number(e.target.value)})} className="w-full p-2 border rounded-lg text-xs" />
-                                       </div>
-                                       <div>
-                                           <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Accent Color</label>
-                                           <div className="flex items-center gap-1 border rounded-lg p-1">
-                                               <input type="color" value={newGameType.color || '#6366f1'} onChange={e => setNewGameType({...newGameType, color: e.target.value})} className="w-8 h-6 border-0 rounded" />
-                                               <span className="text-[10px] text-slate-400">{newGameType.color}</span>
-                                           </div>
-                                       </div>
-                                   </div>
+                                {/* 3. DURATION-WISE CREDIT PRICING */}
+                                <div className="space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                            <Zap size={16} className="text-amber-600" />
+                                            <h5 className="text-xs font-black text-slate-800 uppercase tracking-wider">
+                                                Store Subscription Credit Prices (Duration Wise)
+                                            </h5>
+                                        </div>
+                                        <span className="text-[10px] text-slate-500 font-medium">
+                                            Store cards par yahi credit cost dikhegi
+                                        </span>
+                                    </div>
+                                    
+                                    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+                                        <div className="grid grid-cols-12 bg-slate-100/80 p-2.5 text-[11px] font-black text-slate-700 border-b border-slate-200">
+                                            <div className="col-span-4">Plan Duration</div>
+                                            <div className="col-span-4 text-blue-700">PRO (Basic) Credits</div>
+                                            <div className="col-span-4 text-purple-700">MAX (Ultra) Credits</div>
+                                        </div>
+                                        
+                                        {[
+                                            { label: 'Weekly (7 Days)', keyBasic: 'weekly_basic', keyUltra: 'weekly_ultra', defBasic: 150, defUltra: 300 },
+                                            { label: 'Monthly (30 Days)', keyBasic: 'monthly_basic', keyUltra: 'monthly_ultra', defBasic: 500, defUltra: 1000 },
+                                            { label: 'Quarterly (90 Days)', keyBasic: 'quarterly_basic', keyUltra: 'quarterly_ultra', defBasic: 1200, defUltra: 2400 },
+                                            { label: 'Yearly (365 Days)', keyBasic: 'yearly_basic', keyUltra: 'yearly_ultra', defBasic: 3500, defUltra: 7000 },
+                                        ].map((dur) => {
+                                            const prices = localSettings.subscriptionCreditPrices || {};
+                                            const currentBasic = prices[dur.keyBasic] ?? dur.defBasic;
+                                            const currentUltra = prices[dur.keyUltra] ?? dur.defUltra;
 
-                                   <div className="grid grid-cols-3 gap-2">
-                                       <div>
-                                           <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Free Limit/Day</label>
-                                           <input type="number" min="0" value={newGameType.dailyLimitFree ?? 2} onChange={e => setNewGameType({...newGameType, dailyLimitFree: Number(e.target.value)})} className="w-full p-2 border rounded-lg text-xs" />
-                                       </div>
-                                       <div>
-                                           <label className="text-[9px] font-bold text-blue-500 uppercase block mb-1">Basic Limit/Day</label>
-                                           <input type="number" min="0" value={newGameType.dailyLimitBasic ?? 5} onChange={e => setNewGameType({...newGameType, dailyLimitBasic: Number(e.target.value)})} className="w-full p-2 border border-blue-200 bg-blue-50 rounded-lg text-xs font-bold" />
-                                       </div>
-                                       <div>
-                                           <label className="text-[9px] font-bold text-purple-600 uppercase block mb-1">Ultra Limit/Day</label>
-                                           <input type="number" min="0" value={newGameType.dailyLimitUltra ?? 10} onChange={e => setNewGameType({...newGameType, dailyLimitUltra: Number(e.target.value)})} className="w-full p-2 border border-purple-200 bg-purple-50 rounded-lg text-xs font-bold" />
-                                       </div>
-                                   </div>
+                                            const updateCreditPrice = (key: string, val: number) => {
+                                                const updated = {
+                                                    ...(localSettings.subscriptionCreditPrices || {}),
+                                                    [key]: val,
+                                                };
+                                                setLocalSettings({ ...localSettings, subscriptionCreditPrices: updated });
+                                            };
 
-                                   {/* PRIZES FOR THIS TYPE */}
-                                   <div className="border-t border-slate-100 pt-3">
-                                       <h6 className="text-[10px] font-black text-slate-500 uppercase mb-2 flex items-center gap-1"><Gift size={11} /> Prizes & Win Probabilities</h6>
-                                       <p className="text-[9px] text-slate-400 mb-2">Probability values should sum to 100. Leave blank/0 for equal chance.</p>
+                                            return (
+                                                <div key={dur.label} className="grid grid-cols-12 p-2.5 items-center border-b last:border-0 border-slate-100 hover:bg-slate-50/60 transition-colors">
+                                                    <div className="col-span-4 font-bold text-xs text-slate-800 flex items-center gap-1.5">
+                                                        <span>🗓️</span> {dur.label}
+                                                    </div>
+                                                    <div className="col-span-4 pr-2">
+                                                        <div className="flex items-center gap-1.5">
+                                                            <input
+                                                                type="number"
+                                                                min="1"
+                                                                value={currentBasic}
+                                                                onChange={(e) => updateCreditPrice(dur.keyBasic, Number(e.target.value))}
+                                                                className="w-full p-1.5 border border-blue-200 bg-blue-50/40 rounded-lg text-xs font-black text-blue-900 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                                            />
+                                                            <span className="text-[10px] font-bold text-blue-600 shrink-0">CR</span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="col-span-4 pr-2">
+                                                        <div className="flex items-center gap-1.5">
+                                                            <input
+                                                                type="number"
+                                                                min="1"
+                                                                value={currentUltra}
+                                                                onChange={(e) => updateCreditPrice(dur.keyUltra, Number(e.target.value))}
+                                                                className="w-full p-1.5 border border-purple-200 bg-purple-50/40 rounded-lg text-xs font-black text-purple-900 focus:bg-white focus:outline-none focus:ring-1 focus:ring-purple-400"
+                                                            />
+                                                            <span className="text-[10px] font-bold text-purple-600 shrink-0">CR</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
 
-                                       <div className="space-y-1.5 mb-3 max-h-36 overflow-y-auto">
-                                           {(newGameType.rewards || []).map((r, i) => (
-                                               <div key={r.id || i} className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-100">
-                                                   <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: r.color || '#ccc' }} />
-                                                   <span className="text-[10px] font-bold text-slate-700 flex-1">{r.label}</span>
-                                                   <span className="text-[9px] bg-slate-100 px-1 rounded font-mono text-slate-500">{r.type}</span>
-                                                   <span className="text-[9px] font-black text-indigo-600">{r.probability || 0}%</span>
-                                                   <button onClick={() => {
-                                                       const updated = [...(newGameType.rewards || [])];
-                                                       updated.splice(i, 1);
-                                                       setNewGameType({...newGameType, rewards: updated});
-                                                   }} className="text-red-400 hover:text-red-600 shrink-0"><Trash2 size={11} /></button>
-                                               </div>
-                                           ))}
-                                           {!(newGameType.rewards?.length) && <p className="text-[10px] text-slate-400 text-center py-2">No prizes added yet.</p>}
-                                       </div>
-
-                                       {/* Add prize to this type */}
-                                       <div className="bg-slate-50 p-2 rounded-lg border border-slate-200 space-y-1.5">
-                                           <p className="text-[9px] font-bold text-slate-400 uppercase">Add Prize</p>
-                                           <div className="grid grid-cols-3 gap-1.5">
-                                               <select value={newGameTypeReward.type} onChange={e => setNewGameTypeReward({...newGameTypeReward, type: e.target.value as any})} className="p-1.5 border rounded text-[10px] bg-white col-span-1">
-                                                   <option value="COINS">Coins</option>
-                                                   <option value="SUBSCRIPTION">Sub</option>
-                                                   <option value="GIFT_CODE">Gift Code</option>
-                                               </select>
-                                               {newGameTypeReward.type === 'COINS' ? (
-                                                   <input type="number" placeholder="Amount" value={newGameTypeReward.value as number} onChange={e => setNewGameTypeReward({...newGameTypeReward, value: Number(e.target.value), label: `${e.target.value} CR`})} className="p-1.5 border rounded text-[10px] col-span-1" />
-                                               ) : newGameTypeReward.type === 'SUBSCRIPTION' ? (
-                                                   <select value={String(newGameTypeReward.value)} onChange={e => setNewGameTypeReward({...newGameTypeReward, value: e.target.value, label: e.target.value.replace('_', ' ')})} className="p-1.5 border rounded text-[10px] col-span-1">
-                                                       <option value="WEEKLY_BASIC">Weekly Basic</option>
-                                                       <option value="MONTHLY_ULTRA">Monthly Ultra</option>
-                                                       <option value="YEARLY_ULTRA">Yearly Ultra</option>
-                                                   </select>
-                                               ) : (
-                                                   <input type="text" placeholder="Gift Code" value={newGameTypeReward.giftCode || ''} onChange={e => setNewGameTypeReward({...newGameTypeReward, giftCode: e.target.value, value: e.target.value, label: newGameTypeReward.label || 'Gift Code'})} className="p-1.5 border rounded text-[10px] col-span-1" />
-                                               )}
-                                               <input type="number" placeholder="Prob%" min="0" max="100" value={newGameTypeReward.probability ?? 20} onChange={e => setNewGameTypeReward({...newGameTypeReward, probability: Number(e.target.value)})} className="p-1.5 border rounded text-[10px] col-span-1" />
-                                           </div>
-                                           <div className="grid grid-cols-3 gap-1.5">
-                                               <input type="text" placeholder="Label" value={newGameTypeReward.label} onChange={e => setNewGameTypeReward({...newGameTypeReward, label: e.target.value})} className="p-1.5 border rounded text-[10px] col-span-2" />
-                                               <div className="flex items-center gap-1 border rounded p-1">
-                                                   <input type="color" value={newGameTypeReward.color || '#3b82f6'} onChange={e => setNewGameTypeReward({...newGameTypeReward, color: e.target.value})} className="w-6 h-5 border-0" />
-                                               </div>
-                                           </div>
-                                           {newGameTypeReward.type === 'GIFT_CODE' && (
-                                               <input type="number" placeholder="Valid for (hours, e.g. 48)" min="1" value={newGameTypeReward.expiryHours ?? 48} onChange={e => setNewGameTypeReward({...newGameTypeReward, expiryHours: Number(e.target.value)})} className="w-full p-1.5 border rounded text-[10px]" />
-                                           )}
-                                           <button onClick={() => {
-                                               const item: SpinReward = { ...newGameTypeReward, id: `r-${Date.now()}` };
-                                               setNewGameType({...newGameType, rewards: [...(newGameType.rewards || []), item]});
-                                               setNewGameTypeReward({ id: '', type: 'COINS', value: 10, label: '10 CR', color: '#3b82f6', probability: 20 });
-                                           }} className="w-full py-1.5 bg-indigo-500 text-white font-bold rounded text-[10px] hover:bg-indigo-600">+ Add Prize</button>
-                                       </div>
-                                   </div>
-
-                                   <button
-                                       onClick={() => {
-                                           if (!newGameType.name) return;
-                                           const gt: SpinGameType = {
-                                               id: editingGameType?.id || `sgt-${Date.now()}`,
-                                               name: newGameType.name || 'Spin',
-                                               cost: newGameType.cost ?? 0,
-                                               emoji: newGameType.emoji || '🎰',
-                                               description: newGameType.description,
-                                               dailyLimitFree: newGameType.dailyLimitFree ?? 2,
-                                               dailyLimitBasic: newGameType.dailyLimitBasic ?? 5,
-                                               dailyLimitUltra: newGameType.dailyLimitUltra ?? 10,
-                                               color: newGameType.color || '#6366f1',
-                                               rewards: newGameType.rewards || [],
-                                           };
-                                           let current = [...(localSettings.spinGameTypes || [])];
-                                           if (editingGameType) {
-                                               const idx = current.findIndex(t => t.id === editingGameType.id);
-                                               if (idx >= 0) current[idx] = gt; else current.push(gt);
-                                           } else {
-                                               current.push(gt);
-                                           }
-                                           setLocalSettings({...localSettings, spinGameTypes: current});
-                                           setShowNewGameTypeForm(false);
-                                           setEditingGameType(null);
-                                       }}
-                                       className="w-full py-2 bg-indigo-600 text-white font-black rounded-xl text-sm hover:bg-indigo-700"
-                                   >
-                                       {editingGameType ? 'Save Changes' : 'Create Game Type'}
-                                   </button>
-                               </div>
-                           )}
-
-                           {/* LEGACY FALLBACK CONFIG (only shown when no spinGameTypes set) */}
-                           {!(localSettings.spinGameTypes?.length) && (
-                               <div className="border-t border-slate-200 pt-4 space-y-4">
-                                   <p className="text-[10px] font-bold text-amber-600 uppercase">Legacy Config (used when no game types above are set)</p>
-                                   <div>
-                                       <label className="text-xs font-bold text-slate-600 uppercase block mb-1">Game Cost (Credits)</label>
-                                       <input type="number" value={localSettings.gameCost} onChange={e => setLocalSettings({...localSettings, gameCost: Number(e.target.value)})} className="w-full p-2 border rounded-lg text-xs" />
-                                       <p className="text-[10px] text-slate-500">Set 0 for free entry within daily limits.</p>
-                                   </div>
-                                   <div className="grid grid-cols-3 gap-3">
-                                       <div>
-                                           <label className="text-[10px] font-bold text-purple-600 uppercase block mb-1">Ultra Limit</label>
-                                           <input type="number" value={localSettings.spinLimitUltra} onChange={e => setLocalSettings({...localSettings, spinLimitUltra: Number(e.target.value)})} className="w-full p-2 border border-purple-200 bg-purple-50 rounded-lg font-bold text-xs" />
-                                       </div>
-                                       <div>
-                                           <label className="text-[10px] font-bold text-blue-600 uppercase block mb-1">Basic Limit</label>
-                                           <input type="number" value={localSettings.spinLimitBasic} onChange={e => setLocalSettings({...localSettings, spinLimitBasic: Number(e.target.value)})} className="w-full p-2 border border-blue-200 bg-blue-50 rounded-lg font-bold text-xs" />
-                                       </div>
-                                       <div>
-                                           <label className="text-[10px] font-bold text-slate-600 uppercase block mb-1">Free Limit</label>
-                                           <input type="number" value={localSettings.spinLimitFree} onChange={e => setLocalSettings({...localSettings, spinLimitFree: Number(e.target.value)})} className="w-full p-2 border rounded-lg font-bold text-xs" />
-                                       </div>
-                                   </div>
-                                   <div>
-                                       <h5 className="font-bold text-slate-800 mb-2 flex items-center gap-2 text-sm"><Gift size={15} /> Prize Wheel Items</h5>
-                                       <div className="space-y-1.5 mb-3 max-h-36 overflow-y-auto">
-                                           {(localSettings.wheelRewards || []).map((reward: any, idx: number) => {
-                                               const r = typeof reward === 'number' ? { id: idx, type: 'COINS', value: reward, label: `${reward} CR` } : reward;
-                                               return (
-                                                   <div key={r.id || idx} className="flex justify-between items-center bg-white p-2 rounded-lg border border-slate-200 shadow-sm">
-                                                       <div className="flex items-center gap-2">
-                                                           <div className="w-3 h-3 rounded-full" style={{backgroundColor: r.color || '#ccc'}}></div>
-                                                           <span className="text-xs font-bold text-slate-700">{r.label}</span>
-                                                           <span className="text-[9px] bg-slate-100 px-1 rounded text-slate-500 font-mono">{r.type}</span>
-                                                           {r.probability !== undefined && <span className="text-[9px] font-black text-indigo-500">{r.probability}%</span>}
-                                                       </div>
-                                                       <button onClick={() => {
-                                                           const updated = [...(localSettings.wheelRewards || [])];
-                                                           updated.splice(idx, 1);
-                                                           setLocalSettings({...localSettings, wheelRewards: updated});
-                                                       }} className="text-red-400 hover:text-red-600"><Trash2 size={13} /></button>
-                                                   </div>
-                                               );
-                                           })}
-                                       </div>
-                                       <div className="bg-white p-3 rounded-lg border border-slate-200 space-y-2">
-                                           <p className="text-[10px] font-bold text-slate-500 uppercase">Add Prize</p>
-                                           <div className="grid grid-cols-3 gap-2">
-                                               <select value={newReward.type} onChange={e => setNewReward({...newReward, type: e.target.value as any})} className="p-2 border rounded text-xs bg-slate-50">
-                                                   <option value="COINS">Coins</option>
-                                                   <option value="SUBSCRIPTION">Sub</option>
-                                               </select>
-                                               {newReward.type === 'COINS' ? (
-                                                   <input type="number" placeholder="Amount" value={newReward.value as number} onChange={e => setNewReward({...newReward, value: Number(e.target.value), label: `${e.target.value} CR`})} className="p-2 border rounded text-xs" />
-                                               ) : (
-                                                   <select value={String(newReward.value)} onChange={e => setNewReward({...newReward, value: e.target.value, label: e.target.value.replace('_', ' ')})} className="p-2 border rounded text-xs">
-                                                       <option value="WEEKLY_BASIC">Weekly Basic</option>
-                                                       <option value="MONTHLY_ULTRA">Monthly Ultra</option>
-                                                       <option value="YEARLY_ULTRA">Yearly Ultra</option>
-                                                   </select>
-                                               )}
-                                               <input type="number" placeholder="Prob%" min="0" max="100" value={newReward.probability ?? 0} onChange={e => setNewReward({...newReward, probability: Number(e.target.value)})} className="p-2 border rounded text-xs" />
-                                           </div>
-                                           <div className="grid grid-cols-2 gap-2">
-                                               <input type="text" placeholder="Label" value={newReward.label} onChange={e => setNewReward({...newReward, label: e.target.value})} className="p-2 border rounded text-xs" />
-                                               <div className="flex items-center gap-2 border rounded p-1">
-                                                   <input type="color" value={newReward.color || '#3b82f6'} onChange={e => setNewReward({...newReward, color: e.target.value})} className="w-8 h-6 p-0 border-0 rounded" />
-                                                   <span className="text-[10px] text-slate-500">{newReward.color}</span>
-                                               </div>
-                                           </div>
-                                           <button onClick={() => {
-                                               const item = { ...newReward, id: `rew-${Date.now()}` };
-                                               setLocalSettings({ ...localSettings, wheelRewards: [...(localSettings.wheelRewards || []), item] });
-                                           }} className="w-full py-2 bg-indigo-600 text-white font-bold rounded-lg text-xs hover:bg-indigo-700">+ Add Prize</button>
-                                       </div>
-                                   </div>
-                               </div>
-                           )}
                        </div>
                   )}
                   {activeTab === 'CONFIG_EXTERNAL_APPS' && (
@@ -16828,7 +16848,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                   <label className="text-xs font-bold text-pink-700 uppercase block mb-1">⏱️ Duration (hours)</label>
                                   <input type="number" value={newCodeScoreBoostHours} onChange={e => setNewCodeScoreBoostHours(Number(e.target.value))} className="p-3 rounded-xl border border-pink-200 w-32 font-bold" min="1" />
                               </div>
-                              <p className="text-[10px] text-orange-600 mt-1">🚀 Student ke saare score earning par {newCodeScoreBoostPercent}% extra milega — {newCodeScoreBoostHours} hours ke liye.</p>
+                              <p className="text-[10px] text-orange-600 mt-1">������ Student ke saare score earning par {newCodeScoreBoostPercent}% extra milega — {newCodeScoreBoostHours} hours ke liye.</p>
                           </div>
                       ) : newCodeType === 'SCORE_LIMIT_BOOST' ? (
                           <div className="flex flex-col gap-2">
@@ -16997,18 +17017,69 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                   </div>
               </div>
 
-              <div className="relative mb-6">
-                  <Search className="absolute left-3 top-3 text-slate-500" size={18} />
-                  <input type="text" placeholder="Search by Name, Email or ID..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-purple-500" />
+              <div className="space-y-3 mb-6">
+                  <div className="flex gap-2">
+                      <div className="relative flex-1">
+                          <Search className="absolute left-3 top-3 text-slate-500" size={18} />
+                          <input 
+                              type="text" 
+                              placeholder="Search by Student ID (e.g. NSTA-564894), Name, Email, Phone, or UID..." 
+                              value={searchTerm} 
+                              onChange={e => setSearchTerm(e.target.value)} 
+                              onKeyDown={e => { if (e.key === 'Enter') searchUserInCloud(); }}
+                              className="w-full pl-10 pr-10 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-purple-500 text-sm font-medium" 
+                          />
+                          {searchTerm && (
+                              <button 
+                                  onClick={() => { setSearchTerm(''); setCloudSearchMessage(null); }} 
+                                  className="absolute right-3 top-3 text-slate-400 hover:text-slate-600"
+                              >
+                                  <X size={16} />
+                              </button>
+                          )}
+                      </div>
+                      <button 
+                          onClick={() => searchUserInCloud()}
+                          disabled={cloudSearching}
+                          className="px-4 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-sm transition disabled:opacity-50 whitespace-nowrap"
+                          title="Directly find in Firestore and Realtime Database"
+                      >
+                          {cloudSearching ? <Loader2 size={16} className="animate-spin" /> : <Cloud size={16} />}
+                          {cloudSearching ? 'Searching...' : 'Cloud Search'}
+                      </button>
+                  </div>
+
+                  {cloudSearchMessage && (
+                      <div className={`p-2.5 rounded-xl text-xs font-semibold flex items-center justify-between ${cloudSearchMessage.startsWith('✅') ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
+                          <span>{cloudSearchMessage}</span>
+                          <button onClick={() => setCloudSearchMessage(null)} className="text-slate-400 hover:text-slate-600 ml-2"><X size={14}/></button>
+                      </div>
+                  )}
               </div>
 
               <div className="grid gap-4">
-                  {users.filter(u => (u.name || '').toLowerCase().includes((searchTerm || '').toLowerCase()) || (u.email || '').toLowerCase().includes((searchTerm || '').toLowerCase())).map(u => (
+                  {users.filter(u => matchesUserSearch(u, searchTerm)).map(u => (
                       <div key={u.id} className={`p-4 rounded-xl border-2 ${u.subscriptionTier === 'LIFETIME' ? 'border-yellow-300 bg-yellow-50' : u.subscriptionTier === 'YEARLY' ? 'border-purple-300 bg-purple-50' : u.subscriptionTier === 'MONTHLY' ? 'border-blue-300 bg-blue-50' : u.subscriptionTier === 'WEEKLY' ? 'border-green-300 bg-green-50' : 'border-slate-200 bg-slate-50'}`}>
                           <div className="flex items-start justify-between mb-3">
                               <div>
-                                  <p className="font-bold text-slate-800">{u.name}</p>
-                                  <p className="text-xs text-slate-600">{u.email} • ID: {u.id}</p>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                      <p className="font-bold text-slate-800 text-base">{u.name}</p>
+                                      {u.displayId && (
+                                          <span className="bg-purple-100 text-purple-800 text-xs font-mono font-black px-2.5 py-0.5 rounded-md border border-purple-200 shadow-xs">
+                                              ID: {u.displayId}
+                                          </span>
+                                      )}
+                                      {u.role && u.role !== 'STUDENT' && (
+                                          <span className="bg-slate-200 text-slate-700 text-[10px] font-bold px-2 py-0.5 rounded">
+                                              {u.role}
+                                          </span>
+                                      )}
+                                  </div>
+                                  <p className="text-xs text-slate-600 mt-1 flex flex-wrap items-center gap-2">
+                                      {u.email && <span>{u.email}</span>}
+                                      {u.mobile && <span className="font-mono">📞 {u.mobile}</span>}
+                                      <span className="text-[11px] text-slate-500 font-mono bg-white/70 px-1.5 py-0.5 rounded border border-slate-200">UID: {u.id}</span>
+                                  </p>
                               </div>
                               <span className={`px-3 py-1 rounded-full text-xs font-bold ${
                                   u.subscriptionTier === 'LIFETIME' ? 'bg-yellow-200 text-yellow-800' :
@@ -17050,6 +17121,29 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                           </button>
                       </div>
                   ))}
+
+                  {users.filter(u => matchesUserSearch(u, searchTerm)).length === 0 && (
+                      <div className="p-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-300">
+                          <p className="text-slate-600 font-bold text-sm mb-2">
+                              {searchTerm ? `Local memory mein "${searchTerm}" ka user nahi mila.` : 'Koi user nahi mila.'}
+                          </p>
+                          {searchTerm && (
+                              <div className="mt-3">
+                                  <p className="text-xs text-slate-500 mb-3">
+                                      Ho sakta hai yeh student pehle se Cloud Database mein ho par abhi load na hua ho.
+                                  </p>
+                                  <button
+                                      onClick={() => searchUserInCloud()}
+                                      disabled={cloudSearching}
+                                      className="inline-flex items-center gap-2 px-5 py-2.5 bg-purple-600 text-white rounded-xl font-bold text-xs hover:bg-purple-700 shadow transition"
+                                  >
+                                      {cloudSearching ? <Loader2 size={15} className="animate-spin" /> : <Cloud size={15} />}
+                                      Cloud Database mein "{searchTerm}" khojein
+                                  </button>
+                              </div>
+                          )}
+                      </div>
+                  )}
               </div>
           </div>
       )}
@@ -17271,8 +17365,8 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                               <th className="p-4 text-right">Actions</th>
                           </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-100">
-                          {users.filter(u => u.role === 'TEACHER' && ((u.name || '').toLowerCase().includes((searchTerm || '').toLowerCase()) || (u.id || '').includes(searchTerm)))
+                       <tbody className="divide-y divide-slate-100">
+                          {users.filter(u => u.role === 'TEACHER' && matchesUserSearch(u, searchTerm))
                                 .sort((a, b) => (b.totalActiveDays || 0) - (a.totalActiveDays || 0))
                                 .map((u, index) => (
                               <tr key={u.id} className="hover:bg-slate-50 transition-colors group">
@@ -17288,10 +17382,15 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                               </div>
                                           )}
                                           <div>
-                                              <p className="font-bold text-slate-800 flex items-center gap-1">
+                                              <p className="font-bold text-slate-800 flex items-center gap-1.5 flex-wrap">
                                                   {u.name} {index < 3 && <Award size={14} className="text-yellow-500"/>}
+                                                  {u.displayId && (
+                                                      <span className="bg-purple-100 text-purple-800 font-mono text-[10px] px-1.5 py-0.5 rounded font-black border border-purple-200">
+                                                          {u.displayId}
+                                                      </span>
+                                                  )}
                                               </p>
-                                              <p className="text-[10px] text-slate-500 font-mono">{u.id}</p>
+                                              <p className="text-[10px] text-slate-500 font-mono">UID: {u.id}</p>
                                           </div>
                                       </div>
                                   </td>
@@ -17324,17 +17423,65 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
           <ErrorBoundary fallbackLabel="User Management" compact>
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 animate-in slide-in-from-bottom-4">
               <div className="flex items-center gap-4 mb-6"><button onClick={() => setActiveTab('DASHBOARD')} className="bg-slate-100 p-2 rounded-full hover:bg-slate-200"><ArrowLeft size={20} /></button><h3 className="text-xl font-black text-slate-800">User Management</h3></div>
-              <div className="relative mb-6">
-                  <Search className="absolute left-3 top-3 text-slate-500" size={18} />
-                  <input type="text" placeholder="Search by Name or ID..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500" />
+              <div className="space-y-3 mb-6">
+                  <div className="flex gap-2">
+                      <div className="relative flex-1">
+                          <Search className="absolute left-3 top-3 text-slate-500" size={18} />
+                          <input 
+                              type="text" 
+                              placeholder="Search by Student ID (e.g. NSTA-564894), Name, Mobile, Email or UID..." 
+                              value={searchTerm} 
+                              onChange={e => setSearchTerm(e.target.value)} 
+                              onKeyDown={e => { if (e.key === 'Enter') searchUserInCloud(); }}
+                              className="w-full pl-10 pr-10 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-sm font-medium" 
+                          />
+                          {searchTerm && (
+                              <button 
+                                  onClick={() => { setSearchTerm(''); setCloudSearchMessage(null); }} 
+                                  className="absolute right-3 top-3 text-slate-400 hover:text-slate-600"
+                              >
+                                  <X size={16} />
+                              </button>
+                          )}
+                      </div>
+                      <button 
+                          onClick={() => searchUserInCloud()}
+                          disabled={cloudSearching}
+                          className="px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-sm transition disabled:opacity-50 whitespace-nowrap"
+                          title="Directly find user in Firestore and RTDB"
+                      >
+                          {cloudSearching ? <Loader2 size={16} className="animate-spin" /> : <Cloud size={16} />}
+                          {cloudSearching ? 'Searching...' : 'Cloud Search'}
+                      </button>
+                  </div>
+
+                  {cloudSearchMessage && (
+                      <div className={`p-2.5 rounded-xl text-xs font-semibold flex items-center justify-between ${cloudSearchMessage.startsWith('✅') ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
+                          <span>{cloudSearchMessage}</span>
+                          <button onClick={() => setCloudSearchMessage(null)} className="text-slate-400 hover:text-slate-600 ml-2"><X size={14}/></button>
+                      </div>
+                  )}
               </div>
+
               <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
                       <thead className="bg-slate-50 border-b border-slate-100 text-slate-600"><tr className="uppercase text-xs"><th className="p-4">User</th><th className="p-4">Credits</th><th className="p-4">Role</th><th className="p-4 text-right">Actions</th></tr></thead>
                       <tbody className="divide-y divide-slate-50">
-                          {users.filter(u => (u.name || '').toLowerCase().includes((searchTerm || '').toLowerCase()) || (u.id || '').includes(searchTerm)).map(u => (
+                          {users.filter(u => matchesUserSearch(u, searchTerm)).map(u => (
                               <tr key={u.id} className="hover:bg-slate-50 transition-colors">
-                                  <td className="p-4"><p className="font-bold text-slate-800">{u.name}</p><p className="text-xs text-slate-500 font-mono">{u.id}</p></td>
+                                  <td className="p-4">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                          <p className="font-bold text-slate-800">{u.name}</p>
+                                          {u.displayId && (
+                                              <span className="bg-purple-100 text-purple-800 font-mono text-[11px] px-2 py-0.5 rounded font-black border border-purple-200 shadow-xs">
+                                                  ID: {u.displayId}
+                                              </span>
+                                          )}
+                                      </div>
+                                      <p className="text-xs text-slate-500 font-mono mt-0.5">
+                                          UID: {u.id} {u.email ? `• ${u.email}` : ''} {u.mobile ? `• 📞 ${u.mobile}` : ''}
+                                      </p>
+                                  </td>
                                   <td className="p-4 font-bold text-blue-600">{u.credits}</td>
                                   <td className="p-4"><span className={`px-2 py-1 rounded text-xs font-bold ${u.role === 'ADMIN' ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-600'}`}>{u.role}</span></td>
                                   <td className="p-4 text-right flex justify-end gap-2">
@@ -17365,6 +17512,30 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                   </td>
                               </tr>
                           ))}
+                          {users.filter(u => matchesUserSearch(u, searchTerm)).length === 0 && (
+                              <tr>
+                                  <td colSpan={4} className="p-8 text-center bg-slate-50">
+                                      <p className="text-slate-600 font-bold text-sm mb-2">
+                                          {searchTerm ? `Local memory mein "${searchTerm}" ka user nahi mila.` : 'Koi user nahi mila.'}
+                                      </p>
+                                      {searchTerm && (
+                                          <div className="mt-2">
+                                              <p className="text-xs text-slate-500 mb-3">
+                                                  Student database (Firestore / RTDB) mein search karke directly load karein:
+                                              </p>
+                                              <button
+                                                  onClick={() => searchUserInCloud()}
+                                                  disabled={cloudSearching}
+                                                  className="inline-flex items-center gap-2 px-5 py-2 bg-blue-600 text-white rounded-xl font-bold text-xs hover:bg-blue-700 shadow transition"
+                                              >
+                                                  {cloudSearching ? <Loader2 size={15} className="animate-spin" /> : <Cloud size={15} />}
+                                                  Database mein "{searchTerm}" khojein
+                                              </button>
+                                          </div>
+                                      )}
+                                  </td>
+                              </tr>
+                          )}
                       </tbody>
                   </table>
               </div>
@@ -17445,8 +17616,14 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                   <div className="flex justify-between items-center mb-6 border-b pb-4">
                       <div>
                           <h3 className="text-xl font-black text-slate-800 flex items-center gap-2"><Activity className="text-purple-600"/> Student History</h3>
-                          <p className="text-sm text-slate-600">
-                              Activity for: <span className="font-bold text-purple-600">{viewingUserHistory.name}</span> (ID: {viewingUserHistory.id})
+                          <p className="text-sm text-slate-600 flex flex-wrap items-center gap-2">
+                              Activity for: <span className="font-bold text-purple-600">{viewingUserHistory.name}</span>
+                              {viewingUserHistory.displayId && (
+                                  <span className="bg-purple-100 text-purple-800 font-mono font-bold text-xs px-2 py-0.5 rounded border border-purple-200">
+                                      ID: {viewingUserHistory.displayId}
+                                  </span>
+                              )}
+                              <span className="text-xs text-slate-400 font-mono">(UID: {viewingUserHistory.id})</span>
                           </p>
                       </div>
                       <button onClick={() => setViewingUserHistory(null)} className="p-2 hover:bg-slate-100 rounded-full">
@@ -17597,7 +17774,25 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
       {editingUser && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
               <div className="bg-white p-6 rounded-2xl w-full shadow-2xl max-h-[90vh] overflow-y-auto">
-                  <h3 className="text-lg font-bold mb-4">Edit User: {editingUser.name}</h3>
+                  <div className="mb-4 pb-3 border-b border-slate-100">
+                      <h3 className="text-lg font-bold text-slate-800">Edit User: {editingUser.name}</h3>
+                      <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs">
+                          {editingUser.displayId && (
+                              <span className="bg-purple-100 text-purple-800 font-mono font-black px-2.5 py-1 rounded-md border border-purple-200 shadow-xs">
+                                  Student ID: {editingUser.displayId}
+                              </span>
+                          )}
+                          <span className="bg-slate-100 text-slate-600 font-mono px-2 py-1 rounded-md border border-slate-200">
+                              UID: {editingUser.id}
+                          </span>
+                          {editingUser.email && (
+                              <span className="text-slate-500">{editingUser.email}</span>
+                          )}
+                          {editingUser.mobile && (
+                              <span className="text-slate-500 font-mono">📞 {editingUser.mobile}</span>
+                          )}
+                      </div>
+                  </div>
                   <div className="space-y-4">
                       {/* SCORE */}
                       <div>

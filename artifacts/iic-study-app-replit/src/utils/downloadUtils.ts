@@ -18,7 +18,7 @@ export const downloadAsHTML = (
   filename: string,
   branding?: DownloadBrandingOptions,
 ): void => {
-  const appName   = branding?.appName   || 'IIC';
+  const appName   = branding?.appName   || 'NSTA';
   const pageTitle = branding?.pageTitle || filename || 'Notes';
   const subtitle  = branding?.subtitle  || '';
   const brandColor = branding?.brandColor || '#4f46e5';
@@ -136,7 +136,7 @@ export const downloadAsMHTML = async (
     return;
   }
 
-  const appName    = branding?.appName    || 'IIC';
+  const appName    = branding?.appName    || 'NSTA';
   const pageTitle  = branding?.pageTitle  || filename || 'Notes';
   const subtitle   = branding?.subtitle   || '';
   const brandColor = branding?.brandColor || '#4f46e5';

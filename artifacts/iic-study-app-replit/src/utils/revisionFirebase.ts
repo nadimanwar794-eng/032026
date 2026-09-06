@@ -11,8 +11,8 @@
  * which means Firebase always reflects the latest attempt.
  */
 
-import { doc, setDoc, collection, getDocs } from 'firebase/firestore';
-import { ref, update } from 'firebase/database';
+import { doc, setDoc, collection, getDocs, writeBatch } from 'firebase/firestore';
+import { ref, update, get } from 'firebase/database';
 import { db, rtdb, sanitizeForFirestore } from '../firebase';
 import {
   getTrackerMap,
@@ -57,8 +57,9 @@ export function reconstructBucketsFromUserProfile(user: any): TrackerMap {
       const k = `${subId}::${chapId}::${chapId}::${topicName}`;
 
       const tier = accuracy >= 0.8 ? 'mastered' : accuracy >= 0.65 ? 'strong' : accuracy >= 0.5 ? 'average' : 'weak';
-      // Due today if weak or below mastery so user immediately sees their topics
-      const isDue = accuracy < 0.75;
+      // Due today only if weak
+      const isDue = accuracy < 0.5;
+      const attemptTime = stats.lastAttempt ? new Date(stats.lastAttempt).getTime() : 0;
 
       map[k] = {
         subjectId: subId,
@@ -70,14 +71,14 @@ export function reconstructBucketsFromUserProfile(user: any): TrackerMap {
         topic: topicName,
         total,
         correct,
-        lastAttemptAt: stats.lastAttempt ? new Date(stats.lastAttempt).getTime() : now,
+        lastAttemptAt: attemptTime || now,
         wrongQuestions: [],
-        stage: 'MCQ',
+        stage: accuracy >= 0.7 ? 'NOTES' : 'MCQ',
         nextDueAt: isDue ? now : now + 24 * 3600 * 1000,
         cycleCount: 1,
         lastTier: tier,
         lastSessionAccuracy: accuracy,
-        updatedAt: now,
+        updatedAt: attemptTime || 0,
       };
     }
   }
@@ -95,6 +96,7 @@ export function reconstructBucketsFromUserProfile(user: any): TrackerMap {
           const k = `${subId}::${chapId}::${chapId}::${topicName}`;
           if (!map[k]) {
             const acc = correct / total;
+            const attemptTime = h.date ? new Date(h.date).getTime() : 0;
             map[k] = {
               subjectId: subId,
               subjectName: h.subjectName || subId,
@@ -105,14 +107,14 @@ export function reconstructBucketsFromUserProfile(user: any): TrackerMap {
               topic: topicName,
               total,
               correct,
-              lastAttemptAt: h.date ? new Date(h.date).getTime() : now,
+              lastAttemptAt: attemptTime || now,
               wrongQuestions: [],
-              stage: 'MCQ',
-              nextDueAt: acc < 0.75 ? now : now + 24 * 3600 * 1000,
+              stage: acc >= 0.7 ? 'NOTES' : 'MCQ',
+              nextDueAt: acc < 0.5 ? now : now + 24 * 3600 * 1000,
               cycleCount: 1,
               lastTier: acc >= 0.8 ? 'mastered' : acc >= 0.65 ? 'strong' : acc >= 0.5 ? 'average' : 'weak',
               lastSessionAccuracy: acc,
-              updatedAt: now,
+              updatedAt: attemptTime || 0,
             };
           }
         }
@@ -142,7 +144,7 @@ export function syncRevisionBucket(
     setDoc(bucketRef(userId, key), payload, { merge: false }).catch(() => {});
   } catch {}
 
-  // Also mirror summary to Realtime Database
+  // Also mirror summary and full bucket to Realtime Database
   try {
     if (rtdb) {
       const safeKey = safeDocId(key);
@@ -159,26 +161,66 @@ export function syncRevisionBucket(
         nextDueAt: bucket.nextDueAt || 0,
         updatedAt: Date.now(),
       }).catch(() => {});
+
+      // Full bucket mirror in RTDB
+      const fullBucketPath = `users/${userId}/revisionTracker/buckets/${safeKey}`;
+      update(ref(rtdb, fullBucketPath), payload).catch(() => {});
     }
   } catch {}
 }
 
 /**
- * Sync every bucket in a TrackerMap — fire and forget.
+ * Sync every bucket in a TrackerMap — fire and forget using batched writes to prevent write stream exhaustion.
  * Call this after any bulk update (e.g. after a full Revision Hub MCQ session).
  */
 export function syncAllRevisionBuckets(userId: string, map: TrackerMap): void {
   if (!userId) return;
-  const entries = Object.entries(map);
-  for (const [key, bucket] of entries) {
-    syncRevisionBucket(userId, key, bucket);
+  const entries = Object.entries(map || {});
+  if (entries.length === 0) return;
+
+  // Split into batches of up to 300 to stay well under Firestore's 500 operations per batch limit
+  const CHUNK_SIZE = 300;
+  for (let i = 0; i < entries.length; i += CHUNK_SIZE) {
+    const chunk = entries.slice(i, i + CHUNK_SIZE);
+    try {
+      const batch = writeBatch(db);
+      for (const [key, bucket] of chunk) {
+        const payload = sanitizeForFirestore({ ...bucket, _key: key, updatedAt: Date.now() });
+        batch.set(bucketRef(userId, key), payload, { merge: false });
+      }
+      batch.commit().catch(e => {
+        console.warn('[revisionFirebase] batch commit failed:', e);
+      });
+    } catch (err) {
+      console.warn('[revisionFirebase] batch init failed:', err);
+    }
   }
+
+  // Mirror all to RTDB in a single batch update
   try {
     if (rtdb) {
-      update(ref(rtdb, `users/${userId}/revisionOverview`), {
-        totalBuckets: entries.length,
-        lastSyncedAt: Date.now(),
-      }).catch(() => {});
+      const rtdbUpdates: Record<string, any> = {
+        [`users/${userId}/revisionOverview/totalBuckets`]: entries.length,
+        [`users/${userId}/revisionOverview/lastSyncedAt`]: Date.now(),
+      };
+      for (const [key, bucket] of entries) {
+        const safeKey = safeDocId(key);
+        const payload = sanitizeForFirestore({ ...bucket, _key: key, updatedAt: Date.now() });
+        rtdbUpdates[`users/${userId}/revision_summary/${safeKey}`] = {
+          key,
+          topic: bucket.topic || '',
+          subjectId: bucket.subjectId || '',
+          chapterId: bucket.chapterId || '',
+          stage: bucket.stage || 'NOTES',
+          cycleCount: bucket.cycleCount || 0,
+          accuracy: bucket.lastSessionAccuracy ?? (bucket.total > 0 ? bucket.correct / bucket.total : 0),
+          lastTier: bucket.lastTier || 'average',
+          nextDueAt: bucket.nextDueAt || 0,
+          updatedAt: Date.now(),
+        };
+        rtdbUpdates[`users/${userId}/revisionTracker/buckets/${safeKey}`] = payload;
+      }
+      update(ref(rtdb), rtdbUpdates).catch(() => {});
     }
   } catch {}
 }
@@ -188,28 +230,46 @@ export function syncAllRevisionBuckets(userId: string, map: TrackerMap): void {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Load all revision buckets from Firestore for a user.
+ * Load all revision buckets from Firestore (or RTDB fallback) for a user.
  * Returns an empty map on error.
  */
 export async function loadRevisionBucketsFromFirebase(
   userId: string,
 ): Promise<TrackerMap> {
   if (!userId) return {};
+  const map: TrackerMap = {};
   try {
     const colRef = collection(db, `users/${userId}/revision_lessons`);
     const snap = await getDocs(colRef);
-    const map: TrackerMap = {};
     snap.forEach(d => {
       const raw = d.data() as TopicBucket & { _key?: string; updatedAt?: number };
-      // Restore original key — stored as _key; fallback: reverse safeDocId heuristic
       const key = raw._key || d.id.replace(/__/g, '::');
       const { _key, updatedAt, ...bucket } = raw as any;
       map[key] = bucket as TopicBucket;
     });
-    return map;
   } catch {
-    return {};
+    // Firestore error
   }
+
+  // If Firestore had no docs or failed, try Realtime Database mirror
+  if (Object.keys(map).length === 0 && rtdb) {
+    try {
+      const rtdbSnap = await get(ref(rtdb, `users/${userId}/revisionTracker/buckets`));
+      if (rtdbSnap.exists()) {
+        const val = rtdbSnap.val();
+        if (val && typeof val === 'object') {
+          for (const item of Object.values(val) as any[]) {
+            if (item && item.topic) {
+              const k = item._key || `${item.subjectId || 'GENERAL'}::${item.chapterId || 'chapter_1'}::${item.pageKey || item.chapterId || 'chapter_1'}::${item.topic}`;
+              map[k] = item as TopicBucket;
+            }
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  return map;
 }
 
 /**
@@ -228,8 +288,8 @@ export async function hydrateRevisionTracker(userId: string, userSnapshot?: any)
     let cloud = await loadRevisionBucketsFromFirebase(userId);
     let hasCloudData = Object.keys(cloud).length > 0;
 
-    // Fallback on device switch: If cloud revision collection is empty, reconstruct from student profile
-    if (!hasCloudData && userSnapshot) {
+    // Fallback on device switch: ONLY reconstruct from student profile if BOTH cloud AND local are empty
+    if (!hasCloudData && Object.keys(local).length === 0 && userSnapshot) {
       const reconstructed = reconstructBucketsFromUserProfile(userSnapshot);
       if (Object.keys(reconstructed).length > 0) {
         cloud = reconstructed;
@@ -243,7 +303,22 @@ export async function hydrateRevisionTracker(userId: string, userSnapshot?: any)
     replaceTrackerMap(merged);
     setRevisionHydrationState(false, true);
 
-    if (Object.keys(merged).length > 0) syncAllRevisionBuckets(userId, merged);
+    // Only sync back to cloud if there are entries that were purely local or newer than cloud
+    if (hasCloudData) {
+      const cloudKeys = new Set(Object.keys(cloud));
+      const localOnly: TrackerMap = {};
+      for (const [k, b] of Object.entries(local)) {
+        if (!cloudKeys.has(k) || ((b.updatedAt || 0) > (cloud[k]?.updatedAt || 0))) {
+          localOnly[k] = b;
+        }
+      }
+      if (Object.keys(localOnly).length > 0) {
+        syncAllRevisionBuckets(userId, localOnly);
+      }
+    } else if (Object.keys(local).length > 0) {
+      // First time upload for new user with local work
+      syncAllRevisionBuckets(userId, local);
+    }
     window.dispatchEvent(new CustomEvent('iic-revision-tracker-hydrated', {
       detail: { userId, count: Object.keys(merged).length },
     }));

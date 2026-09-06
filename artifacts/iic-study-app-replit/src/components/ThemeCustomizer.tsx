@@ -626,7 +626,7 @@ const SECTIONS: Array<{ id: ColorSection; label: string; icon: React.ReactNode; 
     { id: 'CARDS',      label: 'Cards',      icon: <Square size={13} />,       desc: 'Card background aur border alag' },
     { id: 'CHAPTERS',   label: 'Chapters',   icon: <BarChart2 size={13} />,    desc: 'Chapter list ka accent color' },
     { id: 'BUTTONS',    label: 'Buttons',    icon: <Zap size={13} />,          desc: 'Button gradient — dono alag' },
-    { id: 'MCQ_TABS',   label: 'MCQ Tabs',   icon: <Globe size={13} />,        desc: 'MCQ/Q&A/Flashcard active tab color' },
+    { id: 'MCQ_TABS',   label: 'MCQ Tabs',   icon: <Globe size={13} />,        desc: 'MCQ/Flashcard active tab color' },
     { id: 'FLASHCARD',  label: 'Flashcard',  icon: <Sparkles size={13} />,     desc: 'Flashcard screen background gradient' },
     { id: 'TEXT',       label: 'Text',       icon: <Type size={13} />,         desc: 'Primary aur secondary text alag' },
     { id: 'ACCENTS',    label: 'Accents',    icon: <Star size={13} />,         desc: 'Glow aur progress bar alag' },
@@ -1884,7 +1884,7 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
             </>
         ),
         MCQ_TABS: (
-            <ColorRow label="MCQ / Q&A / Flashcard Tab" sub="Active tab button ka color (MCQ screen)" value={theme.mcqTabActive || theme.btnStart} onChange={setColor('mcqTabActive')} accent={theme.btnStart} />
+            <ColorRow label="MCQ / Flashcard Tab" sub="Active tab button ka color (MCQ screen)" value={theme.mcqTabActive || theme.btnStart} onChange={setColor('mcqTabActive')} accent={theme.btnStart} />
         ),
         FLASHCARD: (
             <>

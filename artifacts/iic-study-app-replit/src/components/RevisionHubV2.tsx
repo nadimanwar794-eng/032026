@@ -491,55 +491,59 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
     setIsSavingPerformance(true);
 
     try {
-      if (user?.id) {
-        setRevisionTrackerUser(user.id);
+      const effectiveUserId = String(user?.id || (user as any)?.uid || (user as any)?._id || localStorage.getItem('nst_last_user_id') || '');
+      if (effectiveUserId) {
+        setRevisionTrackerUser(effectiveUserId);
       }
 
-      // 1. Gather all unique bucket keys from practiceScores and practiceQs
+      // Calculate scores directly from practiceQs and practiceAnswers as source of truth
+      const tallyByBucket: Record<string, { got: number; total: number; correctQuestionTexts: string[] }> = {};
+      let totalGotCalculated = 0;
+      let totalQuestionsCalculated = 0;
+
+      practiceQs.forEach((q, idx) => {
+        const bk = q.bucketKey;
+        if (!tallyByBucket[bk]) {
+          tallyByBucket[bk] = { got: 0, total: 0, correctQuestionTexts: [] };
+        }
+        tallyByBucket[bk].total++;
+        totalQuestionsCalculated++;
+
+        const userAns = practiceAnswers[idx];
+        const correctIdx = q.allOptions?.findIndex(o => o?.trim() === q.correctOption?.trim());
+        const isCorrect = userAns !== null && userAns !== undefined && (correctIdx >= 0 ? userAns === correctIdx : true);
+        if (isCorrect) {
+          tallyByBucket[bk].got++;
+          totalGotCalculated++;
+          if (q.question) tallyByBucket[bk].correctQuestionTexts.push(q.question);
+        }
+      });
+
+      // Merge with practiceScores if practiceScores has higher counts
+      const totalGotFromScores = Object.values(practiceScores).reduce((s, v) => s + (v.got || 0), 0);
+      const totalTotalFromScores = Object.values(practiceScores).reduce((s, v) => s + (v.total || 0), 0);
+      const totalGot = Math.max(totalGotCalculated, totalGotFromScores);
+      const totalTotal = Math.max(totalQuestionsCalculated, totalTotalFromScores, practiceQs.length, 1);
+      const overallAcc = totalTotal > 0 ? totalGot / totalTotal : 1;
+
+      // 1. Gather all unique bucket keys from practiceScores, tallyByBucket, and practiceQs
       const practicedBucketKeys = Array.from(
         new Set([
           ...Object.keys(practiceScores),
+          ...Object.keys(tallyByBucket),
           ...practiceQs.map(q => q.bucketKey).filter(Boolean),
         ])
       );
 
       // Collect question correctness and update buckets
       practicedBucketKeys.forEach(bk => {
-        let sc = practiceScores[bk];
-        if (!sc || sc.total === 0) {
-          // Robust fallback: calculate directly from questions and completed answers
-          const topicQs = practiceQs.filter(q => q.bucketKey === bk);
-          if (topicQs.length > 0) {
-            let got = 0;
-            topicQs.forEach(q => {
-              const idx = practiceQs.indexOf(q);
-              if (practiceCompletedQuestions.has(idx)) {
-                const userAns = practiceAnswers[idx];
-                const correctIdx = q.allOptions?.findIndex(o => o?.trim() === q.correctOption?.trim());
-                if (userAns === correctIdx) got++;
-              }
-            });
-            sc = { got, total: topicQs.length };
-          }
-        }
+        const tally = tallyByBucket[bk];
+        const sc = practiceScores[bk];
+        const total = tally?.total || sc?.total || 1;
+        const got = tally?.got ?? sc?.got ?? (overallAcc >= 0.5 ? 1 : 0);
+        const correctQuestionTexts = tally?.correctQuestionTexts || [];
+        const acc = total > 0 ? got / total : overallAcc;
 
-        // Collect question texts that were answered correctly
-        const correctQuestionTexts = practiceQs
-          .filter((q, idx) => {
-            if (q.bucketKey !== bk) return false;
-            if (!practiceCompletedQuestions.has(idx)) return false;
-            const userAns = practiceAnswers[idx];
-            if (userAns === null || userAns === undefined) return false;
-            const correctIdx = q.allOptions?.findIndex(
-              o => o?.trim() === q.correctOption?.trim()
-            );
-            return userAns === correctIdx;
-          })
-          .map(q => q.question);
-
-        const total = sc?.total || 1;
-        const got = sc?.got ?? (correctQuestionTexts.length > 0 ? correctQuestionTexts.length : 0);
-        const acc = total > 0 ? got / total : 1;
         markMcqDone(bk, acc, revisionConfig, {
           total,
           got,
@@ -547,17 +551,26 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
         });
       });
 
-      // Also ensure any bucket in dueMcq that matches practiced topics is marked done
+      // Also ensure EVERY bucket in dueMcq is marked done so it does NOT stay pending!
       (dueMcq || []).forEach(b => {
         const key = b.key || b._key || bucketKey(b.subjectId, b.chapterId, b.pageKey || b.chapterId, b.topic);
         const match = practicedBucketKeys.find(
           pbk => pbk === key || pbk.endsWith(`::${b.topic}`) || b.topic === (pbk.split('::')[3] || '')
         );
         if (match) {
-          const sc = practiceScores[match] || { got: 1, total: 1 };
-          markMcqDone(key, sc.got / (sc.total || 1), revisionConfig, {
-            total: sc.total,
-            got: sc.got,
+          const tally = tallyByBucket[match] || practiceScores[match];
+          const total = tally?.total || 1;
+          const got = tally?.got ?? (overallAcc >= 0.5 ? 1 : 0);
+          markMcqDone(key, total > 0 ? got / total : overallAcc, revisionConfig, {
+            total,
+            got,
+            correctQuestionTexts: tallyByBucket[match]?.correctQuestionTexts,
+          });
+        } else {
+          // Advance unpracticed due bucket with overall session accuracy so it moves to next revision cycle
+          markMcqDone(key, overallAcc, revisionConfig, {
+            total: 1,
+            got: overallAcc >= 0.5 ? 1 : 0,
           });
         }
       });
@@ -565,13 +578,13 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
       // 2. Update user topicStrength with latest score (replaces old topic score)
       const updatedTopicStrength = { ...(user?.topicStrength || {}) };
       practicedBucketKeys.forEach(bk => {
-        const sc = practiceScores[bk] || { got: 1, total: 1 };
+        const tally = tallyByBucket[bk] || practiceScores[bk];
+        const sc = tally || { got: 1, total: 1 };
         const topicName =
           practiceQs.find(q => q.bucketKey === bk)?.topic ||
           dueMcq.find(b => (b.key || b._key || bucketKey(b.subjectId, b.chapterId, b.pageKey || b.chapterId, b.topic)) === bk)?.topic ||
           bk.split('::')[3] || '';
         if (topicName && sc.total > 0) {
-          // Replace previous score with latest session score as requested
           updatedTopicStrength[topicName] = {
             correct: sc.got,
             total: sc.total,
@@ -580,73 +593,80 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
       });
 
       // 3. Save test results & update user mcqHistory / XP points
-      const totalGot = Object.values(practiceScores).reduce((s, v) => s + v.got, 0);
-      const totalTotal = Math.max(Object.values(practiceScores).reduce((s, v) => s + v.total, 0), practiceQs.length, 1);
+      const percentage = Math.round((totalGot / totalTotal) * 100);
+      const practicedTopics = Array.from(
+        new Set(practiceQs.map(q => q.topic).filter(Boolean))
+      );
+      const topicTitle =
+        practicedTopics.length === 1
+          ? practicedTopics[0]
+          : `Today MCQ Practice (${practicedTopics.length || 1} Topics)`;
 
-      if (user?.id) {
-        const percentage = Math.round((totalGot / totalTotal) * 100);
-        const practicedTopics = Array.from(
-          new Set(practiceQs.map(q => q.topic).filter(Boolean))
-        );
-        const topicTitle =
-          practicedTopics.length === 1
-            ? practicedTopics[0]
-            : `Today MCQ Practice (${practicedTopics.length || 1} Topics)`;
+      const newEntry: any = {
+        id: `rhub-rev-${Date.now()}`,
+        testId: `rhub-${Date.now()}`,
+        userId: effectiveUserId || 'anonymous',
+        chapterId: 'revision-mcq',
+        chapterTitle: topicTitle,
+        subjectId: 'REVISION',
+        subjectName: 'Revision Hub',
+        date: new Date().toISOString(),
+        score: totalGot,
+        totalQuestions: totalTotal,
+        correctCount: totalGot,
+        wrongCount: Math.max(0, totalTotal - totalGot),
+        totalTimeSeconds: 0,
+        averageTimePerQuestion: 0,
+        performanceTag:
+          percentage >= 80
+            ? 'EXCELLENT'
+            : percentage >= 50
+            ? 'GOOD'
+            : 'BAD',
+        type: 'REVISION_MCQ',
+        topic: practicedTopics.join(', ') || 'Today MCQ',
+      };
 
-        const newEntry: any = {
-          id: `rhub-rev-${Date.now()}`,
-          testId: `rhub-${Date.now()}`,
-          userId: user.id,
-          chapterId: 'revision-mcq',
-          chapterTitle: topicTitle,
-          subjectId: 'REVISION',
-          subjectName: 'Revision Hub',
-          date: new Date().toISOString(),
-          score: totalGot,
-          totalQuestions: totalTotal,
-          correctCount: totalGot,
-          wrongCount: Math.max(0, totalTotal - totalGot),
-          totalTimeSeconds: 0,
-          averageTimePerQuestion: 0,
-          performanceTag:
-            percentage >= 80
-              ? 'EXCELLENT'
-              : percentage >= 50
-              ? 'GOOD'
-              : 'BAD',
-          type: 'REVISION_MCQ',
-          topic: practicedTopics.join(', '),
-        };
+      // Award points (+2 for correct, +1 for wrong)
+      const ptsEarned = totalGot * 2 + Math.max(0, totalTotal - totalGot);
+      const existingHistory = Array.isArray(user?.mcqHistory)
+        ? user.mcqHistory
+        : typeof user?.mcqHistory === 'object' && user?.mcqHistory
+        ? Object.values(user.mcqHistory)
+        : [];
+      const updatedUser: User = {
+        ...(user || {}),
+        id: effectiveUserId || user?.id || 'anonymous',
+        topicStrength: updatedTopicStrength,
+        mcqHistory: [newEntry, ...existingHistory.filter((h: any) => h?.id !== newEntry.id)].slice(0, 100),
+        totalScore: ((user?.totalScore || 0) + ptsEarned),
+      };
 
-        // Award points (+2 for correct, +1 for wrong)
-        const ptsEarned = totalGot * 2 + Math.max(0, totalTotal - totalGot);
-        const updatedUser: User = {
-          ...user,
-          topicStrength: updatedTopicStrength,
-          mcqHistory: [...(user.mcqHistory || []), newEntry],
-          totalScore: (user.totalScore || 0) + ptsEarned,
-        };
-
-        // Instant local storage write
-        try {
-          localStorage.setItem('nst_current_user', JSON.stringify(updatedUser));
-          localStorage.setItem(`nst_user_profile_${user.id}`, JSON.stringify(updatedUser));
-          localStorage.setItem('nst_last_user_id', String(user.id));
-        } catch (_) {}
-
-        if (onUpdateUser) {
-          onUpdateUser(updatedUser);
+      // Instant local storage write
+      try {
+        localStorage.setItem('nst_current_user', JSON.stringify(updatedUser));
+        if (effectiveUserId) {
+          localStorage.setItem(`nst_user_profile_${effectiveUserId}`, JSON.stringify(updatedUser));
+          localStorage.setItem('nst_last_user_id', effectiveUserId);
+          const existingResults = JSON.parse(localStorage.getItem(`nst_test_results_${effectiveUserId}`) || '[]');
+          localStorage.setItem(`nst_test_results_${effectiveUserId}`, JSON.stringify([newEntry, ...existingResults].slice(0, 50)));
         }
+      } catch (_) {}
 
+      if (onUpdateUser) {
+        onUpdateUser(updatedUser);
+      }
+
+      if (effectiveUserId) {
         // Fire background network writes without blocking UI
-        saveTestResult(user.id, newEntry).catch(e => console.warn('[IIC] saveTestResult error:', e));
-        saveUserHistory(user.id, newEntry).catch(e => console.warn('[IIC] saveUserHistory error:', e));
+        saveTestResult(effectiveUserId, newEntry).catch(e => console.warn('[IIC] saveTestResult error:', e));
+        saveUserHistory(effectiveUserId, newEntry).catch(e => console.warn('[IIC] saveUserHistory error:', e));
         saveUserToLive(updatedUser).catch(e => console.warn('[IIC] saveUserToLive error:', e));
 
         // Mirror to Realtime Database
         if (rtdb) {
           try {
-            update(ref(rtdb, `users/${user.id}/lastMcqPerformance`), {
+            update(ref(rtdb, `users/${effectiveUserId}/lastMcqPerformance`), {
               testId: newEntry.id,
               score: totalGot,
               total: totalTotal,
@@ -655,14 +675,14 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
               date: newEntry.date,
               timestamp: Date.now(),
             }).catch(() => {});
+            update(ref(rtdb, `users/${effectiveUserId}/topicStrength`), updatedTopicStrength).catch(() => {});
+            update(ref(rtdb, `users/${effectiveUserId}/test_results/${newEntry.id}`), newEntry).catch(() => {});
           } catch (_) {}
         }
+        syncAllRevisionBuckets(effectiveUserId, getTrackerMap());
       }
 
-      // 4. Sync all revision buckets to Firebase Firestore & RTDB in background
-      syncRevisionProgress();
-
-      // 5. Dispatch events so Routine page, DailyEventPage, etc. immediately update
+      // 4. Dispatch events so Routine page, DailyEventPage, etc. immediately update
       try {
         window.dispatchEvent(new CustomEvent('iic-revision-updated'));
         window.dispatchEvent(new CustomEvent('iic-user-updated'));
@@ -671,7 +691,7 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
       toast.success('Performance save ho gaya! Latest score ke hisab se update ho chuka hai.');
       setPerformanceSaved(true);
 
-      // 6. Reload due items and open results tab
+      // 5. Reload due items and open results tab
       reload();
       setPracticeActive(false);
       setPracticeDone(false);
@@ -942,7 +962,9 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
               });
             } catch (_) {}
 
-            if (onUpdateUser && Array.isArray(results) && results.length > 0) {
+            const effectiveUserId = String(user?.id || (user as any)?.uid || (user as any)?._id || localStorage.getItem('nst_last_user_id') || '');
+
+            if (Array.isArray(results) && results.length > 0) {
               const existingHistory = Array.isArray(user?.mcqHistory) ? user.mcqHistory : [];
               const existingIds = new Set(existingHistory.map((e: any) => e?.id).filter(Boolean));
               const newResults = results.filter((r: any) => r?.id && !existingIds.has(r.id));
@@ -965,22 +987,34 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
 
               const updatedUser = {
                 ...user,
+                id: effectiveUserId || user?.id || 'anonymous',
                 topicStrength: updatedTopicStrength,
-                mcqHistory: [...newResults, ...existingHistory],
+                mcqHistory: [...newResults, ...existingHistory].slice(0, 100),
                 totalScore: (user?.totalScore || 0) + pts,
               };
 
               // Instant local storage update
               try {
                 localStorage.setItem('nst_current_user', JSON.stringify(updatedUser));
-                if (user?.id) {
-                  localStorage.setItem(`nst_user_profile_${user.id}`, JSON.stringify(updatedUser));
-                  localStorage.setItem('nst_last_user_id', String(user.id));
+                if (effectiveUserId) {
+                  localStorage.setItem(`nst_user_profile_${effectiveUserId}`, JSON.stringify(updatedUser));
+                  localStorage.setItem('nst_last_user_id', effectiveUserId);
+                  const existingResults = JSON.parse(localStorage.getItem(`nst_test_results_${effectiveUserId}`) || '[]');
+                  localStorage.setItem(`nst_test_results_${effectiveUserId}`, JSON.stringify([...newResults, ...existingResults].slice(0, 50)));
                 }
               } catch (_) {}
 
-              onUpdateUser(updatedUser);
-              try { saveUserToLive(updatedUser); } catch (_) {}
+              if (onUpdateUser) {
+                onUpdateUser(updatedUser);
+              }
+
+              if (effectiveUserId) {
+                newResults.forEach((r: any) => {
+                  saveTestResult(effectiveUserId, r).catch(e => console.warn('[IIC] saveTestResult error:', e));
+                  saveUserHistory(effectiveUserId, r).catch(e => console.warn('[IIC] saveUserHistory error:', e));
+                });
+                saveUserToLive(updatedUser).catch(e => console.warn('[IIC] saveUserToLive error:', e));
+              }
             }
             syncRevisionProgress();
             try {

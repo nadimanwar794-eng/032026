@@ -231,6 +231,7 @@ export interface User {
   subscriptionLevel?: 'BASIC' | 'ULTRA'; // NEW: Granular level for Real subscribers
   subscriptionEndDate?: string; // ISO Date when subscription expires
   subscriptionPrice?: number; // Price admin set for this user's subscription
+  subscriptionSource?: 'PURCHASE' | 'CREDITS' | 'ADMIN' | 'REWARD'; // Method of acquisition
   grantedByAdmin?: boolean; // True if subscription was granted free by admin
   customSubscriptionName?: string; // For CUSTOM tier
   customSubscriptionDuration?: {
@@ -265,7 +266,17 @@ export interface ActiveSubscription {
   level: 'BASIC' | 'ULTRA'; // 'BASIC' or 'ULTRA'
   startDate: string;
   endDate: string;
-  source: 'PURCHASE' | 'REWARD' | 'ADMIN' | 'BONUS';
+  source: 'PURCHASE' | 'REWARD' | 'ADMIN' | 'BONUS' | 'CREDITS';
+}
+
+export interface CreditSubDiscountEvent {
+  enabled: boolean;
+  eventName: string; // e.g., "Credits Mega Dhamaka", "Coin Store Flash Sale"
+  discountPercent: number; // e.g. 20, 30, 50%
+  startsAt?: string; // ISO Date for countdown / auto-start
+  endsAt?: string; // ISO Date for sale duration
+  showToFreeUsers?: boolean;
+  showToPremiumUsers?: boolean;
 }
 
 export interface MarksheetSettings {
@@ -317,10 +328,12 @@ export interface SubscriptionPlan {
   // Basic Tier (MCQ + Notes)
   basicPrice: number;
   basicOriginalPrice: number;
+  creditPriceBasic?: number; // Custom credits needed for Basic
   
   // Advance/Ultra Tier (PDF + Video)
   ultraPrice: number;
   ultraOriginalPrice: number;
+  creditPriceUltra?: number; // Custom credits needed for Ultra
   
   features: string[]; // Generic features list or split logic
   popular?: boolean;
@@ -861,6 +874,21 @@ export interface SystemSettings {
   basicHtmlDailyLimit?: number; // Free HTML view sessions per day for Basic subscribers (default 3)
   mcqRewardRules?: MCQRewardRule[];
 
+  // SUBSCRIPTION BY CREDITS & DAILY COIN REWARDS
+  allowCreditSubscription?: boolean; // When false, buying subscription via credits is disabled by admin
+  subscriptionCreditPrices?: {
+    weeklyBasic?: number;
+    weeklyUltra?: number;
+    monthlyBasic?: number;
+    monthlyUltra?: number;
+    threeMonthBasic?: number;
+    threeMonthUltra?: number;
+    yearlyBasic?: number;
+    yearlyUltra?: number;
+  };
+  dailyClaimPro?: number; // Daily coins for BASIC / Pro subscribers (default 150)
+  dailyClaimMaxPro?: number; // Daily coins for ULTRA / Max Pro subscribers (default 250)
+
   // LEVEL SYSTEM (Admin Config)
   isLevelSystemEnabled?: boolean;
   levelConfig?: { level: number; unlockedFeatures: string[] }[]; // Admin sets this
@@ -1079,6 +1107,7 @@ export interface SystemSettings {
       seconds: number;
     };
   };
+  creditSubDiscountEvent?: CreditSubDiscountEvent; // Discount event for credit store subscriptions
   
   // NEW: App Modes (Global Control)
   appMode?: {

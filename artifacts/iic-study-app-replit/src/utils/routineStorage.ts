@@ -412,9 +412,11 @@ export function getUserSubTier(user: {
   return 'NONE';
 }
 
-export function getDailyClaimAmount(tier: UserSubTier): number {
-  if (tier === 'MAX_PRO') return DAILY_CLAIM_MAX_PRO;
-  if (tier === 'PRO') return DAILY_CLAIM_PRO;
+export function getDailyClaimAmount(tier: UserSubTier, customAmounts?: { pro?: number; maxPro?: number; dailyClaimPro?: number; dailyClaimMaxPro?: number } | any): number {
+  const proAmt = customAmounts?.dailyClaimPro ?? customAmounts?.pro ?? DAILY_CLAIM_PRO;
+  const maxProAmt = customAmounts?.dailyClaimMaxPro ?? customAmounts?.maxPro ?? DAILY_CLAIM_MAX_PRO;
+  if (tier === 'MAX_PRO') return maxProAmt;
+  if (tier === 'PRO') return proAmt;
   return 0;
 }
 
@@ -428,11 +430,11 @@ export function getUnclaimedCoins(data: RoutineData, tier: UserSubTier): number 
 }
 
 /** Generate today's pending claim entry if it doesn't exist (for active subscribers) */
-export function ensureTodayClaimEntry(data: RoutineData, tier: UserSubTier): RoutineData {
+export function ensureTodayClaimEntry(data: RoutineData, tier: UserSubTier, customAmounts?: { pro?: number; maxPro?: number; dailyClaimPro?: number; dailyClaimMaxPro?: number } | any): RoutineData {
   if (tier === 'NONE') return data;
   const today = getTodayStr();
   if (data.dailyClaims[today]) return data;
-  const amount = getDailyClaimAmount(tier);
+  const amount = getDailyClaimAmount(tier, customAmounts);
   return {
     ...data,
     dailyClaims: {

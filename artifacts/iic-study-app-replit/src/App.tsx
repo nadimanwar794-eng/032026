@@ -289,9 +289,9 @@ const App: React.FC = () => {
     language: 'English',
     globalMessage: null,
     settings: {
-        appName: 'IIC',
-        appShortName: 'IIC',
-        aiName: 'IIC AI',
+        appName: 'NSTA',
+        appShortName: 'NSTA',
+        aiName: 'NSTA AI',
         themeColor: '#3b82f6',
         customCSS: '',
         apiKeys: [],
@@ -1519,6 +1519,13 @@ const App: React.FC = () => {
         user.id = validId;
         user.uid = validId;
         user.profileCompleted = true;
+
+        if (!user.displayId || user.displayId.startsWith('IIC-') || /^\d{8,12}$/.test(user.displayId)) {
+            const digits = user.displayId ? user.displayId.replace(/\D/g, '').slice(-6).padStart(6, '0') : String(Math.floor(100000 + Math.random() * 900000));
+            user.displayId = `NSTA-${digits}`;
+            localStorage.setItem('nst_current_user', JSON.stringify(user));
+            saveUserToLive(user);
+        }
 
         if (auth.currentUser === null) {
             (async () => {
@@ -3320,7 +3327,7 @@ const App: React.FC = () => {
           </div>
       )}
 
-      {!isFullScreen && state.view !== 'STUDENT_DASHBOARD' && !isLessonImmersive && (
+      {!isFullScreen && state.user && state.view !== 'STUDENT_DASHBOARD' && !isLessonImmersive && (
       <header className="bg-white sticky top-0 z-30 shadow-sm border-b border-slate-100">
         <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
            <div onClick={() => setState(prev => ({ ...prev, view: 'STUDENT_DASHBOARD' as any }))} className="flex items-center gap-2 cursor-pointer">
@@ -3362,7 +3369,7 @@ const App: React.FC = () => {
       </header>
       )}
 
-      <main id="main-content" className={`flex-1 w-full max-w-6xl mx-auto ${isFullScreen || state.view === ('STUDENT_DASHBOARD' as any) ? 'p-0' : 'p-4 mb-8'}`}>
+      <main id="main-content" className={`flex-1 w-full ${!state.user ? 'p-0 max-w-none' : (isFullScreen || state.view === ('STUDENT_DASHBOARD' as any) ? 'p-0 max-w-6xl mx-auto' : 'p-4 mb-8 max-w-6xl mx-auto')}`}>
         {!state.user ? (
             <ErrorBoundary fallbackLabel="Login" compact>
               <Auth onLogin={handleLogin} logActivity={logActivity} appSettings={state.settings} />
