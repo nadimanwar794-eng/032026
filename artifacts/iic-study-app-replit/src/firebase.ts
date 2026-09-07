@@ -867,6 +867,7 @@ const ACCOUNT_STATE_FIELDS = [
   'subscriptionLevel',
   'subscriptionEndDate',
   'subscriptionPrice',
+  'subscriptionSource',
   'grantedByAdmin',
   'customSubscriptionName',
   'customSubscriptionDuration',

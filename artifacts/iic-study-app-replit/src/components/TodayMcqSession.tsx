@@ -963,13 +963,12 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                                     <button
                                         onClick={async () => {
                                             const result = await rotateScreen();
-                                            if (result !== null) { setProjectorRotated(result === 'landscape'); }
-                                            else { alert('📱 Phone ko physically rotate karein — landscape ke liye sideways, portrait ke liye seedha.'); }
+                                            setProjectorRotated(result === 'landscape');
                                         }}
-                                        title={projectorRotated ? 'Portrait mode' : 'Landscape mode'}
+                                        title={projectorRotated ? 'Mobile mode' : 'Desktop/Laptop mode'}
                                         style={{ background: projectorRotated ? '#6366f1' : '#334155', color:'#fff', border:'none', borderRadius:8, padding:'6px 10px', fontSize:12, fontWeight:700, cursor:'pointer', display:'flex', alignItems:'center', gap:5 }}>
                                         <RotateCw size={14} />
-                                        {projectorRotated ? 'Portrait' : 'Landscape'}
+                                        {projectorRotated ? 'Desktop ON' : 'Desktop'}
                                     </button>
                                     <button onClick={closeProjector} title="Band Karo" style={{ background:'#ef4444', color:'#fff', border:'none', borderRadius:8, padding:'6px 8px', fontSize:14, fontWeight:900, cursor:'pointer', display:'flex', alignItems:'center' }}>
                                         <X size={16} />

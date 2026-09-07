@@ -6,11 +6,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 const rawPort = process.env.PORT ?? '3000';
 
-const port = Number(rawPort);
-
-if (Number.isNaN(port) || port <= 0) {
-  throw new Error(`Invalid PORT value: "${rawPort}"`);
-}
+const port = Number(rawPort) || 3000;
 
 const basePath = process.env.BASE_PATH ?? '/';
 
@@ -99,8 +95,6 @@ export default defineConfig({
     host: '0.0.0.0',
     allowedHosts: true,
     fs: {
-      // The imported app keeps user-provided images in the workspace-level
-      // attached_assets directory.
       strict: false,
     },
   },

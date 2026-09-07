@@ -11,6 +11,7 @@ import { saveUserToLive } from '../firebase';
 import { getLevelInfo, getScoreDiscountFromScore, getNextLevelInfo, getLevelProgress, getLevelDailyLimitsWithOverride, UNLIMITED } from '../utils/levelSystem';
 import { SCORE_MULTIPLIERS, getDailyScoreLimit } from '../utils/scoreSystem';
 import { addSubscription } from '../utils/subscriptionUtils';
+import { applyDeduction, getTotalCredits } from '../utils/creditSystem';
 import { recordCreditTx } from '../utils/creditHistory';
 import {
   loadRoutineData, saveRoutineData, checkAndResetDaily,
@@ -199,6 +200,21 @@ function getCreditPrice(planDuration: string, isUltra: boolean, plan?: any, sett
   return base;
 }
 
+function isDiscountEventLive(discountEvent?: any): boolean {
+  if (!discountEvent?.enabled) return false;
+  const now = Date.now();
+  const startsAt = discountEvent.startsAt ? new Date(discountEvent.startsAt).getTime() : 0;
+  const endsAt = discountEvent.endsAt ? new Date(discountEvent.endsAt).getTime() : Infinity;
+  if (Number.isNaN(startsAt) || Number.isNaN(endsAt)) return false;
+  return now >= startsAt && now < endsAt;
+}
+
+function isDiscountAudienceAllowed(discountEvent: any, isSubscribed: boolean): boolean {
+  return isSubscribed
+    ? discountEvent?.showToPremiumUsers !== false
+    : discountEvent?.showToFreeUsers !== false;
+}
+
 /* ─── Main Store ─── */
 /* ─── Daily Subscription Coin Claim Card ─── */
 function DailyClaimCard({ userId, user: u, settings, onUpdateUser }: { userId: string; user: any; settings?: SystemSettings; onUpdateUser?: (u: any) => void }) {
@@ -343,13 +359,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
   const isSubscribed = user.isPremium && user.subscriptionEndDate && new Date(user.subscriptionEndDate) > new Date();
 
   const isEventActive = () => {
-    if (!event?.enabled) return false;
-    const now = Date.now();
-    if (!event.startsAt && !event.endsAt) return true;
-    const startsAt = event.startsAt ? new Date(event.startsAt).getTime() : 0;
-    const endsAt = event.endsAt ? new Date(event.endsAt).getTime() : Infinity;
-    if (startsAt === endsAt) return now >= startsAt;
-    return now >= startsAt && now < endsAt;
+    return isDiscountEventLive(event);
   };
   const isCooldownPhase = () => {
     if (!event?.enabled || !event.startsAt) return false;
@@ -397,8 +407,8 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
       setTimeout(() => setCreditPurchaseMsg(null), 4000);
       return;
     }
-    const creditCost = getCreditPrice(plan.duration || plan.name || '', isUltra, plan, settings);
-    const userCredits = (user.credits || 0) + (user.bonusCredits || 0);
+    const creditCost = getPlanCreditCost(plan, isUltra);
+    const userCredits = getTotalCredits(user);
     if (userCredits < creditCost) {
       setCreditPurchaseMsg(`Credits kam hain! Chahiye: ${creditCost.toLocaleString('en-IN')} CR`);
       setTimeout(() => setCreditPurchaseMsg(null), 4000);
@@ -421,10 +431,22 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
       startDate: now.toISOString(), endDate: endDate.toISOString(),
       durationHours: days * 24, price: 0, originalPrice: creditCost, isFree: false, grantSource: 'CREDITS'
     };
+    // Deduct from the same credit pools used everywhere else (permanent,
+    // legacy bonus, and active gifted credits). The old path only subtracted
+    // from `credits`, so users could pass the balance check with bonus/gifted
+    // credits but receive an inconsistent account state.
+    const deductedUser = applyDeduction(user, creditCost);
+    if (!deductedUser) {
+      setCreditPurchaseMsg(`Credits kam hain! Chahiye: ${creditCost.toLocaleString('en-IN')} CR`);
+      setTimeout(() => setCreditPurchaseMsg(null), 4000);
+      return;
+    }
+
     const baseUser = {
-      ...user,
-      credits: Math.max(0, (user.credits || 0) - creditCost),
-      isPremium: true, grantedByAdmin: false,
+      ...deductedUser,
+      isPremium: true,
+      subscriptionSource: 'CREDITS',
+      grantedByAdmin: false,
       subscriptionHistory: [histEntry, ...(user.subscriptionHistory || [])],
     };
     const updatedUser = addSubscription(baseUser, newSub as any);
@@ -494,6 +516,23 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
     return Math.min(d, 100);
   })();
 
+  // Cash subscriptions and credit subscriptions are separate payment paths.
+  // The dedicated credit event takes priority when configured; otherwise the
+  // normal discount event also applies to the credit cost of a subscription.
+  const creditDiscountPercent = (() => {
+    const creditEvent = settings?.creditSubDiscountEvent;
+    const discountEvent = creditEvent || event;
+    if (!isDiscountEventLive(discountEvent) || !isDiscountAudienceAllowed(discountEvent, !!isSubscribed)) return 0;
+    return Math.min(100, Math.max(0, Number(discountEvent?.discountPercent) || 0));
+  })();
+
+  const getPlanCreditCost = (plan: any, ultra: boolean) => {
+    const baseCost = getCreditPrice(plan.duration || plan.name || '', ultra, plan, settings);
+    return creditDiscountPercent > 0
+      ? Math.max(0, Math.round(baseCost * (1 - creditDiscountPercent / 100)))
+      : baseCost;
+  };
+
   const defaultBasicFeatures = ['Full MCQs Unlocked', 'Premium Notes', 'Audio Library', 'AI Videos (2D Basic)', 'Team Support'];
   const defaultUltraFeatures = ['Everything in Pro', 'Deep Dive Notes', 'Studio HD Podcast', 'AI Videos (2D + 3D)', 'Competitive Mode 🏆'];
   const featuresList = isPro
@@ -505,7 +544,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
     return null;
   };
 
-  const userCredits = (user.credits || 0) + (user.bonusCredits || 0);
+  const userCredits = getTotalCredits(user);
 
   /* ── Store locked ── */
   if (settings?.isPaymentEnabled === false) {
@@ -596,7 +635,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
           (selectedPlan as any).tier === 'LIFETIME';
         const basePrice = isPro ? selectedPlan.basicPrice : selectedPlan.ultraPrice;
         const finalPrice = totalDiscount > 0 ? Math.round(basePrice * (1 - totalDiscount / 100)) : basePrice;
-        const creditCost = getCreditPrice(selectedPlan.duration || selectedPlan.name || '', !isPro, selectedPlan, settings);
+      const creditCost = getPlanCreditCost(selectedPlan, !isPro);
         const hasEnoughCredits = userCredits >= creditCost;
         return (
           <>
@@ -681,7 +720,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
 
       {/* ── CREDIT CONFIRM POPUP ── */}
       {showCreditConfirm && selectedPlan && (() => {
-        const creditCost = getCreditPrice(selectedPlan.duration || selectedPlan.name || '', !isPro, selectedPlan, settings);
+        const creditCost = getPlanCreditCost(selectedPlan, !isPro);
         const afterBalance = userCredits - creditCost;
         return (
           <>
@@ -1287,7 +1326,12 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
                                   {isCreditSubAllowed && !isLifetimePlan && (
                                     <div className="mt-1.5 flex items-center gap-1.5">
                                       <span className="text-[10px] font-bold text-amber-300 bg-amber-400/10 border border-amber-400/25 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
-                                        <span>🪙</span> {getCreditPrice(plan.duration || plan.name || '', !isPro, plan, settings).toLocaleString('en-IN')} CR
+                                         <span>🪙</span> {getPlanCreditCost(plan, !isPro).toLocaleString('en-IN')} CR
+                                         {creditDiscountPercent > 0 && (
+                                           <span className="ml-1 text-[9px] font-black text-emerald-300">
+                                             ({creditDiscountPercent}% OFF)
+                                           </span>
+                                         )}
                                       </span>
                                     </div>
                                   )}

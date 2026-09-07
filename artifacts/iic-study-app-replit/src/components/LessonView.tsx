@@ -584,20 +584,11 @@ export const LessonView: React.FC<Props> = ({
   }, []);
 
   const handleRotate = async () => {
-    const desktopWasOn = isDesktopModeOn();
-    const result = await rotateScreen();
-    if (!result) {
-      setRotateToast('Screen rotation is not supported on this device');
-      setTimeout(() => setRotateToast(null), 2500);
-    } else {
-      // Re-apply desktop mode after rotation settles (rotation can reset viewport)
-      setTimeout(() => {
-        if (desktopWasOn) {
-          setDesktopMode(true);
-          setIsDesktopMode(true);
-        }
-      }, 500);
-    }
+    const newVal = !isDesktopMode;
+    setDesktopMode(newVal);
+    setIsDesktopMode(newVal);
+    setRotateToast(newVal ? '💻 Desktop Mode: ON (Compact Layout)' : '📱 Mobile Mode: ON');
+    setTimeout(() => setRotateToast(null), 2200);
   };
 
   const toggleDesktopMode = () => {

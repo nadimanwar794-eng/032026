@@ -220,7 +220,7 @@ import { speakText, stopSpeech, stripHtml } from "../utils/textToSpeech";
 import { parseMCQText, normalizeMcqPaste } from "../utils/mcqParser";
 import { getMistakeBankSync, getMistakeBank, addMistakes, removeMistakeByQuestion, MistakeEntry } from "../utils/mistakeBank";
 import { recordCreditTx } from "../utils/creditHistory";
-import { rotateScreen, isRotatingForOrientation } from "../utils/displayPrefs";
+import { rotateScreen, isRotatingForOrientation, isDesktopModeOn, toggleDesktopMode, setDesktopMode } from "../utils/displayPrefs";
 import { hapticLight, hapticMedium, hapticStrong } from "../utils/haptic";
 import { splitIntoTopics } from "../utils/notesSplitter";
 import { SubjectSelection } from "./SubjectSelection";
@@ -2871,7 +2871,9 @@ export const StudentDashboard: React.FC<Props> = ({
   const [isRotateEnabled, setIsRotateEnabled] = useState<boolean>(() => {
     try { return localStorage.getItem('nst_rotate_toggle') === '1'; } catch { return false; }
   });
-  // Track real orientation so rotate button can show correct state
+  // Desktop Mode / Laptop Layout state
+  const [isDesktopMode, setIsDesktopMode] = useState<boolean>(() => isDesktopModeOn());
+  // Track orientation
   const [isLandscape, setIsLandscape] = useState<boolean>(() => {
     try { return window.matchMedia('(orientation: landscape)').matches; } catch { return false; }
   });
@@ -2886,14 +2888,33 @@ export const StudentDashboard: React.FC<Props> = ({
   useEffect(() => {
     setIsInternalImmersive(false);
   }, [activeTab]);
+  // Listen for desktop mode changes
+  useEffect(() => {
+    const handleDesktopMode = (e: any) => {
+      const active = e.detail?.isDesktop ?? isDesktopModeOn();
+      setIsDesktopMode(active);
+      setIsTopBarHidden(false);
+    };
+    window.addEventListener('nst-desktop-mode-change', handleDesktopMode);
+    return () => window.removeEventListener('nst-desktop-mode-change', handleDesktopMode);
+  }, []);
+  // Listen for screen rotate events (works in both mobile and desktop modes)
+  useEffect(() => {
+    const handleOrientation = (e: any) => {
+      const orient = e.detail?.orientation;
+      if (orient) {
+        setIsLandscape(orient === 'landscape');
+      }
+    };
+    window.addEventListener('nst-screen-rotate', handleOrientation);
+    return () => window.removeEventListener('nst-screen-rotate', handleOrientation);
+  }, []);
   useEffect(() => {
     try {
       const mq = window.matchMedia('(orientation: landscape)');
       const handler = (e: MediaQueryListEvent) => {
         setIsLandscape(e.matches);
-        // Always show top bar when orientation changes
         setIsTopBarHidden(false);
-        // Reset landscape UI hidden state on orientation change
         setIsLandscapeUiHidden(false);
       };
       mq.addEventListener('change', handler);
@@ -3686,8 +3707,15 @@ export const StudentDashboard: React.FC<Props> = ({
     return () => window.speechSynthesis.removeEventListener('voiceschanged', load);
   }, []);
   const handleRotate = async () => {
-    const result = await rotateScreen();
-    if (result === null) showAlert('📱 Phone ko physically rotate karein — landscape ke liye sideways, portrait ke liye seedha.', 'INFO');
+    const r = await rotateScreen();
+    if (r !== null) {
+      setIsLandscape(r === 'landscape');
+      showAlert(r === 'landscape' ? '🔄 Screen Rotated: Landscape' : '🔄 Screen Rotated: Portrait', 'SUCCESS');
+    } else {
+      const next = !isLandscape;
+      setIsLandscape(next);
+      showAlert(next ? '🔄 Landscape View' : '📱 Portrait View', 'INFO');
+    }
   };
   const [lucentHtmlTtsPlaying, setLucentHtmlTtsPlaying] = useState(false);
   const [hwActivePdf, setHwActivePdf] = useState<string | null>(null);
@@ -14462,24 +14490,6 @@ export const StudentDashboard: React.FC<Props> = ({
               );
             })()}
 
-            {/* 💻 Rotate Screen / Desktop Mode Button (Directly in top bar) */}
-            <button
-              onClick={async () => {
-                rotateFullscreenRef.current = true;
-                const result = await rotateScreen();
-                rotateFullscreenRef.current = false;
-                if (result === null) showAlert('Screen rotation is not supported on this device/browser.', 'WARNING');
-              }}
-              className={`p-[3px] rounded-xl transition-colors relative text-white shrink-0 active:scale-95${topBarBtnGlow ? ' nst-topbar-btn-glow' : ''}`}
-              title={isLandscape ? "Rotate to Portrait" : "Rotate Screen"}
-              style={{ color: isLandscape ? '#fde047' : 'rgba(255,255,255,0.92)' }}
-            >
-              {isLandscape ? (
-                <Smartphone size={19} className="text-amber-300" />
-              ) : (
-                <Laptop size={19} />
-              )}
-            </button>
 
             {/* 3-dot menu */}
             <div className="relative shrink-0">

@@ -11,8 +11,12 @@
   "scripts": {
     "dev": "npm run dev --workspace=@workspace/iic-study-app-replit",
     "build": "npm run build --workspace=@workspace/iic-study-app-replit",
-    "typecheck": "npm run typecheck --workspace=@workspace/iic-study-app-replit",
-    "lint": "npm run typecheck --workspace=@workspace/iic-study-app-replit"
+    "serve": "npm run serve --workspace=@workspace/iic-study-app-replit",
+    "lint": "tsc -p ./artifacts/iic-study-app-replit/tsconfig.json --noEmit",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@replit/connectors-sdk": "^0.4.1"
   },
   "devDependencies": {
     "prettier": "^3.9.6",

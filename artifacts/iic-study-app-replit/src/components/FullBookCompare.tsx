@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { X, Download, CheckCircle2, BookOpen, GitCompare, ChevronLeft, ChevronRight, Crown, Search, Trash2, ChevronDown, ChevronUp, Loader2, Play, Headphones, FileText, Volume2, Layers, RotateCcw } from 'lucide-react';
-import { isDesktopModeOn, rotateScreen } from '../utils/displayPrefs';
+import { isDesktopModeOn, toggleDesktopMode, rotateScreen } from '../utils/displayPrefs';
 import { ChunkedNotesReader } from './ChunkedNotesReader';
 import type { SystemSettings } from '../types';
 import { getCompreBookNotes, type CompreNote } from '../firebase';
@@ -166,8 +166,8 @@ export const FullBookCompare: React.FC<Props> = ({ settings, user, isLimited = f
     return () => mq.removeEventListener('change', handler);
   }, []);
   const handleRotateFbc = async () => {
-    const result = await rotateScreen();
-    if (result === null) alert('Screen auto-rotate is not supported on this device. You can rotate your phone manually.');
+    const next = toggleDesktopMode();
+    setIsLandscapeFbc(next);
   };
 
   // ── Compre notes (Firestore) — loaded at mount for search ──

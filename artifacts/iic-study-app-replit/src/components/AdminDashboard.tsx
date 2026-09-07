@@ -16848,7 +16848,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                   <label className="text-xs font-bold text-pink-700 uppercase block mb-1">‚è±Ô∏è Duration (hours)</label>
                                   <input type="number" value={newCodeScoreBoostHours} onChange={e => setNewCodeScoreBoostHours(Number(e.target.value))} className="p-3 rounded-xl border border-pink-200 w-32 font-bold" min="1" />
                               </div>
-                              <p className="text-[10px] text-orange-600 mt-1">Ì†ΩÌ∫Ä Student ke saare score earning par {newCodeScoreBoostPercent}% extra milega ‚Äî {newCodeScoreBoostHours} hours ke liye.</p>
+                              <p className="text-[10px] text-orange-600 mt-1">ÔøΩÔøΩ Student ke saare score earning par {newCodeScoreBoostPercent}% extra milega ‚Äî {newCodeScoreBoostHours} hours ke liye.</p>
                           </div>
                       ) : newCodeType === 'SCORE_LIMIT_BOOST' ? (
                           <div className="flex flex-col gap-2">

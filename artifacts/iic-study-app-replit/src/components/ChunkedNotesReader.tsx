@@ -858,20 +858,12 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
   }, []);
 
   const handleRotate = async () => {
-    const desktopWasOn = isDesktopModeOn();
-    const result = await rotateScreen();
-    if (!result) {
-      setRotateToast('Is device mein screen rotation supported nahi hai');
-      setTimeout(() => setRotateToast(null), 2500);
-    } else {
-      // Re-apply desktop mode after rotation settles
-      setTimeout(() => {
-        if (desktopWasOn) {
-          setDesktopMode(true);
-          setIsDesktopModeLocal(true);
-        }
-      }, 500);
-    }
+    const newVal = !isDesktopMode;
+    setDesktopMode(newVal);
+    setIsDesktopModeLocal(newVal);
+    onDesktopModeChange?.(newVal);
+    setRotateToast(newVal ? '💻 Desktop Mode: ON (Compact Layout)' : '📱 Mobile Mode: ON');
+    setTimeout(() => setRotateToast(null), 2200);
   };
 
   const toggleDesktopMode = () => {

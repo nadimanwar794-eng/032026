@@ -1,5 +1,5 @@
 {
-  "buildCommand": "npm run build --workspace=@workspace/iic-study-app-replit",
+  "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "framework": "vite",
   "rewrites": [

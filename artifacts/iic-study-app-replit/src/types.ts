@@ -295,7 +295,7 @@ export interface SubscriptionHistoryEntry {
   price: number; // Amount paid (or 0)
   originalPrice: number; // Value of the plan
   isFree: boolean; // True if reward/admin grant
-  grantSource: 'PURCHASE' | 'REWARD' | 'ADMIN' | 'BONUS';
+  grantSource: 'PURCHASE' | 'REWARD' | 'ADMIN' | 'BONUS' | 'CREDITS';
   grantedBy?: string; // ID of the Admin/Sub-Admin who granted this
   grantedByName?: string; // Name of the Admin/Sub-Admin
 }

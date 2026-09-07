@@ -679,11 +679,9 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
             type="button"
             onClick={async () => {
               const result = await rotateScreen();
-              if (result === null) {
-                setAlertConfig({ isOpen: true, message: 'Screen rotation is not supported on this device/browser.' });
-              }
+              setIsLandscape(result === 'landscape');
             }} 
-            title={isLandscape ? "Rotate to Portrait" : "Rotate Screen"}
+            title={isLandscape ? "Switch to Mobile Mode" : "Switch to Desktop / Laptop Mode"}
             className={`w-8 h-8 rounded-full bg-[#eef1f5] shadow-[3px_3px_6px_#caced5,-3px_-3px_6px_#ffffff] active:shadow-[inset_2px_2px_4px_#caced5,inset_-2px_-2px_4px_#ffffff] flex items-center justify-center transition-all active:scale-95 ${
               isLandscape ? 'text-amber-600 font-bold' : 'text-slate-600 hover:text-slate-900'
             }`}
@@ -758,11 +756,9 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
             type="button"
             onClick={async () => {
               const result = await rotateScreen();
-              if (result === null) {
-                setAlertConfig({ isOpen: true, message: 'Screen rotation is not supported on this device/browser.' });
-              }
+              setIsLandscape(result === 'landscape');
             }} 
-            title={isLandscape ? "Rotate to Portrait" : "Rotate Screen"}
+            title={isLandscape ? "Switch to Mobile Mode" : "Switch to Desktop / Laptop Mode"}
             className={`w-8 h-8 rounded-full bg-[#eef1f5] shadow-[3px_3px_6px_#caced5,-3px_-3px_6px_#ffffff] active:shadow-[inset_2px_2px_4px_#caced5,inset_-2px_-2px_4px_#ffffff] flex items-center justify-center transition-all active:scale-95 ${
               isLandscape ? 'text-amber-600 font-bold' : 'text-slate-600 hover:text-slate-900'
             }`}
