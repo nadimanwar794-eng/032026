@@ -3490,8 +3490,23 @@ const App: React.FC = () => {
                               onOpenSchool={() => setState(prev => ({...prev, view: 'SCHOOL_ECOSYSTEM' as any}))}
                               onOpenCoaching={() => setState(prev => ({...prev, view: 'COACHING_ECOSYSTEM' as any}))}
                               onOpenMcqAnalysis={(result) => {
-                                  setLastTestResult(result);
-                                  setLastTestQuestions(result.questions || null);
+                                  let qs = result.questions || (result as any).data?.questions || null;
+                                  if (!qs && result.chapterId) {
+                                      try {
+                                          const raw = localStorage.getItem(`nst_mcq_data_${result.chapterId}`) || localStorage.getItem(`nst_chapter_${result.chapterId}`);
+                                          if (raw) {
+                                              const parsed = JSON.parse(raw);
+                                              if (Array.isArray(parsed.mcqs) && parsed.mcqs.length > 0) qs = parsed.mcqs;
+                                              else if (Array.isArray(parsed.questions) && parsed.questions.length > 0) qs = parsed.questions;
+                                          }
+                                      } catch {}
+                                  }
+                                  if (!qs && (result as any).wrongQuestions?.length) {
+                                      qs = (result as any).wrongQuestions;
+                                  }
+                                  const fullResult = qs && !result.questions ? { ...result, questions: qs } : result;
+                                  setLastTestResult(fullResult);
+                                  setLastTestQuestions(qs);
                               }}
                           />
                         </ErrorBoundary>

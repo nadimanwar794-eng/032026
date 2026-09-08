@@ -12,6 +12,7 @@ export const DEFAULT_CREDIT_SUB_PLANS: CreditSubscriptionPlan[] = [
     badge: 'STARTER',
     description: 'Roz 50 Credits milenge (Total 1,500 Credits)',
     isActive: true,
+    scoreMultiplier: 1.1,
   },
   {
     id: 'csp_200',
@@ -23,6 +24,7 @@ export const DEFAULT_CREDIT_SUB_PLANS: CreditSubscriptionPlan[] = [
     badge: 'POPULAR',
     description: 'Roz 110 Credits milenge (Total 3,300 Credits)',
     isActive: true,
+    scoreMultiplier: 1.2,
   },
   {
     id: 'csp_300',
@@ -34,6 +36,7 @@ export const DEFAULT_CREDIT_SUB_PLANS: CreditSubscriptionPlan[] = [
     badge: 'VALUE',
     description: 'Roz 175 Credits milenge (Total 5,250 Credits)',
     isActive: true,
+    scoreMultiplier: 1.3,
   },
   {
     id: 'csp_500',
@@ -45,8 +48,32 @@ export const DEFAULT_CREDIT_SUB_PLANS: CreditSubscriptionPlan[] = [
     badge: 'MEGA',
     description: 'Roz 300 Credits milenge (Total 9,000 Credits)',
     isActive: true,
+    scoreMultiplier: 1.5,
   },
 ];
+
+/**
+ * Helper to resolve the Score / XP multiplier for a Credit Pass
+ * - Starter: 1.1x (+0.1x XP)
+ * - Smart: 1.2x (+0.2x XP)
+ * - Super: 1.3x (+0.3x XP)
+ * - Mega: 1.5x (+0.5x XP)
+ */
+export function getCreditSubPlanMultiplier(
+  planOrSub?: { planId?: string; id?: string; planName?: string; name?: string; scoreMultiplier?: number } | null,
+): number {
+  if (!planOrSub) return 1.0;
+  if (typeof planOrSub.scoreMultiplier === 'number' && planOrSub.scoreMultiplier > 0) {
+    return planOrSub.scoreMultiplier;
+  }
+  const id = ((planOrSub as any).planId || (planOrSub as any).id || '').toLowerCase();
+  const name = ((planOrSub as any).planName || (planOrSub as any).name || '').toLowerCase();
+  if (id.includes('500') || name.includes('mega')) return 1.5;
+  if (id.includes('300') || name.includes('super')) return 1.3;
+  if (id.includes('200') || name.includes('smart')) return 1.2;
+  if (id.includes('100') || name.includes('starter')) return 1.1;
+  return 1.1;
+}
 
 export const PRESET_CREDIT_SUB_TEMPLATES = [
   {
@@ -246,6 +273,7 @@ export function grantCreditSubscription(
     totalCreditsClaimed: 0,
     pricePaid: customPricePaid !== undefined ? customPricePaid : plan.price,
     status: 'ACTIVE',
+    scoreMultiplier: plan.scoreMultiplier || getCreditSubPlanMultiplier(plan),
   };
 
   return {

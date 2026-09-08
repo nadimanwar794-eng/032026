@@ -248,15 +248,15 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
     };
   }, [reload, user?.id]);
 
-  // Every second: update clock + auto-reload when any upcoming topic becomes due
+  // Check periodically if any upcoming topic becomes due and auto-reload
   useEffect(() => {
     const id = setInterval(() => {
       const n = Date.now();
-      setNow(n);
       if (upcomingRef.current.some(b => b.nextDueAt && b.nextDueAt <= n)) {
+        setNow(n);
         reload();
       }
-    }, 1000);
+    }, 15000);
     return () => clearInterval(id);
   }, [reload]);
 
@@ -625,6 +625,15 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
             : 'BAD',
         type: 'REVISION_MCQ',
         topic: practicedTopics.join(', ') || 'Today MCQ',
+        questions: practiceQs.map((q: any) => ({
+          question: q.question,
+          options: q.allOptions || (q.options ? q.options : [q.correctOption]),
+          correctAnswer: typeof q.correctOption === 'number' ? q.correctOption : (q.allOptions ? q.allOptions.indexOf(q.correctOption) : 0),
+          explanation: q.explanation || '',
+          topic: q.topic || 'General',
+        })),
+        omrData: practiceAnswers || {},
+        userAnswers: practiceQs.map((_, i) => practiceAnswers[i] ?? null),
       };
 
       // Award points (+2 for correct, +1 for wrong)

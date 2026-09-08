@@ -135,15 +135,32 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
 
   const mcqAnalysisHistory = useMemo(() => {
     const byId = new Map<string, MCQResult>();
+    try {
+      const localResults: MCQResult[] = JSON.parse(localStorage.getItem(`nst_test_results_${user?.id}`) || '[]');
+      if (Array.isArray(localResults)) {
+        localResults.forEach((result: MCQResult) => {
+          if (result?.id) byId.set(result.id, result);
+        });
+      }
+    } catch {}
     [...(user.mcqHistory || []), ...(user.testResults || [])].forEach((result: MCQResult) => {
-      if (result?.id && !byId.has(result.id)) byId.set(result.id, result);
+      if (result?.id) {
+        if (!byId.has(result.id)) {
+          byId.set(result.id, result);
+        } else {
+          const existing = byId.get(result.id)!;
+          if (!existing.questions && (result as any).questions) {
+            byId.set(result.id, { ...existing, questions: (result as any).questions });
+          }
+        }
+      }
     });
     return Array.from(byId.values()).sort((a, b) => {
       const timeA = new Date(a.date).getTime();
       const timeB = new Date(b.date).getTime();
       return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
     });
-  }, [user.mcqHistory, user.testResults]);
+  }, [user?.id, user.mcqHistory, user.testResults]);
 
   const mergedCreditHistoryDisplay = useMemo(() => {
     const creditRows = creditHistoryDisplay.map(tx => ({

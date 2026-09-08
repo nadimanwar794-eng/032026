@@ -438,6 +438,7 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                 omrData,
                 wrongQuestions,
                 topic: meta._topicName,
+                questions: qs,
             };
 
             saveTestResult(user.id, result);
@@ -494,6 +495,7 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
             topicAnalysis: megaTopicAnalysis,
             omrData: megaOmrData,
             wrongQuestions: megaWrongQuestions,
+            questions: interleavedQuestions,
         };
 
         // Immediate background persistence to localStorage and Firebase

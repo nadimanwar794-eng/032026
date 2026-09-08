@@ -392,6 +392,12 @@ export const RevisionHubScreen: React.FC<Props> = ({
         averageTimePerQuestion: 0,
         performanceTag: totalCorrect / totalAnswered >= 0.8 ? 'EXCELLENT' : totalCorrect / totalAnswered >= 0.5 ? 'GOOD' : 'NEEDS_IMPROVEMENT',
         type: 'REVISION_MCQ',
+        questions: sessionMcqs,
+        userAnswers: sessionAnswers,
+        omrData: sessionAnswers.reduce((acc: any, ans: any, idx: number) => {
+          if (ans !== null && ans !== undefined) acc[idx] = ans;
+          return acc;
+        }, {}),
       };
       // Keep a durable per-attempt copy in Firebase as well as the user's
       // aggregated mcqHistory. This makes the complete test history recoverable

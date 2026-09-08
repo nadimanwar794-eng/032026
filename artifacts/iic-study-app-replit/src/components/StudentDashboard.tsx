@@ -6,7 +6,7 @@ import { createPortal } from "react-dom";
 import { FeatureHints, FeatureTipsList } from "./FeatureHints";
 import { TopBarEffectsLayer } from "../utils/topBarEffects";
 import { getLevelInfo, getNextLevelInfo, getLevelProgress, LEVEL_INFO, ACTIVITY_SCORES, getLevelTopBarEffects, getLevelLimitBonus, getLevelDailyLimits, getLevelDailyLimitsWithOverride, getEffectiveDailyLimit, UNLIMITED, getMaxReadingSeconds } from "../utils/levelSystem";
-import { tryEarnScore, awardMilestone, getDailyScoreEarned, DAILY_SCORE_LIMIT, getDailyScoreLimit, getActiveBoost, getCombinedBoost, logScoreActivity } from "../utils/scoreSystem";
+import { tryEarnScore, awardMilestone, getDailyScoreEarned, DAILY_SCORE_LIMIT, getDailyScoreLimit, getActiveBoost, getCombinedBoost, logScoreActivity, getUserScoreMultiplier } from "../utils/scoreSystem";
 import { ScoreHistoryDashboard } from "./ScoreHistoryDashboard";
 import { StudentProgressDashboard } from "./StudentProgressDashboard";
 import { SuggestionsPanel } from "./SuggestionsPanel";
@@ -74,10 +74,17 @@ import { recordLogin, updateSessionDuration, getLoginHistory, formatDuration, fo
 import { getNewContentItems, markContentItemSeen, markAllContentItemsSeen, formatContentDate, type ContentNotifItem } from "../utils/contentNotifications";
 import { clearAllRecentReads, saveRecentHomework, getRecentHomeworks, removeRecentHomework, getRecentChapters, removeRecentChapter, saveRecentLucent, getRecentLucent, removeRecentLucent, markNoteFullyRead, getFullyReadMap, markReadToday, getReadingStreak, getReadDates, getBestReadingDay, getTodayItemCount, type RecentChapterEntry, type RecentHwEntry, type RecentLucentEntry, type StreakInfo, type BestDay } from "../utils/recentReads";
 import { markRoutinePageRead, markRoutineMcqDone, isRoutinePageRead, isRoutineMcqDone, updateRoutineMcqScore, recordMistake, addPageTime, resetPageTime, calculatePageRequiredReadingSec, isLessonAutoComplete, isLessonRewarded, markLessonRewarded, markRoutinePageMcqDone, updateRoutinePageMcqScore, isRoutinePageMcqDone, getRoutinePageMcqScore, getAutoPageBoxState, getPageTime, getLessonStats, getMultiLessonStats, getProgressColor5, getProgressTicks } from "../utils/routineAutoTrack";
-import { loadRoutineData, saveRoutineData, checkAndResetDaily, generateDailyTask, advanceLessonInCycle, getDiscountFactor, hasActiveDiscount, getPageReadReward, LESSON_COMPLETE_REWARD, unlockRevisionLesson } from "../utils/routineStorage";
+import { loadRoutineData, saveRoutineData, checkAndResetDaily, generateDailyTask, advanceLessonInCycle, getDiscountFactor, hasActiveDiscount, getPageReadReward, LESSON_COMPLETE_REWARD, unlockRevisionLesson, getUserSubTier, getDailyClaimAmount, getUnclaimedCoins, ensureTodayClaimEntry, claimAllPendingCoins } from "../utils/routineStorage";
 import { SubscriptionEngine } from "../utils/engines/subscriptionEngine";
 import { recalculateSubscriptionStatus } from "../utils/subscriptionUtils";
 import { RewardEngine } from "../utils/engines/rewardEngine";
+import {
+  isCreditSubActive,
+  canClaimCreditSubToday,
+  claimDailyCreditSub,
+  getCreditSubDaysRemaining,
+  getCreditSubPlanMultiplier,
+} from "../utils/creditSubscriptionUtils";
 import { Button } from "./ui/button";
 import { getActiveChallenges, saveChallenge20 } from "../services/questionBank";
 import { generateDailyChallengeQuestions, getChallengeDateKey, isDailyChallenge20 } from "../utils/challengeGenerator";
@@ -2338,6 +2345,74 @@ export const StudentDashboard: React.FC<Props> = ({
   const [showCreditsMini, setShowCreditsMini] = useState(false);
   const [storeSubTab, setStoreSubTab] = useState<'STORE' | 'CREDITS'>('STORE');
   const [inboxTab, setInboxTab] = useState<'MESSAGES' | 'UPDATES' | 'REWARDS' | 'HISTORY' | 'RULES'>('UPDATES');
+  const [claimingDailyPass, setClaimingDailyPass] = useState(false);
+  const [showSubDetailsModal, setShowSubDetailsModal] = useState(false);
+  const [claimingDailyBonus, setClaimingDailyBonus] = useState(false);
+  const handleClaimDailyBonus = async () => {
+    if (!user || claimingDailyBonus) return;
+    setClaimingDailyBonus(true);
+    try {
+      const bonusAmount = user.subscriptionLevel === 'ULTRA' ? 25 : user.subscriptionLevel === 'BASIC' ? 15 : 10;
+      const updatedUser = {
+        ...user,
+        credits: (user.credits || 0) + bonusAmount,
+        lastLoginRewardDate: new Date().toISOString(),
+      };
+      await saveUserToLive(updatedUser);
+      handleUserUpdate(updatedUser);
+      triggerRewardEffect(bonusAmount, `+${bonusAmount} Daily Credits 🪙`);
+      showAlert(`🎉 +${bonusAmount} Daily Login Credits Claim Ho Gaye!`, 'SUCCESS', 'Daily Login Bonus Claimed!');
+    } catch (e) {
+      console.error('Failed to claim daily bonus:', e);
+      showAlert('Credits claim karne mein error aaya. Kripya dobara try karein.', 'ERROR');
+    } finally {
+      setClaimingDailyBonus(false);
+    }
+  };
+  const handleClaimDailyCreditPass = async () => {
+    if (!user || claimingDailyPass) return;
+    setClaimingDailyPass(true);
+    try {
+      const res = claimDailyCreditSub(user);
+      if (res) {
+        const ok = await saveUserToLive(res.updatedUser);
+        handleUserUpdate(res.updatedUser);
+        triggerRewardEffect(res.earned, `+${res.earned} Pass Credits 🪙`);
+        showAlert(`🎉 +${res.earned} Daily Credits Claim Ho Gaye! (${res.updatedUser.creditSubscription?.planName || 'Daily Pass'})`, 'SUCCESS', 'Daily Pass Claimed!');
+      } else {
+        showAlert('Aaj ke daily pass credits pehle hi claim ho chuke hain.', 'INFO');
+      }
+    } catch (e) {
+      console.error('Failed to claim daily pass:', e);
+      showAlert('Credits claim karne mein error aaya. Kripya dobara try karein.', 'ERROR');
+    } finally {
+      setClaimingDailyPass(false);
+    }
+  };
+
+  const handleClaimProSubscriptionCoins = async () => {
+    if (!user) return;
+    const tier = getUserSubTier(user);
+    if (tier === 'NONE') return;
+    try {
+      let rData = loadRoutineData(user.id);
+      rData = ensureTodayClaimEntry(rData, tier, settings);
+      const { data: updated, earned } = claimAllPendingCoins(rData, tier);
+      if (earned > 0) {
+        const updatedUser = { ...user, credits: (user.credits || 0) + earned };
+        const ok = await saveUserToLive(updatedUser);
+        handleUserUpdate(updatedUser);
+        saveRoutineData(user.id, updated);
+        triggerRewardEffect(earned, `+${earned} Pro Credits 🪙`);
+        showAlert(`🎉 +${earned} Subscription Daily Credits Claim Ho Gaye!`, 'SUCCESS', 'Daily Credits Claimed!');
+      } else {
+        showAlert('Aaj ke subscription credits pehle hi claim ho chuke hain.', 'INFO');
+      }
+    } catch (e) {
+      console.error('Failed to claim pro coins:', e);
+      showAlert('Credits claim karne mein error aaya. Kripya dobara try karein.', 'ERROR');
+    }
+  };
   const [profileWhite, setProfileWhite] = useState(() => localStorage.getItem(`nst_pw_${user.id}`) === '1');
   const [nameFxOff, setNameFxOff] = useState(() => { try { return localStorage.getItem('nst_name_fx_off') === '1'; } catch { return false; } });
   const [cardFxOff, setCardFxOff] = useState(() => { try { return localStorage.getItem('nst_card_fx_off') === '1'; } catch { return false; } });
@@ -14582,22 +14657,28 @@ export const StudentDashboard: React.FC<Props> = ({
                   </button>
                   </div>{/* end fading wrapper */}
 
-                  {/* Status popup — outside fading wrapper so backdrop z-index is not trapped */}
-                  {showSysStatus && (
-                    <>
+                  {/* Status popup — rendered via portal to document.body so it is always on top of Home and all pages, never clipped by overflow-hidden or CSS transforms */}
+                  {showSysStatus && createPortal(
+                    <div className="fixed inset-0 z-[999999] pointer-events-auto">
                       {/* Backdrop */}
                       <div
-                        className="fixed inset-0 z-[200]"
+                        className="fixed inset-0 bg-black/40 backdrop-blur-[2px] animate-in fade-in duration-150"
                         onClick={() => setShowSysStatus(false)}
+                        onTouchStart={() => setShowSysStatus(false)}
                       />
-                      {/* Popup card */}
-                      <div className="absolute right-0 top-8 z-[201] min-w-[190px] rounded-xl overflow-hidden shadow-2xl border border-white/10"
-                        style={{ background: 'rgba(15,15,25,0.97)', backdropFilter: 'blur(16px)' }}
+                      {/* Popup card with increased padding and comfortable layout */}
+                      <div
+                        data-no-topbar-swipe
+                        className="fixed right-3 sm:right-6 top-14 sm:top-16 z-[1000000] w-[290px] sm:w-[320px] max-w-[calc(100vw-24px)] rounded-2xl overflow-hidden shadow-2xl border border-white/15 animate-in fade-in zoom-in-95 duration-150"
+                        style={{ background: 'rgba(15,15,25,0.98)', backdropFilter: 'blur(20px)' }}
                       >
-                        {/* Header */}
-                        <div className="px-3 py-2 border-b border-white/10 flex items-center justify-between">
-                          <span className="text-[11px] font-bold text-white tracking-wide">System Status</span>
-                          <span className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold"
+                        {/* Header with increased padding */}
+                        <div className="px-4 py-3 sm:px-5 sm:py-3.5 border-b border-white/10 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-base">🛰️</span>
+                            <span className="text-xs sm:text-sm font-bold text-white tracking-wide">System Status</span>
+                          </div>
+                          <span className="text-[10px] sm:text-xs px-2.5 py-0.5 rounded-full font-bold"
                             style={{
                               background: allOk ? 'rgba(16,185,129,0.2)' : hasError ? 'rgba(239,68,68,0.2)' : 'rgba(251,191,36,0.2)',
                               color: allOk ? '#10b981' : hasError ? '#ef4444' : '#fbbf24',
@@ -14606,8 +14687,8 @@ export const StudentDashboard: React.FC<Props> = ({
                             {allOk ? 'All OK' : hasError ? 'Error' : 'Loading…'}
                           </span>
                         </div>
-                        {/* Rows */}
-                        <div className="px-3 py-2 flex flex-col gap-2">
+                        {/* Rows with increased padding & spacing */}
+                        <div className="px-4 py-3 sm:px-5 sm:py-4 flex flex-col gap-3">
                           {dotLabels.map((label, i) => {
                             const lit = fbConnectLevel > i;
                             const isErr = fbDotErrors[i];
@@ -14618,24 +14699,24 @@ export const StudentDashboard: React.FC<Props> = ({
                             const statusText  = isErr ? 'Error' : lit ? 'OK' : isSlow ? 'Slow' : isConnecting ? 'Loading' : 'Pending';
                             const hint = isErr ? dotHints[i].err : isSlow ? dotHints[i].slow : null;
                             return (
-                              <div key={i}>
+                              <div key={i} className="flex flex-col">
                                 <div className="flex items-center justify-between gap-3">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="text-[11px]">{dotIcons[i]}</span>
-                                    <span className="text-[11px] text-white/80 font-medium">{label}</span>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm">{dotIcons[i]}</span>
+                                    <span className="text-xs sm:text-[13px] text-white/90 font-semibold">{label}</span>
                                   </div>
-                                  <div className="flex items-center gap-1">
+                                  <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md" style={{ background: 'rgba(255,255,255,0.05)' }}>
                                     <div style={{
-                                      width: 6, height: 6, borderRadius: '50%',
+                                      width: 7, height: 7, borderRadius: '50%',
                                       background: statusColor,
-                                      boxShadow: `0 0 5px ${statusColor}`,
+                                      boxShadow: `0 0 6px ${statusColor}`,
                                       animation: isConnecting || isSlow ? 'pulse 1.2s ease-in-out infinite' : 'none',
                                     }} />
-                                    <span className="text-[9px] font-semibold" style={{ color: statusColor }}>{statusText}</span>
+                                    <span className="text-[10px] font-bold" style={{ color: statusColor }}>{statusText}</span>
                                   </div>
                                 </div>
                                 {hint && (
-                                  <p className="text-[8.5px] mt-0.5 pl-5 leading-tight" style={{ color: isErr ? 'rgba(239,68,68,0.8)' : 'rgba(251,191,36,0.8)' }}>
+                                  <p className="text-[10px] mt-1 pl-6 leading-tight font-medium" style={{ color: isErr ? 'rgba(239,68,68,0.9)' : 'rgba(251,191,36,0.9)' }}>
                                     {isErr ? '⚠ ' : '⏳ '}{hint}
                                   </p>
                                 )}
@@ -14643,27 +14724,28 @@ export const StudentDashboard: React.FC<Props> = ({
                             );
                           })}
                         </div>
-                        {/* Footer */}
-                        <div className="px-3 py-2 border-t border-white/10 flex flex-col gap-1.5">
+                        {/* Footer with increased padding */}
+                        <div className="px-4 py-3 sm:px-5 sm:py-3.5 border-t border-white/10 flex flex-col gap-2 bg-white/[0.02]">
                           <button
                             onClick={() => window.location.reload()}
-                            className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg font-bold text-[10px] active:scale-95 transition-transform"
+                            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-bold text-xs active:scale-95 transition-transform"
                             style={{
-                              background: hasError ? 'rgba(239,68,68,0.18)' : 'rgba(255,255,255,0.08)',
-                              color: hasError ? '#f87171' : 'rgba(255,255,255,0.6)',
-                              border: `1px solid ${hasError ? 'rgba(239,68,68,0.35)' : 'rgba(255,255,255,0.1)'}`,
+                              background: hasError ? 'rgba(239,68,68,0.22)' : 'rgba(255,255,255,0.12)',
+                              color: hasError ? '#f87171' : 'rgba(255,255,255,0.9)',
+                              border: `1px solid ${hasError ? 'rgba(239,68,68,0.4)' : 'rgba(255,255,255,0.15)'}`,
                             }}
                           >
-                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                               <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
                               <path d="M3 3v5h5"/>
                             </svg>
                             Reconnect
                           </button>
-                          <span className="text-[8px] text-white/20 text-center">Tap anywhere to close</span>
+                          <span className="text-[9px] text-white/30 text-center">Tap anywhere outside to close</span>
                         </div>
                       </div>
-                    </>
+                    </div>,
+                    document.body
                   )}
                 </div>
               );
@@ -14684,11 +14766,19 @@ export const StudentDashboard: React.FC<Props> = ({
 
             {/* Mail */}
             {(() => {
-              const pendingRewards = (user.inbox || []).filter(m => (m.type === 'REWARD' || m.type === 'GIFT') && !m.isClaimed && (!m.expiresAt || new Date(m.expiresAt).getTime() > Date.now())).length;
+              const pendingCreditSub = canClaimCreditSubToday(user) ? 1 : 0;
+              const pendingRewards = (user.inbox || []).filter(m => (m.type === 'REWARD' || m.type === 'GIFT') && !m.isClaimed && (!m.expiresAt || new Date(m.expiresAt).getTime() > Date.now())).length + pendingCreditSub;
               const totalCount = unreadCount + unreadNotifCount + _newContentCount + pendingRewards;
               return (
                 <button
-                  onClick={() => { setInboxTab('UPDATES'); setShowInbox(true); }}
+                  onClick={() => {
+                    if (pendingCreditSub > 0 && unreadCount === 0 && unreadNotifCount === 0) {
+                      setInboxTab('REWARDS');
+                    } else {
+                      setInboxTab('UPDATES');
+                    }
+                    setShowInbox(true);
+                  }}
                   className={`p-[3px] rounded-xl transition-colors relative text-white shrink-0 active:scale-95${topBarBtnGlow ? ' nst-topbar-btn-glow' : ''}`}
                   title="Mail & Notifications"
                 >
@@ -14711,23 +14801,23 @@ export const StudentDashboard: React.FC<Props> = ({
               >
                 <MoreVertical size={17} />
               </button>
-                {showDotsMenu && (
-                  <>
+                {showDotsMenu && createPortal(
+                  <div className="fixed inset-0 z-[999999] pointer-events-auto">
                     {/* Backdrop — tap anywhere outside to close */}
                     <div
-                      className="fixed inset-0 z-[99998] bg-black/20 animate-in fade-in duration-150"
+                      className="fixed inset-0 bg-black/40 backdrop-blur-[2px] animate-in fade-in duration-150"
                       onClick={() => setShowDotsMenu(false)}
                       onTouchStart={() => setShowDotsMenu(false)}
                     />
-                    {/* Dropdown panel — compact */}
+                    {/* Dropdown panel with increased padding and clean sizing */}
                     <div
                       data-no-topbar-swipe
-                      className={`fixed top-[100px] right-2 w-60 rounded-2xl shadow-2xl border z-[99999] animate-in fade-in zoom-in-95 duration-150 overflow-y-auto max-h-[calc(100dvh-120px)] ${
+                      className={`fixed top-14 sm:top-16 right-3 sm:right-6 w-72 sm:w-80 max-w-[calc(100vw-24px)] rounded-2xl shadow-2xl border z-[1000000] animate-in fade-in zoom-in-95 duration-150 overflow-y-auto max-h-[calc(100dvh-80px)] ${
                         isCurrentBlue
                           ? 'bg-[#0d1726] border-[#1e2f4f] text-white'
                           : isCurrentDark
                           ? 'bg-[#111827] border-slate-800 text-white'
-                          : 'bg-white border-slate-100 text-slate-800'
+                          : 'bg-white border-slate-200 text-slate-800'
                       }`}
                       style={
                         isCurrentBlue && settings?.blueThemeBackground
@@ -14739,8 +14829,8 @@ export const StudentDashboard: React.FC<Props> = ({
                           : undefined
                       }
                     >
-                      {/* Header */}
-                      <div className={`flex items-center justify-between px-3 pt-2.5 pb-1.5 border-b ${isCurrentBlue ? 'border-[#1e2f4f]' : isCurrentDark ? 'border-slate-800' : 'border-slate-100'}`}>
+                      {/* Header with increased padding */}
+                      <div className={`flex items-center justify-between px-4 py-3.5 border-b ${isCurrentBlue ? 'border-[#1e2f4f]' : isCurrentDark ? 'border-slate-800' : 'border-slate-100'}`}>
                         {/* Level pill */}
                         {(() => {
                           const _ls = user.role === 'ADMIN' || user.role === 'SUB_ADMIN' ? 999999999 : (user.totalScore || 0);
@@ -14748,23 +14838,23 @@ export const StudentDashboard: React.FC<Props> = ({
                           return (
                             <button
                               onClick={() => { setShowDotsMenu(false); setShowScorePanel(true); }}
-                              className="flex items-center gap-1.5 active:opacity-70 transition-all"
+                              className="flex items-center gap-2 px-2.5 py-1 rounded-xl bg-white/5 hover:bg-white/10 active:opacity-70 transition-all"
                             >
-                              <span className="text-[11px]">⭐</span>
-                              <span className={`text-[11px] font-black ${isCurrentBlue ? 'text-blue-300' : isCurrentDark ? 'text-amber-400' : 'text-indigo-700'}`}>Lv {_li.level}</span>
-                              <span className="text-[10px] text-slate-400 font-semibold">— {_li.label}</span>
+                              <span className="text-sm">⭐</span>
+                              <span className={`text-xs font-black ${isCurrentBlue ? 'text-blue-300' : isCurrentDark ? 'text-amber-400' : 'text-indigo-700'}`}>Lv {_li.level}</span>
+                              <span className="text-[11px] text-slate-400 font-semibold">— {_li.label}</span>
                             </button>
                           );
                         })()}
                         <button
                           onClick={() => setShowDotsMenu(false)}
-                          className={`p-1 rounded-full transition-colors ${isDarkMode ? 'hover:bg-white/10 text-slate-400' : 'hover:bg-slate-100 text-slate-400'}`}
+                          className={`p-1.5 rounded-full transition-colors ${isDarkMode ? 'hover:bg-white/10 text-slate-400' : 'hover:bg-slate-100 text-slate-400'}`}
                         >
-                          <svg width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
                         </button>
                       </div>
 
-                      {/* Board dropdown */}
+                      {/* Board dropdown with increased padding */}
                       {(() => {
                         const boardOptions = [
                           { id: 'NCERT_EN', label: 'NCERT English' },
@@ -14778,11 +14868,11 @@ export const StudentDashboard: React.FC<Props> = ({
                         });
                         const currentLabel = boardOptions.find(b => b.id === activeSessionBoard)?.label ?? activeSessionBoard;
                         return (
-                          <div className={`px-3 pt-2.5 pb-2.5 border-b ${isCurrentBlue ? 'border-[#1e2f4f]' : isCurrentDark ? 'border-slate-800' : 'border-slate-100'}`}>
-                            <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-3">Board</p>
+                          <div className={`px-4 pt-3.5 pb-3.5 border-b ${isCurrentBlue ? 'border-[#1e2f4f]' : isCurrentDark ? 'border-slate-800' : 'border-slate-100'}`}>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2.5">Board</p>
                             <button
                               onClick={() => setShowBoardDropdown(v => !v)}
-                              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-[13px] font-bold transition-all border ${
+                              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-[13px] font-bold transition-all border ${
                                 isCurrentBlue
                                   ? 'bg-[#132038] border-[#1e3252] text-white active:bg-[#182744]'
                                   : isCurrentDark
@@ -14794,7 +14884,7 @@ export const StudentDashboard: React.FC<Props> = ({
                               <ChevronDown size={14} className={`text-slate-400 transition-transform ${showBoardDropdown ? 'rotate-180' : ''}`} />
                             </button>
                             {showBoardDropdown && (
-                              <div className={`mt-1.5 rounded-xl overflow-hidden shadow-md border ${
+                              <div className={`mt-2 rounded-xl overflow-hidden shadow-md border ${
                                 isCurrentBlue
                                   ? 'bg-[#0b1329] border-[#1e3252]'
                                   : isCurrentDark
@@ -14805,7 +14895,7 @@ export const StudentDashboard: React.FC<Props> = ({
                                   <button
                                     key={opt.id}
                                     onClick={() => { setActiveSessionBoard(opt.id as any); setShowBoardDropdown(false); }}
-                                    className={`w-full flex items-center justify-between px-3 py-2.5 text-[13px] font-semibold transition-colors border-b last:border-0 ${
+                                    className={`w-full flex items-center justify-between px-3.5 py-2.5 text-[13px] font-semibold transition-colors border-b last:border-0 ${
                                       isCurrentBlue
                                         ? 'text-slate-200 hover:bg-white/5 border-[#1e2f4f]'
                                         : isCurrentDark
@@ -14823,7 +14913,7 @@ export const StudentDashboard: React.FC<Props> = ({
                         );
                       })()}
 
-                      {/* Slim numbered list */}
+                      {/* Slim numbered list with enhanced padding & spacing */}
                       {(() => {
                         const redeemAccess = getFeatureAccess('REDEEM_CODE');
                         const requestAccess = getFeatureAccess('REQUEST_CONTENT');
@@ -14927,12 +15017,12 @@ export const StudentDashboard: React.FC<Props> = ({
                         ];
 
                         return (
-                          <div className={`px-2 pt-1 pb-1 border-b ${isCurrentBlue ? 'border-[#1e2f4f]' : isCurrentDark ? 'border-slate-800' : 'border-slate-100'}`}>
+                          <div className={`px-2.5 pt-2 pb-2 border-b flex flex-col gap-1 ${isCurrentBlue ? 'border-[#1e2f4f]' : isCurrentDark ? 'border-slate-800' : 'border-slate-100'}`}>
                             {items.map((item, idx) => (
                               <button
                                 key={item.label}
                                 onClick={item.action}
-                                className={`w-full flex items-center gap-3 px-2 py-2.5 rounded-lg transition-all text-left ${
+                                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-left ${
                                   isCurrentBlue
                                     ? 'hover:bg-white/5 active:bg-white/10'
                                     : isCurrentDark
@@ -14956,12 +15046,13 @@ export const StudentDashboard: React.FC<Props> = ({
                       })()}
 
                       {/* Version */}
-                      <div className="px-3 py-1.5 text-center">
+                      <div className="px-4 py-2.5 text-center">
                         <span className={`text-[9px] font-medium ${isDarkMode ? 'text-slate-500' : 'text-slate-300'}`}>v{APP_VERSION}</span>
                       </div>
 
                     </div>
-                  </>
+                  </div>,
+                  document.body
                 )}
               </div>
 
@@ -15001,7 +15092,6 @@ export const StudentDashboard: React.FC<Props> = ({
 
           {/* Right: Credits button */}
           <div className="flex items-center gap-1.5 shrink-0">
-
             {/* Credit Balance with Plus (+) icon */}
             <button
               id="topbar-row2-credits-btn"
@@ -15262,6 +15352,237 @@ export const StudentDashboard: React.FC<Props> = ({
                   <button onClick={() => setShowPremiumPopup(false)} className="flex-1 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider text-white/50 hover:scale-105 transition-transform" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>Close</button>
                 </div>
 
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ═══════════ SUBSCRIPTION & DAILY CREDITS DETAILS MODAL ═══════════ */}
+      {showSubDetailsModal && (() => {
+        const hasCreditSub = isCreditSubActive(user);
+        const creditSub = user.creditSubscription;
+        const canClaimCreditSub = canClaimCreditSubToday(user);
+        const creditDaysLeft = creditSub ? getCreditSubDaysRemaining(creditSub) : 0;
+        const creditEndDateFmt = creditSub?.endDate
+          ? new Date(creditSub.endDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+          : null;
+
+        const isLifetime = user.subscriptionTier === 'LIFETIME';
+        const isPrem = user.isPremium || (user.subscriptionTier && user.subscriptionTier !== 'FREE');
+        const subEndDate = user.subscriptionEndDate ? new Date(user.subscriptionEndDate) : null;
+        const subEndDateMs = subEndDate && !isNaN(subEndDate.getTime()) ? subEndDate.getTime() : null;
+        const hasValidSubEnd = !isLifetime && subEndDateMs !== null && subEndDateMs > Date.now();
+        const subDaysLeft = subEndDateMs ? Math.max(0, Math.ceil((subEndDateMs - Date.now()) / (1000 * 60 * 60 * 24))) : 0;
+        const subEndDateFmt = subEndDate && !isNaN(subEndDate.getTime())
+          ? subEndDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+          : null;
+
+        const canClaimDailyBonusToday = !user.lastLoginRewardDate || new Date(user.lastLoginRewardDate).toDateString() !== new Date().toDateString();
+        const dailyBonusAmount = user.subscriptionLevel === 'ULTRA' ? 25 : user.subscriptionLevel === 'BASIC' ? 15 : 10;
+
+        return (
+          <div
+            className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+            style={{ background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)' }}
+            onClick={() => setShowSubDetailsModal(false)}
+          >
+            <div
+              className="relative w-full max-w-md rounded-3xl overflow-hidden shadow-2xl p-5 border text-white animate-in zoom-in-95 duration-200"
+              style={{
+                background: 'linear-gradient(160deg, #0f172a, #1e1b4b, #0f172a)',
+                borderColor: 'rgba(251,191,36,0.35)',
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between pb-3 border-b border-white/10">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-400/20 border border-amber-400/40 flex items-center justify-center text-xl">
+                    👑
+                  </div>
+                  <div>
+                    <h3 className="font-black text-base text-white">Subscription & Daily Credits</h3>
+                    <p className="text-[11px] text-slate-300">Aapka active plan aur validity details</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowSubDetailsModal(false)}
+                  className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/70 hover:text-white transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="py-4 space-y-4 max-h-[75vh] overflow-y-auto pr-1">
+                {/* 1. DAILY CREDIT PASS SECTION */}
+                {hasCreditSub ? (
+                  <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">⚡</span>
+                        <div>
+                          <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-400 text-black">
+                            ACTIVE DAILY PASS
+                          </span>
+                          <h4 className="font-black text-sm text-white mt-1">
+                            {creditSub?.planName || 'Credit Pass'}
+                          </h4>
+                        </div>
+                      </div>
+                      <span className="text-xs font-black text-amber-400 bg-amber-400/15 px-2.5 py-1 rounded-xl border border-amber-400/30">
+                        🪙 +{creditSub?.dailyCredits} CR / din
+                      </span>
+                    </div>
+
+                    {/* Validity & Expiry */}
+                    <div className="grid grid-cols-2 gap-2 text-xs bg-black/20 p-2.5 rounded-xl border border-white/5">
+                      <div>
+                        <span className="text-slate-400 text-[10px] block">Kitne Din Ke Liye Hai:</span>
+                        <strong className="text-white font-bold">{creditSub?.durationDays || 30} Din Ka Pass</strong>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 text-[10px] block">Kitne Din Baki Hain:</span>
+                        <strong className="text-amber-400 font-bold">{creditDaysLeft} Din Baki</strong>
+                      </div>
+                      <div className="col-span-2 pt-1 border-t border-white/5">
+                        <span className="text-slate-400 text-[10px] block">Kab Khatam Hoga (Expiry Date):</span>
+                        <strong className="text-amber-300 font-bold">{creditEndDateFmt}</strong>
+                      </div>
+                    </div>
+
+                    {/* Total stats */}
+                    <div className="flex items-center justify-between text-[11px] text-slate-300 px-1">
+                      <span>Total Claimed: <strong className="text-amber-400">{creditSub?.totalClaimedDays || 0} Din</strong></span>
+                      <span>Earned: <strong className="text-amber-400">{creditSub?.totalCreditsClaimed || 0} 🪙</strong></span>
+                    </div>
+
+                    {/* Pass Claim Button */}
+                    {canClaimCreditSub ? (
+                      <button
+                        onClick={handleClaimDailyCreditPass}
+                        disabled={claimingDailyPass}
+                        className="w-full py-2.5 rounded-xl font-black text-xs active:scale-95 transition-all flex items-center justify-center gap-2 shadow-md bg-gradient-to-r from-amber-400 to-amber-500 text-black cursor-pointer"
+                      >
+                        <Gift size={15} />
+                        {claimingDailyPass ? 'Claim Ho Raha Hai...' : `Aaj Ke +${creditSub?.dailyCredits} Credits Claim Karo 🪙`}
+                      </button>
+                    ) : (
+                      <div className="py-2 rounded-xl flex items-center justify-center gap-2 text-xs font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20">
+                        <Check size={14} />
+                        <span>Aaj ka daily pass claim ho gaya! Agle kal milenge.</span>
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+
+                {/* 2. REGULAR APP MEMBERSHIP SECTION */}
+                <div className="p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl">👑</span>
+                      <div>
+                        <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-indigo-500 text-white">
+                          MEMBERSHIP TIER
+                        </span>
+                        <h4 className="font-black text-sm text-white mt-1">
+                          {isLifetime
+                            ? 'LIFETIME ALL-ACCESS'
+                            : isPrem
+                            ? `${user.subscriptionLevel || user.subscriptionTier || 'PRO'} PLAN`
+                            : 'FREE STUDENT ACCOUNT'}
+                        </h4>
+                      </div>
+                    </div>
+                    {isPrem && (
+                      <span className="text-xs font-black text-indigo-300 bg-indigo-500/20 px-2.5 py-1 rounded-xl border border-indigo-400/30">
+                        {user.subscriptionTier || 'ACTIVE'}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs bg-black/20 p-2.5 rounded-xl border border-white/5">
+                    <div>
+                      <span className="text-slate-400 text-[10px] block">Kitne Din Ke Liye Hai:</span>
+                      <strong className="text-white font-bold">
+                        {isLifetime
+                          ? 'Lifetime (Forever)'
+                          : hasValidSubEnd
+                          ? `${user.subscriptionTier === 'YEARLY' ? '1 Year (365 Din)' : user.subscriptionTier === '3_MONTHLY' ? '3 Months (90 Din)' : user.subscriptionTier === 'WEEKLY' ? '1 Week (7 Din)' : '1 Month (30 Din)'}`
+                          : 'Free Access (No Limit)'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 text-[10px] block">Kitne Din Baki Hain:</span>
+                      <strong className="text-indigo-300 font-bold">
+                        {isLifetime ? '♾️ Unlimited' : hasValidSubEnd ? `${subDaysLeft} Din Baki` : 'Active'}
+                      </strong>
+                    </div>
+                    <div className="col-span-2 pt-1 border-t border-white/5">
+                      <span className="text-slate-400 text-[10px] block">Kab Khatam Hoga (Expiry Date):</span>
+                      <strong className="text-amber-300 font-bold">
+                        {isLifetime
+                          ? 'Hamesha Ke Liye Active (No Expiry Date)'
+                          : hasValidSubEnd
+                          ? subEndDateFmt
+                          : 'Aap Free Plan par hain (Koi expiry nahi)'}
+                      </strong>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. DAILY LOGIN BONUS / CHECK-IN CLAIM (For students without credit pass) */}
+                {!hasCreditSub && (
+                  <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-500 text-white">
+                          DAILY REWARD
+                        </span>
+                        <h4 className="font-black text-sm text-white mt-1">Daily Login Bonus</h4>
+                      </div>
+                      <span className="text-xs font-black text-emerald-400 bg-emerald-500/15 px-2.5 py-1 rounded-xl border border-emerald-500/30">
+                        🪙 +{dailyBonusAmount} CR
+                      </span>
+                    </div>
+
+                    {canClaimDailyBonusToday ? (
+                      <button
+                        onClick={handleClaimDailyBonus}
+                        disabled={claimingDailyBonus}
+                        className="w-full py-2.5 rounded-xl font-black text-xs active:scale-95 transition-all flex items-center justify-center gap-2 shadow-md bg-gradient-to-r from-emerald-400 to-emerald-600 text-white cursor-pointer animate-pulse"
+                      >
+                        <Gift size={15} />
+                        {claimingDailyBonus ? 'Claim Ho Raha Hai...' : `Aaj Ka Login Bonus (+${dailyBonusAmount} CR) Claim Karo 🪙`}
+                      </button>
+                    ) : (
+                      <div className="py-2 rounded-xl flex items-center justify-center gap-2 text-xs font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20">
+                        <Check size={14} />
+                        <span>Aaj ka daily login bonus claim ho chuka hai!</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="pt-3 border-t border-white/10 flex items-center justify-between gap-2">
+                <button
+                  onClick={() => {
+                    setShowSubDetailsModal(false);
+                    setStoreSubTab('CREDITS');
+                    onTabChange('STORE');
+                  }}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider bg-amber-400/20 text-amber-300 border border-amber-400/40 hover:bg-amber-400/30 transition-all text-center"
+                >
+                  ⚡ Store / Pass Dekho
+                </button>
+                <button
+                  onClick={() => setShowSubDetailsModal(false)}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider text-white/60 bg-white/5 hover:bg-white/10 border border-white/10 transition-all text-center"
+                >
+                  Band Karein
+                </button>
               </div>
             </div>
           </div>
@@ -20160,6 +20481,82 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                             Store Dekho →
                           </button>
                         </div>
+
+                        {/* Daily Credit Pass Claim in Mailbox Rewards */}
+                        {isCreditSubActive(user) && (() => {
+                          const sub = user.creditSubscription!;
+                          const canClaim = canClaimCreditSubToday(user);
+                          const daysLeft = getCreditSubDaysRemaining(sub);
+                          return (
+                            <div
+                              className="border rounded-2xl p-3.5 sm:p-4 relative overflow-hidden transition-all shadow-sm"
+                              style={{
+                                background: canClaim
+                                  ? 'linear-gradient(135deg, #fffbeb, #fef3c7)'
+                                  : 'linear-gradient(135deg, #f8fafc, #f1f5f9)',
+                                borderColor: canClaim ? '#f59e0b' : '#e2e8f0',
+                                boxShadow: canClaim ? '0 4px 14px rgba(245,158,11,0.18)' : 'none',
+                              }}
+                            >
+                              <div className="flex items-center justify-between gap-2 mb-2.5">
+                                <div className="flex items-center gap-2.5">
+                                  <div
+                                    className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 font-black shadow-xs"
+                                    style={{
+                                      background: canClaim ? 'linear-gradient(135deg, #f59e0b, #d97706)' : 'rgba(245,158,11,0.15)',
+                                      color: canClaim ? '#000' : '#f59e0b',
+                                    }}
+                                  >
+                                    ⚡
+                                  </div>
+                                  <div>
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="text-[9px] font-black uppercase tracking-wider text-amber-800 bg-amber-200/80 px-2 py-0.5 rounded-full">
+                                        DAILY CREDIT PASS
+                                      </span>
+                                      <span className="text-[10px] font-bold text-slate-500">
+                                        {daysLeft} Din Baki
+                                      </span>
+                                    </div>
+                                    <h4 className="text-xs font-black text-slate-800 mt-0.5">
+                                      {sub.planName || 'Credit Subscription'}
+                                    </h4>
+                                  </div>
+                                </div>
+                                <span className="text-xs font-black text-amber-700 bg-amber-100/90 border border-amber-200 px-2.5 py-1 rounded-xl">
+                                  +{sub.dailyCredits} CR / din
+                                </span>
+                              </div>
+
+                              <div className="flex items-center justify-between text-[11px] text-slate-600 font-medium mb-3 px-1">
+                                <span>Claimed: <strong className="text-amber-600 font-black">{sub.totalClaimedDays || 0} Din</strong></span>
+                                <span>Total: <strong className="text-amber-600 font-black">{sub.totalCreditsClaimed || 0} 🪙</strong></span>
+                              </div>
+
+                              {canClaim ? (
+                                <button
+                                  onClick={handleClaimDailyCreditPass}
+                                  disabled={claimingDailyPass}
+                                  className="w-full py-2.5 rounded-xl font-black text-xs active:scale-95 transition-all flex items-center justify-center gap-2 shadow-md cursor-pointer"
+                                  style={{
+                                    background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                                    color: '#000',
+                                    boxShadow: '0 4px 12px rgba(245,158,11,0.3)',
+                                  }}
+                                >
+                                  <Gift size={14} />
+                                  {claimingDailyPass ? 'Claim Ho Raha Hai...' : `Aaj Ke +${sub.dailyCredits} Credits Claim Karo 🪙`}
+                                </button>
+                              ) : (
+                                <div className="w-full py-2 rounded-xl flex items-center justify-center gap-1.5 text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                  <Check size={14} />
+                                  <span>Aaj ka daily pass claim ho gaya! Agle credits kal milenge.</span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+
                         {/* Claimable rewards */}
                         {pendingRewardMsgs.length > 0 ? (
                           <div className="space-y-2">
@@ -20335,65 +20732,6 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
 
                 return (
                   <div className="space-y-2">
-
-                    {/* WRITE MODE DETAIL CARD */}
-                    <div className="bg-teal-50 border border-teal-200 rounded-2xl p-3.5 space-y-2">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-lg">✍️</span>
-                        <div>
-                          <p className="font-black text-sm text-slate-800">Write Mode — Credit System</p>
-                          <p className="text-[10px] text-slate-500">Credits apply after free views run out</p>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-3 gap-1.5">
-                        <div className="bg-white rounded-xl p-2 text-center border border-teal-100">
-                          <p className="text-[9px] font-black text-slate-400 uppercase">Free</p>
-                          <p className="font-black text-amber-600 text-xs mt-0.5">0 free</p>
-                          <p className="text-[9px] text-slate-400">{htmlCost} CR/use</p>
-                        </div>
-                        <div className="bg-white rounded-xl p-2 text-center border border-teal-100">
-                          <p className="text-[9px] font-black text-sky-500 uppercase">Basic</p>
-                          <p className="font-black text-sky-600 text-xs mt-0.5">{basicHtmlLimit}/day free</p>
-                          <p className="text-[9px] text-slate-400">Then 10 CR/use</p>
-                        </div>
-                        <div className="bg-white rounded-xl p-2 text-center border border-teal-100">
-                          <p className="text-[9px] font-black text-violet-500 uppercase">Ultra Notes</p>
-                          <p className="font-black text-violet-600 text-xs mt-0.5">{ultraHtmlLimitModal}/day free</p>
-                          <p className="text-[9px] text-slate-400">Then 10 CR/use</p>
-                        </div>
-                      </div>
-                      <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-                        <p className="text-[9px] text-amber-700 font-bold">💡 Escalating Cost: Every 10 credit unlocks adds +5 CR (max 20 CR) · Max 100 unlocks/day</p>
-                      </div>
-                    </div>
-
-                    {/* MCQ DETAIL CARD */}
-                    <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3.5 space-y-2">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-lg">📝</span>
-                        <div>
-                          <p className="font-black text-sm text-slate-800">MCQ Practice — Daily Limits</p>
-                          <p className="text-[10px] text-slate-500">Limit varies by tier</p>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-3 gap-1.5">
-                        <div className="bg-white rounded-xl p-2 text-center border border-emerald-100">
-                          <p className="text-[9px] font-black text-slate-400 uppercase">Free</p>
-                          <p className="font-black text-slate-700 text-sm mt-0.5">{mcqFreeLimit}/day</p>
-                          <p className="text-[9px] text-slate-400">Hard limit</p>
-                        </div>
-                        <div className="bg-white rounded-xl p-2 text-center border border-emerald-100">
-                          <p className="text-[9px] font-black text-sky-500 uppercase">Basic</p>
-                          <p className="font-black text-sky-600 text-sm mt-0.5">{mcqBasicLimit}/day</p>
-                          <p className="text-[9px] text-slate-400">Then 5 CR/30 Qs</p>
-                        </div>
-                        <div className="bg-white rounded-xl p-2 text-center border border-emerald-100">
-                          <p className="text-[9px] font-black text-violet-500 uppercase">Ultra</p>
-                          <p className="font-black text-violet-600 text-sm mt-0.5">{mcqUltraLimit}/day</p>
-                          <p className="text-[9px] text-slate-400">Then 5 CR/30 Qs</p>
-                        </div>
-                      </div>
-                    </div>
 
                     {signupAmt > 0 && (
                       <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-3.5 flex items-center gap-3">

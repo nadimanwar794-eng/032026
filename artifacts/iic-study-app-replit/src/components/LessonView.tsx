@@ -18,6 +18,7 @@ import { WriteModeCorrection } from "./WriteModeCorrection";
 import { SpeakButton } from './SpeakButton';
 import { McqSpeakButtons } from './McqSpeakButtons';
 import { ChunkedNotesReader } from './ChunkedNotesReader';
+import { recordNoteStar, recordNoteUnstar } from '../services/noteStars';
 import { renderMathInHtml, formatExplanationHtml } from '../utils/mathUtils';
 import McqQuestionDisplay from './McqQuestionDisplay';
 import McqPracticeCard from './McqPracticeCard';
@@ -619,14 +620,25 @@ export const LessonView: React.FC<Props> = ({
   const isTopicStarred = (text: string) =>
     lessonStars.some(n => n.noteKey === noteKey && n.topicText === text);
   const toggleTopicStar = (text: string) => {
+    const exists = lessonStars.some(n => n.noteKey === noteKey && n.topicText === text);
     setLessonStars(prev => {
-      const exists = prev.find(n => n.noteKey === noteKey && n.topicText === text);
       const updated = exists
         ? prev.filter(n => !(n.noteKey === noteKey && n.topicText === text))
         : [...prev, { id: Date.now().toString(), noteKey, topicText: text, savedAt: new Date().toISOString() }];
       try { localStorage.setItem('nst_starred_notes_v1', JSON.stringify(updated)); } catch {}
       return updated;
     });
+    // Global social-proof sync so ANY user saving a note reflects globally in trending
+    if (user?.id) {
+      if (!exists) {
+        recordNoteStar(user.id, noteKey, text, {
+          lessonTitle: chapter?.title || content?.title,
+          subject: subject?.title || subject?.name,
+        }).catch(() => {});
+      } else {
+        recordNoteUnstar(user.id, text).catch(() => {});
+      }
+    }
     // Admin star in Class 6-12 → also save to Firebase Mark 2 so ALL users
     // see the orange highlight in their own reader instantly.
     if (isAdmin) {
@@ -1193,7 +1205,7 @@ export const LessonView: React.FC<Props> = ({
                           className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-100 mt-2"
                           noteKey={noteKey}
                           isStarred={isTopicStarred}
-                          onStarToggle={isAdmin ? toggleTopicStar : undefined}
+                          onStarToggle={toggleTopicStar}
                           preferChunkMode
                           hideTopBar={isImmersive}
                           hideFix={schoolMode}
@@ -1740,7 +1752,7 @@ export const LessonView: React.FC<Props> = ({
                           language={language === 'Hindi' ? 'hi-IN' : 'en-US'}
                           noteKey={noteKey}
                           isStarred={isTopicStarred}
-                          onStarToggle={isAdmin ? toggleTopicStar : undefined}
+                          onStarToggle={toggleTopicStar}
                           preferChunkMode
                           hideTopBar={schoolMode ? isImmersive : true}
                           hideFix={schoolMode}
@@ -2051,7 +2063,13 @@ export const LessonView: React.FC<Props> = ({
             chapterId: chapter.id,
             subjectId: subject.id,
             classLevel,
-            userAnswers: mcqState
+            userAnswers: mcqState,
+            questions: displayData,
+            omrData: Object.entries(mcqState || {}).map(([qIdx, ans]) => ({
+              qIndex: Number(qIdx),
+              selected: ans,
+              correct: displayData[Number(qIdx)]?.correctAnswer,
+            })),
         };
 
         if (user?.id) {

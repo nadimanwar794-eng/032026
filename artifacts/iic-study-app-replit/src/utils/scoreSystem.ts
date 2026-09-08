@@ -7,6 +7,7 @@
 
 import { saveScoreLogToFirebase } from '../firebase';
 import { getLevelInfo, getProgressBonus, getDailyLimitBonus } from './levelSystem';
+import { getCreditSubPlanMultiplier } from './creditSubscriptionUtils';
 
 export const DAILY_SCORE_LIMIT = 1500;
 
@@ -115,6 +116,60 @@ export const getCombinedBoost = (
   settings?: any,
 ): number => getActiveBoost(user) + getEventBoostPercent(settings);
 
+/**
+ * Calculates effective score multiplier based on Base Tier (Free=1.0x, Basic=1.5x, Ultra=2.0x)
+ * PLUS Credit Subscription Bonus:
+ * - Starter Credit Pass: 1.1x (+0.1x XP)
+ * - Smart Credit Pass: 1.2x (+0.2x XP)
+ * - Super Credit Pass: 1.3x (+0.3x XP)
+ * - Mega Credit Pass: 1.5x (+0.5x XP)
+ *
+ * Additive Stacking Rule:
+ * - Free (1.0x) + Starter (1.1x) = 1.1x XP
+ * - Free (1.0x) + Smart (1.2x) = 1.2x XP
+ * - Free (1.0x) + Super (1.3x) = 1.3x XP
+ * - Free (1.0x) + Mega (1.5x) = 1.5x XP
+ * - Basic (1.5x) + Starter (1.1x) = 1.5 + 0.1 = 1.6x XP
+ * - Basic (1.5x) + Smart (1.2x) = 1.5 + 0.2 = 1.7x XP
+ * - Basic (1.5x) + Super (1.3x) = 1.5 + 0.3 = 1.8x XP
+ * - Basic (1.5x) + Mega (1.5x) = 1.5 + 0.5 = 2.0x XP
+ * - Ultra (2.0x) + Starter (1.1x) = 2.0 + 0.1 = 2.1x XP
+ * - Ultra (2.0x) + Smart (1.2x) = 2.0 + 0.2 = 2.2x XP
+ * - Ultra (2.0x) + Super (1.3x) = 2.0 + 0.3 = 2.3x XP
+ * - Ultra (2.0x) + Mega (1.5x) = 2.0 + 0.5 = 2.5x XP
+ */
+export const getUserScoreMultiplier = (
+  subscriptionLevel?: string,
+  isPremium?: boolean,
+  creditSub?: { status?: string; endDate?: string; planId?: string; planName?: string; scoreMultiplier?: number } | null,
+): number => {
+  const tier = isPremium ? (subscriptionLevel || 'FREE') : 'FREE';
+  const baseTierMult = SCORE_MULTIPLIERS[tier] ?? 1.0;
+
+  let activeSub = creditSub;
+  if (activeSub === undefined) {
+    try {
+      const raw = localStorage.getItem('nst_user') || localStorage.getItem('nst_current_user');
+      if (raw) {
+        const u = JSON.parse(raw);
+        activeSub = u.creditSubscription;
+      }
+    } catch {}
+  }
+
+  let creditBonus = 0;
+  if (activeSub && activeSub.status !== 'EXPIRED' && activeSub.endDate) {
+    const end = new Date(activeSub.endDate).getTime();
+    if (!Number.isNaN(end) && end > Date.now()) {
+      const subMult = getCreditSubPlanMultiplier(activeSub);
+      creditBonus = Math.max(0, subMult - 1.0);
+    }
+  }
+
+  const total = baseTierMult + creditBonus;
+  return Math.round(total * 10) / 10;
+};
+
 /** Calculate final score with multiplier + booster */
 export const calculateScore = (
   baseScore: number,
@@ -122,29 +177,20 @@ export const calculateScore = (
   isPremium: boolean | undefined,
   boostPercent = 0,
   hasCreditSub?: boolean,
+  creditSubPlanMultiplier?: number,
 ): number => {
-  const tier = isPremium ? (subscriptionLevel || 'FREE') : 'FREE';
-  let mult = SCORE_MULTIPLIERS[tier] ?? 1.0;
+  let mult: number;
 
-  // If user has Credit Subscription and their current tier multiplier is < 1.2, boost to 1.2x
-  let creditActive = hasCreditSub;
-  if (creditActive === undefined) {
-    try {
-      const raw = localStorage.getItem('nst_user') || localStorage.getItem('nst_current_user');
-      if (raw) {
-        const u = JSON.parse(raw);
-        if (u.creditSubscription && u.creditSubscription.status !== 'EXPIRED') {
-          const end = new Date(u.creditSubscription.endDate).getTime();
-          if (!Number.isNaN(end) && end > Date.now()) {
-            creditActive = true;
-          }
-        }
-      }
-    } catch {}
-  }
-
-  if (creditActive && mult < 1.2) {
-    mult = 1.2;
+  if (typeof creditSubPlanMultiplier === 'number' && creditSubPlanMultiplier > 0) {
+    const tier = isPremium ? (subscriptionLevel || 'FREE') : 'FREE';
+    const baseTierMult = SCORE_MULTIPLIERS[tier] ?? 1.0;
+    const creditBonus = Math.max(0, creditSubPlanMultiplier - 1.0);
+    mult = Math.round((baseTierMult + creditBonus) * 10) / 10;
+  } else if (hasCreditSub === false) {
+    const tier = isPremium ? (subscriptionLevel || 'FREE') : 'FREE';
+    mult = SCORE_MULTIPLIERS[tier] ?? 1.0;
+  } else {
+    mult = getUserScoreMultiplier(subscriptionLevel, isPremium);
   }
 
   let s = Math.round(baseScore * mult);
@@ -201,6 +247,7 @@ export const tryEarnScore = (
   label?: string,
   userLevel?: number,
   hasCreditSub?: boolean,
+  creditSubPlanMultiplier?: number,
 ): number => {
   // Derive level if not provided directly
   let effLevel = userLevel;
@@ -217,7 +264,8 @@ export const tryEarnScore = (
 
   // Auto-detect credit subscription if not provided
   let creditActive = hasCreditSub;
-  if (creditActive === undefined) {
+  let activeCreditMult = creditSubPlanMultiplier;
+  if (creditActive === undefined || activeCreditMult === undefined) {
     try {
       const raw = localStorage.getItem('nst_user') || localStorage.getItem('nst_current_user') || localStorage.getItem(`nst_user_profile_${userId}`);
       if (raw) {
@@ -226,6 +274,7 @@ export const tryEarnScore = (
           const end = new Date(u.creditSubscription.endDate).getTime();
           if (!Number.isNaN(end) && end > Date.now()) {
             creditActive = true;
+            activeCreditMult = activeCreditMult || getCreditSubPlanMultiplier(u.creditSubscription);
           }
         }
       }
@@ -241,7 +290,7 @@ export const tryEarnScore = (
   const totalBoost = boostPercent + lvlProgressBonus;
 
   const remaining = getRemainingDailyScore(userId, subscriptionLevel, isPremium, scoreLimitBoostPercent, scoreLimitBoostExpiry, effLevel);
-  const calc = calculateScore(baseScore, subscriptionLevel, isPremium, totalBoost, creditActive);
+  const calc = calculateScore(baseScore, subscriptionLevel, isPremium, totalBoost, creditActive, activeCreditMult);
 
   if (remaining > 0) {
     // Within daily limit — earn normally (capped at remaining)

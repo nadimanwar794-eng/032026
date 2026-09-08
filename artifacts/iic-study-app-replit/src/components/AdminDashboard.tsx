@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { User, ViewState, SystemSettings, Subject, Chapter, MCQItem, RecoveryRequest, ActivityLogEntry, LeaderboardEntry, RecycleBinItem, Stream, Board, ClassLevel, GiftCode, SubscriptionPlan, CreditPackage, CreditSubscriptionPlan, UserCreditSubscription, SpinReward, SpinGameType, HtmlModule, PremiumNoteSlot, ContentInfoConfig, ContentInfoItem, SubscriptionHistoryEntry, UniversalAnalysisLog, ContentType, LessonContent, DeepDiveEntry, AdditionalNoteEntry, TeacherStorePlan, TeacherCode, HomeworkItem, LucentNoteEntry, LucentPageNote, AppNotification, BroadcastRedeemCode, LoginBonusRandomGiftOption } from '../types';
-import { DEFAULT_CREDIT_SUB_PLANS, PRESET_CREDIT_SUB_TEMPLATES, grantCreditSubscription, cancelCreditSubscription } from '../utils/creditSubscriptionUtils';
+import { DEFAULT_CREDIT_SUB_PLANS, PRESET_CREDIT_SUB_TEMPLATES, grantCreditSubscription, cancelCreditSubscription, getCreditSubPlanMultiplier } from '../utils/creditSubscriptionUtils';
 import { List, GraduationCap, LayoutDashboard, Users, Search, Trash2, Save, X, Eye, EyeOff, Shield, Megaphone, CheckCircle, ListChecks, Database, FileText, Monitor, Sparkles, Banknote, BrainCircuit, AlertOctagon, ArrowLeft, ArrowRight, Key, Bell, ShieldCheck, Lock, Globe, Layers, Zap, PenTool, RefreshCw, RotateCcw, Plus, LogOut, Download, Upload, CreditCard, Ticket, Video, Image as ImageIcon, Type, Link, FileJson, Activity, AlertTriangle, Gift, Book, Mail, Edit3, MessageSquare, ShoppingBag, Cloud, Rocket, Code2, Layers as LayersIcon, Wifi, WifiOff, Copy, Crown, Gamepad2, Calendar, BookOpen, Image, HelpCircle, Youtube, Play, Star, Trophy, Palette, Settings, Headphones, Layout, Bot, LayoutDashboard as DashboardIcon, Loader2, Gauge, LayoutGrid, ArrowUpCircle, KeyRound, Award, Send, GitCompare, Lightbulb, ThumbsUp, ThumbsDown, Building2, TrendingUp, Coins } from 'lucide-react';
 import { getSubjectsList, DEFAULT_SUBJECTS, DEFAULT_APP_FEATURES, ALL_APP_FEATURES, STUDENT_APP_FEATURES, DEFAULT_CONTENT_INFO_CONFIG, ADMIN_PERMISSIONS, APP_VERSION, STATIC_SYLLABUS, LEVEL_UNLOCKABLE_FEATURES, LUCENT_SUBJECT_OPTIONS_BASE, getClassSubjectOptions, SUPPORT_PHONE } from '../constants';
 import { AdminClassMcqManager } from './AdminClassMcqManager';
@@ -3317,6 +3317,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
       badge: newCspBadge ? newCspBadge.trim().toUpperCase() : undefined,
       description: `Roz ${daily} Credits milenge (Total ${(daily * dur).toLocaleString('en-IN')} Credits)`,
       isActive: true,
+      scoreMultiplier: getCreditSubPlanMultiplier({ name: newCspName.trim(), price: Number(newCspPrice) } as any),
     };
     const currentPlans = localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS;
     setLocalSettings({ ...localSettings, creditSubscriptionPlans: [...currentPlans, newPlan] });
@@ -3360,6 +3361,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
       badge: preset.badge,
       description: preset.description,
       isActive: true,
+      scoreMultiplier: getCreditSubPlanMultiplier({ name: preset.name, price: preset.price } as any),
     };
     const currentPlans = localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS;
     setLocalSettings({ ...localSettings, creditSubscriptionPlans: [...currentPlans, newPlan] });

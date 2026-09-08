@@ -92,13 +92,34 @@ export const MarksheetCard: React.FC<Props> = ({
   onClose,
   onViewAnalysis,
   onPublish,
-  questions,
+  questions: propQuestions,
   onUpdateUser,
   onRestart,
   initialView,
   onLaunchContent,
   mcqMode = "FREE",
 }) => {
+  const questions = useMemo(() => {
+    if (propQuestions && propQuestions.length > 0) return propQuestions;
+    if (result.questions && result.questions.length > 0) return result.questions;
+    if ((result as any).data?.questions && (result as any).data.questions.length > 0) return (result as any).data.questions;
+    if ((result as any).allQuestions && (result as any).allQuestions.length > 0) return (result as any).allQuestions;
+    if (result.chapterId) {
+      try {
+        const raw = localStorage.getItem(`nst_mcq_data_${result.chapterId}`) || localStorage.getItem(`nst_chapter_${result.chapterId}`);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed.mcqs) && parsed.mcqs.length > 0) return parsed.mcqs;
+          if (Array.isArray(parsed.questions) && parsed.questions.length > 0) return parsed.questions;
+        }
+      } catch {}
+    }
+    if ((result as any).wrongQuestions && (result as any).wrongQuestions.length > 0) {
+      return (result as any).wrongQuestions;
+    }
+    return [];
+  }, [propQuestions, result]);
+
   const [page, setPage] = useState(1);
   const [activeTab, setActiveTab] = useState<
     | "OFFICIAL_MARKSHEET"

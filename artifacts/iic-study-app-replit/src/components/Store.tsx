@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { saveUserToLive } from '../firebase';
 import { getLevelInfo, getScoreDiscountFromScore, getNextLevelInfo, getLevelProgress, getLevelDailyLimitsWithOverride, UNLIMITED } from '../utils/levelSystem';
-import { SCORE_MULTIPLIERS, getDailyScoreLimit } from '../utils/scoreSystem';
+import { SCORE_MULTIPLIERS, getDailyScoreLimit, getUserScoreMultiplier } from '../utils/scoreSystem';
 import { addSubscription } from '../utils/subscriptionUtils';
 import { applyDeduction, getTotalCredits } from '../utils/creditSystem';
 import { recordCreditTx } from '../utils/creditHistory';
@@ -28,6 +28,7 @@ import {
   CREDIT_SUB_DURATIONS,
   type CreditSubDurationId,
   calculateCreditSubPrice,
+  getCreditSubPlanMultiplier,
 } from '../utils/creditSubscriptionUtils';
 
 interface Props {
@@ -334,6 +335,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
   const [creditSubTab, setCreditSubTab] = useState<'PASS' | 'PACKAGES'>('PASS');
   const [creditSubDuration, setCreditSubDuration] = useState<CreditSubDurationId>('1_MONTH');
   const [claimingStorePass, setClaimingStorePass] = useState(false);
+  const [passClaimSuccessMsg, setPassClaimSuccessMsg] = useState<string | null>(null);
 
   const handleClaimStorePass = async () => {
     if (!user || claimingStorePass) return;
@@ -344,6 +346,8 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
         const ok = await saveUserToLive(res.updatedUser);
         if (ok) {
           onUserUpdate(res.updatedUser);
+          setPassClaimSuccessMsg(`🎉 +${res.earned} Daily Credits Claim Ho Gaye! Naya Balance: ${(res.updatedUser.credits || 0).toLocaleString('en-IN')} CR 🪙`);
+          setTimeout(() => setPassClaimSuccessMsg(null), 6000);
         }
       }
     } finally {
@@ -1192,75 +1196,19 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
         {/* ── CREDITS TAB ── */}
         {tierType === 'CREDITS' && (
           <div className="animate-in fade-in duration-200 space-y-4">
-            {/* Active Daily Pass Status Card */}
-            {isCreditSubActive(user) && (
-              <div className="rounded-2xl p-5 border relative overflow-hidden"
-                style={{
-                  background: 'linear-gradient(135deg, rgba(251,191,36,0.14), rgba(245,158,11,0.06), rgba(15,15,26,0.95))',
-                  borderColor: C.goldBorder,
-                  boxShadow: '0 0 25px rgba(251,191,36,0.15)',
-                }}>
-                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xl">⚡</span>
-                    <div>
-                      <span className="text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full"
-                        style={{ background: C.gold, color: '#000' }}>
-                        ACTIVE DAILY PASS
-                      </span>
-                      <h4 className="text-base font-black mt-1" style={{ color: C.text }}>
-                        {user.creditSubscription?.planName || 'Credit Pass'}
-                      </h4>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-sm font-black px-3 py-1 rounded-xl block"
-                      style={{ background: C.goldBg, color: C.gold, border: `1px solid ${C.goldBorder}` }}>
-                      🪙 +{user.creditSubscription?.dailyCredits} CR / din
-                    </span>
-                    <span className="text-[10px] text-slate-400 mt-0.5 block">
-                      {getCreditSubDaysRemaining(user.creditSubscription)} Din Baki
-                    </span>
-                  </div>
+            {/* Success Claim Toast */}
+            {passClaimSuccessMsg && (
+              <div className="p-4 rounded-2xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-black flex items-center justify-between gap-3 shadow-lg animate-in fade-in slide-in-from-top-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-base">🎉</span>
+                  <span>{passClaimSuccessMsg}</span>
                 </div>
-
-                <div className="grid grid-cols-2 gap-2 my-3 p-3 rounded-xl bg-black/30 border border-white/5 text-xs">
-                  <div>
-                    <span className="text-[10px] text-slate-400 block">Total Claimed Days</span>
-                    <span className="font-black text-amber-400">
-                      {user.creditSubscription?.totalClaimedDays || 0} Din
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-slate-400 block">Total Credits Earned</span>
-                    <span className="font-black text-amber-400">
-                      {user.creditSubscription?.totalCreditsClaimed || 0} 🪙 Credits
-                    </span>
-                  </div>
-                </div>
-
-                {canClaimCreditSubToday(user) ? (
-                  <button
-                    onClick={handleClaimStorePass}
-                    disabled={claimingStorePass}
-                    className="w-full py-3.5 rounded-xl font-black text-sm active:scale-[0.98] transition flex items-center justify-center gap-2 shadow-lg"
-                    style={{
-                      background: 'linear-gradient(135deg, #f59e0b, #d97706)',
-                      color: '#000',
-                      boxShadow: '0 4px 20px rgba(245,158,11,0.4)',
-                    }}>
-                    <Gift size={16} />
-                    {claimingStorePass ? 'Credits Claim Ho Rahe Hain...' : `Aaj Ke ${user.creditSubscription?.dailyCredits} Credits Claim Karo 🪙`}
-                  </button>
-                ) : (
-                  <div className="py-2.5 rounded-xl flex items-center justify-center gap-2"
-                    style={{ background: 'rgba(52,211,153,0.10)', border: `1px solid ${C.greenBorder}` }}>
-                    <Check size={15} color={C.green} />
-                    <span className="text-xs font-black" style={{ color: C.green }}>
-                      Aaj ka daily pass claim ho gaya! ({user.creditSubscription?.dailyCredits} 🪙) Agle credits kal milenge.
-                    </span>
-                  </div>
-                )}
+                <button
+                  onClick={() => setPassClaimSuccessMsg(null)}
+                  className="w-6 h-6 rounded-full bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-300 flex items-center justify-center text-xs"
+                >
+                  ✕
+                </button>
               </div>
             )}
 
@@ -1297,19 +1245,216 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
             {/* SECTION 1: DAILY CREDIT SUBSCRIPTION PLANS */}
             {creditSubTab === 'PASS' && (
               <div className="space-y-3.5">
-                {/* Important Notice Banner */}
-                <div className="rounded-xl p-3.5 flex items-start gap-2.5"
-                  style={{ background: 'rgba(251,191,36,0.08)', border: `1px dashed ${C.goldBorder}` }}>
-                  <span className="text-base shrink-0 mt-0.5">🛡️</span>
-                  <div>
-                    <p className="text-xs font-black" style={{ color: C.gold }}>
-                      Pure Daily Credits Subscription · 1.2X Score Boost
-                    </p>
-                    <p className="text-[11px] leading-relaxed mt-0.5" style={{ color: C.textMuted }}>
-                      Is pass se aapko <strong className="text-amber-300">har roz daily credits</strong> milenge aur sabhi activities par <strong className="text-amber-300">⚡ 1.2X Score Multiplier (20% Extra XP)</strong> boost unlock hoga! Daily login karke apne credits claim karein!
-                    </p>
-                  </div>
-                </div>
+                {/* ════════ AAPKA CREDIT SUBSCRIPTION STATUS & DAILY CLAIM CARD ════════ */}
+                {(() => {
+                  const hasPass = isCreditSubActive(user);
+                  const sub = user.creditSubscription;
+                  const daysLeft = sub ? getCreditSubDaysRemaining(sub) : 0;
+                  const canClaim = canClaimCreditSubToday(user);
+                  const endDateFmt = sub?.endDate
+                    ? new Date(sub.endDate).toLocaleDateString('en-IN', {
+                        day: '2-digit',
+                        month: 'short',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })
+                    : null;
+
+                  if (hasPass && sub) {
+                    return (
+                      <div
+                        className="rounded-2xl p-5 border relative overflow-hidden transition-all shadow-xl"
+                        style={{
+                          background: 'linear-gradient(135deg, rgba(251,191,36,0.18), rgba(245,158,11,0.08), rgba(15,15,26,0.98))',
+                          borderColor: canClaim ? '#f59e0b' : C.goldBorder,
+                          boxShadow: canClaim ? '0 0 30px rgba(251,191,36,0.25)' : '0 4px 20px rgba(0,0,0,0.4)',
+                        }}
+                      >
+                        {canClaim && (
+                          <div
+                            className="absolute -right-10 -top-10 w-32 h-32 rounded-full pointer-events-none"
+                            style={{ background: 'radial-gradient(circle, rgba(251,191,36,0.3) 0%, transparent 70%)' }}
+                          />
+                        )}
+
+                        <div className="flex flex-wrap items-start justify-between gap-3 relative z-10">
+                          <div className="flex items-start gap-3 min-w-0">
+                            <div
+                              className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shrink-0 shadow-md mt-0.5"
+                              style={{
+                                background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                                color: '#000',
+                              }}
+                            >
+                              ⚡
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span
+                                  className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full"
+                                  style={{ background: C.gold, color: '#000' }}
+                                >
+                                  ACTIVE CREDIT PASS
+                                </span>
+                                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/30">
+                                  ⏳ {daysLeft} Din Baki
+                                </span>
+                              </div>
+                              <h3 className="text-base sm:text-lg font-black mt-1 text-white truncate">
+                                {sub.planName || 'Credit Subscription Pass'}
+                              </h3>
+                            </div>
+                          </div>
+
+                          <div className="text-right shrink-0">
+                            <span
+                              className="text-sm font-black px-3.5 py-1.5 rounded-xl block shadow-sm"
+                              style={{
+                                background: C.goldBg,
+                                color: C.gold,
+                                border: `1px solid ${C.goldBorder}`,
+                              }}
+                            >
+                              🪙 +{sub.dailyCredits} CR / din
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Validity, Days Left & Expiry Date Box */}
+                        <div className="grid grid-cols-2 gap-2.5 my-3.5 p-3 rounded-xl bg-black/40 border border-white/10 text-xs">
+                          <div>
+                            <span className="text-[10px] text-slate-400 block font-medium">⏱️ Kitne Din Ke Liye Hai:</span>
+                            <span className="font-bold text-white text-xs">
+                              {sub.durationDays || 30} Din Ka Pass
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-slate-400 block font-medium">⏳ Kitne Din Baki Hain:</span>
+                            <span className="font-bold text-amber-400 text-xs">
+                              {daysLeft} Din Baki
+                            </span>
+                          </div>
+                          <div className="col-span-2 pt-1.5 border-t border-white/10">
+                            <span className="text-[10px] text-slate-400 block font-medium">📅 Kab Khatam Hoga (Expiry):</span>
+                            <span className="font-black text-amber-300 text-xs">
+                              {endDateFmt}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Claimed Stats */}
+                        <div className="flex items-center justify-between text-xs text-slate-300 px-1 mb-2.5">
+                          <span>Total Claimed: <strong className="text-amber-400 font-bold">{sub.totalClaimedDays || 0} Din</strong></span>
+                          <span>Earned: <strong className="text-amber-400 font-bold">{sub.totalCreditsClaimed || 0} 🪙 Credits</strong></span>
+                        </div>
+
+                        {/* Multiplier & Stacking Stats */}
+                        {(() => {
+                          const activeMult = sub.scoreMultiplier || getCreditSubPlanMultiplier(sub);
+                          const userTier = user.isPremium ? (user.subscriptionLevel || 'FREE') : 'FREE';
+                          const totalCombined = getUserScoreMultiplier(user.subscriptionLevel, user.isPremium, sub);
+                          return (
+                            <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-400/20 mb-3 text-xs flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex items-center gap-1.5">
+                                <span>⚡</span>
+                                <span className="text-slate-300">Credit Pass Boost: <strong className="text-amber-300 font-black">{activeMult}x XP</strong></span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span>🔥</span>
+                                <span className="text-slate-300">Total Effective XP: <strong className="text-emerald-400 font-black">{totalCombined}x Multiplier</strong></span>
+                                {userTier !== 'FREE' && (
+                                  <span className="text-[10px] text-amber-300 font-bold bg-amber-400/20 px-1.5 py-0.5 rounded">
+                                    {userTier} ({userTier === 'ULTRA' ? '2.0x' : '1.5x'}) + {activeMult}x
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {/* DAILY CLAIM BUTTON */}
+                        {canClaim ? (
+                          <button
+                            onClick={handleClaimStorePass}
+                            disabled={claimingStorePass}
+                            className="w-full py-3.5 rounded-xl font-black text-sm active:scale-[0.98] transition flex items-center justify-center gap-2 shadow-lg cursor-pointer"
+                            style={{
+                              background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                              color: '#000',
+                              boxShadow: '0 4px 20px rgba(245,158,11,0.45)',
+                            }}
+                          >
+                            <Gift size={18} />
+                            {claimingStorePass ? 'Credits Claim Ho Rahe Hain...' : `Aaj Ke +${sub.dailyCredits} Credits Claim Karo 🪙`}
+                          </button>
+                        ) : (
+                          <div
+                            className="py-3 rounded-xl flex items-center justify-center gap-2"
+                            style={{ background: 'rgba(52,211,153,0.12)', border: `1px solid ${C.greenBorder}` }}
+                          >
+                            <Check size={16} color={C.green} />
+                            <span className="text-xs font-black text-emerald-400">
+                              Aaj ka daily pass claim ho gaya! (+{sub.dailyCredits} 🪙) Agle credits kal milenge.
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+
+                  // When no credit pass is currently active
+                  return (
+                    <div
+                      className="rounded-2xl p-4 sm:p-5 border relative overflow-hidden transition-all shadow-sm"
+                      style={{
+                        background: 'linear-gradient(135deg, rgba(30,41,59,0.7), rgba(15,23,42,0.85))',
+                        borderColor: 'rgba(255,255,255,0.12)',
+                      }}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-3">
+                          <div
+                            className="w-11 h-11 rounded-2xl flex items-center justify-center text-xl shrink-0 border"
+                            style={{
+                              background: 'rgba(255,255,255,0.05)',
+                              borderColor: 'rgba(255,255,255,0.1)',
+                            }}
+                          >
+                            ⚡
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-slate-700/60 text-slate-300 border border-white/10">
+                                STATUS: INACTIVE
+                              </span>
+                              <span className="text-[10px] font-bold text-amber-400">
+                                0 Din Active
+                              </span>
+                            </div>
+                            <h4 className="text-base font-black text-white mt-1">
+                              Abhi Koi Daily Credit Pass Active Nahi Hai
+                            </h4>
+                            <div className="grid grid-cols-2 gap-2 mt-2 p-2.5 rounded-xl bg-black/30 border border-white/5 text-[11px] text-slate-300">
+                              <div>
+                                <span className="text-slate-400 block text-[10px]">Kon Sa Plan Active Hai:</span>
+                                <strong className="text-slate-200">Koi Plan Active Nahi Hai</strong>
+                              </div>
+                              <div>
+                                <span className="text-slate-400 block text-[10px]">Kitne Din Ke Liye:</span>
+                                <strong className="text-slate-200">— (0 Din)</strong>
+                              </div>
+                              <div className="col-span-2 pt-1 border-t border-white/5">
+                                <span className="text-slate-400 block text-[10px]">Daily Claim Option:</span>
+                                <span className="text-amber-300/90 font-medium">Pass subscribe karne ke baad har roz daily credits claim karne ka option yahan milega!</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Duration Selector Bar */}
                 <div className="space-y-1.5">
@@ -1359,6 +1504,11 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
                     const selectedDurationOpt = CREDIT_SUB_DURATIONS.find(d => d.id === creditSubDuration) || CREDIT_SUB_DURATIONS[0];
                     const pricing = calculateCreditSubPrice(plan, selectedDurationOpt);
                     const isSuper = plan.price >= 300 || selectedDurationOpt.months >= 6;
+                    const planMult = plan.scoreMultiplier || getCreditSubPlanMultiplier(plan);
+                    const userTier = user.isPremium ? (user.subscriptionLevel || 'FREE') : 'FREE';
+                    const baseMult = userTier === 'ULTRA' ? 2.0 : userTier === 'BASIC' ? 1.5 : 1.0;
+                    const effectiveCombinedMult = Math.round((baseMult + (planMult - 1.0)) * 10) / 10;
+                    const extraBoostPct = Math.round((planMult - 1.0) * 100);
 
                     return (
                       <div
@@ -1439,10 +1589,61 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
                         </div>
 
                         {plan.description && (
-                          <p className="text-[11px] mb-3" style={{ color: C.textMuted }}>
+                          <p className="text-[11px] mb-2" style={{ color: C.textMuted }}>
                             {plan.description}
                           </p>
                         )}
+
+                        {/* XP Multiplier & Subscription Stacking Benefits Box */}
+                        <div className="p-3.5 rounded-xl bg-gradient-to-r from-amber-500/10 via-yellow-500/5 to-transparent border border-amber-400/30 my-3 space-y-2">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-base">⚡</span>
+                              <div>
+                                <span className="text-xs font-black text-amber-300">
+                                  Score & XP Multiplier: <span className="text-white text-sm font-black">{planMult}x XP</span>
+                                </span>
+                                <span className="text-[10px] text-slate-400 ml-1.5 font-medium">
+                                  (+{extraBoostPct}% Extra Score Boost)
+                                </span>
+                              </div>
+                            </div>
+                            <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/40 shadow-sm">
+                              {planMult}x XP
+                            </span>
+                          </div>
+
+                          {/* Stacking Rule & Examples */}
+                          <div className="pt-2 border-t border-white/10 text-[11px] leading-relaxed space-y-1.5">
+                            <p className="text-[11px] text-slate-300 font-medium">
+                              🔗 <strong className="text-amber-300">Subscription Stacking XP:</strong> Agar aapne Basic ya Ultra subscription li hui hai, to dono ka XP aapas me jud jayega:
+                            </p>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 text-[10px]">
+                              <div className={`p-2 rounded-lg border flex flex-col justify-center ${userTier === 'FREE' ? 'bg-amber-400/15 border-amber-400/50 text-amber-300 ring-1 ring-amber-400/40' : 'bg-black/40 border-white/10 text-slate-300'}`}>
+                                <span className="text-[9px] text-slate-400 font-semibold">Free Plan (1.0x):</span>
+                                <span className="font-bold">1.0x + {(planMult - 1.0).toFixed(1)}x = <strong className="text-amber-300">{planMult}x XP</strong></span>
+                              </div>
+
+                              <div className={`p-2 rounded-lg border flex flex-col justify-center ${userTier === 'BASIC' ? 'bg-amber-400/15 border-amber-400/50 text-amber-300 ring-1 ring-amber-400/50' : 'bg-black/40 border-white/10 text-slate-300'}`}>
+                                <span className="text-[9px] text-slate-400 font-semibold">Basic Plan (1.5x):</span>
+                                <span className="font-bold">1.5x + {planMult}x = <strong className="text-amber-300">{(1.5 + (planMult - 1.0)).toFixed(1)}x XP</strong></span>
+                              </div>
+
+                              <div className={`p-2 rounded-lg border flex flex-col justify-center ${userTier === 'ULTRA' ? 'bg-amber-400/15 border-amber-400/50 text-amber-300 ring-1 ring-amber-400/50' : 'bg-black/40 border-white/10 text-slate-300'}`}>
+                                <span className="text-[9px] text-slate-400 font-semibold">Ultra Plan (2.0x):</span>
+                                <span className="font-bold">2.0x + {planMult}x = <strong className="text-amber-300">{(2.0 + (planMult - 1.0)).toFixed(1)}x XP</strong></span>
+                              </div>
+                            </div>
+
+                            {userTier !== 'FREE' && (
+                              <div className="mt-1 flex items-center gap-1.5 text-[10px] text-emerald-400 font-black bg-emerald-500/10 px-2.5 py-1 rounded-md border border-emerald-500/20">
+                                <span>✓</span>
+                                <span>Aapka {userTier === 'ULTRA' ? 'Ultra (2.0x)' : 'Basic (1.5x)'} Subscription active hai! Is pass se aapko kul <strong className="text-amber-300">{effectiveCombinedMult}x XP</strong> milega!</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
 
                         <button
                           onClick={() => initiatePurchase({
@@ -1461,6 +1662,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
                             isCreditSub: true,
                             discountPercent: pricing.totalDiscountPercent,
                             durationDiscountPercent: pricing.durationDiscountPercent,
+                            scoreMultiplier: planMult,
                           })}
                           className="w-full py-3 rounded-xl font-black text-xs transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-md"
                           style={{

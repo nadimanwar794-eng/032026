@@ -69,6 +69,26 @@ export const StudentLevelPage: React.FC<StudentLevelPageProps> = ({
   const nextUserLvl = LEVEL_INFO[userLvl.level] ?? null;
   const progressPct = getLevelProgress(totalScore);
 
+  const scrollToCurrentLevel = React.useCallback(() => {
+    const card = document.getElementById(`level-card-${userLvl.level}`);
+    const container = document.getElementById('level-roadmap-column');
+    if (card && container) {
+      const offsetTop = card.offsetTop - 16;
+      container.scrollTo({ top: Math.max(0, offsetTop), behavior: 'smooth' });
+    } else if (card) {
+      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [userLvl.level]);
+
+  React.useEffect(() => {
+    const t1 = setTimeout(scrollToCurrentLevel, 120);
+    const t2 = setTimeout(scrollToCurrentLevel, 400);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [scrollToCurrentLevel]);
+
   const lvlFrom = userLvl.minScore;
   const lvlTo = nextUserLvl ? nextUserLvl.minScore : null;
   const ptsLeft = lvlTo ? Math.max(0, lvlTo - totalScore) : 0;
@@ -788,16 +808,30 @@ export const StudentLevelPage: React.FC<StudentLevelPageProps> = ({
                 id={`level-card-${lvl.level}`}
                 className={`rounded-2xl p-4 md:p-5 transition-all relative overflow-hidden border ${
                   isUserLevel
-                    ? 'border-2 shadow-2xl bg-white/[0.03]'
+                    ? 'border-2 shadow-2xl ring-2'
                     : isUnlocked
-                    ? 'border-white/15 bg-white/[0.02]'
-                    : 'border-white/8 bg-black/40 opacity-90'
+                    ? 'border'
+                    : 'border opacity-90'
                 }`}
                 style={{
-                  borderColor: isUserLevel ? lvl.color : undefined,
-                  boxShadow: isUserLevel ? `0 0 28px ${lvl.glowColor}` : undefined,
+                  borderColor: isUserLevel ? lvl.color : `${lvl.color}${isUnlocked ? '60' : '30'}`,
+                  background: isUserLevel
+                    ? `linear-gradient(135deg, ${lvl.color}25 0%, rgba(15,23,42,0.95) 100%)`
+                    : isUnlocked
+                    ? `linear-gradient(135deg, ${lvl.color}15 0%, rgba(15,23,42,0.85) 100%)`
+                    : `linear-gradient(135deg, ${lvl.color}0a 0%, rgba(10,14,26,0.9) 100%)`,
+                  boxShadow: isUserLevel
+                    ? `0 0 32px ${lvl.glowColor}, inset 0 0 16px ${lvl.color}20`
+                    : `0 4px 16px ${lvl.glowColor}15`,
                 }}
               >
+                {/* Visual Level Color Accent Line on Top */}
+                <div
+                  className="absolute top-0 left-0 right-0 h-1"
+                  style={{
+                    background: `linear-gradient(90deg, transparent, ${lvl.color}, transparent)`,
+                  }}
+                />
                 {/* Card Top Row */}
                 <div className="flex items-center justify-between gap-3 pb-3.5 border-b border-white/10">
                   <div className="flex items-center gap-3">
@@ -1022,6 +1056,23 @@ export const StudentLevelPage: React.FC<StudentLevelPageProps> = ({
               </div>
             );
           })}
+
+          {/* Sticky Quick-Jump to Current Level */}
+          <div className="sticky bottom-3 z-30 flex justify-center pointer-events-none mt-2">
+            <button
+              onClick={scrollToCurrentLevel}
+              type="button"
+              className="pointer-events-auto px-4 py-2 rounded-full text-xs font-black text-white shadow-2xl flex items-center gap-2 border border-white/20 active:scale-95 transition-all backdrop-blur-md hover:brightness-110"
+              style={{
+                background: `linear-gradient(135deg, ${userLvl.color}ee, #0f172a)`,
+                boxShadow: `0 4px 20px ${userLvl.glowColor}`,
+              }}
+            >
+              <span className="text-base">{userLvl.emoji}</span>
+              <span>Aapka Current Level {userLvl.level} ({userLvl.label})</span>
+              <span className="text-[11px] bg-white/20 px-1.5 py-0.5 rounded-full font-bold ml-1">Go to My Level 🎯</span>
+            </button>
+          </div>
         </div>
 
         {/* ═════════════════════════════════════════════════════════════════

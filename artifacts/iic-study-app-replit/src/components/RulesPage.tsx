@@ -26,10 +26,8 @@ export const RulesPage: React.FC<Props> = ({ onBack, settings }) => {
           title: "Credits & Economy",
           points: [
             "Free Notes (PDF): Basic chapter PDFs are always free for all students.",
-            "Deep Dive / Write Mode: AI-styled HTML notes (admin-set cost, ~15 CR). Basic: 5 free/day. Ultra: 10 free/day.",
             "Premium Notes (PDF): Typically 2–5 CR per unlock. Basic/Ultra may get free daily views.",
             "Video Lectures: Usually 5 CR (admin-configurable). Basic/Ultra get free daily views.",
-            "MCQ Test Mode (Mock Test): ~10 CR per test attempt.",
             "AI Chat Tutor: ~1 CR per message (admin-configurable). Ultra users get higher limits.",
             "Custom Theme Creator: 200 CR (one-time, permanent unlock).",
             "How to earn Credits: Daily Login Bonus (claim from Mail tab), Study Goal Timer, Login Streak, Spin Wheel, Gift Codes, Level-up bonuses, MCQ milestones, Referral."
@@ -129,10 +127,8 @@ export const RulesPage: React.FC<Props> = ({ onBack, settings }) => {
           title: "क्रेडिट और इकोनॉमी",
           points: [
             "Free Notes (PDF): सभी students के लिए हमेशा मुफ्त।",
-            "Deep Dive / Write Mode: AI-styled HTML notes (~15 CR, admin-set)। Basic: 5 free/day, Ultra: 10 free/day।",
             "Premium Notes (PDF): आमतौर पर 2–5 CR। Basic/Ultra users को free daily views मिल सकते हैं।",
             "Video Lectures: लगभग 5 CR (admin-configurable)। Basic/Ultra users को free daily views।",
-            "MCQ Test Mode (Mock Test): ~10 CR प्रति attempt।",
             "AI Chat: ~1 CR प्रति message। Ultra users को ज़्यादा daily limit।",
             "Custom Theme Creator: 200 CR (एक बार — permanent unlock)।",
             "Coins कैसे कमाएं: Daily Login Bonus (Mail tab से claim करें), Study Goal Timer, Login Streak, Spin Wheel, Gift Codes, Level-up bonus, Referral, MCQ milestones।"

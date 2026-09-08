@@ -331,6 +331,7 @@ export interface CreditSubscriptionPlan {
   badge?: string;
   description?: string;
   isActive?: boolean;
+  scoreMultiplier?: number; // XP Multiplier: Starter (1.1x), Smart (1.2x), Super (1.3x), Mega (1.5x)
 }
 
 export interface UserCreditSubscription {
@@ -344,6 +345,7 @@ export interface UserCreditSubscription {
   totalCreditsClaimed?: number;
   pricePaid?: number;
   status?: 'ACTIVE' | 'EXPIRED';
+  scoreMultiplier?: number; // Active XP Multiplier (e.g. 1.1, 1.2, 1.3, 1.5)
 }
 
 export interface SubscriptionPlan {
