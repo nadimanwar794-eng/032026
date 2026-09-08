@@ -34,6 +34,7 @@ import { scheduleRoutineLessonForRevision } from '../utils/revisionTrackerV2';
 import { RoutineRevisionBadge } from './RoutineRevisionBadge';
 import { tryEarnScore, getActiveBoost } from '../utils/scoreSystem';
 import { DailyEventPage } from './DailyEventPage';
+import { useAppTheme } from '../utils/themeContext';
 
 const TASK_COMPLETE_PTS = 100; // pts awarded per routine task completion
 
@@ -1622,6 +1623,7 @@ function CategoryManagerSheet({ categories, tier, level, userCredits, data, onRe
   onUnlockTier: () => void;
   onAddOpen: () => void; onClose: () => void;
 }) {
+  const theme = useAppTheme();
   const base = getBaseSlotCount(tier);
   const actualMax = getActualMaxSlots(tier, level, data);
   const tierCost = getTierSlotCost(tier);
@@ -1644,7 +1646,8 @@ function CategoryManagerSheet({ categories, tier, level, userCredits, data, onRe
         <div className="flex-1 overflow-y-auto px-4 py-4 pb-[72px] space-y-4">
           {usedCount < actualMax ? (
             <button onClick={onAddOpen}
-              className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-blue-600 text-white font-black text-sm active:scale-[0.98] transition shadow-sm">
+              className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl text-white font-black text-sm active:scale-[0.98] transition shadow-sm"
+              style={{ background: theme.btnGrad || theme.primary }}>
               <Plus size={16} /> Category Add Karo
             </button>
           ) : (
@@ -1732,6 +1735,7 @@ interface MyRoutineProps {
 }
 
 export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], onBack, onUserUpdate, onGoToRevision, settings, onOpenRevisionHub, onPracticeMistakes, onOpenLesson, onStartChallenge20, onClaimChallenge20, challenge20s = [] }) => {
+  const theme = useAppTheme();
   const userId = user?.id || 'guest';
   const mcqHistory: any[] = user?.mcqHistory || [];
   const subTier: UserSubTier = getUserSubTier(user);
@@ -2159,7 +2163,7 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
               </div>
             </div>
             <div className="px-5 pb-6">
-              <button onClick={() => setShowInfo(false)} className="w-full py-3 rounded-2xl bg-indigo-600 text-white font-black text-sm active:scale-[0.98] transition">Samajh gaya! 👍</button>
+              <button onClick={() => setShowInfo(false)} className="w-full py-3 rounded-2xl text-white font-black text-sm active:scale-[0.98] transition shadow-sm" style={{ background: theme.btnGrad || theme.primary }}>Samajh gaya! 👍</button>
             </div>
           </div>
         </div>
@@ -2173,18 +2177,20 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
             <ChevronLeft size={20} className="text-slate-700" />
           </button>
           <div className="flex-1 min-w-0">
-            <h1 className="font-black text-slate-900 text-sm flex items-center gap-1">
-              <CalendarCheck size={15} className="text-blue-600 shrink-0" /> My Routine
+            <h1 className="font-black text-slate-900 text-sm flex items-center gap-1.5">
+              <CalendarCheck size={16} className="shrink-0" style={{ color: theme.primary }} /> My Routine
             </h1>
           </div>
           {/* Routine ON/OFF toggle — compact */}
           <button onClick={toggleRoutine}
-            className={`relative w-12 h-6 rounded-full transition-all duration-300 shrink-0 ${data.enabled ? 'bg-blue-600' : 'bg-slate-200'}`}
+            className="relative w-12 h-6 rounded-full transition-all duration-300 shrink-0"
+            style={{ background: data.enabled ? (theme.btnGrad || theme.primary) : '#e2e8f0' }}
             title={data.enabled ? 'Routine ON' : 'Routine OFF'}>
             <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-all duration-300 ${data.enabled ? 'left-6' : 'left-0.5'}`} />
           </button>
-          <button onClick={() => setShowInfo(true)} className="w-8 h-8 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center active:scale-90 shrink-0">
-            <HelpCircle size={15} className="text-indigo-500" />
+          <button onClick={() => setShowInfo(true)} className="w-8 h-8 rounded-full border flex items-center justify-center active:scale-90 shrink-0"
+            style={{ background: `${theme.primary}12`, borderColor: `${theme.primary}25`, color: theme.primary }}>
+            <HelpCircle size={15} />
           </button>
           {/* Settings button — Class & Category */}
           <div className="relative shrink-0">
@@ -2238,15 +2244,18 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
         {/* Row 2: tab bar — always visible */}
         <div className="mx-4 mb-2 flex bg-slate-100 rounded-2xl p-1 gap-1">
           <button onClick={() => setActiveView('home')}
-            className={`flex-1 flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-black transition-all ${activeView === 'home' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>
+            className={`flex-1 flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-black transition-all ${activeView === 'home' ? 'shadow-sm' : 'text-slate-500'}`}
+            style={activeView === 'home' ? { background: '#ffffff', color: theme.primary } : {}}>
             🎯 Daily Hub
           </button>
           <button onClick={() => setActiveView('subjects')}
-            className={`flex-1 flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-black transition-all ${activeView === 'subjects' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>
+            className={`flex-1 flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-black transition-all ${activeView === 'subjects' ? 'shadow-sm' : 'text-slate-500'}`}
+            style={activeView === 'subjects' ? { background: '#ffffff', color: theme.primary } : {}}>
             📚 Subjects
           </button>
           <button onClick={() => setActiveView('tracking')}
-            className={`flex-1 flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-black transition-all ${activeView === 'tracking' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>
+            className={`flex-1 flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-black transition-all ${activeView === 'tracking' ? 'shadow-sm' : 'text-slate-500'}`}
+            style={activeView === 'tracking' ? { background: '#ffffff', color: theme.primary } : {}}>
             📖 My Syllabus
           </button>
         </div>
@@ -2267,11 +2276,24 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
         {activeView === 'home' && (
           <div className="mx-4 mt-4 space-y-3">
             {!data.enabled ? (
-              <div className="bg-[#f5f2eb] rounded-3xl border border-[#e8e4db] p-8 text-center">
-                <CalendarCheck size={44} className="text-slate-200 mx-auto mb-3" />
-                <p className="font-black text-slate-700 mb-1">Routine OFF Hai</p>
+              <div
+                className="rounded-3xl p-8 text-center"
+                style={{
+                  background: (theme as any)?.soft || (theme as any)?.profileCardBg || '#f5f2eb',
+                  border: `1.5px solid ${(theme as any)?.borderSoft || (theme as any)?.cardBorder || '#e8e4db'}`,
+                  boxShadow: `0 4px 20px ${theme.primary}0a`,
+                }}
+              >
+                <CalendarCheck size={44} className="mx-auto mb-3" style={{ color: theme.primary }} />
+                <p className="font-black text-slate-800 mb-1">Routine OFF Hai</p>
                 <p className="text-sm text-slate-500 mb-4">ON karo daily tasks dekhne ke liye</p>
-                <button onClick={toggleRoutine} className="px-6 py-2.5 rounded-xl bg-blue-600 text-white font-black text-sm active:scale-95 transition">Routine ON Karo</button>
+                <button
+                  onClick={toggleRoutine}
+                  className="px-6 py-2.5 rounded-xl text-white font-black text-sm active:scale-95 transition shadow-sm"
+                  style={{ background: theme.btnGrad || theme.primary }}
+                >
+                  Routine ON Karo
+                </button>
               </div>
             ) : categories.length === 0 ? (
               <>
@@ -2290,12 +2312,22 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
                   onStartChallenge20={onStartChallenge20}
                    onClaimChallenge20={onClaimChallenge20}
                 />
-                <div className="bg-[#f5f2eb] rounded-3xl border border-[#e8e4db] p-8 text-center">
+                <div
+                  className="rounded-3xl p-8 text-center"
+                  style={{
+                    background: (theme as any)?.soft || (theme as any)?.profileCardBg || '#f5f2eb',
+                    border: `1.5px solid ${(theme as any)?.borderSoft || (theme as any)?.cardBorder || '#e8e4db'}`,
+                    boxShadow: `0 4px 20px ${theme.primary}0a`,
+                  }}
+                >
                   <span className="text-5xl mb-3 block">📚</span>
-                  <p className="font-black text-slate-700 mb-1">Koi Category Nahi</p>
+                  <p className="font-black text-slate-800 mb-1">Koi Category Nahi</p>
                   <p className="text-sm text-slate-500 mb-4">Pehle ek category add karo — phir daily task shuru hoga</p>
-                  <button onClick={() => setShowCatManager(true)}
-                    className="px-6 py-2.5 rounded-xl bg-blue-600 text-white font-black text-sm active:scale-95 transition">
+                  <button
+                    onClick={() => setShowCatManager(true)}
+                    className="px-6 py-2.5 rounded-xl text-white font-black text-sm active:scale-95 transition shadow-sm"
+                    style={{ background: theme.btnGrad || theme.primary }}
+                  >
                     + Category Add Karo
                   </button>
                 </div>

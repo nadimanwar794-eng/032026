@@ -13,6 +13,8 @@ import { SuggestionsPanel } from "./SuggestionsPanel";
 import { applyDeduction, getTotalCredits } from "../utils/creditSystem";
 import { fireCreditNotify } from "../utils/creditNotify";
 import { LevelLeaderboard } from "./LevelLeaderboard";
+import { StudentLevelPage } from "./StudentLevelPage";
+import { TopBarRow2XpBar } from "./TopBarRow2XpBar";
 import {
   User,
   Subject,
@@ -1025,6 +1027,33 @@ export const StudentDashboard: React.FC<Props> = ({
   const EVENT_MIN_LEVELS = { scoreBoost: 5, specialDiscount: 1, globalFreeAccess: 10, creditFree: 8, dailyLimitBoost: 3, themeStudio: 7, creditBonus: 1 } as const;
   const meetsEventLevel = (min: number) => _userLevel >= min;
 
+  // Active Top Bar Effects (Custom user animation -> Admin configured Top Bar Effects -> Level fallback)
+  const activeTopBarEffects = React.useMemo(() => {
+    if (user.customAnimation?.effectId) {
+      return [{
+        id: user.customAnimation.effectId,
+        enabled: true,
+        color: user.customAnimation.color || '#ffffff',
+        speed: user.customAnimation.speed || 1,
+      }];
+    }
+    const adminEffects = (settings?.topBarEffects || []).filter(e => e.enabled);
+    if (adminEffects.length > 0) {
+      return adminEffects;
+    }
+    const effLvl = (user.role === 'ADMIN' || user.role === 'SUB_ADMIN') ? LEVEL_INFO[14] : _userLevelInfo;
+    return getLevelTopBarEffects(effLvl);
+  }, [user.customAnimation, user.role, _userLevelInfo, settings?.topBarEffects]);
+
+  // Active Profile Card Effects (Admin Profile Card Effects -> Admin Top Bar Effects -> Active Top Bar Effects)
+  const activeProfileEffects = React.useMemo(() => {
+    const adminProfileEffects = (settings?.profileBarEffects || []).filter(e => e.enabled);
+    if (adminProfileEffects.length > 0) {
+      return adminProfileEffects;
+    }
+    return activeTopBarEffects;
+  }, [settings?.profileBarEffects, activeTopBarEffects]);
+
   // Free quota (0 free views — credit-only, but track key for limit enforcement)
   const _freeHtmlKey   = `nst_free_html_${user.id}_${_todayKey}`;
 
@@ -1067,25 +1096,31 @@ export const StudentDashboard: React.FC<Props> = ({
   const _trackBasicHtmlOpen = _trackHtmlOpen;
 
   // ── COIN GATE helpers ────────────────────────────────────────────────────
-  // Returns effective cost after discount: 50% off if yesterday complete, 25% off if routine on but no discount, full if routine off
+  // Returns effective cost after discount: Ultra gets 40% off everywhere, Basic gets 20% off; Routine can boost to 50%
   const _getCoinCost = (baseCost: number): { cost: number; discountPct: number } => {
     const _isAdm = user.role === 'ADMIN' || user.role === 'SUB_ADMIN';
     if (_isAdm) return { cost: 0, discountPct: 100 };
     try {
+      let disc = 0;
+      if (_isUltraUser) disc = 40;
+      else if (_isBasicUser) disc = 20;
+
       const _rd = loadRoutineData(user.id);
-      // Routine OFF → always full price (0% discount)
-      if (!_rd.enabled) return { cost: baseCost, discountPct: 0 };
-      // Routine ON → 3-tier discount based on YESTERDAY's task completion
-      const _yDate = new Date();
-      _yDate.setDate(_yDate.getDate() - 1);
-      const _yStr = _yDate.toISOString().split('T')[0];
-      const _yt = _rd.dailyTasks?.[_yStr];
-      const _sciDone = !!(_yt?.scienceComplete);
-      const _socDone = !!(_yt?.socialScienceComplete);
-      if (_sciDone && _socDone) return { cost: Math.max(1, Math.floor(baseCost * 0.5)),  discountPct: 50 }; // dono complete → 50% off
-      if (_sciDone || _socDone) return { cost: Math.max(1, Math.floor(baseCost * 0.75)), discountPct: 25 }; // ek complete → 25% off
-      return { cost: baseCost, discountPct: 0 }; // koi nahi → full price
-    } catch { return { cost: baseCost, discountPct: 0 }; }
+      if (_rd?.enabled) {
+        const _yDate = new Date();
+        _yDate.setDate(_yDate.getDate() - 1);
+        const _yStr = _yDate.toISOString().split('T')[0];
+        const _yt = _rd.dailyTasks?.[_yStr];
+        const _sciDone = !!(_yt?.scienceComplete);
+        const _socDone = !!(_yt?.socialScienceComplete);
+        if (_sciDone && _socDone) disc = Math.max(disc, 50); // both complete → 50% off
+        else if (_sciDone || _socDone) disc = Math.max(disc, 25); // one complete → 25% off
+      }
+      return { cost: Math.max(1, Math.floor(baseCost * (1 - disc / 100))), discountPct: disc };
+    } catch {
+      const disc = _isUltraUser ? 40 : _isBasicUser ? 20 : 0;
+      return { cost: Math.max(1, Math.floor(baseCost * (1 - disc / 100))), discountPct: disc };
+    }
   };
 
   // Show the full-screen coin gate popup
@@ -1176,7 +1211,7 @@ export const StudentDashboard: React.FC<Props> = ({
     pgInfo?: Parameters<typeof showCoinGate>[5],
   ) => {
     const _isAdm = user.role === 'ADMIN' || user.role === 'SUB_ADMIN';
-    if (_isAdm || isProjectorUnlocked(lid, pi)) { action(); return; }
+    if (_isAdm || _isBasicUser || _isUltraUser || isProjectorUnlocked(lid, pi)) { action(); return; }
     showCoinGate(20, 'Projector Mode', () => {
       if (lid) markProjectorUnlocked(lid, pi);
       action();
@@ -1681,6 +1716,7 @@ export const StudentDashboard: React.FC<Props> = ({
       // Build type label
       let typeLabel = '';
       if (bc.type === 'CREDITS') typeLabel = `💰 ${bc.amount || 0} Credits`;
+      else if (bc.type === 'CREDIT_SUBSCRIPTION') typeLabel = `⚡ Credit Pass +${bc.creditDailyAmount || 100} CR/d (${bc.creditDurationDays || 30} Days)`;
       else if (bc.type === 'DISCOUNT') typeLabel = `🏷️ ${bc.discountPercent || 0}% Discount`;
       else if (bc.type === 'SUBSCRIPTION') typeLabel = `⭐ ${bc.subTier || ''} ${bc.subLevel || ''} Subscription`;
       else if (bc.type === 'CONTENT_UNLOCK') typeLabel = `🔓 Content Unlock`;
@@ -2286,8 +2322,6 @@ export const StudentDashboard: React.FC<Props> = ({
   const [showSuggestionsPanel, setShowSuggestionsPanel] = useState(false);
   const [showScorePanel, setShowScorePanel] = useState(false);
   const topBarBtnGlow = false; // effect hataya — home pe aate hi glow nahi chahiye
-  const [scorePanelTab, setScorePanelTab] = useState<'LEVEL' | 'DAILY' | 'FEATURES' | 'LEADERBOARD'>('LEVEL');
-  const [scoreDailyTier, setScoreDailyTier] = useState<'FREE' | 'BASIC' | 'ULTRA' | null>(null);
   const [viewedLevelIdx, setViewedLevelIdx] = useState<number>(0);
   const [ttsProgressPercent, setTtsProgressPercent] = useState(0);
   const [ttsSessionKey, setTtsSessionKey] = useState<string | null>(null);
@@ -2521,7 +2555,6 @@ export const StudentDashboard: React.FC<Props> = ({
   // Daily greeting disabled as requested by user
 
   const [showLevelModal, setShowLevelModal] = useState(false);
-  const [showScoreHistory, setShowScoreHistory] = useState(false);
   const [showScoreHistoryDirect, setShowScoreHistoryDirect] = useState(false);
   const [showProgressDashboard, setShowProgressDashboard] = useState(false);
   const [expandedLevelRow, setExpandedLevelRow] = useState<number | null>(null);
@@ -11886,6 +11919,9 @@ export const StudentDashboard: React.FC<Props> = ({
               paddingBottom: 20,
             }}>
 
+              {/* Profile Card Animations & Effects Layer */}
+              <TopBarEffectsLayer effects={activeProfileEffects} />
+
               {/* Background mesh dots — decorative */}
               {!_light && (
                 <svg className="absolute inset-0 w-full h-full opacity-[0.05] pointer-events-none" xmlns="http://www.w3.org/2000/svg">
@@ -12520,14 +12556,20 @@ export const StudentDashboard: React.FC<Props> = ({
           {/* ── STATS ROW ── */}
           <div className="px-3 mb-3">
             <div className="grid grid-cols-3 gap-2.5">
-              {/* Credits mini-card */}
-              <div className="rounded-2xl p-3.5 flex flex-col items-center" style={{
-                background: _light
-                  ? `linear-gradient(145deg, ${tierTheme.primary}12, ${tierTheme.primary}06)`
-                  : `linear-gradient(145deg, ${tierTheme.primary}22, ${tierTheme.primary}0e)`,
-                border: `1.5px solid ${tierTheme.primary}28`,
-                boxShadow: `0 4px 16px ${tierTheme.primary}18`,
-              }}>
+              {/* Credits mini-card — Tap to open Store */}
+              <button
+                id="profile-credits-btn"
+                onClick={() => onTabChange("STORE")}
+                className="rounded-2xl p-3.5 flex flex-col items-center active:scale-95 transition-transform cursor-pointer w-full text-center group"
+                style={{
+                  background: _light
+                    ? `linear-gradient(145deg, ${tierTheme.primary}12, ${tierTheme.primary}06)`
+                    : `linear-gradient(145deg, ${tierTheme.primary}22, ${tierTheme.primary}0e)`,
+                  border: `1.5px solid ${tierTheme.primary}28`,
+                  boxShadow: `0 4px 16px ${tierTheme.primary}18`,
+                }}
+                title="Aapke Credits — Tap karke Store se aur paayein"
+              >
                 <div className="w-9 h-9 rounded-xl flex items-center justify-center mb-2.5" style={{
                   background: `linear-gradient(135deg, ${tierTheme.primary}40, ${tierTheme.primary}20)`,
                   border: `1px solid ${tierTheme.primary}45`,
@@ -12547,7 +12589,7 @@ export const StudentDashboard: React.FC<Props> = ({
                   </div>
                 )}
                 <div className="font-black uppercase tracking-widest" style={{ fontSize: 8, color: _pTxtSubColor }}>Credits</div>
-              </div>
+              </button>
 
               {/* Streak mini-card */}
               <button
@@ -13321,14 +13363,25 @@ export const StudentDashboard: React.FC<Props> = ({
 
             {/* ── Score History Button ── */}
             <button
-              onClick={() => setShowScoreHistoryDirect(true)}
+              onClick={() => {
+                if (!_isBasicUser && !_isUltraUser && user.role !== 'ADMIN') {
+                  showAlert('🔒 Score History Basic aur Ultra members ke liye unlocked hai. Upgrade karein!', 'INFO');
+                  return;
+                }
+                setShowScoreHistoryDirect(true);
+              }}
               className={`w-full px-4 py-4 flex items-center gap-3.5 ${_pHovCls} transition-colors`}
               style={{ borderBottom: _pSep }}>
               <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: _pIconBg, border: _pIconBdr }}>
                 <TrendingUp size={18} style={{ color: tierTheme.primary }} />
               </div>
               <div className="flex-1 text-left">
-                <p className={`text-sm font-bold ${_pTxt}`}>Score History</p>
+                <div className="flex items-center gap-1.5">
+                  <p className={`text-sm font-bold ${_pTxt}`}>Score History</p>
+                  {!_isBasicUser && !_isUltraUser && user.role !== 'ADMIN' && (
+                    <span className="text-[9px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-black">PRO+</span>
+                  )}
+                </div>
                 <p className={`text-[10px] mt-0.5 ${_pTxtSub}`}>Apna activity score ka pura record</p>
               </div>
               <ChevronRight size={14} style={{ color: _pTxtMutedColor }} className="shrink-0" />
@@ -14007,27 +14060,29 @@ export const StudentDashboard: React.FC<Props> = ({
       {/* NEW GLOBAL TOP BAR */}
       <div
         id="top-banner-container"
-        className={`sticky top-0 z-[100] w-full flex flex-col relative transition-all duration-150 ease-in-out ${isFullscreenMode ? "hidden" : ""} ${(isTopBarHidden || isLandscapeUiHidden || activeTab === 'STORE' || activeTab === 'CUSTOM_PAGE' || activeTab === 'PROFILE' || activeTab === 'UNIVERSAL_VIDEO') ? "-translate-y-full !h-0 overflow-hidden opacity-0 pointer-events-none" : "translate-y-0 opacity-100"}`}
+        className={`sticky top-0 z-[100] w-full flex flex-col relative transition-all duration-150 ease-in-out overflow-hidden ${isFullscreenMode ? "hidden" : ""} ${(isTopBarHidden || isLandscapeUiHidden || activeTab === 'STORE' || activeTab === 'CUSTOM_PAGE' || activeTab === 'PROFILE' || activeTab === 'UNIVERSAL_VIDEO') ? "-translate-y-full !h-0 overflow-hidden opacity-0 pointer-events-none" : "translate-y-0 opacity-100"}`}
         style={{ background: activeTopBarGrad }}
       >
+        <TopBarEffectsLayer effects={activeTopBarEffects} />
+
         {/* Main Header Row */}
-        <div className="flex items-center justify-between w-full px-3 pt-2.5 pb-1.5">
+        <div className="relative z-10 flex items-center justify-between w-full px-2.5 sm:px-3 pt-2.5 pb-1.5 gap-1.5">
           {/* LEFT: logo + app name + verified badge — only the badge tap opens What's New */}
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="font-black text-[23px] leading-tight tracking-tight uppercase text-white whitespace-nowrap">
+          <div className="flex items-center gap-1.5 shrink-0 min-w-0">
+            <span className="font-black text-[20px] sm:text-[23px] leading-tight tracking-tight uppercase text-white truncate max-w-[85px] xs:max-w-[120px] sm:max-w-none">
               {settings?.appShortName || settings?.appName || "NSTA"}
             </span>
             <button
-              className="active:opacity-70 transition-opacity"
+              className="active:opacity-70 transition-opacity shrink-0"
               onClick={() => onTabChange("CUSTOM_PAGE")}
+              title="What's New"
             >
-              <BadgeCheck size={19} className="text-blue-300 shrink-0" />
+              <BadgeCheck size={18} className="text-blue-300 shrink-0" />
             </button>
           </div>
 
-          {/* RIGHT: event + streak + mail + bulb + dots */}
-          <div className="flex items-center gap-1 shrink-0">
-
+          {/* RIGHT: event + streak + mail + 5 connection dots + 3-dot menu */}
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
             {/* Event badge — shows BEFORE streak; auto-hides when no active/upcoming events */}
             {(() => {
               const now = Date.now();
@@ -14460,14 +14515,171 @@ export const StudentDashboard: React.FC<Props> = ({
             })()}
 
 
-            {/* Streak */}
+
+            {/* 5 connection dots — System Health Indicator (placed before streak) */}
+            {(() => {
+              const dotLabels = ['Network','Connection','Account','Settings','Content'];
+              const dotIcons  = ['🌐','🔗','👤','⚙️','📚'];
+              const dotHints  = [
+                { slow: 'Internet slow', err: 'No internet — check WiFi/Data' },
+                { slow: 'Connection slow', err: 'Connection timeout — retry' },
+                { slow: 'Account loading…', err: 'Account error — try refreshing' },
+                { slow: 'Settings slow…', err: 'Settings load failed — refresh' },
+                { slow: 'Content loading…', err: 'Content not found — check upload' },
+              ];
+              const allOk = fbConnectLevel >= 5 && fbDotErrors.every(e => !e);
+              const hasError = fbDotErrors.some(e => e);
+              return (
+                <div className="relative shrink-0">
+                  {/* Fading wrapper — only wraps dots button, NOT popup/backdrop */}
+                  <div
+                    style={{
+                      opacity: (showDots || showSysStatus) ? 1 : 0,
+                      pointerEvents: (showDots || showSysStatus) ? 'auto' : 'none',
+                      maxWidth: (showDots || showSysStatus) ? '65px' : '0px',
+                      overflow: 'hidden',
+                      transition: 'opacity 0.6s ease, max-width 0.4s ease',
+                    }}
+                  >
+                  {/* Dots row — tap to open popup */}
+                  <button
+                    onClick={() => setShowSysStatus(s => !s)}
+                    className="flex items-center gap-[3px] px-1 py-1 rounded active:scale-90 transition-transform"
+                    title={allOk ? '✓ System Ready' : hasError ? '⚠ System Error' : `Loading… (${fbConnectLevel * 20}%)`}
+                  >
+                    {dotLabels.map((_, i) => {
+                      const lit = fbConnectLevel > i;
+                      const isErr = fbDotErrors[i];
+                      const isConnecting = fbConnectLevel === i && i < 5 && !isErr;
+                      // Track if this dot just newly turned green (for pop animation)
+                      const justBecameLit = lit && fbPrevLevelRef.current <= i;
+                      if (lit && fbPrevLevelRef.current <= i) fbPrevLevelRef.current = i + 1;
+                      const bg = isErr ? '#ef4444' : lit ? '#10b981' : isConnecting ? '#fbbf24' : 'rgba(255,255,255,0.22)';
+                      const shadow = isErr
+                        ? '0 0 6px rgba(239,68,68,0.95)'
+                        : lit ? '0 0 7px rgba(16,185,129,1), 0 0 14px rgba(16,185,129,0.5)'
+                        : 'none';
+                      return (
+                        <div
+                          key={`dot-${i}-${lit ? 'lit' : 'dark'}`}
+                          style={{
+                            width: 5, height: 5, borderRadius: '50%',
+                            background: bg,
+                            boxShadow: shadow,
+                            transitionDelay: `${i * 0.08}s`,
+                            transition: 'background 0.3s ease, box-shadow 0.3s ease',
+                            animation: isErr
+                              ? 'none'
+                              : justBecameLit
+                                ? `dotPopIn 0.4s ${i * 0.18}s cubic-bezier(0.34,1.56,0.64,1) both`
+                                : isConnecting
+                                  ? 'pulse 1.2s ease-in-out infinite'
+                                  : 'none',
+                          }}
+                        />
+                      );
+                    })}
+                  </button>
+                  </div>{/* end fading wrapper */}
+
+                  {/* Status popup — outside fading wrapper so backdrop z-index is not trapped */}
+                  {showSysStatus && (
+                    <>
+                      {/* Backdrop */}
+                      <div
+                        className="fixed inset-0 z-[200]"
+                        onClick={() => setShowSysStatus(false)}
+                      />
+                      {/* Popup card */}
+                      <div className="absolute right-0 top-8 z-[201] min-w-[190px] rounded-xl overflow-hidden shadow-2xl border border-white/10"
+                        style={{ background: 'rgba(15,15,25,0.97)', backdropFilter: 'blur(16px)' }}
+                      >
+                        {/* Header */}
+                        <div className="px-3 py-2 border-b border-white/10 flex items-center justify-between">
+                          <span className="text-[11px] font-bold text-white tracking-wide">System Status</span>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold"
+                            style={{
+                              background: allOk ? 'rgba(16,185,129,0.2)' : hasError ? 'rgba(239,68,68,0.2)' : 'rgba(251,191,36,0.2)',
+                              color: allOk ? '#10b981' : hasError ? '#ef4444' : '#fbbf24',
+                            }}
+                          >
+                            {allOk ? 'All OK' : hasError ? 'Error' : 'Loading…'}
+                          </span>
+                        </div>
+                        {/* Rows */}
+                        <div className="px-3 py-2 flex flex-col gap-2">
+                          {dotLabels.map((label, i) => {
+                            const lit = fbConnectLevel > i;
+                            const isErr = fbDotErrors[i];
+                            const isSlow = fbDotSlow[i] && !lit && !isErr;
+                            const isConnecting = fbConnectLevel === i && i < 5 && !isErr;
+                            const isPending = !lit && !isConnecting && !isErr;
+                            const statusColor = isErr ? '#ef4444' : lit ? '#10b981' : isSlow || isConnecting ? '#fbbf24' : 'rgba(255,255,255,0.25)';
+                            const statusText  = isErr ? 'Error' : lit ? 'OK' : isSlow ? 'Slow' : isConnecting ? 'Loading' : 'Pending';
+                            const hint = isErr ? dotHints[i].err : isSlow ? dotHints[i].slow : null;
+                            return (
+                              <div key={i}>
+                                <div className="flex items-center justify-between gap-3">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[11px]">{dotIcons[i]}</span>
+                                    <span className="text-[11px] text-white/80 font-medium">{label}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1">
+                                    <div style={{
+                                      width: 6, height: 6, borderRadius: '50%',
+                                      background: statusColor,
+                                      boxShadow: `0 0 5px ${statusColor}`,
+                                      animation: isConnecting || isSlow ? 'pulse 1.2s ease-in-out infinite' : 'none',
+                                    }} />
+                                    <span className="text-[9px] font-semibold" style={{ color: statusColor }}>{statusText}</span>
+                                  </div>
+                                </div>
+                                {hint && (
+                                  <p className="text-[8.5px] mt-0.5 pl-5 leading-tight" style={{ color: isErr ? 'rgba(239,68,68,0.8)' : 'rgba(251,191,36,0.8)' }}>
+                                    {isErr ? '⚠ ' : '⏳ '}{hint}
+                                  </p>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                        {/* Footer */}
+                        <div className="px-3 py-2 border-t border-white/10 flex flex-col gap-1.5">
+                          <button
+                            onClick={() => window.location.reload()}
+                            className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg font-bold text-[10px] active:scale-95 transition-transform"
+                            style={{
+                              background: hasError ? 'rgba(239,68,68,0.18)' : 'rgba(255,255,255,0.08)',
+                              color: hasError ? '#f87171' : 'rgba(255,255,255,0.6)',
+                              border: `1px solid ${hasError ? 'rgba(239,68,68,0.35)' : 'rgba(255,255,255,0.1)'}`,
+                            }}
+                          >
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                              <path d="M3 3v5h5"/>
+                            </svg>
+                            Reconnect
+                          </button>
+                          <span className="text-[8px] text-white/20 text-center">Tap anywhere to close</span>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Streak — tap to see streak popup */}
             <button
+              id="topbar-streak-btn"
               onClick={() => setShowStreakPopup(true)}
-              className={'inline-flex items-center gap-0.5 px-2 py-1 rounded-full text-[11px] font-black shrink-0 active:scale-90 transition-all text-white' + (topBarBtnGlow ? ' nst-topbar-btn-glow' : '')}
-              title={'Login streak: ' + user.streak + ' day' + (user.streak === 1 ? '' : 's')}
+              className="inline-flex items-center gap-1 px-1.5 py-1 rounded-lg active:scale-95 text-white hover:text-amber-200 transition-all shrink-0"
+              title="Aapki Study Streak — Tap karke detail dekhein"
             >
-              <span className="text-[14px] leading-none">🔥</span>
-              <span>{user.streak}d</span>
+              <span className="text-[13px] sm:text-[14px] leading-none select-none">🔥</span>
+              <span className="font-black text-[11px] sm:text-xs tabular-nums text-amber-300">
+                {user.streak > 0 ? user.streak : 0}
+              </span>
             </button>
 
             {/* Mail */}
@@ -14489,7 +14701,6 @@ export const StudentDashboard: React.FC<Props> = ({
                 </button>
               );
             })()}
-
 
             {/* 3-dot menu */}
             <div className="relative shrink-0">
@@ -14536,7 +14747,7 @@ export const StudentDashboard: React.FC<Props> = ({
                           const _li = getLevelInfo(_ls);
                           return (
                             <button
-                              onClick={() => { setShowDotsMenu(false); setShowScorePanel(true); setScorePanelTab('DAILY'); }}
+                              onClick={() => { setShowDotsMenu(false); setShowScorePanel(true); }}
                               className="flex items-center gap-1.5 active:opacity-70 transition-all"
                             >
                               <span className="text-[11px]">⭐</span>
@@ -14654,8 +14865,20 @@ export const StudentDashboard: React.FC<Props> = ({
                         type ListItem = { label: string; right?: string; locked?: boolean; isTheme?: boolean; action: () => void };
                         const items: ListItem[] = [
                           {
+                            label: 'Store',
+                            right: '🛍️',
+                            action: () => { onTabChange("STORE"); setShowDotsMenu(false); },
+                          },
+                          {
                             label: 'Score History',
-                            action: () => { setShowScoreHistoryDirect(true); setShowDotsMenu(false); },
+                            locked: !_isBasicUser && !_isUltraUser && user.role !== 'ADMIN',
+                            action: () => {
+                              if (!_isBasicUser && !_isUltraUser && user.role !== 'ADMIN') {
+                                showAlert('🔒 Score History Basic aur Ultra members ke liye unlocked hai. Upgrade karein!', 'INFO');
+                                return;
+                              }
+                              setShowScoreHistoryDirect(true); setShowDotsMenu(false);
+                            },
                           },
                           ...(!requestAccess.isHidden ? [{
                             label: 'Content Demand',
@@ -14684,11 +14907,18 @@ export const StudentDashboard: React.FC<Props> = ({
                           },
                           {
                             label: 'Suggestions',
-                            action: () => { setShowSuggestionsPanel(true); setShowDotsMenu(false); },
+                            locked: !_isUltraUser && user.role !== 'ADMIN',
+                            action: () => {
+                              if (!_isUltraUser && user.role !== 'ADMIN') {
+                                showAlert('🔒 Suggestions panel Ultra members ke liye unlocked hai. Upgrade to Ultra!', 'INFO');
+                                return;
+                              }
+                              setShowSuggestionsPanel(true); setShowDotsMenu(false);
+                            },
                           },
                           {
-                            label: 'Daily Limits',
-                            action: () => { setShowDotsMenu(false); setShowScorePanel(true); setScorePanelTab('DAILY'); },
+                            label: 'Level System',
+                            action: () => { setShowDotsMenu(false); setShowScorePanel(true); },
                           },
                           {
                             label: 'Profile',
@@ -14742,7 +14972,7 @@ export const StudentDashboard: React.FC<Props> = ({
         <div className="mx-3 h-px bg-white/20" />
 
         {/* SECOND LINE: greeting | XP | credits — single clean row */}
-        <div className="flex items-center justify-between w-full mt-0 pt-0.5 px-4 pb-1.5 gap-2">
+        <div className="relative z-10 flex items-center justify-between w-full mt-0 pt-0.5 px-3 sm:px-4 pb-1.5 gap-2">
 
           {/* Left: greeting */}
           {(() => {
@@ -14750,9 +14980,9 @@ export const StudentDashboard: React.FC<Props> = ({
             const isLong = fullName.length > 10;
             const overflowPx = isLong ? Math.min(90, (fullName.length - 10) * 7) : 0;
             return (
-              <div className="overflow-hidden shrink-0" style={isLong ? { maskImage: 'linear-gradient(to right, black 78%, transparent 100%)', maxWidth: '120px' } : {}}>
+              <div className="overflow-hidden shrink-0" style={isLong ? { maskImage: 'linear-gradient(to right, black 78%, transparent 100%)', maxWidth: '105px' } : {}}>
                 <span
-                  className={`text-[13px] font-black text-white leading-tight whitespace-nowrap inline-block${isLong ? ' nst-name-scroll' : ''}`}
+                  className={`text-[12px] sm:text-[13px] font-black text-white leading-tight whitespace-nowrap inline-block${isLong ? ' nst-name-scroll' : ''}`}
                   style={isLong ? { '--nst-scroll': `-${overflowPx}px` } as React.CSSProperties : {}}
                 >
                   Hey, {fullName} 👋
@@ -14761,226 +14991,39 @@ export const StudentDashboard: React.FC<Props> = ({
             );
           })()}
 
-          {/* Centre: XP progress — HOME pe 5 sec ke liye dikhta hai, phir hide */}
-          {(() => {
-            const _nextLvl      = getNextLevelInfo(user.totalScore || 0);
-            const _isMax        = !_nextLvl;
-            const _currentScore = user.totalScore || 0;
-            const _nextScore    = _nextLvl ? _nextLvl.minScore : _currentScore;
-            const _fmt = (n: number) => n >= 1_00_000 ? `${(n/1_00_000).toFixed(n%1_00_000===0?0:1)}L` : n >= 1000 ? `${(n/1000).toFixed(n%1000===0?0:1)}K` : String(n);
-            return (
-              <div
-                className="flex-1 flex justify-center overflow-hidden"
-                style={{
-                  maxWidth: showXpBadge ? 160 : 0,
-                  opacity: showXpBadge ? 1 : 0,
-                  transition: 'max-width 0.35s ease, opacity 0.3s ease',
-                  pointerEvents: showXpBadge ? 'auto' : 'none',
-                }}
-              >
-                <span
-                  className="whitespace-nowrap px-2.5 py-0.5 rounded-full"
-                  style={{ color: 'rgba(255,255,255,0.7)', fontSize: 10, fontWeight: 600, letterSpacing: '0.01em', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.15)' }}
-                >
-                  {_isMax
-                    ? `Lv.${_userLevelInfo.level} · MAX`
-                    : `Lv.${_userLevelInfo.level} · ${_fmt(_currentScore)} / ${_fmt(_nextScore)} XP`}
-                </span>
-              </div>
-            );
-          })()}
+          {/* Middle: Merged XP status bar with glowing Bindu, shimmer & Total XP button */}
+          <TopBarRow2XpBar
+            user={user}
+            settings={settings}
+            activeTab={activeTab}
+            onOpenScorePanel={() => setShowScorePanel(true)}
+          />
 
-          {/* Right: Level | Credits | Subscription pills */}
-          <div className="flex items-center gap-1.5 shrink-0 ml-2">
+          {/* Right: Credits button */}
+          <div className="flex items-center gap-1.5 shrink-0">
 
-            {/* 5 connection dots — System Health Indicator */}
-            {(() => {
-              const dotLabels = ['Network','Connection','Account','Settings','Content'];
-              const dotIcons  = ['🌐','🔗','👤','⚙️','📚'];
-              const dotHints  = [
-                { slow: 'Internet slow', err: 'No internet — check WiFi/Data' },
-                { slow: 'Connection slow', err: 'Connection timeout — retry' },
-                { slow: 'Account loading…', err: 'Account error — try refreshing' },
-                { slow: 'Settings slow…', err: 'Settings load failed — refresh' },
-                { slow: 'Content loading…', err: 'Content not found — check upload' },
-              ];
-              const allOk = fbConnectLevel >= 5 && fbDotErrors.every(e => !e);
-              const hasError = fbDotErrors.some(e => e);
-              return (
-                <div className="relative shrink-0">
-                  {/* Fading wrapper — only wraps dots button, NOT popup/backdrop
-                      so the opacity transition doesn't create a stacking context
-                      that would trap the backdrop's z-index */}
-                  <div
-                    style={{
-                      opacity: showDots ? 1 : 0,
-                      pointerEvents: showDots ? 'auto' : 'none',
-                      transition: 'opacity 0.6s ease',
-                    }}
-                  >
-                  {/* Dots row — tap to open popup */}
-                  <button
-                    onClick={() => setShowSysStatus(s => !s)}
-                    className="flex items-center gap-[3px] px-1 py-1 rounded active:scale-90 transition-transform"
-                    title={allOk ? '✓ System Ready' : hasError ? '⚠ System Error' : `Loading… (${fbConnectLevel * 20}%)`}
-                  >
-                    {dotLabels.map((_, i) => {
-                      const lit = fbConnectLevel > i;
-                      const isErr = fbDotErrors[i];
-                      const isConnecting = fbConnectLevel === i && i < 5 && !isErr;
-                      // Track if this dot just newly turned green (for pop animation)
-                      const justBecameLit = lit && fbPrevLevelRef.current <= i;
-                      if (lit && fbPrevLevelRef.current <= i) fbPrevLevelRef.current = i + 1;
-                      const bg = isErr ? '#ef4444' : lit ? '#10b981' : isConnecting ? '#fbbf24' : 'rgba(255,255,255,0.22)';
-                      const shadow = isErr
-                        ? '0 0 6px rgba(239,68,68,0.95)'
-                        : lit ? '0 0 7px rgba(16,185,129,1), 0 0 14px rgba(16,185,129,0.5)'
-                        : 'none';
-                      return (
-                        <div
-                          key={`dot-${i}-${lit ? 'lit' : 'dark'}`}
-                          style={{
-                            width: 5, height: 5, borderRadius: '50%',
-                            background: bg,
-                            boxShadow: shadow,
-                            transitionDelay: `${i * 0.08}s`,
-                            transition: 'background 0.3s ease, box-shadow 0.3s ease',
-                            animation: isErr
-                              ? 'none'
-                              : justBecameLit
-                                ? `dotPopIn 0.4s ${i * 0.18}s cubic-bezier(0.34,1.56,0.64,1) both`
-                                : isConnecting
-                                  ? 'pulse 1.2s ease-in-out infinite'
-                                  : 'none',
-                          }}
-                        />
-                      );
-                    })}
-                  </button>
-                  </div>{/* end fading wrapper */}
-
-                  {/* Status popup — outside fading wrapper so backdrop z-index is not trapped */}
-                  {showSysStatus && (
-                    <>
-                      {/* Backdrop */}
-                      <div
-                        className="fixed inset-0 z-[200]"
-                        onClick={() => setShowSysStatus(false)}
-                      />
-                      {/* Popup card */}
-                      <div className="absolute right-0 top-7 z-[201] min-w-[190px] rounded-xl overflow-hidden shadow-2xl border border-white/10"
-                        style={{ background: 'rgba(15,15,25,0.97)', backdropFilter: 'blur(16px)' }}
-                      >
-                        {/* Header */}
-                        <div className="px-3 py-2 border-b border-white/10 flex items-center justify-between">
-                          <span className="text-[11px] font-bold text-white tracking-wide">System Status</span>
-                          <span className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold"
-                            style={{
-                              background: allOk ? 'rgba(16,185,129,0.2)' : hasError ? 'rgba(239,68,68,0.2)' : 'rgba(251,191,36,0.2)',
-                              color: allOk ? '#10b981' : hasError ? '#ef4444' : '#fbbf24',
-                            }}
-                          >
-                            {allOk ? 'All OK' : hasError ? 'Error' : 'Loading…'}
-                          </span>
-                        </div>
-                        {/* Rows */}
-                        <div className="px-3 py-2 flex flex-col gap-2">
-                          {dotLabels.map((label, i) => {
-                            const lit = fbConnectLevel > i;
-                            const isErr = fbDotErrors[i];
-                            const isSlow = fbDotSlow[i] && !lit && !isErr;
-                            const isConnecting = fbConnectLevel === i && i < 5 && !isErr;
-                            const isPending = !lit && !isConnecting && !isErr;
-                            const statusColor = isErr ? '#ef4444' : lit ? '#10b981' : isSlow || isConnecting ? '#fbbf24' : 'rgba(255,255,255,0.25)';
-                            const statusText  = isErr ? 'Error' : lit ? 'OK' : isSlow ? 'Slow' : isConnecting ? 'Loading' : 'Pending';
-                            const hint = isErr ? dotHints[i].err : isSlow ? dotHints[i].slow : null;
-                            return (
-                              <div key={i}>
-                                <div className="flex items-center justify-between gap-3">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="text-[11px]">{dotIcons[i]}</span>
-                                    <span className="text-[11px] text-white/80 font-medium">{label}</span>
-                                  </div>
-                                  <div className="flex items-center gap-1">
-                                    <div style={{
-                                      width: 6, height: 6, borderRadius: '50%',
-                                      background: statusColor,
-                                      boxShadow: `0 0 5px ${statusColor}`,
-                                      animation: isConnecting || isSlow ? 'pulse 1.2s ease-in-out infinite' : 'none',
-                                    }} />
-                                    <span className="text-[9px] font-semibold" style={{ color: statusColor }}>{statusText}</span>
-                                  </div>
-                                </div>
-                                {hint && (
-                                  <p className="text-[8.5px] mt-0.5 pl-5 leading-tight" style={{ color: isErr ? 'rgba(239,68,68,0.8)' : 'rgba(251,191,36,0.8)' }}>
-                                    {isErr ? '⚠ ' : '⏳ '}{hint}
-                                  </p>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                        {/* Footer */}
-                        <div className="px-3 py-2 border-t border-white/10 flex flex-col gap-1.5">
-                          <button
-                            onClick={() => window.location.reload()}
-                            className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg font-bold text-[10px] active:scale-95 transition-transform"
-                            style={{
-                              background: hasError ? 'rgba(239,68,68,0.18)' : 'rgba(255,255,255,0.08)',
-                              color: hasError ? '#f87171' : 'rgba(255,255,255,0.6)',
-                              border: `1px solid ${hasError ? 'rgba(239,68,68,0.35)' : 'rgba(255,255,255,0.1)'}`,
-                            }}
-                          >
-                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-                              <path d="M3 3v5h5"/>
-                            </svg>
-                            Reconnect
-                          </button>
-                          <span className="text-[8px] text-white/20 text-center">Tap anywhere to close</span>
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              );
-            })()}
-
-
-            {/* Credits pill */}
-            {!(settings?.hiddenTopBarButtons || []).includes('CREDITS') && (
-              <div className="shrink-0">
-                <button
-                  onClick={() => onTabChange('STORE' as any)}
-                  className="inline-flex items-center gap-[2px] px-2 py-[3px] rounded-full text-white whitespace-nowrap active:scale-90 transition-transform text-[8px] font-black leading-none"
-                >
-                  <Crown size={9} />
-                  {user.credits} CR
-                </button>
-              </div>
-            )}
-
+            {/* Credit Balance with Plus (+) icon */}
+            <button
+              id="topbar-row2-credits-btn"
+              onClick={() => onTabChange("STORE")}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full active:scale-95 transition-all shrink-0 cursor-pointer group"
+              style={{
+                background: 'rgba(245,158,11,0.18)',
+                border: '1px solid rgba(245,158,11,0.38)',
+                boxShadow: '0 1px 6px rgba(245,158,11,0.2)',
+              }}
+              title="Aapke Credits — Tap karke Store se aur paayein"
+            >
+              <span className="text-[12px] leading-none select-none">🪙</span>
+              <span className="font-black text-[11px] tabular-nums text-amber-300 group-hover:text-amber-200">
+                {(user.credits || 0).toLocaleString('en-IN')}
+              </span>
+              <span className="text-amber-400 group-hover:scale-110 transition-transform ml-0.5">
+                <Plus size={11} strokeWidth={3.5} />
+              </span>
+            </button>
           </div>
         </div>
-
-        {/* Level progress bar — bottom of top bar */}
-        {(() => {
-          const _progress = getLevelProgress(user.totalScore || 0);
-          const _isMax    = !getNextLevelInfo(user.totalScore || 0);
-          return (
-            <div className="w-full relative" style={{ height: 3, background: 'rgba(255,255,255,0.13)' }}>
-              <div
-                style={{
-                  position: 'absolute', inset: '0 auto 0 0',
-                  width: `${_isMax ? 100 : _progress}%`,
-                  background: tierTheme.primary,
-                  boxShadow: `0 0 6px ${tierTheme.primary}99`,
-                  transition: 'width 0.8s cubic-bezier(0.34,1.1,0.64,1)',
-                }}
-              />
-            </div>
-          );
-        })()}
       </div>
 
       {/* LIFETIME POPUP — enhanced with white shimmer */}
@@ -19871,9 +19914,16 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="flex items-center justify-between px-5 pt-5 pb-3 shrink-0">
+            <div className="flex items-center justify-between px-5 pt-5 pb-3 shrink-0" style={{ borderBottom: `1px solid ${tierTheme.borderSoft || '#f1f5f9'}` }}>
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-indigo-100 rounded-2xl flex items-center justify-center text-indigo-600">
+                <div
+                  className="w-10 h-10 rounded-2xl flex items-center justify-center"
+                  style={{
+                    background: `${tierTheme.primary}18`,
+                    color: tierTheme.primary,
+                    border: `1px solid ${tierTheme.primary}30`
+                  }}
+                >
                   <Mail size={20} />
                 </div>
                 <div>
@@ -19891,30 +19941,34 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
             </div>
 
             {/* Tabs */}
-            <div className="flex gap-1 px-4 pb-3 shrink-0 border-b border-slate-100 overflow-x-auto no-scrollbar">
+            <div className="flex gap-1.5 px-4 pb-3 pt-1 shrink-0 border-b border-slate-100 overflow-x-auto no-scrollbar">
               {(() => {
                 const hasAdminMsgs = (user.inbox || []).some(m => m.type !== 'REWARD' && m.type !== 'GIFT');
                 if (!hasAdminMsgs) return null;
+                const isActive = inboxTab === 'MESSAGES';
                 return (
                   <button
                     onClick={() => setInboxTab('MESSAGES')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-black transition-all whitespace-nowrap ${inboxTab === 'MESSAGES' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                    className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-black transition-all whitespace-nowrap ${isActive ? 'text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                    style={isActive ? { background: tierTheme.btnGrad || tierTheme.primary } : {}}
                   >
                     <MessageSquare size={11} /> Messages
-                    {unreadCount > 0 && <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${inboxTab === 'MESSAGES' ? 'bg-white/20 text-white' : 'bg-red-500 text-white'}`}>{unreadCount}</span>}
+                    {unreadCount > 0 && <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${isActive ? 'bg-white/20 text-white' : 'bg-red-500 text-white'}`}>{unreadCount}</span>}
                   </button>
                 );
               })()}
               <button
                 onClick={() => setInboxTab('UPDATES')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-black transition-all whitespace-nowrap ${inboxTab === 'UPDATES' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-black transition-all whitespace-nowrap ${inboxTab === 'UPDATES' ? 'text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                style={inboxTab === 'UPDATES' ? { background: tierTheme.btnGrad || tierTheme.primary } : {}}
               >
                 <Bell size={11} /> Updates
                 {unreadNotifCount > 0 && <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${inboxTab === 'UPDATES' ? 'bg-white/20 text-white' : 'bg-red-500 text-white'}`}>{unreadNotifCount}</span>}
               </button>
               <button
                 onClick={() => setInboxTab('REWARDS')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-black transition-all whitespace-nowrap ${inboxTab === 'REWARDS' ? 'bg-amber-500 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-black transition-all whitespace-nowrap ${inboxTab === 'REWARDS' ? 'text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                style={inboxTab === 'REWARDS' ? { background: tierTheme.btnGrad || tierTheme.primary } : {}}
               >
                 <Trophy size={11} /> Reward
                 {(() => {
@@ -19929,7 +19983,8 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                   setRewardHistorySeenCount(claimedCnt);
                   localStorage.setItem(`nst_reward_hist_seen_${user?.id || ''}`, String(claimedCnt));
                 }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-black transition-all whitespace-nowrap ${inboxTab === 'HISTORY' ? 'bg-violet-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-black transition-all whitespace-nowrap ${inboxTab === 'HISTORY' ? 'text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                style={inboxTab === 'HISTORY' ? { background: tierTheme.btnGrad || tierTheme.primary } : {}}
               >
                 <span className="text-[11px]">📜</span> History
                 {(() => {
@@ -19940,7 +19995,8 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
               </button>
               <button
                 onClick={() => setInboxTab('RULES')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-black transition-all whitespace-nowrap ${inboxTab === 'RULES' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-black transition-all whitespace-nowrap ${inboxTab === 'RULES' ? 'text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                style={inboxTab === 'RULES' ? { background: tierTheme.btnGrad || tierTheme.primary } : {}}
               >
                 <span className="text-[11px]">📋</span> Rules
               </button>
@@ -25837,964 +25893,16 @@ RULES:
       )}
 
       {/* ═══════════ SCORE / LEVEL PANEL ═══════════ */}
-      {showScorePanel && (() => {
-        const totalScore = (user.role === 'ADMIN' || user.role === 'SUB_ADMIN') ? 999999999 : (user.totalScore || 0);
-        const userLvl = getLevelInfo(totalScore);
-        const _vIdx = viewedLevelIdx === 0 ? userLvl.level - 1 : viewedLevelIdx - 1;
-        const lvl = LEVEL_INFO[_vIdx] ?? userLvl;
-        const nextLvl = LEVEL_INFO[_vIdx + 1] ?? null;
-        const progress = getLevelProgress(totalScore);
-        const _closePanel = () => { setShowScorePanel(false); setScorePanelTab('LEVEL'); setViewedLevelIdx(0); };
-        return (
-          <div className="fixed inset-0 z-[9998] flex flex-col justify-end" style={{ background: 'rgba(0,0,0,0.7)' }} onClick={_closePanel}>
-            {/* Panel — outer rounded container, no overflow (prevents white-corner flash) */}
-            <div className="bg-[#0e0e0e] rounded-t-3xl max-h-[88vh] flex flex-col w-full overflow-hidden" onClick={e => e.stopPropagation()}>
-              {/* Header — fixed, not sticky, so no repaint glitch */}
-              <div className="flex-shrink-0 bg-[#0e0e0e] pt-3 pb-2 px-5 border-b border-white/6">
-                <div className="w-10 h-1 bg-slate-700 rounded-full mx-auto mb-2" />
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm font-black text-white">⚡ Activity Score</p>
-                  <button onClick={_closePanel} className="w-7 h-7 flex items-center justify-center rounded-full bg-white/8 text-slate-400">✕</button>
-                </div>
-                {/* Tab toggle — 4 tabs — no transition-all to prevent lag */}
-                <div className="flex gap-1.5">
-                  <button
-                    onClick={() => setScorePanelTab('LEVEL')}
-                    className={`flex-1 py-1.5 rounded-xl text-[10px] font-black ${scorePanelTab === 'LEVEL' ? 'bg-violet-600 text-white' : 'bg-white/6 text-slate-400'}`}
-                  >⚡ Level</button>
-                  <button
-                    onClick={() => setScorePanelTab('DAILY')}
-                    className={`flex-1 py-1.5 rounded-xl text-[10px] font-black ${scorePanelTab === 'DAILY' ? 'bg-emerald-600 text-white' : 'bg-white/6 text-slate-400'}`}
-                  >📊 Limits</button>
-                  <button
-                    onClick={() => setScorePanelTab('FEATURES')}
-                    className={`flex-1 py-1.5 rounded-xl text-[10px] font-black ${scorePanelTab === 'FEATURES' ? 'bg-sky-600 text-white' : 'bg-white/6 text-slate-400'}`}
-                  >🎯 Level System</button>
-                </div>
-              </div>
-
-              {/* Scrollable content area */}
-              <div className="overflow-y-auto no-scrollbar flex-1">
-              <div className="px-4 py-4 space-y-3">
-
-              {/* ── LEVEL HERO CARD — shown on ALL 3 tabs ── */}
-              {(() => {
-                const _lvlFrom = lvl.minScore;
-                const _lvlTo   = nextLvl ? nextLvl.minScore : null;
-                const _rangeTotal = _lvlTo ? _lvlTo - _lvlFrom : 0;
-                const _rangeEarned = _lvlTo ? Math.max(0, totalScore - _lvlFrom) : 0;
-                const _rangePct = _lvlTo ? Math.min(100, Math.round((_rangeEarned / _rangeTotal) * 100)) : 100;
-                const _ptsLeft = _lvlTo ? Math.max(0, _lvlTo - totalScore) : 0;
-                const _isUserLevel = lvl.level === userLvl.level;
-                const _canPrev = lvl.level > 1;
-                const _canNext = lvl.level < LEVEL_INFO.length;
-                return (
-                  <div className="rounded-2xl p-4 text-center relative overflow-hidden"
-                    style={{ background: `linear-gradient(135deg, ${lvl.color}20, ${lvl.color}08)`, border: `1px solid ${lvl.color}50`, boxShadow: `0 0 32px ${lvl.glowColor}` }}>
-
-                    {/* ‹ Prev / Next › Nav Buttons */}
-                    <button
-                      onClick={() => setViewedLevelIdx(_canPrev ? lvl.level - 1 : lvl.level)}
-                      disabled={!_canPrev}
-                      className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-full transition-all active:scale-90"
-                      style={{ background: _canPrev ? `${lvl.color}22` : 'rgba(255,255,255,0.04)', border: `1px solid ${_canPrev ? lvl.color + '50' : 'rgba(255,255,255,0.08)'}`, color: _canPrev ? lvl.color : '#334155' }}
-                    >‹</button>
-                    <button
-                      onClick={() => setViewedLevelIdx(_canNext ? lvl.level + 1 : lvl.level)}
-                      disabled={!_canNext}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-full transition-all active:scale-90"
-                      style={{ background: _canNext ? `${lvl.color}22` : 'rgba(255,255,255,0.04)', border: `1px solid ${_canNext ? lvl.color + '50' : 'rgba(255,255,255,0.08)'}`, color: _canNext ? lvl.color : '#334155' }}
-                    >›</button>
-
-                    <div className="text-5xl mb-2.5">{lvl.emoji}</div>
-                    <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full mb-1" style={{ background: `${lvl.color}28`, border: `1px solid ${lvl.color}55` }}>
-                      <span className="text-xs font-black text-white">Level {lvl.level}</span>
-                      <span className="text-[9px] font-black uppercase tracking-widest" style={{ color: lvl.color }}>· {lvl.label}</span>
-                    </div>
-
-                    {/* "Your Level" badge — only when browsing other levels */}
-                    {!_isUserLevel && (
-                      <div className="mb-1.5">
-                        <button onClick={() => setViewedLevelIdx(0)} className="text-[9px] font-black text-slate-500 underline underline-offset-2">
-                          Mera Level: {userLvl.emoji} L{userLvl.level} pe vapas jao
-                        </button>
-                      </div>
-                    )}
-                    {_isUserLevel && (
-                      <div className="mb-1.5">
-                        <span className="text-[8px] font-black px-2 py-0.5 rounded-full" style={{ background: `${lvl.color}28`, color: lvl.color }}>✦ Mera Current Level</span>
-                      </div>
-                    )}
-
-                    <p className="text-3xl font-black" style={{ color: _isUserLevel ? lvl.color : '#64748b' }}>
-                      {_isUserLevel ? totalScore.toLocaleString('en-IN') : lvl.minScore.toLocaleString('en-IN')}
-                    </p>
-                    <p className="text-[9px] text-slate-500 uppercase tracking-widest mt-0.5">
-                      {_isUserLevel ? 'Mera Score' : 'Min. Score Required'}
-                    </p>
-                    {lvl.discount > 0 && (
-                      <div className="mt-2.5 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black text-white" style={{ background: `${lvl.color}cc` }}>
-                        🏷️ {lvl.discount}% Store Discount
-                      </div>
-                    )}
-                    {/* Level Range Progress */}
-                    <div className="mt-3 rounded-xl px-3 py-2.5" style={{ background: 'rgba(0,0,0,0.25)', border: `1px solid ${lvl.color}25` }}>
-                      <div className="flex items-center justify-between mb-1.5">
-                        <div className="text-left">
-                          <p className="text-[7px] font-black uppercase tracking-widest text-slate-600">Level {lvl.level} shuru</p>
-                          <p className="text-[9px] font-black" style={{ color: lvl.color }}>{_lvlFrom.toLocaleString('en-IN')}</p>
-                        </div>
-                        <div className="text-center flex-1 px-2">
-                          {_isUserLevel ? (
-                            <>
-                              <p className="text-[8px] font-black text-white">{_rangePct}% Complete</p>
-                              {_lvlTo && <p className="text-[7px] text-slate-500">{_ptsLeft.toLocaleString('en-IN')} pts baki</p>}
-                            </>
-                          ) : (
-                            <p className="text-[8px] font-black text-slate-500">Preview Mode</p>
-                          )}
-                        </div>
-                        <div className="text-right">
-                          <p className="text-[7px] font-black uppercase tracking-widest text-slate-600">{nextLvl ? `Level ${nextLvl.level} pe` : 'Max Level'}</p>
-                          <p className="text-[9px] font-black text-slate-400">{_lvlTo ? _lvlTo.toLocaleString('en-IN') : '∞'}</p>
-                        </div>
-                      </div>
-                      <div className="h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
-                        <div className="h-full rounded-full" style={{ width: `${_isUserLevel ? _rangePct : 0}%`, background: `linear-gradient(90deg, ${lvl.color}99, ${lvl.color})` }} />
-                      </div>
-                      {_rangePct === 100 && !nextLvl && _isUserLevel && (
-                        <p className="text-[8px] font-black text-amber-400 mt-1 text-center">🏆 Highest Level Achieved!</p>
-                      )}
-                    </div>
-                  </div>
-                );
-              })()}
-
-
-                {/* ── DAILY LIMITS TAB ── */}
-                {scorePanelTab === 'DAILY' && (() => {
-                  const _userTier = (user.role === 'ADMIN' || user.role === 'SUB_ADMIN') ? 'ULTRA' : user.isPremium ? (user.subscriptionLevel === 'ULTRA' ? 'ULTRA' : 'BASIC') : 'FREE';
-                  const _tier = scoreDailyTier ?? _userTier;
-                  const _isOwnTier = _tier === _userTier;
-                  const _ld = getLevelDailyLimitsWithOverride(lvl.level, settings) ?? getLevelDailyLimits(lvl.level);
-                  const _ldNext = LEVEL_INFO[lvl.level] ? (getLevelDailyLimitsWithOverride(lvl.level + 1, settings) ?? getLevelDailyLimits(lvl.level + 1)) : null;
-                  const _creditMax = _ld.creditWriteMax;
-                  const _isUnlimNotes = _ld.notes.free >= UNLIMITED;
-                  const todayStr = new Date().toISOString().split('T')[0];
-
-                  // ── Today's actual usage (only for own tier) ──
-                  const _mcqUsed   = _isOwnTier ? parseInt(localStorage.getItem(`nst_mcq_daily_total_${todayStr}_${user.id}`) || '0', 10) : 0;
-                  const _dlUsed    = _isOwnTier ? parseInt(localStorage.getItem(`nst_dl_html_${user.id}_${todayStr}`) || '0', 10) : 0;
-                  const _writeUsed = _isOwnTier ? parseInt(localStorage.getItem(
-                    _userTier === 'ULTRA' ? `nst_ultra_html_${user.id}_${todayStr}`
-                    : _userTier === 'BASIC' ? `nst_basic_html_${user.id}_${todayStr}`
-                    : `nst_free_html_${user.id}_${todayStr}`
-                  ) || '0', 10) : 0;
-                  const _paidWriteUsed = _isOwnTier ? parseInt(localStorage.getItem(`nst_paid_write_${user.id}_${todayStr}`) || '0', 10) : 0;
-                  const _cnUsed    = _isOwnTier ? parseInt(localStorage.getItem(`nst_cn_daily_${user.id}_${todayStr}`) || '0', 10) : 0;
-                  const _fcUsed    = _isOwnTier ? parseInt(localStorage.getItem(`nst_fc_daily_${user.id}_${new Date().toDateString()}`) || '0', 10) : 0;
-                  const _vidUsed   = _isOwnTier ? parseInt(localStorage.getItem(`nst_vid_daily_${user.id}_${todayStr}`) || '0', 10) : 0;
-                  const _pdfUsed   = _isOwnTier ? parseInt(localStorage.getItem(`nst_pdf_daily_${user.id}_${todayStr}`) || '0', 10) : 0;
-                  const _spinUsed  = _isOwnTier ? parseInt(localStorage.getItem(`nst_spin_daily_${user.id}_${todayStr}`) || '0', 10) : 0;
-
-                  // ── Bar color based on usage % ──
-                  const _barClr = (pct: number) =>
-                    pct >= 100 ? '#ef4444' : pct >= 75 ? '#f97316' : pct >= 50 ? '#eab308' : pct >= 25 ? '#3b82f6' : '#22c55e';
-                  const _barLabel = (pct: number) =>
-                    pct >= 100 ? 'BLOCKED' : pct >= 75 ? 'Almost full' : pct >= 50 ? 'Half used' : pct >= 25 ? 'Going' : 'Available';
-
-                  // ── Reusable card renderer ──
-                  // accessType: 'free' = green, 'credit' = blue, 'locked' = grey/lock
-                  const _renderCard = (
-                    icon: string, label: string,
-                    limit: number | null, used: number,
-                    isUnlim: boolean,
-                    accessType: 'free' | 'credit' | 'locked',
-                    nextLvlVal: number | null,
-                    tracked: boolean,
-                    crCost?: number,
-                    nextLvlCrCost?: number
-                  ) => {
-                    const isLocked  = accessType === 'locked';
-                    const isCredit  = accessType === 'credit';
-                    const isFree    = accessType === 'free';
-
-                    const pct = (isFree && !isUnlim && limit && limit > 0 && tracked && _isOwnTier)
-                      ? Math.min(100, Math.round((used / limit) * 100)) : 0;
-                    const isBarBlocked = pct >= 100;
-
-                    // Card color theme
-                    const cardBg    = isLocked  ? 'rgba(255,255,255,0.02)'
-                                    : isCredit  ? '#3b82f608'
-                                    : isBarBlocked ? '#ef444410'
-                                    : '#22c55e08';
-                    const cardBdr   = isLocked  ? 'rgba(255,255,255,0.05)'
-                                    : isCredit  ? '#3b82f625'
-                                    : isBarBlocked ? '#ef444440'
-                                    : '#22c55e25';
-                    const accentClr = isLocked ? '#475569' : isCredit ? '#60a5fa' : _barClr(pct);
-
-                    return (
-                      <div className="rounded-xl px-3 py-2.5" style={{ background: cardBg, border: `1px solid ${cardBdr}`, opacity: isLocked ? 0.55 : 1 }}>
-                        <div className="flex items-center gap-2">
-                          {/* Icon + lock overlay */}
-                          <div className="relative shrink-0">
-                            <span className="text-base">{icon}</span>
-                            {isLocked && <span className="absolute -bottom-0.5 -right-1 text-[8px]">🔒</span>}
-                          </div>
-
-                          {/* Label + sub-info */}
-                          <div className="flex-1 min-w-0">
-                            <p className="text-[10px] font-black leading-tight" style={{ color: isLocked ? '#64748b' : '#e2e8f0' }}>{label}</p>
-                            {isCredit && crCost !== undefined && (
-                              <p className="text-[8px] font-black mt-0.5" style={{ color: '#60a5fa' }}>
-                                💰 {crCost} CR/unlock
-                                {nextLvlCrCost !== undefined && nextLvlCrCost < crCost && (
-                                  <span className="text-amber-400 ml-1">→ {nextLvlCrCost} CR next level</span>
-                                )}
-                              </p>
-                            )}
-                            {isLocked && (
-                              <p className="text-[8px] font-bold mt-0.5 text-slate-600">Not available on this plan</p>
-                            )}
-                          </div>
-
-                          {/* Right badge */}
-                          <div className="shrink-0 text-right flex flex-col items-end gap-0.5">
-                            {isLocked ? (
-                              <span className="text-[9px] font-black text-slate-600 px-2 py-0.5 rounded-full" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }}>🔒 Locked</span>
-                            ) : isUnlim ? (
-                              <span className="text-[9px] font-black text-emerald-400">∞ Unlimited</span>
-                            ) : isCredit ? (
-                              <div className="flex flex-col items-end">
-                                {limit !== null && <span className="text-[9px] font-black text-sky-400">{limit}/day max</span>}
-                                {_isOwnTier && tracked && limit !== null && (
-                                  <span className="text-[8px] font-bold text-sky-300">{used} used today</span>
-                                )}
-                              </div>
-                            ) : limit !== null ? (
-                              <div className="flex flex-col items-end gap-0.5">
-                                {_isOwnTier && tracked ? (
-                                  <span className="text-[10px] font-black" style={{ color: accentClr }}>{used} / {limit}</span>
-                                ) : (
-                                  <span className="text-[9px] font-black text-emerald-400">{limit}/day</span>
-                                )}
-                                {isBarBlocked && <span className="text-[7px] font-black text-red-400 uppercase tracking-widest">BLOCKED</span>}
-                              </div>
-                            ) : null}
-                          </div>
-                        </div>
-
-                        {/* Progress bar — only for free tracked features */}
-                        {isFree && !isUnlim && limit !== null && limit > 0 && (
-                          <div className="mt-2">
-                            <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.07)' }}>
-                              <div className="h-full rounded-full transition-all duration-500" style={{
-                                width: (_isOwnTier && tracked) ? `${pct}%` : '0%',
-                                background: `linear-gradient(90deg, ${accentClr}80, ${accentClr})`
-                              }} />
-                            </div>
-                            <div className="flex items-center justify-between mt-0.5">
-                              {_isOwnTier && tracked
-                                ? <p className="text-[7px] font-bold" style={{ color: accentClr }}>{_barLabel(pct)} · {pct}%</p>
-                                : <p className="text-[7px] text-slate-600">Preview mode</p>
-                              }
-                              {_ldNext && nextLvlVal !== null && nextLvlVal > limit && (
-                                <p className="text-[7px] text-slate-500">Next Lvl: <span className="text-amber-400 font-black">{nextLvlVal}</span></p>
-                              )}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Credit bar — only for credit tracked features */}
-                        {isCredit && limit !== null && limit > 0 && _isOwnTier && tracked && (
-                          <div className="mt-2">
-                            <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.07)' }}>
-                              <div className="h-full rounded-full transition-all duration-500" style={{
-                                width: `${Math.min(100, Math.round((used / limit) * 100))}%`,
-                                background: 'linear-gradient(90deg, #3b82f680, #60a5fa)'
-                              }} />
-                            </div>
-                            <div className="flex items-center justify-between mt-0.5">
-                              <p className="text-[7px] font-bold text-sky-400">{used} of {limit} unlocks used</p>
-                              {_ldNext && nextLvlVal !== null && nextLvlVal > limit && (
-                                <p className="text-[7px] text-slate-500">Next Lvl: <span className="text-amber-400 font-black">{nextLvlVal}</span></p>
-                              )}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Unlimited footer */}
-                        {isUnlim && (
-                          <p className="text-[7px] text-emerald-600/70 mt-1">✓ No daily cap</p>
-                        )}
-                      </div>
-                    );
-                  };
-
-                  const _mcqLim  = _tier === 'ULTRA' ? _ld.mcq.ultra  : _tier === 'BASIC' ? _ld.mcq.basic  : _ld.mcq.free;
-                  const _dlLim   = _tier === 'ULTRA' ? _ld.dl.ultra   : _tier === 'BASIC' ? _ld.dl.basic   : _ld.dl.free;
-                  const _wrtLim  = _tier === 'ULTRA' ? _ld.write.ultra : _tier === 'BASIC' ? _ld.write.basic : 0;
-                  const _vidLim  = _tier === 'ULTRA' ? _ld.video.ultra : _tier === 'BASIC' ? _ld.video.basic : _ld.video.free;
-                  const _pdfLim  = _tier === 'ULTRA' ? _ld.pdf.ultra  : _tier === 'BASIC' ? _ld.pdf.basic  : _ld.pdf.free;
-                  const _conLim  = _tier === 'ULTRA' ? _ld.concept.ultra : _tier === 'BASIC' ? _ld.concept.basic : 0;
-
-                  const _mcqNext  = _ldNext ? (_tier === 'ULTRA' ? _ldNext.mcq.ultra  : _tier === 'BASIC' ? _ldNext.mcq.basic  : _ldNext.mcq.free) : null;
-                  const _dlNext   = _ldNext ? (_tier === 'ULTRA' ? _ldNext.dl.ultra   : _tier === 'BASIC' ? _ldNext.dl.basic   : _ldNext.dl.free) : null;
-                  const _wrtNext  = _ldNext ? (_tier === 'ULTRA' ? _ldNext.write.ultra : _tier === 'BASIC' ? _ldNext.write.basic : 0) : null;
-                  const _vidNext  = _ldNext ? (_tier === 'ULTRA' ? _ldNext.video.ultra : _tier === 'BASIC' ? _ldNext.video.basic : _ldNext.video.free) : null;
-                  const _pdfNext  = _ldNext ? (_tier === 'ULTRA' ? _ldNext.pdf.ultra  : _tier === 'BASIC' ? _ldNext.pdf.basic  : _ldNext.pdf.free) : null;
-                  const _conNext  = _ldNext ? (_tier === 'ULTRA' ? _ldNext.concept.ultra : _tier === 'BASIC' ? _ldNext.concept.basic : 0) : null;
-                  const _wrtCrCost  = settings?.htmlUnlockCost ?? 5;
-                  const _vidCrCost  = settings?.defaultVideoCost ?? 10;
-                  const _pdfCrCost  = settings?.defaultPdfCost ?? 5;
-
-                  return (
-                    <>
-                      {/* Tier Selector */}
-                      <div className="flex gap-1.5">
-                        {(['FREE', 'BASIC', 'ULTRA'] as const).map(t => {
-                          const isActive = _tier === t;
-                          const isMe = t === _userTier;
-                          const c = t === 'ULTRA' ? '#7c3aed' : t === 'BASIC' ? '#0ea5e9' : '#475569';
-                          const lbl = t === 'ULTRA' ? '⚡ Ultra' : t === 'BASIC' ? '🔵 Basic' : '🆓 Free';
-                          return (
-                            <button key={t} onClick={() => setScoreDailyTier(t === scoreDailyTier ? null : t)}
-                              className="flex-1 py-2 rounded-xl text-[10px] font-black flex flex-col items-center gap-0.5"
-                              style={{ background: isActive ? c + '28' : 'rgba(255,255,255,0.04)', border: `1px solid ${isActive ? c + '60' : 'rgba(255,255,255,0.08)'}`, color: isActive ? c : '#64748b' }}>
-                              <span>{lbl}</span>
-                              {isMe && <span style={{ fontSize: '7px', fontWeight: 900, letterSpacing: '0.06em', opacity: 0.75 }}>MY PLAN</span>}
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      {/* Header info strip */}
-                      <div className="rounded-xl px-3 py-2 flex items-center justify-between" style={{ background: `${lvl.color}12`, border: `1px solid ${lvl.color}25` }}>
-                        <div>
-                          <p className="text-[9px] font-black uppercase tracking-widest" style={{ color: lvl.color }}>Level {lvl.level} · {_tier} Limits</p>
-                          <p className="text-[7px] text-slate-500 mt-0.5">Level badhne pe limits badhti hain</p>
-                        </div>
-                        {/* Legend */}
-                        <div className="flex items-center gap-1.5">
-                          {[['#22c55e','0%'], ['#3b82f6','25%'], ['#eab308','50%'], ['#f97316','75%'], ['#ef4444','100%']].map(([c,l]) => (
-                            <div key={l} className="flex flex-col items-center gap-0.5">
-                              <div className="w-2 h-2 rounded-full" style={{ background: c as string }} />
-                              <p className="text-[5px] font-bold text-slate-600">{l}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Usage note — only when own tier */}
-                      {_isOwnTier && (
-                        <p className="text-[8px] text-slate-500 text-center -mt-1">
-                          📊 Aaj ki usage dikh rahi hai · Bar rang badlega usage ke saath
-                        </p>
-                      )}
-                      {!_isOwnTier && (
-                        <p className="text-[8px] text-amber-500/70 text-center -mt-1">
-                          👁 Preview mode — {_tier} plan ki limits dikh rahi hain
-                        </p>
-                      )}
-
-                      {/* Feature cards */}
-                      <div className="space-y-1.5">
-
-                        {/* ── FREE features (green) ── */}
-                        {_renderCard('❓', 'MCQ Practice', _mcqLim, _mcqUsed, false, 'free', _mcqNext, true)}
-                        {_renderCard('📥', 'HTML Downloads', _dlLim, _dlUsed, false, 'free', _dlNext, true)}
-
-                        {/* Write Mode Free: green if plan has free quota, else credit/locked */}
-                        {_wrtLim > 0
-                          ? _renderCard('✍️', 'Write Mode (Free)', _wrtLim, _writeUsed, false, 'free', _wrtNext, true)
-                          : _tier === 'FREE'
-                            ? _renderCard('✍️', 'Write Mode (Free)', null, 0, false, 'locked', null, false)
-                            : _renderCard('✍️', 'Write Mode (Free)', null, 0, false, 'credit', null, false, _wrtCrCost)}
-
-                        {/* Notes Reading */}
-                        {_isUnlimNotes
-                          ? _renderCard('📖', 'Notes Reading', null, _cnUsed, true, 'free', null, true)
-                          : _renderCard('📖', 'Notes Reading',
-                              _tier === 'ULTRA' ? _ld.notes.ultra : _tier === 'BASIC' ? _ld.notes.basic : _ld.notes.free,
-                              _cnUsed, false, 'free',
-                              _ldNext ? (_tier === 'ULTRA' ? _ldNext.notes.ultra : _tier === 'BASIC' ? _ldNext.notes.basic : _ldNext.notes.free) : null,
-                              true)}
-
-                        {/* Flashcards — only Ultra gets free quota; free/basic = locked */}
-                        {_tier === 'ULTRA'
-                          ? _renderCard('🃏', 'Flashcards', _ld.flashcard.ultra, _fcUsed, false, 'free',
-                              _ldNext ? _ldNext.flashcard.ultra : null, true)
-                          : _renderCard('🃏', 'Flashcards', null, _fcUsed, false, 'locked', null, false)}
-
-                        {/* ── CREDIT features (blue) ── */}
-                        {/* Video Lectures */}
-                        {_vidLim > 0
-                          ? _renderCard('🎬', 'Video Lectures', _vidLim, _vidUsed, false, 'free', _vidNext, false)
-                          : _renderCard('🎬', 'Video Lectures', null, _vidUsed, false, 'credit', null, false, _vidCrCost)}
-
-                        {/* PDF / Notes Access */}
-                        {_pdfLim > 0
-                          ? _renderCard('📄', 'PDF / Notes Access', _pdfLim, _pdfUsed, false, 'free', _pdfNext, false)
-                          : _renderCard('📄', 'PDF / Notes Access', null, _pdfUsed, false, 'credit', null, false, _pdfCrCost)}
-
-                        {/* Concept Notes: credit if plan has it, locked if FREE */}
-                        {_conLim > 0
-                          ? _renderCard('💡', 'Concept Notes', _conLim, _cnUsed, false, 'free', _conNext, false)
-                          : _tier === 'FREE'
-                            ? _renderCard('💡', 'Concept Notes', null, _cnUsed, false, 'locked', null, false)
-                            : _renderCard('💡', 'Concept Notes', null, _cnUsed, false, 'credit', null, false, _wrtCrCost)}
-
-                        {/* Write (Credits) — always credit (blue) */}
-                        {_renderCard('✏️', 'Write Mode (Credits)', _creditMax, _paidWriteUsed, false, 'credit', null, true, _wrtCrCost)}
-
-                      </div>
-
-                      {/* ── All-Tier Comparison Table ── */}
-                      <div className="rounded-2xl overflow-hidden border border-white/10">
-                        <div className="px-3 py-2 border-b border-white/6 flex items-center gap-2" style={{ background: 'rgba(255,255,255,0.03)' }}>
-                          <span>📊</span>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-[9px] font-black text-white uppercase tracking-widest">Sabhi Plans Ki Limits — Level {lvl.level}</p>
-                            <p className="text-[7px] text-slate-500 mt-0.5">Teeno tiers + aaj ki usage ek nazar mein</p>
-                          </div>
-                        </div>
-                        {/* Header row */}
-                        <div className="grid border-b border-white/6 text-center" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1.1fr' }}>
-                          <div className="px-2 py-1.5 text-[7px] font-black text-slate-500 uppercase text-left">Feature</div>
-                          <div className="py-1.5 text-[7px] font-black text-slate-400 border-l border-white/5" style={{ background: 'rgba(71,85,105,0.12)' }}>🆓 Free</div>
-                          <div className="py-1.5 text-[7px] font-black text-sky-400 border-l border-white/5" style={{ background: 'rgba(14,165,233,0.07)' }}>🔵 Pro</div>
-                          <div className="py-1.5 text-[7px] font-black text-violet-400 border-l border-white/5" style={{ background: 'rgba(124,58,237,0.1)' }}>⚡ Max</div>
-                          <div className="py-1.5 text-[7px] font-black text-amber-400 border-l border-white/5" style={{ background: 'rgba(251,191,36,0.08)' }}>📊 Aaj</div>
-                        </div>
-                        {/* Data rows */}
-                        {(() => {
-                          // usageMap: label → today's used count (only tracked features)
-                          const _usageMap: Record<string, number> = {
-                            'MCQ Practice':  _mcqUsed,
-                            'Downloads':     _dlUsed,
-                            'PDF Access':    _pdfUsed,
-                            'Video':         _vidUsed,
-                            'Notes Reading': _cnUsed,
-                            'Flashcards':    _fcUsed,
-                            'Write Mode':    _writeUsed,
-                          };
-                          const rows = [
-                            { icon: '❓', label: 'MCQ Practice',   f: _ld.mcq.free,       b: _ld.mcq.basic,       u: _ld.mcq.ultra },
-                            { icon: '📥', label: 'Downloads',      f: _ld.dl.free,        b: _ld.dl.basic,        u: _ld.dl.ultra },
-                            { icon: '📄', label: 'PDF Access',     f: _ld.pdf.free,       b: _ld.pdf.basic,       u: _ld.pdf.ultra },
-                            { icon: '🎬', label: 'Video',          f: _ld.video.free,     b: _ld.video.basic,     u: _ld.video.ultra },
-                            { icon: '📖', label: 'Notes Reading',  f: _ld.notes.free,     b: _ld.notes.basic,     u: _ld.notes.ultra },
-                            { icon: '🃏', label: 'Flashcards',     f: _ld.flashcard.free, b: _ld.flashcard.basic, u: _ld.flashcard.ultra },
-                            { icon: '✍️', label: 'Write Mode',     f: _ld.write.free,     b: _ld.write.basic,     u: _ld.write.ultra },
-                            { icon: '💡', label: 'Concept Notes',  f: _ld.concept.free,   b: _ld.concept.basic,   u: _ld.concept.ultra },
-                          ];
-                          const fmt = (v: number) => v >= UNLIMITED ? '∞' : v === 0 ? '🔒' : String(v);
-                          const clr = (v: number, base: string) => v >= UNLIMITED ? '#10b981' : v === 0 ? '#334155' : base;
-                          return rows.map((row, idx) => {
-                            const fStr = fmt(row.f), bStr = fmt(row.b), uStr = fmt(row.u);
-                            const myLim = _tier === 'ULTRA' ? row.u : _tier === 'BASIC' ? row.b : row.f;
-                            const usedVal = _usageMap[row.label] ?? null;
-                            const isTracked = usedVal !== null && _isOwnTier;
-                            const usePct = (isTracked && myLim > 0 && myLim < UNLIMITED) ? Math.min(100, Math.round((usedVal! / myLim) * 100)) : 0;
-                            const useClr = isTracked
-                              ? (myLim >= UNLIMITED ? '#10b981' : usePct >= 100 ? '#ef4444' : usePct >= 75 ? '#f97316' : usePct >= 50 ? '#eab308' : usePct >= 25 ? '#3b82f6' : '#22c55e')
-                              : '#475569';
-                            return (
-                              <div key={row.label} className={`border-b border-white/[0.04]`} style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1.1fr', display: 'grid' }}>
-                                <div className="px-2 py-2 flex items-center gap-1.5 min-w-0">
-                                  <span className="text-xs shrink-0">{row.icon}</span>
-                                  <p className="text-[7px] font-bold text-slate-300 leading-tight truncate">{row.label}</p>
-                                </div>
-                                <div className="py-2 flex items-center justify-center border-l border-white/[0.04]" style={{ background: 'rgba(71,85,105,0.06)' }}>
-                                  <span className="text-[8px] font-black" style={{ color: clr(row.f, '#94a3b8') }}>{fStr}</span>
-                                </div>
-                                <div className="py-2 flex items-center justify-center border-l border-white/[0.04]" style={{ background: 'rgba(14,165,233,0.04)' }}>
-                                  <span className="text-[8px] font-black" style={{ color: clr(row.b, '#38bdf8') }}>{bStr}</span>
-                                </div>
-                                <div className="py-2 flex items-center justify-center border-l border-white/[0.04]" style={{ background: 'rgba(124,58,237,0.06)' }}>
-                                  <span className="text-[8px] font-black" style={{ color: clr(row.u, '#a78bfa') }}>{uStr}</span>
-                                </div>
-                                {/* Aaj column — color-coded usage bar + number */}
-                                <div className="py-1.5 px-1.5 flex flex-col items-center justify-center gap-0.5 border-l border-white/[0.04]" style={{ background: 'rgba(251,191,36,0.04)' }}>
-                                  {isTracked ? (
-                                    <>
-                                      <span className="text-[8px] font-black" style={{ color: useClr }}>
-                                        {myLim >= UNLIMITED ? `${usedVal}` : `${usedVal}/${myLim}`}
-                                      </span>
-                                      {myLim > 0 && myLim < UNLIMITED && (
-                                        <div className="w-full h-1 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
-                                          <div className="h-full rounded-full transition-all" style={{ width: `${usePct}%`, background: useClr }} />
-                                        </div>
-                                      )}
-                                      {myLim >= UNLIMITED && <span className="text-[6px] text-emerald-500 font-black">∞</span>}
-                                    </>
-                                  ) : (
-                                    <span className="text-[7px] text-slate-600">—</span>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          });
-                        })()}
-                        {/* Bonus Login Credits row */}
-                        <div className="border-t border-white/[0.04]" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1.1fr', display: 'grid' }}>
-                          <div className="px-2 py-2 flex items-center gap-1.5">
-                            <span className="text-xs">🎁</span>
-                            <p className="text-[7px] font-bold text-slate-300 leading-tight">Login CR</p>
-                          </div>
-                          {[0,1,2].map(i => (
-                            <div key={i} className="py-2 flex items-center justify-center border-l border-white/[0.04]"
-                              style={{ background: i === 0 ? 'rgba(71,85,105,0.06)' : i === 1 ? 'rgba(14,165,233,0.04)' : 'rgba(124,58,237,0.06)' }}>
-                              <span className="text-[8px] font-black text-amber-400">
-                                {_ld.bonusLoginCredits > 0 ? `+${_ld.bonusLoginCredits}` : '—'}
-                              </span>
-                            </div>
-                          ))}
-                          <div className="py-2 flex items-center justify-center border-l border-white/[0.04]" style={{ background: 'rgba(251,191,36,0.04)' }}>
-                            <span className="text-[7px] text-slate-600">—</span>
-                          </div>
-                        </div>
-                        {/* Credit Write Max row */}
-                        <div className="border-t border-white/[0.04]" style={{ gridTemplateColumns: '2fr 1fr 1fr 1fr 1.1fr', display: 'grid' }}>
-                          <div className="px-2 py-2 flex items-center gap-1.5">
-                            <span className="text-xs">✏️</span>
-                            <p className="text-[7px] font-bold text-slate-300 leading-tight">Write (Max)</p>
-                          </div>
-                          {[0,1,2].map(i => (
-                            <div key={i} className="py-2 flex items-center justify-center border-l border-white/[0.04]"
-                              style={{ background: i === 0 ? 'rgba(71,85,105,0.06)' : i === 1 ? 'rgba(14,165,233,0.04)' : 'rgba(124,58,237,0.06)' }}>
-                              <span className="text-[8px] font-black text-sky-400">{_creditMax}</span>
-                            </div>
-                          ))}
-                          <div className="py-1.5 px-1.5 flex flex-col items-center justify-center gap-0.5 border-l border-white/[0.04]" style={{ background: 'rgba(251,191,36,0.04)' }}>
-                            {_isOwnTier ? (() => {
-                              const wPct = _creditMax > 0 ? Math.min(100, Math.round((_paidWriteUsed / _creditMax) * 100)) : 0;
-                              const wClr = wPct >= 100 ? '#ef4444' : wPct >= 75 ? '#f97316' : wPct >= 50 ? '#eab308' : wPct >= 25 ? '#3b82f6' : '#22c55e';
-                              return (
-                                <>
-                                  <span className="text-[8px] font-black" style={{ color: wClr }}>{_paidWriteUsed}/{_creditMax}</span>
-                                  <div className="w-full h-1 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
-                                    <div className="h-full rounded-full transition-all" style={{ width: `${wPct}%`, background: wClr }} />
-                                  </div>
-                                </>
-                              );
-                            })() : <span className="text-[7px] text-slate-600">—</span>}
-                          </div>
-                        </div>
-                        {/* Footer note */}
-                        <div className="px-3 py-2 border-t border-white/6" style={{ background: 'rgba(255,255,255,0.02)' }}>
-                          <p className="text-[7px] text-slate-600">🔒 = Locked · ∞ = Unlimited · 📊 Aaj = Aaj ki actual usage (sirf apna plan)</p>
-                        </div>
-                      </div>
-
-                      {/* Upgrade nudge */}
-                      {_tier === 'FREE' && (
-                        <div className="rounded-xl px-3 py-2.5 flex items-center gap-2.5" style={{ background: 'linear-gradient(135deg, #7c3aed18, #4f46e518)', border: '1px solid #7c3aed30' }}>
-                          <span className="text-base">⚡</span>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-[10px] font-black text-violet-300">Upgrade to Basic / Ultra</p>
-                            <p className="text-[8px] text-slate-400 mt-0.5">More limits unlock at higher levels</p>
-                          </div>
-                        </div>
-                      )}
-                      <div className="h-4" />
-                    </>
-                  );
-                })()}
-
-                {/* ── FEATURES (LEVEL SYSTEM) TAB ── */}
-                {scorePanelTab === 'FEATURES' && (() => {
-                  const _fl = lvl;
-                  const animLabels = ['None', 'Subtle shimmer ✨', 'Glow effect 🌟', 'Strong glow + sparks 💫', 'Legendary animation 🌈'];
-                  const animActive = _fl.animationIntensity > 0;
-                  const nextLvlF = LEVEL_INFO[_fl.level]; // next level info (LEVEL_INFO is 0-indexed)
-                  const _ld = getLevelDailyLimits(_fl.level);
-                  const _l1 = getLevelDailyLimits(1);
-                  const hasBonus = _ld.mcq.free > _l1.mcq.free;
-                  const _bonusCredits = getLevelDailyLimitsWithOverride(_fl.level, settings)?.bonusLoginCredits ?? 0;
-                  const _featureList = [
-                    {
-                      emoji: '🏷️',
-                      title: _fl.discount > 0 ? `${_fl.discount}% Store Discount` : 'Store Discount: None',
-                      desc: _fl.discount > 0
-                        ? `Automatic ${_fl.discount}% off on all store purchases — coins, subscriptions, everything`
-                        : 'No discount yet — starts at Level 3',
-                      color: _fl.discount > 0 ? _fl.color : '#475569',
-                      active: _fl.discount > 0,
-                    },
-                    {
-                      emoji: '✨',
-                      title: animActive ? `Top Bar Animation: ${animLabels[_fl.animationIntensity]}` : 'Top Bar Animation: None',
-                      desc: animActive
-                        ? 'A dynamic animation effect displays on your top bar — independent of subscription'
-                        : 'No top bar animation — unlocks at Level 3',
-                      color: animActive ? '#818cf8' : '#475569',
-                      active: animActive,
-                    },
-                    {
-                      emoji: '🎨',
-                      title: _fl.nameColor ? 'Colored Username 🔥' : 'Username Color: Normal',
-                      desc: _fl.nameColor
-                        ? 'Your name appears in a vibrant color on the leaderboard, chat, and profile'
-                        : 'No special name color — unlocks at Level 4',
-                      color: _fl.nameColor ?? '#475569',
-                      active: !!_fl.nameColor,
-                    },
-                    {
-                      emoji: '🏆',
-                      title: 'Level Leaderboard Entry',
-                      desc: 'Your rank will be visible on the global level leaderboard with all users',
-                      color: '#eab308',
-                      active: true,
-                    },
-                    {
-                      emoji: '📊',
-                      title: 'Activity Score Tracking',
-                      desc: 'Earn daily score from MCQs, videos, PDFs, audio — level up. Notes/PDF/Video/Audio: +5 pts every 30 sec, up to 5 min max.',
-                      color: '#10b981',
-                      active: true,
-                    },
-                    {
-                      emoji: '⏱️',
-                      title: _fl.level >= 9 ? `Reading Time Bonus: Max ${getMaxReadingSeconds(_fl.level)}s (${Math.floor(getMaxReadingSeconds(_fl.level)/60)}m ${getMaxReadingSeconds(_fl.level)%60}s) 🔥` : 'Reading Time Bonus: Unlocks at Level 9',
-                      desc: _fl.level >= 9
-                        ? `Level ${_fl.level} bonus: Max reading time for Notes/PDF/Video/Audio is ${getMaxReadingSeconds(_fl.level)} seconds (base 300s + ${(_fl.level-8)*30}s bonus). +30 sec per level.`
-                        : 'After Level 8 (GrandMaster), each level adds +30 sec to max reading/watching time — more time means more score.',
-                      color: _fl.level >= 9 ? '#f59e0b' : '#475569',
-                      active: _fl.level >= 9,
-                    },
-                    {
-                      emoji: '🎁',
-                      title: 'Level-Up Celebration',
-                      desc: 'A special popup and benefits card appears when your level changes',
-                      color: '#f59e0b',
-                      active: true,
-                    },
-                    {
-                      emoji: '📈',
-                      title: `Daily Limits — 🆓${_ld.mcq.free} · 🔵${_ld.mcq.basic} · ⚡${_ld.mcq.ultra} MCQ/day`,
-                      desc: hasBonus
-                        ? `Free=${_ld.mcq.free}, Basic=${_ld.mcq.basic}, Ultra=${_ld.mcq.ultra}. Downloads: Free=${_ld.dl.free}, Basic=${_ld.dl.basic}, Ultra=${_ld.dl.ultra}/day. Video/PDF (Basic=${_ld.video.basic}, Ultra=${_ld.video.ultra} free/day).`
-                        : `Daily MCQ limits at this level: Free=${_ld.mcq.free}, Basic=${_ld.mcq.basic}, Ultra=${_ld.mcq.ultra}. Limits increase at higher levels.`,
-                      color: hasBonus ? '#06b6d4' : '#475569',
-                      active: true,
-                    },
-                    ...(_fl.level >= 6 ? [{
-                      emoji: '💰',
-                      title: `Sunday Streak Recovery Bonus: +${_bonusCredits} CR (Sunday first login pe)`,
-                      desc: `First login on Sunday after a streak break gives ${_bonusCredits} extra credits — L6+ exclusive!`,
-                      color: '#f59e0b',
-                      active: true,
-                    }] : []),
-                    ...(_fl.level >= 5 ? [{
-                      emoji: '💎',
-                      title: 'Elite Status Badge',
-                      desc: 'You will appear on the leaderboard with a special Elite/Legend badge',
-                      color: _fl.color,
-                      active: true,
-                    }] : []),
-                    // ── Event access by level ──
-                    {
-                      emoji: '🏷️',
-                      title: `Discount Event: ${_fl.level >= EVENT_MIN_LEVELS.specialDiscount ? '✓ Accessible' : `🔒 Level ${EVENT_MIN_LEVELS.specialDiscount}+ required`}`,
-                      desc: `Unlocks at Level ${EVENT_MIN_LEVELS.specialDiscount} — get the full benefit of store discount events`,
-                      color: _fl.level >= EVENT_MIN_LEVELS.specialDiscount ? '#f59e0b' : '#475569',
-                      active: _fl.level >= EVENT_MIN_LEVELS.specialDiscount,
-                    },
-                    {
-                      emoji: '🎁',
-                      title: `Credit Bonus Event: ${_fl.level >= EVENT_MIN_LEVELS.creditBonus ? '✓ Accessible' : `🔒 Level ${EVENT_MIN_LEVELS.creditBonus}+ required`}`,
-                      desc: `Unlocks at Level ${EVENT_MIN_LEVELS.creditBonus} — earn extra % bonus credits on MCQ prizes and gifts`,
-                      color: _fl.level >= EVENT_MIN_LEVELS.creditBonus ? '#22c55e' : '#475569',
-                      active: _fl.level >= EVENT_MIN_LEVELS.creditBonus,
-                    },
-                    {
-                      emoji: '📈',
-                      title: `Daily Limit Boost Event: ${_fl.level >= EVENT_MIN_LEVELS.dailyLimitBoost ? '✓ Accessible' : `🔒 Level ${EVENT_MIN_LEVELS.dailyLimitBoost}+ required`}`,
-                      desc: `Unlocks at Level ${EVENT_MIN_LEVELS.dailyLimitBoost} — get the full benefit of daily score limit boost events`,
-                      color: _fl.level >= EVENT_MIN_LEVELS.dailyLimitBoost ? '#10b981' : '#475569',
-                      active: _fl.level >= EVENT_MIN_LEVELS.dailyLimitBoost,
-                    },
-                    {
-                      emoji: '🚀',
-                      title: `Score Boost Event: ${_fl.level >= EVENT_MIN_LEVELS.scoreBoost ? '✓ Accessible' : `🔒 Level ${EVENT_MIN_LEVELS.scoreBoost}+ required`}`,
-                      desc: `Unlocks at Level ${EVENT_MIN_LEVELS.scoreBoost} — boosted scores during the event`,
-                      color: _fl.level >= EVENT_MIN_LEVELS.scoreBoost ? '#f97316' : '#475569',
-                      active: _fl.level >= EVENT_MIN_LEVELS.scoreBoost,
-                    },
-                    {
-                      emoji: '🪙',
-                      title: `Credit Free Event: ${_fl.level >= EVENT_MIN_LEVELS.creditFree ? '✓ Accessible' : `🔒 Level ${EVENT_MIN_LEVELS.creditFree}+ required`}`,
-                      desc: `Unlocks at Level ${EVENT_MIN_LEVELS.creditFree} — unlock content without credits during the event`,
-                      color: _fl.level >= EVENT_MIN_LEVELS.creditFree ? '#06b6d4' : '#475569',
-                      active: _fl.level >= EVENT_MIN_LEVELS.creditFree,
-                    },
-                    {
-                      emoji: '🌍',
-                      title: `Global Free Access Event: ${_fl.level >= EVENT_MIN_LEVELS.globalFreeAccess ? '✓ Accessible' : `🔒 Level ${EVENT_MIN_LEVELS.globalFreeAccess}+ required`}`,
-                      desc: `Unlocks at Level ${EVENT_MIN_LEVELS.globalFreeAccess} — everything is free during global free access events`,
-                      color: _fl.level >= EVENT_MIN_LEVELS.globalFreeAccess ? '#10b981' : '#475569',
-                      active: _fl.level >= EVENT_MIN_LEVELS.globalFreeAccess,
-                    },
-                  ];
-                  return (
-                    <>
-                      {/* Section header */}
-                      <div className="rounded-2xl px-4 py-3 flex items-center gap-3" style={{ background: `${_fl.color}15`, border: `1px solid ${_fl.color}35` }}>
-                        <span className="text-xl">🎯</span>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[10px] font-black uppercase tracking-widest" style={{ color: _fl.color }}>SAARI FEATURES — LEVEL {_fl.level}</p>
-                          <p className="text-[8px] text-slate-500 mt-0.5">Level badhne par aur features unlock honge</p>
-                        </div>
-                        <span className="text-lg">{_fl.emoji}</span>
-                      </div>
-
-                      {/* Feature cards */}
-                      <div className="rounded-2xl overflow-hidden border border-white/8">
-                        {_featureList.map((feat, idx) => (
-                          <div key={idx} className={`px-4 py-3 flex items-start gap-3 ${idx < _featureList.length - 1 ? 'border-b border-white/5' : ''}`}
-                            style={{ background: idx % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent' }}>
-                            <span className="text-base w-6 text-center shrink-0 mt-0.5">{feat.emoji}</span>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-[10px] font-black leading-tight" style={{ color: feat.active ? feat.color : '#94a3b8' }}>{feat.title}</p>
-                              <p className="text-[8px] text-slate-500 mt-0.5 leading-relaxed">{feat.desc}</p>
-                            </div>
-                            <span className={`text-xs shrink-0 mt-0.5 font-black ${feat.active ? 'text-emerald-400' : 'text-slate-700'}`}>{feat.active ? '✓' : '✗'}</span>
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* Next level preview */}
-                      {nextLvlF && (
-                        <div className="rounded-2xl px-4 py-3 flex items-center gap-3 bg-white/4 border border-white/10">
-                          <span className="text-base">⚡</span>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-[10px] font-black text-white">Level {nextLvlF.level} · {nextLvlF.label} →</p>
-                            <p className="text-[8px] text-slate-500 mt-0.5">{nextLvlF.minScore.toLocaleString('en-IN')} pts pe unlock · {nextLvlF.discount}% discount</p>
-                          </div>
-                          <span className="text-base">{nextLvlF.emoji}</span>
-                        </div>
-                      )}
-
-                      {/* Close CTA */}
-                      <button
-                        onClick={() => { setShowScorePanel(false); setScorePanelTab('LEVEL'); }}
-                        className="w-full py-3 rounded-2xl font-black text-sm text-white"
-                        style={{ background: `linear-gradient(135deg, ${_fl.color}cc, ${_fl.color}88)` }}
-                      >Samajh Gaya ✓</button>
-                      <div className="h-4" />
-                    </>
-                  );
-                })()}
-
-                {/* ── LEVEL SYSTEM TAB (default) ── */}
-                {scorePanelTab === 'LEVEL' && showScoreHistory && (
-                  <ScoreHistoryDashboard user={user} onBack={() => setShowScoreHistory(false)} />
-                )}
-                {scorePanelTab === 'LEVEL' && <React.Fragment>
-
-                {/* Next Level + Daily Score — side by side */}
-                <div className="grid grid-cols-2 gap-2.5">
-                  {nextLvl ? (
-                    <div className="rounded-2xl p-3.5 bg-white/4 border border-white/10 flex flex-col justify-between">
-                      <div className="flex items-center gap-1.5 mb-2">
-                        <span className="text-lg">{nextLvl.emoji}</span>
-                        <div>
-                          <p className="text-[10px] font-black text-white leading-none">L{nextLvl.level} · {nextLvl.label}</p>
-                          <p className="text-[8px] text-slate-500 mt-0.5">{(nextLvl.minScore - totalScore).toLocaleString('en-IN')} pts left</p>
-                        </div>
-                      </div>
-                      <div>
-                        <div className="h-1.5 bg-white/8 rounded-full overflow-hidden">
-                          <div className="h-full rounded-full" style={{ width: `${progress}%`, background: `linear-gradient(90deg, ${lvl.color}88, ${lvl.color})` }} />
-                        </div>
-                        <p className="text-[8px] text-slate-600 mt-1">{progress}% complete · {nextLvl.discount}% discount next</p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="rounded-2xl p-3.5 bg-amber-900/20 border border-amber-500/30 flex flex-col justify-center text-center">
-                      <p className="text-2xl mb-1">🏆</p>
-                      <p className="text-[10px] font-black text-amber-400 leading-tight">Max Level!</p>
-                      <p className="text-[8px] text-amber-500/60 mt-0.5">{lvl.discount}% discount active</p>
-                    </div>
-                  )}
-
-                  {(() => {
-                    const earned = getDailyScoreEarned(user.id);
-                    const baseLimit = getDailyScoreLimit(user.subscriptionLevel, user.isPremium, (user as any).scoreLimitBoostPercent, (user as any).scoreLimitBoostExpiry);
-                    const isUltra = user.isPremium && user.subscriptionLevel === 'ULTRA';
-                    const isBasic = user.isPremium && user.subscriptionLevel === 'BASIC';
-                    // Daily Limit Boost Event extra pts (requires L3+)
-                    const dlbEvent = (settings as any)?.dailyLimitBoostEvent;
-                    const dlbNow = Date.now();
-                    const dlbActive = dlbEvent?.enabled && meetsEventLevel(EVENT_MIN_LEVELS.dailyLimitBoost) &&
-                      (dlbEvent.startsAt ? new Date(dlbEvent.startsAt).getTime() <= dlbNow : true) &&
-                      (dlbEvent.endsAt ? new Date(dlbEvent.endsAt).getTime() > dlbNow : true);
-                    const eventExtra = dlbActive
-                      ? (isUltra ? (dlbEvent?.mcqBoostUltra || 0) : isBasic ? (dlbEvent?.mcqBoostBasic || 0) : (dlbEvent?.mcqBoostFree || 0))
-                      : 0;
-                    const dailyLimit = baseLimit + eventExtra;
-                    const pct = Math.min(100, Math.round((earned / dailyLimit) * 100));
-                    return (
-                      <div className="rounded-2xl p-3.5 bg-emerald-900/20 border border-emerald-500/30 flex flex-col justify-between">
-                        <div>
-                          <div className="flex items-center justify-between mb-0.5">
-                            <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">Aaj</p>
-                            <div className="flex items-center gap-1">
-                              {isUltra && <span className="text-[7px] font-black text-amber-300 bg-amber-900/30 px-1 rounded">1.75×</span>}
-                              {isBasic && <span className="text-[7px] font-black text-sky-300 bg-sky-900/30 px-1 rounded">1.25×</span>}
-                              {dlbActive && eventExtra > 0 && <span className="text-[7px] font-black text-emerald-300 bg-emerald-900/40 px-1 rounded">📈 +{eventExtra}</span>}
-                            </div>
-                          </div>
-                          <p className="text-base font-black text-white leading-tight">{earned} <span className="text-[10px] font-normal text-slate-400">/ {dailyLimit}</span></p>
-                          {dlbActive && eventExtra > 0 ? (
-                            <p className="text-[8px] text-emerald-500/80">{baseLimit} + <span className="text-emerald-400 font-black">+{eventExtra} event</span> = {dailyLimit} pts</p>
-                          ) : (
-                            <p className="text-[8px] text-slate-500">pts aaj</p>
-                          )}
-                        </div>
-                        <div>
-                          <div className="h-1.5 bg-white/8 rounded-full overflow-hidden mt-2">
-                            <div className="h-full rounded-full" style={{ width: `${pct}%`, background: 'linear-gradient(90deg, #10b981, #34d399)' }} />
-                          </div>
-                          <p className="text-[8px] text-slate-600 mt-1">{pct === 100 ? '🎉 Complete!' : `${dailyLimit - earned} pts baki`}</p>
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </div>
-
-                {/* Score History Button */}
-                <button
-                  onClick={() => setShowScoreHistory(true)}
-                  className="w-full flex items-center gap-2.5 px-4 py-3 rounded-2xl active:scale-[0.98] transition-all"
-                  style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)' }}>
-                  <span className="text-base">📊</span>
-                  <div className="flex-1 text-left">
-                    <p className="text-[11px] font-black text-white">Score History</p>
-                    <p className="text-[9px] text-slate-500">Tera din ka pura score record dekho</p>
-                  </div>
-                  <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400">Dekho →</span>
-                </button>
-
-                {/* Score Boost Active Banner */}
-                {(() => {
-                  const boost = getActiveBoost(user);
-                  if (!boost) return null;
-                  return (
-                    <div className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-2xl bg-orange-900/25 border border-orange-500/30">
-                      <span className="text-xl">🚀</span>
-                      <div>
-                        <p className="text-[11px] font-black text-orange-300">Score Boost Active!</p>
-                        <p className="text-[9px] text-orange-500/80 mt-0.5">+{boost}% extra · Expires {new Date(user.scoreBoostExpiry!).toLocaleDateString('en-IN')}</p>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* Earn Score — clean 2-column activity grid */}
-                <div className="rounded-2xl overflow-hidden border border-white/10">
-                  <div className="px-4 py-2.5 border-b border-white/6 flex items-center gap-2" style={{ background: 'rgba(255,255,255,0.03)' }}>
-                    <span>⚡</span>
-                    <p className="text-[10px] font-black text-white uppercase tracking-widest">Score Kaise Kamayein</p>
-                  </div>
-                  {/* Time-based rule banner */}
-                  <div className="px-4 py-2.5 border-b border-white/6 flex items-center gap-2.5" style={{ background: 'rgba(99,102,241,0.08)' }}>
-                    <span className="text-base">⏱️</span>
-                    <div>
-                      <p className="text-[10px] font-black text-indigo-300 leading-tight">Notes · PDF · Video · Audio — Reading / Watching / Listening Score</p>
-                      <p className="text-[9px] font-bold text-slate-400 mt-0.5">Every <span className="text-white font-black">30 sec</span> earns <span className="text-indigo-300 font-black">+5 pts</span> · Max <span className="text-white font-black">5 min</span> (+30 sec/level bonus after Level 8)</p>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2">
-                    {[
-                      { emoji: '📚', label: 'Reading Notes', pts: '+5 pts / 30 sec', sub: 'Max 5 min', color: '#8b5cf6' },
-                      { emoji: '📄', label: 'Reading PDF', pts: '+5 pts / 30 sec', sub: 'Max 5 min', color: '#3b82f6' },
-                      { emoji: '🎬', label: 'Watching Video', pts: '+5 pts / 30 sec', sub: 'Max 5 min', color: '#f97316' },
-                      { emoji: '🎵', label: 'Listening Audio', pts: '+5 pts / 30 sec', sub: 'Max 5 min', color: '#10b981' },
-                      { emoji: '❓', label: 'MCQ Correct Answer', pts: '+2 pts each', sub: 'Per correct answer', color: '#ec4899' },
-                      { emoji: '📅', label: 'Daily Login', pts: `+${ACTIVITY_SCORES.DAILY_LOGIN} pts`, sub: 'Login every day', color: '#eab308' },
-                    ].map((item, i) => (
-                      <div key={item.label} className={`flex items-center gap-2.5 px-3.5 py-3 ${i % 2 === 0 ? 'border-r border-white/6' : ''} ${i < 4 ? 'border-b border-white/6' : ''}`}
-                        style={{ background: `${item.color}08` }}>
-                        <span className="text-xl flex-shrink-0">{item.emoji}</span>
-                        <div className="min-w-0">
-                          <p className="text-[10px] font-black text-slate-200 leading-tight">{item.label}</p>
-                          <p className="text-[9px] font-black mt-0.5" style={{ color: item.color }}>{item.pts}</p>
-                          <p className="text-[7px] text-slate-500 mt-0.5">{item.sub}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="px-4 py-2.5 border-t border-white/6 flex flex-col gap-2" style={{ background: 'rgba(255,255,255,0.02)' }}>
-                    <div className="flex items-center gap-3 flex-wrap">
-                      <p className="text-[8px] font-black text-slate-600 uppercase tracking-widest">Multiplier:</p>
-                      {[
-                        { label: '🌱 Free', val: '1×', color: '#64748b' },
-                        { label: '★ Basic', val: '1.2×', color: '#06b6d4' },
-                        { label: '⚡ Ultra', val: '1.5×', color: '#f59e0b' },
-                      ].map(m => (
-                        <div key={m.label} className="flex items-center gap-1 px-2 py-0.5 rounded-lg" style={{ background: `${m.color}18`, border: `1px solid ${m.color}30` }}>
-                          <span className="text-[8px] font-bold" style={{ color: m.color }}>{m.label}</span>
-                          <span className="text-[9px] font-black text-white">{m.val}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="flex items-center gap-2 px-2 py-1.5 rounded-xl" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }}>
-                      <span className="text-base">💎</span>
-                      <p className="text-[8px] font-bold text-amber-400">After Level 8 (GrandMaster), each level adds +30 sec to max reading time — more time = more score!</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Level Roadmap — horizontal scroll chips */}
-                <div className="rounded-2xl overflow-hidden border border-white/10">
-                  <div className="px-4 py-2.5 border-b border-white/6" style={{ background: 'rgba(255,255,255,0.03)' }}>
-                    <p className="text-[10px] font-black text-white uppercase tracking-widest">🏅 Level Roadmap</p>
-                  </div>
-                  <div className="flex overflow-x-auto scrollbar-none gap-2.5 p-4">
-                    {LEVEL_INFO.map(l => {
-                      const isCurrentLevel = lvl.level === l.level;
-                      const isUnlocked = totalScore >= l.minScore;
-                      return (
-                        <button key={l.level} onClick={() => setSelectedLevelDetail(l)}
-                          className="flex-shrink-0 flex flex-col items-center gap-1.5 w-[60px] active:scale-95 transition-transform"
-                          style={{ opacity: isUnlocked ? 1 : 0.5 }}>
-                          <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-xl relative"
-                            style={{
-                              background: isCurrentLevel ? `${l.color}30` : isUnlocked ? `${l.color}14` : 'rgba(255,255,255,0.04)',
-                              border: isCurrentLevel ? `2px solid ${l.color}` : `1px solid ${l.color}28`,
-                              boxShadow: isCurrentLevel ? `0 0 14px ${l.glowColor}` : 'none',
-                            }}>
-                            {l.emoji}
-                            {isCurrentLevel && (
-                              <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center" style={{ background: l.color }}>
-                                <span style={{ fontSize: '6px', color: 'white', fontWeight: 900 }}>YOU</span>
-                              </div>
-                            )}
-                          </div>
-                          <p className="text-[8px] font-black leading-none text-center" style={{ color: isCurrentLevel ? l.color : isUnlocked ? '#cbd5e1' : '#475569' }}>L{l.level}</p>
-                          <p className="text-[7px] text-center leading-tight" style={{ color: l.discount > 0 ? '#10b981' : '#475569' }}>{l.discount > 0 ? `${l.discount}%` : '—'}</p>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div className="px-4 pb-3 flex items-center justify-between">
-                    <p className="text-[8px] text-slate-600">← Swipe · Tap any level to view</p>
-                    <p className="text-[8px] text-emerald-600 font-bold">Green % = store discount</p>
-                  </div>
-                </div>
-
-                <div className="h-4" />
-                </React.Fragment>}
-
-              </div>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      {showScorePanel && (
+        <StudentLevelPage
+          user={user}
+          settings={settings}
+          onClose={() => {
+            setShowScorePanel(false);
+            setViewedLevelIdx(0);
+          }}
+        />
+      )}
 
       {/* ═══════════ LEVEL DETAIL POPUP ═══════════ */}
       {selectedLevelDetail && (() => {
@@ -26872,34 +25980,12 @@ RULES:
             color: '#f59e0b',
             active: true,
           },
-          // ── Level-based Daily Limits (Free / Basic / Ultra) ──
-          (() => {
-            const ld = getLevelDailyLimits(l.level);
-            const l1 = getLevelDailyLimits(1);
-            const hasBonus = ld.mcq.free > l1.mcq.free;
-            return {
-              emoji: '📈',
-              title: `Daily Limits — 🆓${ld.mcq.free} · 🔵${ld.mcq.basic} · ⚡${ld.mcq.ultra} MCQ/day`,
-              desc: hasBonus
-                ? `Daily MCQ limits at this level: Free=${ld.mcq.free}, Basic=${ld.mcq.basic}, Ultra=${ld.mcq.ultra}. Downloads: Free=${ld.dl.free}, Basic=${ld.dl.basic}, Ultra=${ld.dl.ultra}/day. Video/PDF (Basic=${ld.video.basic}, Ultra=${ld.video.ultra} free/day).`
-                : `Daily MCQ limits at this level: Free=${ld.mcq.free}, Basic=${ld.mcq.basic}, Ultra=${ld.mcq.ultra}. Limits increase at higher levels.`,
-              color: hasBonus ? '#06b6d4' : undefined,
-              active: true,
-            };
-          })(),
           // ── L6+ new perks ──
           ...(l.level >= 6 ? [{
             emoji: '💰',
             title: `Sunday Streak Recovery Bonus: +${getLevelLimitBonus(l.level).bonusLoginCredits} CR`,
             desc: `First login on Sunday after a streak break gives ${getLevelLimitBonus(l.level).bonusLoginCredits} extra credits — L6+ exclusive perk!`,
             color: '#f59e0b',
-            active: true,
-          }] : []),
-          ...(l.level >= 6 ? [{
-            emoji: '✍️',
-            title: `Extended Credit Write Mode: ${getLevelLimitBonus(l.level).creditWriteMax}/day`,
-            desc: `Write Mode sessions unlockable with credits are increased to ${getLevelLimitBonus(l.level).creditWriteMax} for today (base: 100) — L6 = 120, L7 = 130, L8 = 150.`,
-            color: '#8b5cf6',
             active: true,
           }] : []),
           ...(l.level >= 5 ? [{
@@ -27068,13 +26154,6 @@ RULES:
                       free:  '0 CR',
                       basic: ld.bonusLoginCredits > 0 ? `+${ld.bonusLoginCredits} CR` : '+5 CR',
                       ultra: ld.bonusLoginCredits > 0 ? `+${ld.bonusLoginCredits + 5} CR` : '+10 CR',
-                    },
-                    {
-                      icon: '✍️', label: 'Write (Credits)',
-                      free:  `${ld.creditWriteMax} max/day`,
-                      basic: `${ld.creditWriteMax} max/day`,
-                      ultra: `${ld.creditWriteMax} max/day`,
-                      freeNote: '10 CR/unlock',
                     },
                   ];
                   return (

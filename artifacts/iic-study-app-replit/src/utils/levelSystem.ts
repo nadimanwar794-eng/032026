@@ -16,8 +16,8 @@ export const LEVEL_INFO: LevelInfo[] = [
   { level: 2,  minScore: 1000,       label: 'Learner',          emoji: '🌿', color: '#6ee7b7', gradient: 'from-emerald-300 to-teal-400',                 glowColor: 'rgba(110,231,183,0.35)', discount: 0,  animationIntensity: 0 },
   { level: 3,  minScore: 2500,       label: 'Active Learner',   emoji: '🔍', color: '#38bdf8', gradient: 'from-sky-400 to-cyan-500',                     glowColor: 'rgba(56,189,248,0.4)',   discount: 2,  animationIntensity: 1 },
   { level: 4,  minScore: 5000,       label: 'Consistent Learner', emoji: '✨', color: '#06b6d4', gradient: 'from-cyan-400 to-sky-500',                   glowColor: 'rgba(6,182,212,0.45)',   discount: 3,  animationIntensity: 1, nameColor: '#06b6d4' },
-  { level: 5,  minScore: 10000,      label: 'Dedicated Student', emoji: '⚡', color: '#3b82f6', gradient: 'from-blue-400 to-indigo-500',                 glowColor: 'rgba(59,130,246,0.5)',   discount: 5,  animationIntensity: 2 },
-  { level: 6,  minScore: 25000,      label: 'Rising Achiever',  emoji: '🔥', color: '#f97316', gradient: 'from-orange-400 to-red-500',                   glowColor: 'rgba(249,115,22,0.55)',  discount: 8,  animationIntensity: 2 },
+  { level: 5,  minScore: 10000,      label: 'Dedicated Student', emoji: '⚡', color: '#3b82f6', gradient: 'from-blue-400 to-indigo-500',                 glowColor: 'rgba(59,130,246,0.5)',   discount: 5,  animationIntensity: 2, nameColor: '#3b82f6' },
+  { level: 6,  minScore: 25000,      label: 'Rising Achiever',  emoji: '🔥', color: '#f97316', gradient: 'from-orange-400 to-red-500',                   glowColor: 'rgba(249,115,22,0.55)',  discount: 8,  animationIntensity: 2, nameColor: '#f97316' },
   { level: 7,  minScore: 75000,      label: 'Expert Learner',   emoji: '💫', color: '#a855f7', gradient: 'from-violet-400 to-purple-600',                glowColor: 'rgba(168,85,247,0.6)',   discount: 10, animationIntensity: 2, nameColor: '#a855f7' },
   { level: 8,  minScore: 200000,     label: 'Master Learner',   emoji: '💎', color: '#f59e0b', gradient: 'from-amber-400 to-yellow-500',                 glowColor: 'rgba(245,158,11,0.65)',  discount: 13, animationIntensity: 3, nameColor: '#f59e0b' },
   { level: 9,  minScore: 500000,     label: 'Elite',            emoji: '🌟', color: '#eab308', gradient: 'from-yellow-400 to-amber-500',                 glowColor: 'rgba(234,179,8,0.75)',   discount: 17, animationIntensity: 3, nameColor: '#eab308' },
@@ -122,6 +122,7 @@ export const applyDailyLimitBonus = (
   level: number,
   dailyProgressPct: number,
 ): number => {
+  if (baseLimit >= UNLIMITED) return UNLIMITED;
   const bonusPct = getDailyLimitBonus(level, dailyProgressPct);
   if (bonusPct <= 0) return baseLimit;
   return Math.round(baseLimit * (1 + bonusPct / 100));
@@ -134,14 +135,11 @@ export interface LevelTierLimits {
   ultra: number;
 }
 
-// Special sentinel value meaning "unlimited" in the level table
+// Special sentinel value meaning "unlimited" in the level system
 export const UNLIMITED = 9999;
 
 // ── Unified daily limits per level ───────────────────────────────────────────
-// notes     = Chunk Notes Reading free sessions/day
-// tts       = Audio/TTS free sessions/day
-// concept   = Concept (DEEP_DIVE) tab free opens/day — Free=0, Basic/Ultra scaled with write
-// retention = Retention (PREMIUM) tab free opens/day — Free=0 (N/A), Basic/Ultra scaled with write
+// Level system no longer caps or restricts daily limits. All limits are UNLIMITED.
 export interface LevelDailyLimits {
   mcq:               LevelTierLimits;
   dl:                LevelTierLimits;
@@ -158,27 +156,11 @@ export interface LevelDailyLimits {
 }
 
 // ── Helper to build one level row ────────────────────────────────────────────
-// MCQ:       Fixed per-level counts (Free base × 1.2 Basic, × 1.5 Ultra)
-// DL:        Free = level×2/day; Basic = UNLIMITED; Ultra = UNLIMITED
-// PDF:       Free = 1/day (flat); Basic = 10/day; Ultra = UNLIMITED
-// Video:     Free = 1/day (flat); Basic = 5/day;  Ultra = UNLIMITED
-// Notes/TTS: Free = 1/day (flat); Basic = 5/day;  Ultra = UNLIMITED
-// Write(Fix):Free = 5/day (flat); Basic = 10/day; Ultra = 20/day
-// Concept:   Free = 5/day (flat); Basic = 5/day;  Ultra = 5/day (unchanged)
-// Retention: Free = 0 (N/A);     Basic = 10/day; Ultra = 20/day
-// Flashcard (Community MCQ): Free=10; Basic=15; Ultra=20 (flat)
-// Star lock: Free L1–L4 locked; Free L5+ unlocked; Basic/Ultra always unlocked
-// bonusLoginCredits: 0,5,10,15,20,30,40,50,65,80,100,...
-
+// All features are set to UNLIMITED (Level system limits removed as requested)
 const _BONUS_LOGIN = [0, 5, 10, 15, 20, 30, 40, 50, 65, 80, 100, 120, 150, 185, 220];
 const _CREDIT_WRITE_MAX = [100, 100, 100, 100, 100, 110, 120, 130, 140, 145, 150, 155, 160, 165, 170];
 
-// ── MCQ question counts per level (0-indexed, L1=index 0 … L15=index 14) ────
-// Free base values from subscription matrix; Basic = Free×1.2; Ultra = Free×1.5
-//         L1   L2   L3   L4   L5   L6   L7   L8   L9  L10  L11  L12  L13  L14  L15
-const _MCQ_FREE  = [ 50,  80, 100, 120, 150, 180, 200, 220, 250, 280, 300, 350, 400, 450, 500];
-const _MCQ_BASIC = [ 60,  96, 120, 144, 180, 216, 240, 264, 300, 336, 360, 420, 480, 540, 600];
-const _MCQ_ULTRA = [ 75, 120, 150, 180, 225, 270, 300, 330, 375, 420, 450, 525, 600, 675, 750];
+const _UNLIMITED_TIER: LevelTierLimits = { free: UNLIMITED, basic: UNLIMITED, ultra: UNLIMITED };
 
 // ── Star lock: Free users cannot bookmark at L1–L4; unlocks at L5 ────────────
 /** Returns true when a Free-tier user at this level has the star/bookmark feature locked. */
@@ -189,17 +171,17 @@ const buildTable = (): Record<number, LevelDailyLimits> => {
   for (let i = 1; i <= MAX_LEVEL; i++) {
     const n = i - 1; // 0-indexed
     tbl[i] = {
-      mcq:       { free: _MCQ_FREE[n],  basic: _MCQ_BASIC[n],  ultra: _MCQ_ULTRA[n] },
-      dl:        { free: i * 2,         basic: UNLIMITED,       ultra: UNLIMITED      },
-      pdf:       { free: 1,             basic: 10,              ultra: UNLIMITED      },
-      video:     { free: 0,             basic: 5,               ultra: UNLIMITED      },
-      notes:     { free: 1,             basic: 5,               ultra: UNLIMITED      },
-      tts:       { free: 0,             basic: 0,               ultra: 0              },
-      write:     { free: 5,             basic: 10,              ultra: 20             },
-      concept:   { free: 5,             basic: 5,               ultra: 5              },
-      retention: { free: 0,             basic: 0,               ultra: 0              },
-      flashcard: { free: 0,             basic: 0,               ultra: 20             },
-      creditWriteMax:    _CREDIT_WRITE_MAX[n],
+      mcq:       { free: 300, basic: 1500, ultra: 3000 },
+      dl:        { ..._UNLIMITED_TIER },
+      pdf:       { ..._UNLIMITED_TIER },
+      video:     { ..._UNLIMITED_TIER },
+      notes:     { ..._UNLIMITED_TIER },
+      tts:       { ..._UNLIMITED_TIER },
+      write:     { ..._UNLIMITED_TIER },
+      concept:   { ..._UNLIMITED_TIER },
+      retention: { ..._UNLIMITED_TIER },
+      flashcard: { ..._UNLIMITED_TIER },
+      creditWriteMax:    UNLIMITED,
       bonusLoginCredits: _BONUS_LOGIN[n],
     };
   }
@@ -269,22 +251,12 @@ export const getEffectiveDailyLimit = (
   tier: 'FREE' | 'BASIC' | 'ULTRA',
   settings?: { mcqLimitFree?: number; mcqLimitBasic?: number; mcqLimitUltra?: number; levelLimitsOverride?: Record<string, Partial<LevelDailyLimitsOverride>> } | null
 ): number => {
-  const ld = getLevelDailyLimitsWithOverride(level, settings);
-  const tierKey: keyof LevelTierLimits = tier === 'FREE' ? 'free' : tier === 'BASIC' ? 'basic' : 'ultra';
-  const levelValue = ld[feature][tierKey];
-
-  // MCQ: admin's flat override (mcqLimitFree/Basic/Ultra) treated as L1 base → scale with level
-  if (feature === 'mcq' && settings && !settings.levelLimitsOverride?.[String(level)]?.mcq) {
-    const l1 = LEVEL_DAILY_LIMITS_TABLE[1].mcq[tierKey];
-    const adminBase =
-      tier === 'FREE'  ? (settings.mcqLimitFree  ?? 0) :
-      tier === 'BASIC' ? (settings.mcqLimitBasic ?? 0) :
-                         (settings.mcqLimitUltra ?? 0);
-    if (adminBase > 0) {
-      return adminBase + (levelValue - l1);
-    }
+  if (feature === 'mcq') {
+    if (tier === 'ULTRA') return settings?.mcqLimitUltra ?? 3000;
+    if (tier === 'BASIC') return settings?.mcqLimitBasic ?? 1500;
+    return settings?.mcqLimitFree ?? 300;
   }
-  return levelValue;
+  return UNLIMITED;
 };
 
 // ── Backward-compat: LevelLimitBonus (derived from new table) ────────────────
@@ -300,13 +272,12 @@ export interface LevelLimitBonus {
 
 export const getLevelLimitBonus = (level: number): LevelLimitBonus => {
   const cur = getLevelDailyLimits(level);
-  const l1  = getLevelDailyLimits(1);
   return {
-    mcqBonus:          cur.mcq.free   - l1.mcq.free,
-    writeFreeBonus:    cur.write.basic - l1.write.basic,
-    dlBonus:           cur.dl.free    - l1.dl.free,
-    videoFreeBonus:    cur.video.basic - l1.video.basic,
-    pdfFreeBonus:      cur.pdf.basic  - l1.pdf.basic,
+    mcqBonus:          0,
+    writeFreeBonus:    0,
+    dlBonus:           0,
+    videoFreeBonus:    0,
+    pdfFreeBonus:      0,
     creditWriteMax:    cur.creditWriteMax,
     bonusLoginCredits: cur.bonusLoginCredits,
   };

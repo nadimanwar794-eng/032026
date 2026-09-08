@@ -49,7 +49,11 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                 : (user.subscriptionLevel === 'BASIC' && user.isPremium) ? 'rgba(37,99,235,0.30)'
                 : 'rgba(14,165,233,0.28)',
           };
-    const [activeTab, setActiveTab] = useState<'GLOBAL' | 'SUPPORT' | 'MCQ'>(defaultTab || (hideGlobalTab ? 'MCQ' : 'GLOBAL'));
+    const isUltraChatUser = (user.subscriptionLevel === 'ULTRA' && user.isPremium) || isAdmin;
+    const isSubscriber = isAdmin || !!(user.isPremium || (user.subscriptionTier && user.subscriptionTier !== 'FREE') || user.subscriptionLevel === 'BASIC' || user.subscriptionLevel === 'ULTRA');
+    const [activeTab, setActiveTab] = useState<'GLOBAL' | 'SUPPORT' | 'MCQ'>(
+        defaultTab || (hideGlobalTab || !isUltraChatUser ? 'MCQ' : 'GLOBAL')
+    );
     const [mcqVotes, setMcqVotes] = useState<Record<string, Record<string, number>>>({});
     const [mcqDailyCount, setMcqDailyCount] = useState(0);
     const [messages, setMessages] = useState<any[]>([]);
@@ -476,10 +480,17 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                     <div className="flex p-1 gap-1 shrink-0" style={{ background: appTheme.profileCardBg || '#f1f5f9' }}>
                         {!hideGlobalTab && (
                         <button
-                            onClick={() => setActiveTab('GLOBAL')}
+                            onClick={() => {
+                                if (!isUltraChatUser) {
+                                    alert('🔒 Global Chat is exclusive to ULTRA members! Upgrade to Ultra to join Global Chat.');
+                                    return;
+                                }
+                                setActiveTab('GLOBAL');
+                            }}
                             className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1 ${activeTab === 'GLOBAL' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
                         >
                             <Users size={12} /> Global
+                            {!isUltraChatUser && <span className="text-[10px]">🔒</span>}
                         </button>
                         )}
                         <button
@@ -795,13 +806,24 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                                 </div>
                             )}
                             <button
-                                onClick={() => setShowMcqBuilder(true)}
+                                onClick={() => {
+                                    if (!isSubscriber) {
+                                        alert('🔒 Community MCQ Send feature Basic aur Ultra members ke liye hai! Upgrade your plan to participate.');
+                                        return;
+                                    }
+                                    setShowMcqBuilder(true);
+                                }}
                                 disabled={!isAdminOrSub && mcqDailyCount >= 10}
-                                title="MCQ bhejo"
+                                title={!isSubscriber ? "🔒 Community MCQ Send (Basic+ Required)" : "MCQ bhejo"}
                                 className={`w-full py-2.5 rounded-xl border font-bold text-xs transition-all flex items-center justify-center gap-2 ${!isAdminOrSub && mcqDailyCount >= 10 ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' : 'active:scale-95'}`}
                                 style={!(!isAdminOrSub && mcqDailyCount >= 10) ? { background: subColorLight, color: subColor, borderColor: subColorBorder } : {}}
                             >
                                 <BookOpen size={16} /> MCQ Bhejo
+                                {!isSubscriber && (
+                                    <span className="text-[9px] bg-amber-500/15 text-amber-700 border border-amber-500/30 font-black px-1.5 py-0.5 rounded-md flex items-center gap-0.5">
+                                        <Lock size={9} /> Basic+
+                                    </span>
+                                )}
                             </button>
                         </div>
                         )}
@@ -839,6 +861,20 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                                     </div>
                                     {/* Scrollable form body */}
                                     <div className="overflow-y-auto flex-1 px-5 py-4 space-y-3">
+                                        {!isSubscriber && (
+                                            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center justify-between gap-2">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-base">🔒</span>
+                                                    <div>
+                                                        <span className="text-xs font-black text-amber-900 block">Community MCQ Send Locked</span>
+                                                        <span className="text-[10px] text-amber-700">MCQ community me bhejne ke liye Basic (Pro) ya Ultra (Max) plan zaroori hai.</span>
+                                                    </div>
+                                                </div>
+                                                <span className="text-[9px] font-black uppercase tracking-wider bg-amber-200 text-amber-900 px-2 py-1 rounded-md shrink-0">
+                                                    Basic+ Required
+                                                </span>
+                                            </div>
+                                        )}
                                         {/* Question */}
                                         <div>
                                             <label className="block text-[11px] font-black text-slate-500 mb-1 uppercase tracking-wide">Question</label>
@@ -895,11 +931,25 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                                             </p>
                                         )}
                                         <button
-                                            onClick={handleSendMcq}
-                                            className="w-full active:scale-95 text-white py-4 rounded-2xl text-sm font-black transition-all flex items-center justify-center gap-2 shadow-lg"
-                                        style={{ background: subColor }}
+                                            onClick={() => {
+                                                if (!isSubscriber) {
+                                                    alert('🔒 Community MCQ Send feature Basic aur Ultra members ke liye hai! Upgrade your plan to participate.');
+                                                    return;
+                                                }
+                                                handleSendMcq();
+                                            }}
+                                            className={`w-full active:scale-95 text-white py-4 rounded-2xl text-sm font-black transition-all flex items-center justify-center gap-2 shadow-lg ${!isSubscriber ? 'opacity-80 cursor-not-allowed' : ''}`}
+                                            style={{ background: !isSubscriber ? '#94a3b8' : subColor }}
                                         >
-                                            <Send size={15} /> MCQ Community Mein Bhejo
+                                            {!isSubscriber ? (
+                                                <>
+                                                    <Lock size={15} /> <span>Upgrade to Basic/Ultra to Send</span>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Send size={15} /> <span>MCQ Community Mein Bhejo</span>
+                                                </>
+                                            )}
                                         </button>
                                     </div>
                                 </div>

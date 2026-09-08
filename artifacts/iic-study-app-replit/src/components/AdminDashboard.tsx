@@ -1,7 +1,8 @@
 // @ts-nocheck
 
 import React, { useEffect, useState, useRef } from 'react';
-import { User, ViewState, SystemSettings, Subject, Chapter, MCQItem, RecoveryRequest, ActivityLogEntry, LeaderboardEntry, RecycleBinItem, Stream, Board, ClassLevel, GiftCode, SubscriptionPlan, CreditPackage, SpinReward, SpinGameType, HtmlModule, PremiumNoteSlot, ContentInfoConfig, ContentInfoItem, SubscriptionHistoryEntry, UniversalAnalysisLog, ContentType, LessonContent, DeepDiveEntry, AdditionalNoteEntry, TeacherStorePlan, TeacherCode, HomeworkItem, LucentNoteEntry, LucentPageNote, AppNotification, BroadcastRedeemCode, LoginBonusRandomGiftOption } from '../types';
+import { User, ViewState, SystemSettings, Subject, Chapter, MCQItem, RecoveryRequest, ActivityLogEntry, LeaderboardEntry, RecycleBinItem, Stream, Board, ClassLevel, GiftCode, SubscriptionPlan, CreditPackage, CreditSubscriptionPlan, UserCreditSubscription, SpinReward, SpinGameType, HtmlModule, PremiumNoteSlot, ContentInfoConfig, ContentInfoItem, SubscriptionHistoryEntry, UniversalAnalysisLog, ContentType, LessonContent, DeepDiveEntry, AdditionalNoteEntry, TeacherStorePlan, TeacherCode, HomeworkItem, LucentNoteEntry, LucentPageNote, AppNotification, BroadcastRedeemCode, LoginBonusRandomGiftOption } from '../types';
+import { DEFAULT_CREDIT_SUB_PLANS, PRESET_CREDIT_SUB_TEMPLATES, grantCreditSubscription, cancelCreditSubscription } from '../utils/creditSubscriptionUtils';
 import { List, GraduationCap, LayoutDashboard, Users, Search, Trash2, Save, X, Eye, EyeOff, Shield, Megaphone, CheckCircle, ListChecks, Database, FileText, Monitor, Sparkles, Banknote, BrainCircuit, AlertOctagon, ArrowLeft, ArrowRight, Key, Bell, ShieldCheck, Lock, Globe, Layers, Zap, PenTool, RefreshCw, RotateCcw, Plus, LogOut, Download, Upload, CreditCard, Ticket, Video, Image as ImageIcon, Type, Link, FileJson, Activity, AlertTriangle, Gift, Book, Mail, Edit3, MessageSquare, ShoppingBag, Cloud, Rocket, Code2, Layers as LayersIcon, Wifi, WifiOff, Copy, Crown, Gamepad2, Calendar, BookOpen, Image, HelpCircle, Youtube, Play, Star, Trophy, Palette, Settings, Headphones, Layout, Bot, LayoutDashboard as DashboardIcon, Loader2, Gauge, LayoutGrid, ArrowUpCircle, KeyRound, Award, Send, GitCompare, Lightbulb, ThumbsUp, ThumbsDown, Building2, TrendingUp, Coins } from 'lucide-react';
 import { getSubjectsList, DEFAULT_SUBJECTS, DEFAULT_APP_FEATURES, ALL_APP_FEATURES, STUDENT_APP_FEATURES, DEFAULT_CONTENT_INFO_CONFIG, ADMIN_PERMISSIONS, APP_VERSION, STATIC_SYLLABUS, LEVEL_UNLOCKABLE_FEATURES, LUCENT_SUBJECT_OPTIONS_BASE, getClassSubjectOptions, SUPPORT_PHONE } from '../constants';
 import { AdminClassMcqManager } from './AdminClassMcqManager';
@@ -53,23 +54,34 @@ import QRCode from "react-qr-code";
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 const DEFAULT_BASIC_FEATURES = [
-    'Daily Login Bonus: 10 Credits/Day',
-    'Full MCQs Unlocked',
-    'Premium Notes (Standard)',
-    'Audio Library (Standard)',
-    'AI Videos (2D Basic)',
-    'Team Support',
-    'Daily Coin Claim (50 Coins/Day)'
+    'Community MCQ Send',
+    'Content Request',
+    'Correction Mode',
+    'Text Color Customization',
+    'Text Style Customization',
+    'Basic Themes Free',
+    'Daily XP Limit: +66%',
+    'Store Discount: +5%',
+    'Score History Unlocked',
+    'Download Available',
+    'Credit Off Anywhere: 20%',
+    'XP Multiplier: 1.5X',
+    'Projector Mode & PDF Mode (1,500 MCQ/day)'
 ];
 
 const DEFAULT_ULTRA_FEATURES = [
-    'Daily Login Bonus: 20 Credits/Day',
-    'Everything in Basic Unlocked',
-    'Premium Notes (Deep Dive)',
-    'Ultra Podcast (Studio HD)',
-    'AI Videos (2D + 3D Deep Dive)',
-    'Competitive Mode Unlocked 🏆',
-    'Daily Coin Claim (100 Coins/Day)'
+    'Everything in Basic',
+    '+ Additional Perks:',
+    '⚡ Ultra Mode (Chunk Notes / Reading Notes)',
+    'Store Discount: +10% (Pro & Max)',
+    'Daily XP Limit: +133%',
+    'XP Multiplier: 2.0X',
+    'Credit Off Anywhere: 40%',
+    'Global Chat Available',
+    'Ultra Themes Free',
+    'Suggestions',
+    'Flashcard Mode & Video Mode',
+    '3,000 MCQ / Day Limit'
 ];
 
 const QUESTION_START_REGEX = /^(\*\*)?(\*\*Question\s*\d+\*\*|Q\s*\d+[.:)]?|\d+[.:)]|Question\s*\d+[.:)]?)(\*\*)?\s*/i;
@@ -1113,6 +1125,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
           { id: 'yearly', name: 'Yearly', duration: '365 days', basicPrice: 999, basicOriginalPrice: 1999, ultraPrice: 1499, ultraOriginalPrice: 2999, features: ['Everything in Quarterly', 'Priority Support'], popular: false },
           { id: 'lifetime', name: 'Yearly Plus', duration: '365 days', basicPrice: 4999, basicOriginalPrice: 9999, ultraPrice: 7499, ultraOriginalPrice: 14999, features: ['VIP Status'], popular: true }
       ],
+      creditSubscriptionPlans: DEFAULT_CREDIT_SUB_PLANS,
       startupAd: { 
           enabled: true, 
           duration: 10, 
@@ -1308,6 +1321,14 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   const [newPkgPrice, setNewPkgPrice] = useState('');
   const [newPkgCredits, setNewPkgCredits] = useState('');
   const [newPkgDummyPrice, setNewPkgDummyPrice] = useState('');
+
+  // --- CREDIT SUBSCRIPTION MANAGER STATE (Daily Pass) ---
+  const [newCspName, setNewCspName] = useState('');
+  const [newCspPrice, setNewCspPrice] = useState('');
+  const [newCspDummyPrice, setNewCspDummyPrice] = useState('');
+  const [newCspDailyCredits, setNewCspDailyCredits] = useState('');
+  const [newCspDurationDays, setNewCspDurationDays] = useState('30');
+  const [newCspBadge, setNewCspBadge] = useState('');
 
   // --- GLOBAL BOARD CONTEXT (STRICT ISOLATION) ---
   const [adminBoardContext, setAdminBoardContext] = useState<Board>('NCERT_EN');
@@ -1524,6 +1545,8 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   const [editSubscriptionDays, setEditSubscriptionDays] = useState(0);
   const [editSubscriptionHours, setEditSubscriptionHours] = useState(0);
   const [editSubscriptionMinutes, setEditSubscriptionMinutes] = useState(0);
+  const [selectedUserCreditSubPlanId, setSelectedUserCreditSubPlanId] = useState<string>('');
+  const [selectedUserCreditSubDuration, setSelectedUserCreditSubDuration] = useState<number>(30);
   const [editSubscriptionSeconds, setEditSubscriptionSeconds] = useState(0);
   const [editSubscriptionPrice, setEditSubscriptionPrice] = useState(0);
   const [editCustomSubName, setEditCustomSubName] = useState('');
@@ -1952,7 +1975,11 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   };
 
   // --- GIFT CODE STATE ---
-  const [newCodeType, setNewCodeType] = useState<'CREDITS' | 'SUBSCRIPTION' | 'DISCOUNT' | 'CONTENT_UNLOCK' | 'TOPBAR_EFFECT_COLOR' | 'TOPBAR_EFFECT_ID' | 'SCORE' | 'SCORE_BOOST' | 'SCORE_LIMIT_BOOST' | 'THEME_COLOR'>('CREDITS');
+  const [newCodeType, setNewCodeType] = useState<'CREDITS' | 'CREDIT_SUBSCRIPTION' | 'SUBSCRIPTION' | 'DISCOUNT' | 'CONTENT_UNLOCK' | 'TOPBAR_EFFECT_COLOR' | 'TOPBAR_EFFECT_ID' | 'SCORE' | 'SCORE_BOOST' | 'SCORE_LIMIT_BOOST' | 'THEME_COLOR'>('CREDITS');
+  const [newCodeCreditPlanId, setNewCodeCreditPlanId] = useState<string>('');
+  const [newCodeCreditDaily, setNewCodeCreditDaily] = useState<number>(100);
+  const [newCodeCreditDays, setNewCodeCreditDays] = useState<number>(30);
+  const [newCodeCreditPlanName, setNewCodeCreditPlanName] = useState<string>('');
   const [newCodeThemeColor, setNewCodeThemeColor] = useState('#6366f1');
   const [newCodeThemeDurationHours, setNewCodeThemeDurationHours] = useState(24);
   const [newCodeScoreAmount, setNewCodeScoreAmount] = useState(100);
@@ -1981,6 +2008,10 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
 
   // --- BROADCAST REDEEM CODE STATE ---
   const [broadcastType, setBroadcastType] = useState<BroadcastRedeemCode['type']>('CREDITS');
+  const [broadcastCreditPlanId, setBroadcastCreditPlanId] = useState<string>('');
+  const [broadcastCreditDaily, setBroadcastCreditDaily] = useState<number>(100);
+  const [broadcastCreditDays, setBroadcastCreditDays] = useState<number>(30);
+  const [broadcastCreditPlanName, setBroadcastCreditPlanName] = useState<string>('');
   const [broadcastScoreLimitBoostPercent, setBroadcastScoreLimitBoostPercent] = useState(50);
   const [broadcastScoreLimitBoostHours, setBroadcastScoreLimitBoostHours] = useState(24);
   const [broadcastScoreAmount, setBroadcastScoreAmount] = useState(50);
@@ -3092,7 +3123,10 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
               let code = generateSecureRandomString(12, codeChars);
 
               let prefix = 'C';
-              if (newCodeType === 'CONTENT_UNLOCK') {
+              if (newCodeType === 'CREDIT_SUBSCRIPTION') {
+                  prefix = 'CRSUB';
+                  code = prefix + '-' + code.substring(0, 8);
+              } else if (newCodeType === 'CONTENT_UNLOCK') {
                   if (newCodeContentType === 'VIDEO') prefix = 'V';
                   if (newCodeContentType === 'PDF') prefix = 'N';
                   if (newCodeContentType === 'MCQ') prefix = 'M';
@@ -3105,6 +3139,12 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                   code: code.toUpperCase(),
                   type: newCodeType || 'CREDITS',
                   ...(newCodeType === 'CREDITS' ? { amount: newCodeAmount || 10 } : {}),
+                  ...(newCodeType === 'CREDIT_SUBSCRIPTION' ? {
+                      creditPlanId: newCodeCreditPlanId || `csp-redeem-${Date.now()}`,
+                      creditPlanName: newCodeCreditPlanName || `${newCodeCreditDaily} Daily Credits Pass`,
+                      creditDailyAmount: newCodeCreditDaily || 100,
+                      creditDurationDays: newCodeCreditDays || 30,
+                  } : {}),
                   ...(newCodeType === 'SCORE' ? { scoreAmount: newCodeScoreAmount || 100 } : {}),
                   ...(newCodeType === 'SCORE_BOOST' ? { scoreBoostPercent: newCodeScoreBoostPercent || 20, scoreBoostDurationHours: newCodeScoreBoostHours || 24 } : {}),
                   ...(newCodeType === 'SCORE_LIMIT_BOOST' ? { scoreLimitBoostPercent: newCodeScoreLimitBoostPercent || 50, scoreLimitBoostDurationHours: newCodeScoreLimitBoostHours || 24 } : {}),
@@ -3189,6 +3229,10 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
               scoreBoostDurationHours: broadcastType === 'SCORE_BOOST' ? broadcastScoreBoostHours : undefined,
               scoreLimitBoostPercent: broadcastType === 'SCORE_LIMIT_BOOST' ? broadcastScoreLimitBoostPercent : undefined,
               scoreLimitBoostDurationHours: broadcastType === 'SCORE_LIMIT_BOOST' ? broadcastScoreLimitBoostHours : undefined,
+              creditPlanId: broadcastType === 'CREDIT_SUBSCRIPTION' ? (broadcastCreditPlanId || `csp-bc-${Date.now()}`) : undefined,
+              creditPlanName: broadcastType === 'CREDIT_SUBSCRIPTION' ? (broadcastCreditPlanName || `${broadcastCreditDaily} Daily Credits Pass`) : undefined,
+              creditDailyAmount: broadcastType === 'CREDIT_SUBSCRIPTION' ? (broadcastCreditDaily || 100) : undefined,
+              creditDurationDays: broadcastType === 'CREDIT_SUBSCRIPTION' ? (broadcastCreditDays || 30) : undefined,
               isMultiUse: broadcastIsMultiUse,
               maxUses: broadcastIsMultiUse ? 999999 : undefined,
               discountPercent: broadcastType === 'DISCOUNT' ? broadcastDiscount : undefined,
@@ -3253,6 +3297,77 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   const removePackage = (id: string) => {
       const currentPkgs = localSettings.packages || [];
       setLocalSettings({ ...localSettings, packages: currentPkgs.filter(p => p.id !== id) });
+  };
+
+  // --- CREDIT SUBSCRIPTION MANAGER (Daily Pass Plans) ---
+  const addCreditSubPlan = () => {
+    if (!newCspName || !newCspPrice || !newCspDailyCredits) {
+      alert('Plan Name, Price, aur Daily Credits bharna zaroori hai.');
+      return;
+    }
+    const dur = Number(newCspDurationDays) || 30;
+    const daily = Number(newCspDailyCredits);
+    const newPlan: CreditSubscriptionPlan = {
+      id: `csp-${Date.now()}`,
+      name: newCspName.trim(),
+      price: Number(newCspPrice),
+      dummyPrice: newCspDummyPrice ? Number(newCspDummyPrice) : undefined,
+      dailyCredits: daily,
+      durationDays: dur,
+      badge: newCspBadge ? newCspBadge.trim().toUpperCase() : undefined,
+      description: `Roz ${daily} Credits milenge (Total ${(daily * dur).toLocaleString('en-IN')} Credits)`,
+      isActive: true,
+    };
+    const currentPlans = localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS;
+    setLocalSettings({ ...localSettings, creditSubscriptionPlans: [...currentPlans, newPlan] });
+    setNewCspName('');
+    setNewCspPrice('');
+    setNewCspDummyPrice('');
+    setNewCspDailyCredits('');
+    setNewCspDurationDays('30');
+    setNewCspBadge('');
+  };
+
+  const removeCreditSubPlan = (id: string) => {
+    if (!confirm('Kya aap sach me is credit subscription plan ko delete karna chahte hain?')) return;
+    const currentPlans = localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS;
+    setLocalSettings({ ...localSettings, creditSubscriptionPlans: currentPlans.filter(p => p.id !== id) });
+  };
+
+  const updateCreditSubPlan = (id: string, field: string, value: any) => {
+    const currentPlans = localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS;
+    const updated = currentPlans.map(p => {
+      if (p.id !== id) return p;
+      const u = { ...p, [field]: value };
+      if (field === 'dailyCredits' || field === 'durationDays') {
+        const d = field === 'dailyCredits' ? Number(value) : p.dailyCredits;
+        const dur = field === 'durationDays' ? Number(value) : p.durationDays;
+        u.description = `Roz ${d} Credits milenge (Total ${(d * dur).toLocaleString('en-IN')} Credits)`;
+      }
+      return u;
+    });
+    setLocalSettings({ ...localSettings, creditSubscriptionPlans: updated });
+  };
+
+  const addCreditSubPreset = (preset: (typeof PRESET_CREDIT_SUB_TEMPLATES)[0]) => {
+    const newPlan: CreditSubscriptionPlan = {
+      id: `csp-${Date.now()}`,
+      name: preset.name,
+      price: preset.price,
+      dummyPrice: preset.dummyPrice,
+      dailyCredits: preset.dailyCredits,
+      durationDays: preset.durationDays,
+      badge: preset.badge,
+      description: preset.description,
+      isActive: true,
+    };
+    const currentPlans = localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS;
+    setLocalSettings({ ...localSettings, creditSubscriptionPlans: [...currentPlans, newPlan] });
+  };
+
+  const resetCreditSubToDefault = () => {
+    if (!confirm('Kya aap default 4 monthly credit plans (₹100, ₹200, ₹300, ₹500) reset karna chahte hain?')) return;
+    setLocalSettings({ ...localSettings, creditSubscriptionPlans: [...DEFAULT_CREDIT_SUB_PLANS] });
   };
 
   // --- CONTENT & SYLLABUS LOGIC ---
@@ -6392,8 +6507,12 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                           const speedLabel = speed <= 0.4 ? 'Very Slow' : speed <= 0.7 ? 'Slow' : speed <= 1.3 ? 'Normal' : speed <= 2 ? 'Fast' : speed <= 3 ? 'Very Fast' : 'Ultra';
                           return (
                             <div key={eff.id} className={`p-3 rounded-xl border transition-all ${isEnabled ? 'bg-violet-50 border-violet-200' : 'bg-slate-50 border-slate-200'}`}>
-                              <div className="relative overflow-hidden rounded-lg mb-2" style={{ height: 18, background: '#0f172a' }}>
+                              <div className="relative overflow-hidden rounded-xl mb-2.5 border border-slate-700/60 shadow-inner" style={{ height: 26, background: 'linear-gradient(135deg, #090d16 0%, #171536 50%, #0c1222 100%)' }}>
                                 <TopBarEffectsLayer effects={[{ id: eff.id, enabled: true, color, speed }]} />
+                                <div className="absolute inset-0 flex items-center justify-between px-2.5 pointer-events-none">
+                                  <span className="text-[8px] font-black uppercase tracking-wider text-white/35">Animation Preview</span>
+                                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: color, boxShadow: `0 0 6px ${color}` }} />
+                                </div>
                               </div>
                               <div className="flex items-center gap-3">
                                 <button
@@ -6471,8 +6590,12 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                           const speedLabel = speed <= 0.4 ? 'Very Slow' : speed <= 0.7 ? 'Slow' : speed <= 1.3 ? 'Normal' : speed <= 2 ? 'Fast' : speed <= 3 ? 'Very Fast' : 'Ultra';
                           return (
                             <div key={eff.id} className={`p-3 rounded-xl border transition-all ${isEnabled ? 'bg-pink-50 border-pink-200' : 'bg-slate-50 border-slate-200'}`}>
-                              <div className="relative overflow-hidden rounded-lg mb-2" style={{ height: 18, background: '#0f172a' }}>
+                              <div className="relative overflow-hidden rounded-xl mb-2.5 border border-slate-700/60 shadow-inner" style={{ height: 26, background: 'linear-gradient(135deg, #090d16 0%, #171536 50%, #0c1222 100%)' }}>
                                 <TopBarEffectsLayer effects={[{ id: eff.id, enabled: true, color, speed }]} />
+                                <div className="absolute inset-0 flex items-center justify-between px-2.5 pointer-events-none">
+                                  <span className="text-[8px] font-black uppercase tracking-wider text-white/35">Animation Preview</span>
+                                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: color, boxShadow: `0 0 6px ${color}` }} />
+                                </div>
                               </div>
                               <div className="flex items-center gap-3">
                                 <button
@@ -7998,6 +8121,218 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                       <input type="number" placeholder="50" value={newPkgCredits} onChange={e => setNewPkgCredits(e.target.value)} className="w-full p-2 border rounded-lg text-sm" />
                                   </div>
                                   <button onClick={addPackage} className="bg-emerald-600 text-white p-2 rounded-lg h-[38px] w-[38px] flex items-center justify-center hover:bg-emerald-700 shadow"><Plus size={20} /></button>
+                              </div>
+                          </div>
+
+                          {/* --- DAILY CREDIT SUBSCRIPTION (DAILY PASS) PLANS MANAGER --- */}
+                          <div className="bg-slate-900 text-white p-5 rounded-2xl border border-amber-500/30 shadow-xl space-y-4">
+                              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3">
+                                  <div>
+                                      <h3 className="font-black text-base text-amber-400 flex items-center gap-2">
+                                          <Zap className="text-amber-400" size={18} />
+                                          Daily Credit Subscription Manager (Daily Pass)
+                                      </h3>
+                                      <p className="text-xs text-slate-400 mt-0.5">
+                                          Students ke liye Daily Credits subscription plans. <strong className="text-amber-300">Isse koi premium unlock nahi hota</strong>, sirf roz credits milte hain.
+                                      </p>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                      <button
+                                          type="button"
+                                          onClick={resetCreditSubToDefault}
+                                          className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-bold rounded-lg border border-amber-500/30 flex items-center gap-1.5 transition">
+                                          <RotateCcw size={13} /> Reset Default 4 Plans
+                                      </button>
+                                  </div>
+                              </div>
+
+                              {/* Quick Presets for Multi-Month / Yearly Plans */}
+                              <div className="bg-slate-800/80 p-3 rounded-xl border border-white/5">
+                                  <p className="text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                                      <span>⚡ Quick Add Presets:</span>
+                                  </p>
+                                  <div className="flex flex-wrap gap-2">
+                                      {PRESET_CREDIT_SUB_TEMPLATES.map((preset) => (
+                                          <button
+                                              key={preset.id}
+                                              type="button"
+                                              onClick={() => addCreditSubPreset(preset)}
+                                              className="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-lg text-xs font-bold flex items-center gap-1.5 transition active:scale-95">
+                                              <Plus size={13} />
+                                              {preset.name} (₹{preset.price} / {preset.durationDays}d · +{preset.dailyCredits} CR/d)
+                                          </button>
+                                      ))}
+                                  </div>
+                              </div>
+
+                              {/* Current Plans List */}
+                              <div className="space-y-2.5">
+                                  {(localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS).map((plan) => {
+                                      const totalCreds = (plan.dailyCredits || 0) * (plan.durationDays || 30);
+                                      return (
+                                          <div key={plan.id} className="p-4 bg-slate-800/90 rounded-xl border border-white/10 hover:border-amber-400/40 transition flex flex-col md:flex-row md:items-center justify-between gap-3">
+                                              <div className="flex-1 space-y-2">
+                                                  <div className="flex flex-wrap items-center gap-2">
+                                                      <input
+                                                          type="text"
+                                                          value={plan.name}
+                                                          onChange={(e) => updateCreditSubPlan(plan.id, 'name', e.target.value)}
+                                                          className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-sm font-bold text-white max-w-[220px]"
+                                                          placeholder="Plan Name"
+                                                      />
+                                                      <input
+                                                          type="text"
+                                                          value={plan.badge || ''}
+                                                          onChange={(e) => updateCreditSubPlan(plan.id, 'badge', e.target.value.toUpperCase())}
+                                                          className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[11px] font-bold text-amber-300 max-w-[110px]"
+                                                          placeholder="Badge (e.g. POPULAR)"
+                                                      />
+                                                      <label className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer select-none ml-2">
+                                                          <input
+                                                              type="checkbox"
+                                                              checked={plan.isActive !== false}
+                                                              onChange={(e) => updateCreditSubPlan(plan.id, 'isActive', e.target.checked)}
+                                                              className="accent-amber-500 rounded"
+                                                          />
+                                                          <span>Active</span>
+                                                      </label>
+                                                  </div>
+
+                                                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                                                      <div>
+                                                          <label className="text-[10px] text-slate-400 block">Price (₹)</label>
+                                                          <input
+                                                              type="number"
+                                                              value={plan.price}
+                                                              onChange={(e) => updateCreditSubPlan(plan.id, 'price', Number(e.target.value))}
+                                                              className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 font-bold text-amber-300"
+                                                          />
+                                                      </div>
+                                                      <div>
+                                                          <label className="text-[10px] text-slate-400 block">Dummy/Cut Price (₹)</label>
+                                                          <input
+                                                              type="number"
+                                                              value={plan.dummyPrice || ''}
+                                                              onChange={(e) => updateCreditSubPlan(plan.id, 'dummyPrice', e.target.value ? Number(e.target.value) : undefined)}
+                                                              className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-400"
+                                                              placeholder="Optional"
+                                                          />
+                                                      </div>
+                                                      <div>
+                                                          <label className="text-[10px] text-slate-400 block">Daily Credits</label>
+                                                          <input
+                                                              type="number"
+                                                              value={plan.dailyCredits}
+                                                              onChange={(e) => updateCreditSubPlan(plan.id, 'dailyCredits', Number(e.target.value))}
+                                                              className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 font-bold text-emerald-400"
+                                                          />
+                                                      </div>
+                                                      <div>
+                                                          <label className="text-[10px] text-slate-400 block">Duration (Days)</label>
+                                                          <input
+                                                              type="number"
+                                                              value={plan.durationDays}
+                                                              onChange={(e) => updateCreditSubPlan(plan.id, 'durationDays', Number(e.target.value))}
+                                                              className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sky-300"
+                                                          />
+                                                      </div>
+                                                  </div>
+
+                                                  <div className="text-[11px] text-slate-400 flex flex-wrap items-center gap-3">
+                                                      <span>🪙 Total Credits: <strong className="text-amber-300">{totalCreds.toLocaleString('en-IN')} Credits</strong></span>
+                                                      <span>📊 ~₹{(plan.price / plan.durationDays).toFixed(1)}/din</span>
+                                                      <span>💎 ₹{totalCreds > 0 ? (plan.price / totalCreds).toFixed(2) : 0}/credit</span>
+                                                  </div>
+                                              </div>
+
+                                              <div className="flex md:flex-col items-center justify-end gap-2 shrink-0">
+                                                  <button
+                                                      type="button"
+                                                      onClick={() => removeCreditSubPlan(plan.id)}
+                                                      className="p-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 rounded-lg transition"
+                                                      title="Delete Plan">
+                                                      <Trash2 size={16} />
+                                                  </button>
+                                              </div>
+                                          </div>
+                                      );
+                                  })}
+                              </div>
+
+                              {/* Add New Plan Form */}
+                              <div className="bg-slate-800/90 p-4 rounded-xl border border-dashed border-amber-500/40 space-y-3">
+                                  <p className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                                      <Plus size={14} /> Naya Credit Subscription Plan Banayein:
+                                  </p>
+                                  <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
+                                      <div className="col-span-2">
+                                          <label className="text-[10px] font-bold uppercase text-slate-400">Plan Name</label>
+                                          <input
+                                              type="text"
+                                              placeholder="e.g. Starter Daily Pass"
+                                              value={newCspName}
+                                              onChange={e => setNewCspName(e.target.value)}
+                                              className="w-full p-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white"
+                                          />
+                                      </div>
+                                      <div>
+                                          <label className="text-[10px] font-bold uppercase text-slate-400">Price (₹)</label>
+                                          <input
+                                              type="number"
+                                              placeholder="100"
+                                              value={newCspPrice}
+                                              onChange={e => setNewCspPrice(e.target.value)}
+                                              className="w-full p-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white"
+                                          />
+                                      </div>
+                                      <div>
+                                          <label className="text-[10px] font-bold uppercase text-slate-400">Dummy Cut ₹</label>
+                                          <input
+                                              type="number"
+                                              placeholder="199"
+                                              value={newCspDummyPrice}
+                                              onChange={e => setNewCspDummyPrice(e.target.value)}
+                                              className="w-full p-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white"
+                                          />
+                                      </div>
+                                      <div>
+                                          <label className="text-[10px] font-bold uppercase text-slate-400">Daily CR</label>
+                                          <input
+                                              type="number"
+                                              placeholder="50"
+                                              value={newCspDailyCredits}
+                                              onChange={e => setNewCspDailyCredits(e.target.value)}
+                                              className="w-full p-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white"
+                                          />
+                                      </div>
+                                      <div>
+                                          <label className="text-[10px] font-bold uppercase text-slate-400">Days (30/90/365)</label>
+                                          <input
+                                              type="number"
+                                              placeholder="30"
+                                              value={newCspDurationDays}
+                                              onChange={e => setNewCspDurationDays(e.target.value)}
+                                              className="w-full p-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white"
+                                          />
+                                      </div>
+                                  </div>
+                                  <div className="flex gap-2">
+                                      <div className="flex-1">
+                                          <input
+                                              type="text"
+                                              placeholder="Badge (Optional: e.g. POPULAR, VALUE, BESTSELLER)"
+                                              value={newCspBadge}
+                                              onChange={e => setNewCspBadge(e.target.value)}
+                                              className="w-full p-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white"
+                                          />
+                                      </div>
+                                      <button
+                                          type="button"
+                                          onClick={addCreditSubPlan}
+                                          className="px-5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-lg text-xs flex items-center justify-center gap-1.5 transition shadow">
+                                          <Plus size={16} /> Plan Add Karein
+                                      </button>
+                                  </div>
                               </div>
                           </div>
                        </>
@@ -16520,6 +16855,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                           <label className="text-[10px] font-bold text-indigo-700 uppercase block mb-1">Code Type</label>
                           <select value={broadcastType} onChange={e => setBroadcastType(e.target.value as any)} className="w-full p-2.5 rounded-xl border border-indigo-200 font-bold bg-white text-sm">
                               <option value="CREDITS">💰 Credits (Coins)</option>
+                              <option value="CREDIT_SUBSCRIPTION">⚡ Credit Subscription Pass</option>
                               <option value="SCORE">⭐ Score Points</option>
                               <option value="SCORE_BOOST">🚀 Score Booster</option>
                               <option value="SCORE_LIMIT_BOOST">📈 Daily Limit Boost</option>
@@ -16558,6 +16894,43 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                           <div>
                               <label className="text-[10px] font-bold text-indigo-700 uppercase block mb-1">Credits Amount</label>
                               <input type="number" value={broadcastAmount} onChange={e => setBroadcastAmount(Number(e.target.value))} className="w-full p-2.5 rounded-xl border border-indigo-200 font-bold bg-white text-sm" />
+                          </div>
+                      )}
+                      {broadcastType === 'CREDIT_SUBSCRIPTION' && (
+                          <div className="flex flex-col gap-2 p-3 bg-indigo-50/60 rounded-xl border border-indigo-200 col-span-full">
+                              <div>
+                                  <label className="text-[10px] font-bold text-indigo-700 uppercase block mb-1">Select Credit Plan or Custom</label>
+                                  <select
+                                      value={broadcastCreditPlanId}
+                                      onChange={e => {
+                                          const val = e.target.value;
+                                          setBroadcastCreditPlanId(val);
+                                          const found = (localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS).find(p => p.id === val);
+                                          if (found) {
+                                              setBroadcastCreditDaily(found.dailyCredits);
+                                              setBroadcastCreditDays(found.durationDays);
+                                              setBroadcastCreditPlanName(found.name);
+                                          }
+                                      }}
+                                      className="w-full p-2.5 rounded-xl border border-indigo-200 bg-white font-bold text-sm"
+                                  >
+                                      <option value="">Custom Daily Pass</option>
+                                      {(localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS).map(p => (
+                                          <option key={p.id} value={p.id}>{p.name} — +{p.dailyCredits} CR/d ({p.durationDays} Days)</option>
+                                      ))}
+                                  </select>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                  <div>
+                                      <label className="text-[10px] font-bold text-indigo-700 uppercase block mb-1">🪙 Daily Credits</label>
+                                      <input type="number" min={1} value={broadcastCreditDaily} onChange={e => setBroadcastCreditDaily(Number(e.target.value))} className="w-full p-2.5 rounded-xl border border-indigo-200 font-bold bg-white text-sm" />
+                                  </div>
+                                  <div>
+                                      <label className="text-[10px] font-bold text-indigo-700 uppercase block mb-1">📅 Duration (Days)</label>
+                                      <input type="number" min={1} value={broadcastCreditDays} onChange={e => setBroadcastCreditDays(Number(e.target.value))} className="w-full p-2.5 rounded-xl border border-indigo-200 font-bold bg-white text-sm" />
+                                  </div>
+                              </div>
+                              <p className="text-[9px] text-indigo-700 font-medium">⚡ Saare recipients ko roz +{broadcastCreditDaily} credits milenge ({broadcastCreditDays} din tak Store me claim karne ke liye).</p>
                           </div>
                       )}
                       {broadcastType === 'SCORE' && (
@@ -16693,6 +17066,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                               className="p-3 rounded-xl border border-pink-200 font-bold bg-white"
                           >
                               <option value="CREDITS">Credits (Coins)</option>
+                              <option value="CREDIT_SUBSCRIPTION">⚡ Credit Subscription Pass</option>
                               <option value="SCORE">⭐ Score Points</option>
                               <option value="SCORE_BOOST">🚀 Score Booster</option>
                               <option value="SCORE_LIMIT_BOOST">📈 Daily Limit Boost</option>
@@ -16827,6 +17201,42 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                               </div>
                               <p className="text-[10px] text-slate-500 mt-1">Student ko redeem karne par yeh animation permanently milegi top bar + profile card pe.</p>
                           </div>
+                      ) : newCodeType === 'CREDIT_SUBSCRIPTION' ? (
+                          <div className="flex flex-col gap-2 p-3 bg-white rounded-xl border border-pink-200">
+                              <div>
+                                  <label className="text-xs font-bold text-pink-700 uppercase block mb-1">Select Credit Plan or Custom</label>
+                                  <select
+                                      value={newCodeCreditPlanId}
+                                      onChange={e => {
+                                          const val = e.target.value;
+                                          setNewCodeCreditPlanId(val);
+                                          const found = (localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS).find(p => p.id === val);
+                                          if (found) {
+                                              setNewCodeCreditDaily(found.dailyCredits);
+                                              setNewCodeCreditDays(found.durationDays);
+                                              setNewCodeCreditPlanName(found.name);
+                                          }
+                                      }}
+                                      className="p-3 rounded-xl border border-pink-200 bg-white font-bold text-sm w-full"
+                                  >
+                                      <option value="">Custom Daily Pass</option>
+                                      {(localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS).map(p => (
+                                          <option key={p.id} value={p.id}>{p.name} — +{p.dailyCredits} CR/d ({p.durationDays} Days)</option>
+                                      ))}
+                                  </select>
+                              </div>
+                              <div className="flex gap-2">
+                                  <div>
+                                      <label className="text-[10px] font-bold text-pink-700 uppercase block mb-1">🪙 Daily Credits</label>
+                                      <input type="number" min={1} value={newCodeCreditDaily} onChange={e => setNewCodeCreditDaily(Number(e.target.value))} className="p-2.5 rounded-xl border border-pink-200 w-28 font-bold text-sm" />
+                                  </div>
+                                  <div>
+                                      <label className="text-[10px] font-bold text-pink-700 uppercase block mb-1">📅 Days</label>
+                                      <input type="number" min={1} value={newCodeCreditDays} onChange={e => setNewCodeCreditDays(Number(e.target.value))} className="p-2.5 rounded-xl border border-pink-200 w-24 font-bold text-sm" />
+                                  </div>
+                              </div>
+                              <p className="text-[10px] text-pink-700 font-semibold">⚡ Redeemer ko har din +{newCodeCreditDaily} Credits milenge Store se claim karne ke liye {newCodeCreditDays} dino tak.</p>
+                          </div>
                       ) : newCodeType === 'CREDITS' ? (
                           <div>
                               <label className="text-xs font-bold text-pink-700 uppercase block mb-1">Amount</label>
@@ -16955,10 +17365,17 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                       </button>
                                   </td>
                                   <td className="p-3 font-bold text-pink-600">
-                                      {code.type === 'SUBSCRIPTION' 
+                                      {code.type === 'CREDIT_SUBSCRIPTION' ? `⚡ +${code.creditDailyAmount || 100} CR/d (${code.creditDurationDays || 30}d)`
+                                          : code.type === 'SUBSCRIPTION' 
                                           ? `${code.subTier} ${code.subLevel}` 
                                           : code.type === 'DISCOUNT' ? `${code.discountPercent}% OFF`
                                           : code.type === 'CONTENT_UNLOCK' ? `${code.contentType} (${code.contentId})`
+                                          : code.type === 'SCORE' ? `⭐ ${code.scoreAmount} Pts`
+                                          : code.type === 'SCORE_BOOST' ? `🚀 +${code.scoreBoostPercent}% (${code.scoreBoostDurationHours}h)`
+                                          : code.type === 'SCORE_LIMIT_BOOST' ? `📈 +${code.scoreLimitBoostPercent}% Limit`
+                                          : code.type === 'TOPBAR_EFFECT_COLOR' ? `🎨 Color (${code.effectColor})`
+                                          : code.type === 'TOPBAR_EFFECT_ID' ? `✨ Effect (${code.effectId})`
+                                          : code.type === 'THEME_COLOR' ? `🌈 Theme (${code.themeDurationHours}h)`
                                           : `${code.amount} CR`}
                                   </td>
                                   <td className="p-3">
@@ -17926,6 +18343,100 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                               </p>
                           </div>
                       )}
+
+                      {/* --- DAILY CREDIT SUBSCRIPTION (DAILY PASS) --- */}
+                      <div className="border-t pt-3">
+                          <label className="text-xs font-bold text-amber-700 uppercase flex items-center gap-1.5">
+                              <Zap size={14} className="text-amber-500" />
+                              Daily Credit Pass (Subscription)
+                          </label>
+                          <p className="text-[10px] text-slate-500 mb-2">
+                              Note: Isse sirf daily login credits milte hain (No premium content unlock).
+                          </p>
+
+                          {editingUser.creditSubscription && new Date(editingUser.creditSubscription.endDate) > new Date() ? (
+                              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
+                                  <div className="flex items-center justify-between">
+                                      <span className="text-xs font-black text-amber-900">
+                                          ⚡ {editingUser.creditSubscription.planName}
+                                      </span>
+                                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 font-bold">
+                                          ACTIVE
+                                      </span>
+                                  </div>
+                                  <div className="text-xs text-slate-700 grid grid-cols-2 gap-1">
+                                      <div>🪙 Daily: <strong>+{editingUser.creditSubscription.dailyCredits} CR/d</strong></div>
+                                      <div>📅 End: <strong>{new Date(editingUser.creditSubscription.endDate).toLocaleDateString()}</strong></div>
+                                      <div>✅ Claimed: <strong>{editingUser.creditSubscription.totalClaimedDays || 0} Din</strong></div>
+                                      <div>💰 Total: <strong>{editingUser.creditSubscription.totalCreditsClaimed || 0} 🪙</strong></div>
+                                  </div>
+                                  <button
+                                      type="button"
+                                      onClick={async () => {
+                                          if (!confirm(`Kya aap ${editingUser.name} ka Credit Pass cancel karna chahte hain?`)) return;
+                                          const updated = cancelCreditSubscription(editingUser);
+                                          const ok = await saveUserToLive(updated);
+                                          if (ok) {
+                                              setEditingUser(updated);
+                                              setUsers(prev => prev.map(u => u.id === updated.id ? updated : u));
+                                              alert('Credit pass revoked successfully.');
+                                          }
+                                      }}
+                                      className="w-full py-1.5 bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold rounded-lg transition">
+                                      ❌ Revoke / Cancel Credit Pass
+                                  </button>
+                              </div>
+                          ) : (
+                              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                                  <span className="text-xs text-slate-500 italic block">No active daily credit pass</span>
+                                  <div className="flex flex-col gap-2">
+                                      <div className="flex gap-2">
+                                          <select
+                                              value={selectedUserCreditSubPlanId}
+                                              onChange={e => setSelectedUserCreditSubPlanId(e.target.value)}
+                                              className="flex-1 p-2 border rounded-lg text-xs bg-white">
+                                              <option value="">-- Credit Plan Chunein --</option>
+                                              {(localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS).map(p => (
+                                                  <option key={p.id} value={p.id}>
+                                                      {p.name} (Base ₹{p.price} · +{p.dailyCredits} CR/d)
+                                                  </option>
+                                              ))}
+                                          </select>
+                                          <select
+                                              value={selectedUserCreditSubDuration}
+                                              onChange={e => setSelectedUserCreditSubDuration(Number(e.target.value))}
+                                              className="w-36 p-2 border rounded-lg text-xs bg-white font-medium">
+                                              <option value="30">1 Month (30d · 5% off)</option>
+                                              <option value="90">3 Months (90d · 10% off)</option>
+                                              <option value="180">6 Months (180d · 15% off)</option>
+                                              <option value="365">1 Year (365d · 25% off)</option>
+                                          </select>
+                                      </div>
+                                      <button
+                                          type="button"
+                                          onClick={async () => {
+                                              const plans = localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS;
+                                              const plan = plans.find(p => p.id === selectedUserCreditSubPlanId) || plans[0];
+                                              if (!plan) return;
+                                              const durDays = selectedUserCreditSubDuration || plan.durationDays || 30;
+                                              const durLabel = durDays === 365 ? '1 Year' : durDays === 180 ? '6 Months' : durDays === 90 ? '3 Months' : '1 Month';
+                                              if (!confirm(`Kya aap ${editingUser.name} ko "${plan.name} (${durLabel})" Credit Pass (${durDays} Din) grant karna chahte hain?`)) return;
+                                              const updated = grantCreditSubscription(editingUser, plan, durDays, undefined, `${plan.name} (${durLabel})`);
+                                              const ok = await saveUserToLive(updated);
+                                              if (ok) {
+                                                  setEditingUser(updated);
+                                                  setUsers(prev => prev.map(u => u.id === updated.id ? updated : u));
+                                                  alert(`Credit Pass "${plan.name} (${durLabel})" successfully granted to ${editingUser.name}!`);
+                                              }
+                                          }}
+                                          disabled={!selectedUserCreditSubPlanId}
+                                          className="w-full py-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-slate-950 text-xs font-bold rounded-lg transition shadow-sm">
+                                          ⚡ Grant Credit Pass
+                                      </button>
+                                  </div>
+                              </div>
+                          )}
+                      </div>
 
                       {/* BUTTONS (SPLIT FOR FREE VS PAID) */}
                       <div className="flex gap-2 pt-4 border-t">

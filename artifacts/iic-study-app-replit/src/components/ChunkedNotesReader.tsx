@@ -1593,9 +1593,20 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
               </button>
               {/* Offline Save */}
               {onSaveOffline && (
-                <button type="button" onClick={() => { onSaveOffline(); setShowControls(false); }}
-                  style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '6px 4px', background: isSavedOffline ? '#f0fdf4' : 'transparent', cursor: 'pointer', border: 'none', borderLeft: '1px solid #e2e8f0' }}>
-                  <WifiOff size={12} style={{ color: isSavedOffline ? '#16a34a' : '#64748b' }} />
+                <button type="button" onClick={() => {
+                  if (!_canAccessSmart) {
+                    alert('🔒 Download Available feature Basic aur Ultra members ke liye hai. Upgrade karein!');
+                    return;
+                  }
+                  onSaveOffline();
+                  setShowControls(false);
+                }}
+                  title={!_canAccessSmart ? "🔒 Download Available (Basic+ Required)" : (isSavedOffline ? 'Saved' : 'Save')}
+                  style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '6px 4px', background: isSavedOffline ? '#f0fdf4' : 'transparent', cursor: 'pointer', border: 'none', borderLeft: '1px solid #e2e8f0', opacity: !_canAccessSmart ? 0.75 : 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <WifiOff size={12} style={{ color: isSavedOffline ? '#16a34a' : '#64748b' }} />
+                    {!_canAccessSmart && <span style={{ fontSize: 9 }}>🔒</span>}
+                  </div>
                   <span style={{ fontSize: 8, fontWeight: 700, textTransform: 'uppercase', color: isSavedOffline ? '#16a34a' : '#94a3b8', letterSpacing: '0.05em', lineHeight: 1 }}>
                     {isSavedOffline ? 'Saved' : 'Save'}
                   </span>
@@ -1603,9 +1614,20 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
               )}
               {/* 💡 Suggestion/Correction — hidden in school mode */}
               {!hideFix && (
-                <button type="button" onClick={() => { setShowSuggestionPanel(s => !s); setShowControls(false); }}
-                  style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '6px 4px', background: showSuggestionPanel ? '#fef3c7' : 'transparent', cursor: 'pointer', border: 'none', borderLeft: '1px solid #e2e8f0' }}>
-                  <Lightbulb size={12} style={{ color: showSuggestionPanel ? '#d97706' : '#64748b' }} />
+                <button type="button" onClick={() => {
+                  if (!_canAccessSmart) {
+                    alert('🔒 Correction Mode feature Basic aur Ultra members ke liye hai. Upgrade karein!');
+                    return;
+                  }
+                  setShowSuggestionPanel(s => !s);
+                  setShowControls(false);
+                }}
+                  title={!_canAccessSmart ? "🔒 Correction Mode (Basic+ Required)" : "Correction / Fix"}
+                  style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '6px 4px', background: showSuggestionPanel ? '#fef3c7' : 'transparent', cursor: 'pointer', border: 'none', borderLeft: '1px solid #e2e8f0', opacity: !_canAccessSmart ? 0.75 : 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <Lightbulb size={12} style={{ color: showSuggestionPanel ? '#d97706' : '#64748b' }} />
+                    {!_canAccessSmart && <span style={{ fontSize: 9 }}>🔒</span>}
+                  </div>
                   <span style={{ fontSize: 8, fontWeight: 700, textTransform: 'uppercase', color: showSuggestionPanel ? '#d97706' : '#94a3b8', letterSpacing: '0.05em', lineHeight: 1 }}>Fix</span>
                 </button>
               )}
@@ -1618,20 +1640,40 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
 
               {/* Font Style */}
               <button type="button"
-                onClick={() => { setShowFontFamilyMenu(true); setShowControls(false); TOP_10_READING_FONTS.forEach(f => ensureReadingFontLoaded(f.gfontParam)); }}
-                style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '6px 4px', background: activeFont ? '#eef2ff' : 'transparent', cursor: 'pointer', border: 'none', borderRight: '1px solid #e2e8f0' }}>
-                <Type size={12} style={{ color: activeFont ? '#6366f1' : '#64748b' }} />
+                onClick={() => {
+                  if (!_canAccessSmart) {
+                    alert('🔒 Text Style Customization feature Basic aur Ultra members ke liye hai. Upgrade karein!');
+                    return;
+                  }
+                  setShowFontFamilyMenu(true);
+                  setShowControls(false);
+                  TOP_10_READING_FONTS.forEach(f => ensureReadingFontLoaded(f.gfontParam));
+                }}
+                title={!_canAccessSmart ? "🔒 Text Style Customization (Basic+ Required)" : "Style"}
+                style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '6px 4px', background: activeFont ? '#eef2ff' : 'transparent', cursor: 'pointer', border: 'none', borderRight: '1px solid #e2e8f0', opacity: !_canAccessSmart ? 0.75 : 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <Type size={12} style={{ color: activeFont ? '#6366f1' : '#64748b' }} />
+                  {!_canAccessSmart && <span style={{ fontSize: 9 }}>🔒</span>}
+                </div>
                 <span style={{ fontSize: 8, fontWeight: 700, textTransform: 'uppercase', color: activeFont ? '#6366f1' : '#94a3b8', letterSpacing: '0.05em', lineHeight: 1 }}>Style</span>
               </button>
 
               {/* Text Color */}
               {!textColorOverride ? (
                 <div style={{ flex: 1, position: 'relative', borderRight: '1px solid #e2e8f0' }}>
-                  <button type="button" onClick={() => setShowColorMenu(s => !s)}
-                    style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '6px 4px', background: 'transparent', cursor: 'pointer', border: 'none' }}>
+                  <button type="button" onClick={() => {
+                    if (!_canAccessSmart) {
+                      alert('🔒 Text Color Customization feature Basic aur Ultra members ke liye hai. Upgrade karein!');
+                      return;
+                    }
+                    setShowColorMenu(s => !s);
+                  }}
+                    title={!_canAccessSmart ? "🔒 Text Color Customization (Basic+ Required)" : "Color"}
+                    style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '6px 4px', background: 'transparent', cursor: 'pointer', border: 'none', opacity: !_canAccessSmart ? 0.75 : 1 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                       <Palette size={10} style={{ color: '#64748b' }} />
                       <span style={{ width: 10, height: 10, borderRadius: '50%', border: '2px solid #cbd5e1', backgroundColor: textColor, display: 'inline-block' }} />
+                      {!_canAccessSmart && <span style={{ fontSize: 9 }}>🔒</span>}
                     </div>
                     <span style={{ fontSize: 8, fontWeight: 700, textTransform: 'uppercase', color: '#94a3b8', letterSpacing: '0.05em', lineHeight: 1 }}>Color</span>
                   </button>
@@ -1792,17 +1834,39 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                 <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', color: '#94a3b8', letterSpacing: '0.05em', lineHeight: 1 }}>Reset</span>
               </button>
               {onSaveOffline && (
-                <button type="button" onClick={() => { onSaveOffline(); setShowControls(false); }}
-                  style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '10px 4px', background: isSavedOffline ? '#f0fdf4' : 'transparent', cursor: 'pointer', border: 'none', borderRight: '1px solid #e2e8f0' }}>
-                  <WifiOff size={14} style={{ color: isSavedOffline ? '#16a34a' : '#64748b' }} />
+                <button type="button" onClick={() => {
+                  if (!_canAccessSmart) {
+                    alert('🔒 Download Available feature Basic aur Ultra members ke liye hai. Upgrade karein!');
+                    return;
+                  }
+                  onSaveOffline();
+                  setShowControls(false);
+                }}
+                  title={!_canAccessSmart ? "🔒 Download Available (Basic+ Required)" : (isSavedOffline ? 'Saved' : 'Save')}
+                  style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '10px 4px', background: isSavedOffline ? '#f0fdf4' : 'transparent', cursor: 'pointer', border: 'none', borderRight: '1px solid #e2e8f0', opacity: !_canAccessSmart ? 0.75 : 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <WifiOff size={14} style={{ color: isSavedOffline ? '#16a34a' : '#64748b' }} />
+                    {!_canAccessSmart && <span style={{ fontSize: 9 }}>🔒</span>}
+                  </div>
                   <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', color: isSavedOffline ? '#16a34a' : '#94a3b8', letterSpacing: '0.05em', lineHeight: 1 }}>{isSavedOffline ? 'Saved' : 'Save'}</span>
                 </button>
               )}
               {/* Fix — school mode mein chhupa */}
               {!hideFix && (
-                <button type="button" onClick={() => { setShowSuggestionPanel(s => !s); setShowControls(false); }}
-                  style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '10px 4px', background: showSuggestionPanel ? '#fef3c7' : 'transparent', cursor: 'pointer', border: 'none', borderLeft: onSaveOffline ? '1px solid #e2e8f0' : 'none' }}>
-                  <Lightbulb size={14} style={{ color: showSuggestionPanel ? '#d97706' : '#64748b' }} />
+                <button type="button" onClick={() => {
+                  if (!_canAccessSmart) {
+                    alert('🔒 Correction Mode feature Basic aur Ultra members ke liye hai. Upgrade karein!');
+                    return;
+                  }
+                  setShowSuggestionPanel(s => !s);
+                  setShowControls(false);
+                }}
+                  title={!_canAccessSmart ? "🔒 Correction Mode (Basic+ Required)" : "Correction / Fix"}
+                  style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '10px 4px', background: showSuggestionPanel ? '#fef3c7' : 'transparent', cursor: 'pointer', border: 'none', borderLeft: onSaveOffline ? '1px solid #e2e8f0' : 'none', opacity: !_canAccessSmart ? 0.75 : 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <Lightbulb size={14} style={{ color: showSuggestionPanel ? '#d97706' : '#64748b' }} />
+                    {!_canAccessSmart && <span style={{ fontSize: 9 }}>🔒</span>}
+                  </div>
                   <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', color: showSuggestionPanel ? '#d97706' : '#94a3b8', letterSpacing: '0.05em', lineHeight: 1 }}>Fix</span>
                 </button>
               )}
@@ -1810,19 +1874,39 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
             {/* Row 2 */}
             <div style={{ borderTop: '1px solid #e2e8f0', background: 'linear-gradient(180deg, #e8edf3 0%, #f1f5f9 100%)', display: 'flex', alignItems: 'stretch', boxShadow: 'inset 0 -2px 0 #d1d9e0' }}>
               <button type="button"
-                onClick={() => { setShowFontFamilyMenu(true); setShowControls(false); TOP_10_READING_FONTS.forEach(f => ensureReadingFontLoaded(f.gfontParam)); }}
-                style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '10px 4px', background: activeFont ? '#eef2ff' : 'transparent', cursor: 'pointer', border: 'none', borderRight: '1px solid #e2e8f0' }}>
-                <Type size={14} style={{ color: activeFont ? '#6366f1' : '#64748b' }} />
+                onClick={() => {
+                  if (!_canAccessSmart) {
+                    alert('🔒 Text Style Customization feature Basic aur Ultra members ke liye hai. Upgrade karein!');
+                    return;
+                  }
+                  setShowFontFamilyMenu(true);
+                  setShowControls(false);
+                  TOP_10_READING_FONTS.forEach(f => ensureReadingFontLoaded(f.gfontParam));
+                }}
+                title={!_canAccessSmart ? "🔒 Text Style Customization (Basic+ Required)" : "Style"}
+                style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '10px 4px', background: activeFont ? '#eef2ff' : 'transparent', cursor: 'pointer', border: 'none', borderRight: '1px solid #e2e8f0', opacity: !_canAccessSmart ? 0.75 : 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <Type size={14} style={{ color: activeFont ? '#6366f1' : '#64748b' }} />
+                  {!_canAccessSmart && <span style={{ fontSize: 9 }}>🔒</span>}
+                </div>
                 <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', color: activeFont ? '#6366f1' : '#94a3b8', letterSpacing: '0.05em', lineHeight: 1 }}>Style</span>
               </button>
               {/* Color */}
               {!textColorOverride ? (
                 <div style={{ flex: 1, position: 'relative', borderRight: '1px solid #e2e8f0' }}>
-                  <button type="button" onClick={() => setShowColorMenu(s => !s)}
-                    style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '10px 4px', background: 'transparent', cursor: 'pointer', border: 'none' }}>
+                  <button type="button" onClick={() => {
+                    if (!_canAccessSmart) {
+                      alert('🔒 Text Color Customization feature Basic aur Ultra members ke liye hai. Upgrade karein!');
+                      return;
+                    }
+                    setShowColorMenu(s => !s);
+                  }}
+                    title={!_canAccessSmart ? "🔒 Text Color Customization (Basic+ Required)" : "Color"}
+                    style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '10px 4px', background: 'transparent', cursor: 'pointer', border: 'none', opacity: !_canAccessSmart ? 0.75 : 1 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                       <Palette size={12} style={{ color: '#64748b' }} />
                       <span style={{ width: 8, height: 8, borderRadius: '50%', border: '2px solid #cbd5e1', backgroundColor: textColor, display: 'inline-block' }} />
+                      {!_canAccessSmart && <span style={{ fontSize: 9 }}>🔒</span>}
                     </div>
                     <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', color: '#94a3b8', letterSpacing: '0.05em', lineHeight: 1 }}>Color</span>
                   </button>
@@ -2324,6 +2408,10 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                   onPointerDown={(e) => { e.stopPropagation(); }}
                   onClick={(e) => {
                     e.stopPropagation();
+                    if (!_canAccessSmart) {
+                      alert('🔒 Correction Mode feature Basic aur Ultra members ke liye hai. Upgrade karein!');
+                      return;
+                    }
                     try { if (navigator.vibrate) navigator.vibrate(30); } catch {}
                     if (inlineCorrectionIdx === idx) {
                       setInlineCorrectionIdx(null);

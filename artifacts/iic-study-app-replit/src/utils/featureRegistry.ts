@@ -433,7 +433,14 @@ export const ALL_FEATURES: Feature[] = [
     { id: 'REVISION_HUB_FREE', label: 'Revision Hub (Free)', group: 'SOUL', surfaceLevel: 2, adminVisible: true, description: 'Basic revision features.' },
     { id: 'REVISION_HUB_PREMIUM', label: 'Revision Hub (Premium)', group: 'SOUL', surfaceLevel: 2, adminVisible: true, description: 'Advanced revision features.' },
     { id: 'TOPIC_CONTENT', label: 'Topic Content', group: 'SOUL', surfaceLevel: 2, adminVisible: true, description: 'Control topic-specific content visibility.' },
-    { id: 'REQUEST_CONTENT', label: 'Request Content', group: 'SOUL', surfaceLevel: 2, adminVisible: true, description: 'Enable/Disable content requests.' },
+    { id: 'REQUEST_CONTENT', label: 'Request Content', group: 'SOUL', surfaceLevel: 2, requiredSubscription: 'BASIC', adminVisible: true, description: 'Enable/Disable content requests.' },
+    { id: 'COMMUNITY_MCQ_SEND', label: 'Community MCQ Send', group: 'TOOLS', surfaceLevel: 2, requiredSubscription: 'BASIC', adminVisible: true, description: 'Send MCQs to community.' },
+    { id: 'SCORE_HISTORY', label: 'Score History Unlocked', group: 'ANALYSIS', surfaceLevel: 2, requiredSubscription: 'BASIC', adminVisible: true, description: 'View detailed score analytics and history.' },
+    { id: 'TEXT_STYLE_CUSTOMIZATION', label: 'Text Style Customization', group: 'TOOLS', surfaceLevel: 2, requiredSubscription: 'BASIC', adminVisible: true, description: 'Customize reader fonts and typography.' },
+    { id: 'TEXT_COLOR_CUSTOMIZATION', label: 'Text Color Customization', group: 'TOOLS', surfaceLevel: 2, requiredSubscription: 'BASIC', adminVisible: true, description: 'Customize reader text palette colors.' },
+    { id: 'CORRECTION_MODE', label: 'Correction Mode', group: 'TOOLS', surfaceLevel: 2, requiredSubscription: 'BASIC', adminVisible: true, description: 'Submit error corrections in reading notes.' },
+    { id: 'SUGGESTIONS_PANEL', label: 'Suggestions Panel', group: 'TOOLS', surfaceLevel: 2, requiredSubscription: 'ULTRA', adminVisible: true, description: 'Exclusive feedback & suggestions portal for Ultra members.' },
+    { id: 'ULTRA_MODE', label: 'Ultra Mode (Chunk Notes)', group: 'CONTENT', surfaceLevel: 2, requiredSubscription: 'ULTRA', adminVisible: true, description: 'Exclusive HTML styled rich reader mode for Ultra members.' },
     { id: 'AI_STUDIO', label: 'AI Studio', group: 'SOUL', surfaceLevel: 2, adminVisible: true, description: 'Control AI Studio features.' },
 
     // --- MARKSHEET FEATURES (App Soul Controlled) ---

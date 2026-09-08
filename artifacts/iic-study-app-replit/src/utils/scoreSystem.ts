@@ -2,28 +2,42 @@
  * Score System — daily limits, subscription multipliers, activity milestones
  * Daily score limit: 1500 pts (Free) / 2500 pts (Basic) / 3500 pts (Ultra)
  * Milestones: 20%=5, 40%=10, 60%=15, 80%=20, 100%=25 base pts
- * Multipliers: Free=1x, Basic=1.2x (+20%), Ultra=1.5x (+50%)
+ * Multipliers: Free=1x, Credit Subscription=1.2x (+20%), Basic=1.5x (+50%), Ultra=2x (+100%)
  */
 
 import { saveScoreLogToFirebase } from '../firebase';
+import { getLevelInfo, getProgressBonus, getDailyLimitBonus } from './levelSystem';
 
 export const DAILY_SCORE_LIMIT = 1500;
 
-/** Fixed daily score limits by tier (Free=1500, Basic=25000, Ultra=3500) */
+/** Fixed daily score limits by tier (Free=1500, Basic=2500, Ultra=3500) */
 const DAILY_TIER_LIMITS: Record<string, number> = {
   FREE:  1500,
   BASIC: 2500,
   ULTRA: 3500,
 };
 
-/** Dynamic daily score limit based on subscription + optional temporary limit boost (from redeem code or event) */
+/** Dynamic daily score limit based on subscription + optional temporary limit boost + level-based daily limit multiplier (L9+) */
 export const getDailyScoreLimit = (
   subscriptionLevel?: string,
   isPremium?: boolean,
   scoreLimitBoostPercent?: number,
   scoreLimitBoostExpiry?: string,
+  userLevel?: number,
+  dailyEarned?: number,
 ): number => {
-  const base = isPremium ? (DAILY_TIER_LIMITS[subscriptionLevel ?? 'FREE'] ?? 1500) : 1500;
+  let base = isPremium ? (DAILY_TIER_LIMITS[subscriptionLevel ?? 'FREE'] ?? 1500) : 1500;
+
+  // Level 9+ Daily Limit Multiplier (up to +100% to +500% based on daily study progress)
+  if (userLevel && userLevel >= 9) {
+    const earned = dailyEarned ?? 0;
+    const progressPct = base > 0 ? Math.min(100, Math.round((earned / base) * 100)) : 0;
+    const limitBonusPct = getDailyLimitBonus(userLevel, progressPct);
+    if (limitBonusPct > 0) {
+      base = Math.round(base * (1 + limitBonusPct / 100));
+    }
+  }
+
   // Only apply boost if it hasn't expired
   const boostActive = scoreLimitBoostPercent && scoreLimitBoostPercent > 0
     && (!scoreLimitBoostExpiry || new Date(scoreLimitBoostExpiry).getTime() > Date.now());
@@ -34,9 +48,10 @@ export const getDailyScoreLimit = (
 };
 
 export const SCORE_MULTIPLIERS: Record<string, number> = {
-  FREE:  1.0,
-  BASIC: 1.2,
-  ULTRA: 1.5,
+  FREE:       1.0,
+  CREDIT_SUB: 1.2,
+  BASIC:      1.5,
+  ULTRA:      2.0,
 };
 
 export const PROGRESS_MILESTONES: { percent: number; score: number }[] = [
@@ -71,8 +86,11 @@ export const getRemainingDailyScore = (
   isPremium?: boolean,
   scoreLimitBoostPercent?: number,
   scoreLimitBoostExpiry?: string,
-): number =>
-  Math.max(0, getDailyScoreLimit(subscriptionLevel, isPremium, scoreLimitBoostPercent, scoreLimitBoostExpiry) - getDailyScoreEarned(userId));
+  userLevel?: number,
+): number => {
+  const earned = getDailyScoreEarned(userId);
+  return Math.max(0, getDailyScoreLimit(subscriptionLevel, isPremium, scoreLimitBoostPercent, scoreLimitBoostExpiry, userLevel, earned) - earned);
+};
 
 /** Get active score boost % for a user (returns 0 if expired or not set) */
 export const getActiveBoost = (user: { scoreBoostPercent?: number; scoreBoostExpiry?: string } | null | undefined): number => {
@@ -103,9 +121,32 @@ export const calculateScore = (
   subscriptionLevel: string | undefined,
   isPremium: boolean | undefined,
   boostPercent = 0,
+  hasCreditSub?: boolean,
 ): number => {
   const tier = isPremium ? (subscriptionLevel || 'FREE') : 'FREE';
-  const mult = SCORE_MULTIPLIERS[tier] ?? 1.0;
+  let mult = SCORE_MULTIPLIERS[tier] ?? 1.0;
+
+  // If user has Credit Subscription and their current tier multiplier is < 1.2, boost to 1.2x
+  let creditActive = hasCreditSub;
+  if (creditActive === undefined) {
+    try {
+      const raw = localStorage.getItem('nst_user') || localStorage.getItem('nst_current_user');
+      if (raw) {
+        const u = JSON.parse(raw);
+        if (u.creditSubscription && u.creditSubscription.status !== 'EXPIRED') {
+          const end = new Date(u.creditSubscription.endDate).getTime();
+          if (!Number.isNaN(end) && end > Date.now()) {
+            creditActive = true;
+          }
+        }
+      }
+    } catch {}
+  }
+
+  if (creditActive && mult < 1.2) {
+    mult = 1.2;
+  }
+
   let s = Math.round(baseScore * mult);
   if (boostPercent > 0) s = Math.round(s * (1 + boostPercent / 100));
   return s;
@@ -158,9 +199,49 @@ export const tryEarnScore = (
   scoreLimitBoostPercent?: number,
   scoreLimitBoostExpiry?: string,
   label?: string,
+  userLevel?: number,
+  hasCreditSub?: boolean,
 ): number => {
-  const remaining = getRemainingDailyScore(userId, subscriptionLevel, isPremium, scoreLimitBoostPercent, scoreLimitBoostExpiry);
-  const calc = calculateScore(baseScore, subscriptionLevel, isPremium, boostPercent);
+  // Derive level if not provided directly
+  let effLevel = userLevel;
+  if (!effLevel) {
+    try {
+      const raw = localStorage.getItem('nst_user');
+      if (raw) {
+        const u = JSON.parse(raw);
+        effLevel = getLevelInfo(u.totalScore || 0).level;
+      }
+    } catch {}
+  }
+  effLevel = effLevel || 1;
+
+  // Auto-detect credit subscription if not provided
+  let creditActive = hasCreditSub;
+  if (creditActive === undefined) {
+    try {
+      const raw = localStorage.getItem('nst_user') || localStorage.getItem('nst_current_user') || localStorage.getItem(`nst_user_profile_${userId}`);
+      if (raw) {
+        const u = JSON.parse(raw);
+        if (u.creditSubscription && u.creditSubscription.status !== 'EXPIRED') {
+          const end = new Date(u.creditSubscription.endDate).getTime();
+          if (!Number.isNaN(end) && end > Date.now()) {
+            creditActive = true;
+          }
+        }
+      }
+    } catch {}
+  }
+
+  const currentEarned = getDailyScoreEarned(userId);
+  const baseLimit = isPremium ? (DAILY_TIER_LIMITS[subscriptionLevel ?? 'FREE'] ?? 1500) : 1500;
+  const progressPct = baseLimit > 0 ? Math.min(100, Math.round((currentEarned / baseLimit) * 100)) : 0;
+
+  // Level 4-8 Progress Bonus (extra score percentage as daily progress increases)
+  const lvlProgressBonus = getProgressBonus(effLevel, progressPct);
+  const totalBoost = boostPercent + lvlProgressBonus;
+
+  const remaining = getRemainingDailyScore(userId, subscriptionLevel, isPremium, scoreLimitBoostPercent, scoreLimitBoostExpiry, effLevel);
+  const calc = calculateScore(baseScore, subscriptionLevel, isPremium, totalBoost, creditActive);
 
   if (remaining > 0) {
     // Within daily limit — earn normally (capped at remaining)

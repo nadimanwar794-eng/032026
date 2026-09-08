@@ -888,6 +888,8 @@ const ACCOUNT_STATE_FIELDS = [
   'scoreBoostExpiry',
   'scoreLimitBoostPercent',
   'scoreLimitBoostExpiry',
+  'creditSubscription',
+  'creditSubscriptionHistory',
 ] as const;
 
 const getAccountState = (user: any): Record<string, any> => {

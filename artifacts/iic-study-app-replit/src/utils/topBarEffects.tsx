@@ -151,34 +151,34 @@ export function TopBarEffectsLayer({ effects }: { effects?: EffectEntry[] }) {
 
           // ── SHIMMER ──────────────────────────────────────────────
           case 'shimmer-forward':
-            return <div key={key} className="absolute inset-0 pointer-events-none z-0" style={{ background: `linear-gradient(105deg,transparent 30%,${ca(0.18)} 50%,transparent 70%)`, backgroundSize: '200% 100%', animation: `shimmer-sweep ${dur(2.5, sp)} linear infinite` }} />;
+            return <div key={key} className="absolute inset-0 pointer-events-none z-0" style={{ background: `linear-gradient(105deg,transparent 25%,${ca(0.42)} 50%,transparent 75%)`, backgroundSize: '200% 100%', animation: `shimmer-sweep ${dur(2.5, sp)} linear infinite` }} />;
 
           case 'shimmer-reverse':
-            return <div key={key} className="absolute inset-0 pointer-events-none z-0" style={{ background: `linear-gradient(75deg,transparent 30%,${ca(0.14)} 50%,transparent 70%)`, backgroundSize: '200% 100%', animation: `shimmer-sweep-reverse ${dur(3.5, sp)} linear infinite` }} />;
+            return <div key={key} className="absolute inset-0 pointer-events-none z-0" style={{ background: `linear-gradient(75deg,transparent 25%,${ca(0.38)} 50%,transparent 75%)`, backgroundSize: '200% 100%', animation: `shimmer-sweep-reverse ${dur(3.5, sp)} linear infinite` }} />;
 
           case 'shimmer-vertical':
-            return <div key={key} className="absolute inset-0 pointer-events-none z-0" style={{ background: `linear-gradient(180deg,${ca(0.14)} 0%,transparent 35%,transparent 65%,${ca(0.12)} 100%)` }} />;
+            return <div key={key} className="absolute inset-0 pointer-events-none z-0" style={{ background: `linear-gradient(180deg,${ca(0.35)} 0%,transparent 35%,transparent 65%,${ca(0.32)} 100%)` }} />;
 
           case 'shimmer-rainbow':
-            return <div key={key} className="absolute inset-0 pointer-events-none z-0" style={{ background: `linear-gradient(105deg,transparent 20%,${ca(0.15)} 35%,rgba(244,114,182,0.1) 50%,${ca(0.15)} 65%,transparent 80%)`, backgroundSize: '300% 100%', animation: `shimmer-sweep ${dur(4.0, sp)} linear infinite` }} />;
+            return <div key={key} className="absolute inset-0 pointer-events-none z-0" style={{ background: `linear-gradient(105deg,transparent 15%,${ca(0.38)} 30%,rgba(244,114,182,0.35) 50%,${ca(0.38)} 70%,transparent 85%)`, backgroundSize: '300% 100%', animation: `shimmer-sweep ${dur(4.0, sp)} linear infinite` }} />;
 
           case 'shimmer-diagonal':
-            return <div key={key} className="absolute inset-0 pointer-events-none z-0" style={{ background: `linear-gradient(135deg,transparent 25%,${ca(0.22)} 50%,transparent 75%)`, backgroundSize: '200% 200%', animation: `shimmer-sweep ${dur(2.8, sp)} linear infinite` }} />;
+            return <div key={key} className="absolute inset-0 pointer-events-none z-0" style={{ background: `linear-gradient(135deg,transparent 20%,${ca(0.45)} 50%,transparent 80%)`, backgroundSize: '200% 200%', animation: `shimmer-sweep ${dur(2.8, sp)} linear infinite` }} />;
 
           case 'shimmer-double':
-            return <div key={key} className="absolute inset-0 pointer-events-none z-0" style={{ background: `linear-gradient(105deg,transparent 15%,${ca(0.12)} 25%,transparent 35%,transparent 55%,${ca(0.12)} 65%,transparent 75%)`, backgroundSize: '300% 100%', animation: `shimmer-sweep ${dur(3.0, sp)} linear infinite` }} />;
+            return <div key={key} className="absolute inset-0 pointer-events-none z-0" style={{ background: `linear-gradient(105deg,transparent 10%,${ca(0.32)} 25%,transparent 40%,transparent 60%,${ca(0.32)} 75%,transparent 90%)`, backgroundSize: '300% 100%', animation: `shimmer-sweep ${dur(3.0, sp)} linear infinite` }} />;
 
           case 'shimmer-gold':
-            return <div key={key} className="absolute inset-0 pointer-events-none z-0" style={{ background: `linear-gradient(105deg,transparent 25%,rgba(251,191,36,0.25) 40%,rgba(255,255,255,0.12) 50%,rgba(251,191,36,0.25) 60%,transparent 75%)`, backgroundSize: '250% 100%', animation: `shimmer-sweep ${dur(2.5, sp)} linear infinite` }} />;
+            return <div key={key} className="absolute inset-0 pointer-events-none z-0" style={{ background: `linear-gradient(105deg,transparent 20%,rgba(251,191,36,0.48) 40%,rgba(255,255,255,0.30) 50%,rgba(251,191,36,0.48) 60%,transparent 80%)`, backgroundSize: '250% 100%', animation: `shimmer-sweep ${dur(2.5, sp)} linear infinite` }} />;
 
           case 'shimmer-silver':
-            return <div key={key} className="absolute inset-0 pointer-events-none z-0" style={{ background: `linear-gradient(105deg,transparent 25%,rgba(226,232,240,0.3) 42%,rgba(255,255,255,0.18) 50%,rgba(226,232,240,0.3) 58%,transparent 75%)`, backgroundSize: '250% 100%', animation: `shimmer-sweep ${dur(3.0, sp)} linear infinite` }} />;
+            return <div key={key} className="absolute inset-0 pointer-events-none z-0" style={{ background: `linear-gradient(105deg,transparent 20%,rgba(226,232,240,0.52) 40%,rgba(255,255,255,0.42) 50%,rgba(226,232,240,0.52) 60%,transparent 80%)`, backgroundSize: '250% 100%', animation: `shimmer-sweep ${dur(3.0, sp)} linear infinite` }} />;
 
           case 'shimmer-pulse-wave':
-            return <div key={key} className="absolute inset-0 pointer-events-none z-0" style={{ background: `linear-gradient(105deg,transparent 30%,${ca(0.2)} 50%,transparent 70%)`, backgroundSize: '200% 100%', animation: `shimmer-sweep ${dur(3.5, sp)} ease-in-out infinite` }} />;
+            return <div key={key} className="absolute inset-0 pointer-events-none z-0" style={{ background: `linear-gradient(105deg,transparent 25%,${ca(0.45)} 50%,transparent 75%)`, backgroundSize: '200% 100%', animation: `shimmer-sweep ${dur(3.5, sp)} ease-in-out infinite` }} />;
 
           case 'shimmer-wide':
-            return <div key={key} className="absolute inset-0 pointer-events-none z-0" style={{ background: `linear-gradient(105deg,transparent 10%,${ca(0.1)} 30%,${ca(0.18)} 50%,${ca(0.1)} 70%,transparent 90%)`, backgroundSize: '300% 100%', animation: `shimmer-sweep ${dur(4.0, sp)} linear infinite` }} />;
+            return <div key={key} className="absolute inset-0 pointer-events-none z-0" style={{ background: `linear-gradient(105deg,transparent 10%,${ca(0.25)} 30%,${ca(0.42)} 50%,${ca(0.25)} 70%,transparent 90%)`, backgroundSize: '300% 100%', animation: `shimmer-sweep ${dur(4.0, sp)} linear infinite` }} />;
 
           // ── SPARKLE ───────────────────────────────────────────────
           case 'sparkle-top':

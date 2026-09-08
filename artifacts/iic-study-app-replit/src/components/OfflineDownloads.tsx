@@ -295,6 +295,59 @@ export const OfflineDownloads: React.FC<Props> = ({ onBack, hideHeader = false, 
     return renderItemViewer(selectedItem);
   }
 
+  const isSubscriber = (user?.subscriptionLevel === 'BASIC' || user?.subscriptionLevel === 'ULTRA' || user?.isPremium || user?.role === 'ADMIN');
+
+  if (!isSubscriber) {
+    return (
+      <div className={`bg-slate-50 ${hideHeader ? 'pb-8' : 'min-h-screen pb-8'}`}>
+        {!hideHeader && (
+          <div className="bg-white p-4 border-b border-slate-200 flex items-center justify-between sticky top-0 z-40">
+            <div className="flex items-center gap-3">
+              <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+                <ArrowLeft size={20} className="text-slate-600" />
+              </button>
+              <h1 className="text-xl font-black text-slate-800">Offline Downloads</h1>
+            </div>
+            <span className="text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1">
+              🔒 Basic+
+            </span>
+          </div>
+        )}
+        <div className="max-w-md mx-auto p-6 mt-8">
+          <div className="bg-white rounded-3xl p-6 text-center border border-amber-200 shadow-sm">
+            <div className="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center text-3xl bg-amber-50 border border-amber-200">
+              🔒
+            </div>
+            <span className="inline-block px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-widest mb-3 bg-amber-100 text-amber-800">
+              Subscription Tier Required: Basic+
+            </span>
+            <h3 className="text-xl font-black text-slate-800 mb-2">
+              Download Available Feature Locked
+            </h3>
+            <p className="text-sm text-slate-600 leading-relaxed mb-6">
+              Notes aur MCQs offline save karke bina internet ke access karne ka feature sirf <strong className="text-blue-600">Basic (Pro)</strong> aur <strong className="text-purple-600">Ultra (Max)</strong> members ke liye available hai.
+            </p>
+            <div className="grid grid-cols-2 gap-3 mb-6 text-left">
+              <div className="p-3 rounded-2xl bg-blue-50 border border-blue-200">
+                <p className="text-xs font-black text-blue-700 mb-1">⭐ Basic Plan</p>
+                <p className="text-[11px] text-slate-600">Offline notes & content downloads available</p>
+              </div>
+              <div className="p-3 rounded-2xl bg-purple-50 border border-purple-200">
+                <p className="text-xs font-black text-purple-700 mb-1">👑 Ultra Plan</p>
+                <p className="text-[11px] text-slate-600">Offline downloads + Ultra Mode + priority support</p>
+              </div>
+            </div>
+            <button
+              onClick={onBack}
+              className="w-full py-3.5 rounded-2xl font-black text-sm text-white transition-all active:scale-95 shadow-md bg-amber-600 hover:bg-amber-700">
+              Back to Dashboard / Upgrade Plan
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={`bg-slate-50 ${hideHeader ? 'pb-8' : 'min-h-screen pb-8'}`}>
       {!hideHeader && (

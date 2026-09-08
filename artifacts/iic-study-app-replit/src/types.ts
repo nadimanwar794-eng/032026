@@ -258,6 +258,7 @@ export interface User {
   timedUnlocks?: { contentId: string; expiresAt: string }[];
   dailyRoutine?: DailyRoutine;
   subjectFreeLesson?: Record<string, string>; // subjectId → chapterId (first free lesson per subject)
+  creditSubscription?: UserCreditSubscription; // Daily Credits Subscription (Pure daily credits, no premium features)
 }
 
 export interface ActiveSubscription {
@@ -318,6 +319,31 @@ export interface CreditPackage {
   price: number;
   dummyPrice?: number; // NEW: Strike-through dummy price
   color?: string; // Visual color for the card
+}
+
+export interface CreditSubscriptionPlan {
+  id: string;
+  name: string;
+  price: number;
+  dummyPrice?: number;
+  dailyCredits: number;
+  durationDays: number;
+  badge?: string;
+  description?: string;
+  isActive?: boolean;
+}
+
+export interface UserCreditSubscription {
+  planId: string;
+  planName: string;
+  dailyCredits: number;
+  startDate: string; // ISO string
+  endDate: string;   // ISO string
+  lastClaimDate?: string; // YYYY-MM-DD
+  totalClaimedDays?: number;
+  totalCreditsClaimed?: number;
+  pricePaid?: number;
+  status?: 'ACTIVE' | 'EXPIRED';
 }
 
 export interface SubscriptionPlan {
@@ -455,7 +481,7 @@ export interface LoginBonusConfig {
 export interface BroadcastRedeemCode {
     id: string;
     code: string;
-    type: 'CREDITS' | 'SUBSCRIPTION' | 'DISCOUNT' | 'CONTENT_UNLOCK' | 'TOPBAR_EFFECT_COLOR' | 'TOPBAR_EFFECT_ID' | 'SCORE' | 'SCORE_BOOST' | 'SCORE_LIMIT_BOOST';
+    type: 'CREDITS' | 'CREDIT_SUBSCRIPTION' | 'SUBSCRIPTION' | 'DISCOUNT' | 'CONTENT_UNLOCK' | 'TOPBAR_EFFECT_COLOR' | 'TOPBAR_EFFECT_ID' | 'SCORE' | 'SCORE_BOOST' | 'SCORE_LIMIT_BOOST';
     scoreBoostPercent?: number; // For SCORE_BOOST type — how much % to boost score by
     scoreBoostDurationHours?: number; // How long the boost lasts
     scoreLimitBoostPercent?: number; // For SCORE_LIMIT_BOOST type — temporary daily limit increase %
@@ -464,6 +490,10 @@ export interface BroadcastRedeemCode {
     title?: string;
     amount?: number;
     scoreAmount?: number; // For SCORE type — how many score points to add
+    creditPlanId?: string; // For CREDIT_SUBSCRIPTION type
+    creditPlanName?: string; // For CREDIT_SUBSCRIPTION type
+    creditDailyAmount?: number; // For CREDIT_SUBSCRIPTION type
+    creditDurationDays?: number; // For CREDIT_SUBSCRIPTION type
     discountPercent?: number;
     subTier?: string;
     subLevel?: string;
@@ -886,8 +916,8 @@ export interface SystemSettings {
     yearlyBasic?: number;
     yearlyUltra?: number;
   };
-  dailyClaimPro?: number; // Daily coins for BASIC / Pro subscribers (default 150)
-  dailyClaimMaxPro?: number; // Daily coins for ULTRA / Max Pro subscribers (default 250)
+  dailyClaimPro?: number; // Daily coins for BASIC / Pro subscribers (default 50)
+  dailyClaimMaxPro?: number; // Daily coins for ULTRA / Max Pro subscribers (default 100)
 
   // LEVEL SYSTEM (Admin Config)
   isLevelSystemEnabled?: boolean;
@@ -939,6 +969,7 @@ export interface SystemSettings {
   paymentInstructions?: string;
   packages?: CreditPackage[];
   subscriptionPlans?: SubscriptionPlan[];
+  creditSubscriptionPlans?: CreditSubscriptionPlan[]; // Daily Credit Subscription Plans managed by Admin
   startupAd?: StartupConfig;
   // NEW: 3-Tier Popup Control (Free vs Ultra)
   appFeatures?: AppFeature[];
@@ -1283,12 +1314,16 @@ export interface MCQRewardRule {
 export interface GiftCode {
   id: string;
   code: string;
-  type: 'CREDITS' | 'SUBSCRIPTION' | 'DISCOUNT' | 'CONTENT_UNLOCK' | 'TOPBAR_EFFECT_COLOR' | 'TOPBAR_EFFECT_ID' | 'SCORE' | 'SCORE_BOOST' | 'SCORE_LIMIT_BOOST' | 'THEME_COLOR'; // New: Type of code
+  type: 'CREDITS' | 'CREDIT_SUBSCRIPTION' | 'SUBSCRIPTION' | 'DISCOUNT' | 'CONTENT_UNLOCK' | 'TOPBAR_EFFECT_COLOR' | 'TOPBAR_EFFECT_ID' | 'SCORE' | 'SCORE_BOOST' | 'SCORE_LIMIT_BOOST' | 'THEME_COLOR'; // New: Type of code
   scoreBoostPercent?: number; // For SCORE_BOOST type
   scoreBoostDurationHours?: number; // Hours the boost lasts
   scoreLimitBoostPercent?: number; // For SCORE_LIMIT_BOOST type — temporary daily limit increase %
   scoreLimitBoostDurationHours?: number; // How long the daily limit boost lasts (hours)
   amount?: number; // For Credits
+  creditPlanId?: string; // For CREDIT_SUBSCRIPTION type
+  creditPlanName?: string; // For CREDIT_SUBSCRIPTION type
+  creditDailyAmount?: number; // For CREDIT_SUBSCRIPTION type
+  creditDurationDays?: number; // For CREDIT_SUBSCRIPTION type
   discountPercent?: number; // For Discount
   effectColor?: string; // For TOPBAR_EFFECT_COLOR — hex color
   effectId?: string; // For TOPBAR_EFFECT_ID — specific animation effect id

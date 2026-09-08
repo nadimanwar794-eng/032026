@@ -11,6 +11,7 @@ interface Props {
 }
 
 export const WriteModeCorrection: React.FC<Props> = ({ user, lessonTitle, pageNo, subject, classLevel }) => {
+  const isSubscriber = (user?.subscriptionLevel === 'BASIC' || user?.subscriptionLevel === 'ULTRA' || user?.isPremium || user?.role === 'ADMIN');
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -20,6 +21,10 @@ export const WriteModeCorrection: React.FC<Props> = ({ user, lessonTitle, pageNo
   const reset = () => { setDone(false); setError(false); setText(''); setOpen(false); };
 
   const submit = async () => {
+    if (!isSubscriber) {
+      alert('🔒 Correction Mode feature Basic aur Ultra members ke liye available hai. Plan upgrade karein!');
+      return;
+    }
     if (!text.trim() || submitting) return;
     setSubmitting(true);
     setError(false);
@@ -83,10 +88,21 @@ export const WriteModeCorrection: React.FC<Props> = ({ user, lessonTitle, pageNo
     <div style={{ margin: '12px 16px 4px' }}>
       {!open ? (
         <button
-          onClick={() => setOpen(true)}
+          onClick={() => {
+            if (!isSubscriber) {
+              alert('🔒 Correction Mode feature Basic aur Ultra members ke liye available hai. Plan upgrade karein!');
+              return;
+            }
+            setOpen(true);
+          }}
           style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 20, border: '1px solid #fde68a', background: '#fffbeb', color: '#92400e', fontSize: 11, fontWeight: 900, cursor: 'pointer' }}
         >
-          💡 Is page mein correction report karo
+          {isSubscriber ? '💡 Is page mein correction report karo' : '🔒 Is page mein correction report karo'}
+          {!isSubscriber && (
+            <span style={{ fontSize: 9, background: 'rgba(217,119,6,0.15)', color: '#b45309', padding: '1px 5px', borderRadius: 4, fontWeight: 900 }}>
+              Basic+
+            </span>
+          )}
         </button>
       ) : (
         <div style={{ background: '#fffbeb', border: '2px solid #fcd34d', borderRadius: 14, padding: '12px', gap: 8, display: 'flex', flexDirection: 'column' }}>

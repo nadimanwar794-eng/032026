@@ -769,7 +769,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
             </div>
 
             {(() => {
-              const _c612Bg  = (settings as any)?.homeClass612CardBg     || '#ffffff';
+              const _c612Bg  = (settings as any)?.homeClass612CardBg     || (theme as any).profileCardBg || '#ffffff';
               const _c612Bdr = (settings as any)?.homeClass612CardBorder  || primary;
               const _card3D  = (settings as any)?.homeAllCards3D || (settings as any)?.homeClass612Card3D || false;
               const boardClasses = ['10', '11', '12'];

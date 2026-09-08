@@ -21,6 +21,7 @@ import { setRevisionTrackerUser } from './utils/revisionTrackerV2';
 import { hydrateRoutineData } from './utils/routineFirebaseSync';
 import { applyDeduction, getTotalCredits } from './utils/creditSystem';
 import { consumeDeferredStudyCoins } from './utils/studyRewards';
+import { DEFAULT_CREDIT_SUB_PLANS } from './utils/creditSubscriptionUtils';
 import { signInAnonymously } from 'firebase/auth';
 import { fetchChapters, fetchLessonContent } from './services/groq';
 import { AppLoadingScreen } from './components/AppLoadingScreen';
@@ -344,6 +345,7 @@ const App: React.FC = () => {
             { id: 'yearly', name: 'Yearly', duration: '365 days', basicPrice: 999, basicOriginalPrice: 1999, ultraPrice: 1499, ultraOriginalPrice: 2999, features: ['Everything in Quarterly', 'Priority Support'], popular: false },
             { id: 'lifetime', name: 'Lifetime', duration: 'Forever', basicPrice: 4999, basicOriginalPrice: 9999, ultraPrice: 7499, ultraOriginalPrice: 14999, features: ['VIP Status'], popular: true }
         ],
+        creditSubscriptionPlans: DEFAULT_CREDIT_SUB_PLANS,
         startupAd: {
             enabled: false,
             duration: 2,

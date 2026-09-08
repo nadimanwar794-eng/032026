@@ -19,6 +19,16 @@ import {
   getUnclaimedCoins, getDailyClaimAmount, DAILY_CLAIM_PRO, DAILY_CLAIM_MAX_PRO,
   type UserSubTier,
 } from '../utils/routineStorage';
+import {
+  getCreditSubPlans,
+  isCreditSubActive,
+  canClaimCreditSubToday,
+  getCreditSubDaysRemaining,
+  claimDailyCreditSub,
+  CREDIT_SUB_DURATIONS,
+  type CreditSubDurationId,
+  calculateCreditSubPrice,
+} from '../utils/creditSubscriptionUtils';
 
 interface Props {
   user: User;
@@ -216,8 +226,20 @@ function isDiscountAudienceAllowed(discountEvent: any, isSubscribed: boolean): b
 }
 
 /* ─── Main Store ─── */
-/* ─── Daily Subscription Coin Claim Card ─── */
-function DailyClaimCard({ userId, user: u, settings, onUpdateUser }: { userId: string; user: any; settings?: SystemSettings; onUpdateUser?: (u: any) => void }) {
+/* ─── Specific Tier Daily Subscription Coin Claim Card (Pro on Pro, Max on Max) ─── */
+function TierDailyClaimCard({
+  targetTier,
+  userId,
+  user: u,
+  settings,
+  onUpdateUser,
+}: {
+  targetTier: 'PRO' | 'MAX_PRO';
+  userId: string;
+  user: any;
+  settings?: SystemSettings;
+  onUpdateUser?: (u: any) => void;
+}) {
   function getToday() { return new Date().toISOString().split('T')[0]; }
   const subTier: UserSubTier = getUserSubTier(u ?? {});
   const [routineData, setRoutineDataRaw] = useState(() => {
@@ -225,14 +247,24 @@ function DailyClaimCard({ userId, user: u, settings, onUpdateUser }: { userId: s
     const reset = checkAndResetDaily(d);
     return ensureTodayClaimEntry(reset, getUserSubTier(u ?? {}), settings);
   });
-  const unclaimed = getUnclaimedCoins(routineData, subTier);
-  const todayClaimed = routineData.dailyClaims?.[getToday()]?.claimed ?? false;
-  const dailyAmt = getDailyClaimAmount(subTier, settings);
-  const dailyPro = settings?.dailyClaimPro ?? DAILY_CLAIM_PRO;
-  const dailyMaxPro = settings?.dailyClaimMaxPro ?? DAILY_CLAIM_MAX_PRO;
+
+  const unclaimed = getUnclaimedCoins(routineData, targetTier);
+  const isTargetActive = subTier === targetTier;
+
+  // Only render if user has this active subscription tier OR has unclaimed stacked coins from it
+  if (!isTargetActive && unclaimed <= 0) {
+    return null;
+  }
+
+  const dailyAmt = getDailyClaimAmount(targetTier, settings);
+  const isMax = targetTier === 'MAX_PRO';
+  const grad = isMax ? 'linear-gradient(135deg,#7c3aed,#a855f7,#e879f9)' : 'linear-gradient(135deg,#0891b2,#22d3ee,#67e8f9)';
+  const borderC = isMax ? C.maxBorder : C.proBorder;
+  const bgC = isMax ? C.maxBg : C.proBg;
+  const label = isMax ? 'Max' : 'Pro';
 
   const handleClaim = async () => {
-    const { data: updated, earned } = claimAllPendingCoins(routineData, subTier);
+    const { data: updated, earned } = claimAllPendingCoins(routineData, targetTier);
     // Add earned coins to main app credits
     if (earned > 0 && onUpdateUser && u) {
       const updatedUser = { ...u, credits: (u.credits || 0) + earned };
@@ -246,30 +278,11 @@ function DailyClaimCard({ userId, user: u, settings, onUpdateUser }: { userId: s
     saveRoutineData(userId, updated);
   };
 
-  if (subTier === 'NONE') return (
-    <div className="rounded-2xl p-4 mb-5" style={{ background: C.surfaceHigh, border: `1px solid ${C.border}` }}>
-      <div className="flex items-center gap-2 mb-1">
-        <Gift size={15} color={C.textMuted} />
-        <p className="text-sm font-black" style={{ color: C.textMuted }}>Daily Coin Reward</p>
-      </div>
-      <p className="text-xs font-medium" style={{ color: C.textDim }}>
-        Pro ya Max Pro lo → roz {dailyPro}–{dailyMaxPro} 🪙 pao!
-      </p>
-    </div>
-  );
-
-  const isPro = subTier === 'MAX_PRO';
-  const grad = isPro ? 'linear-gradient(135deg,#7c3aed,#a855f7,#e879f9)' : 'linear-gradient(135deg,#0891b2,#22d3ee,#67e8f9)';
-  const borderC = isPro ? C.maxBorder : C.proBorder;
-  const bgC = isPro ? C.maxBg : C.proBg;
-  const labelC = isPro ? C.max : C.pro;
-  const label = isPro ? 'Max Pro' : 'Pro';
-
   return (
-    <div className="rounded-2xl p-4 mb-5" style={{ background: bgC, border: `1.5px solid ${borderC}` }}>
+    <div className="rounded-2xl p-4 mb-5 shadow-md" style={{ background: bgC, border: `1.5px solid ${borderC}` }}>
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: grad }}>
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center shadow-sm" style={{ background: grad }}>
             <Gift size={15} color="#fff" />
           </div>
           <div>
@@ -291,8 +304,8 @@ function DailyClaimCard({ userId, user: u, settings, onUpdateUser }: { userId: s
             </div>
           )}
           <button onClick={handleClaim}
-            className="w-full py-3 rounded-xl font-black text-sm active:scale-[0.98] transition flex items-center justify-center gap-2"
-            style={{ background: grad, color: '#fff', boxShadow: isPro ? '0 4px 14px rgba(168,85,247,0.35)' : '0 4px 14px rgba(34,211,238,0.25)' }}>
+            className="w-full py-3 rounded-xl font-black text-sm active:scale-[0.98] transition flex items-center justify-center gap-2 shadow-lg"
+            style={{ background: grad, color: '#fff', boxShadow: isMax ? '0 4px 14px rgba(168,85,247,0.35)' : '0 4px 14px rgba(34,211,238,0.25)' }}>
             <Gift size={15} /> Claim {unclaimed} 🪙 Karo
           </button>
         </>
@@ -300,7 +313,7 @@ function DailyClaimCard({ userId, user: u, settings, onUpdateUser }: { userId: s
         <div className="py-2.5 rounded-xl flex items-center justify-center gap-2"
           style={{ background: 'rgba(52,211,153,0.10)', border: `1px solid ${C.greenBorder}` }}>
           <Check size={14} color={C.green} />
-          <span className="text-xs font-black" style={{ color: C.green }}>Aaj ka reward claim ho gaya! ✅</span>
+          <span className="text-xs font-black" style={{ color: C.green }}>Aaj ka {label} Daily Reward claim ho gaya! ({dailyAmt} 🪙) ✅</span>
         </div>
       )}
     </div>
@@ -308,12 +321,35 @@ function DailyClaimCard({ userId, user: u, settings, onUpdateUser }: { userId: s
 }
 
 export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack }) => {
-  const [tierType, setTierType] = useState<'BASIC' | 'ULTRA' | 'CREDITS' | 'HISTORY'>('BASIC');
+  const [tierType, setTierType] = useState<'FREE' | 'BASIC' | 'ULTRA' | 'CREDITS' | 'HISTORY'>(() =>
+    user.isPremium
+      ? ((user.subscriptionLevel === 'ULTRA' || (user.subscriptionLevel as any) === 'PRO') ? 'ULTRA' : 'BASIC')
+      : 'FREE'
+  );
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
 
   const packages = settings?.packages || [];
   const subscriptionPlans = settings?.subscriptionPlans || [];
   const isCreditSubAllowed = settings?.allowCreditSubscription !== false;
+  const [creditSubTab, setCreditSubTab] = useState<'PASS' | 'PACKAGES'>('PASS');
+  const [creditSubDuration, setCreditSubDuration] = useState<CreditSubDurationId>('1_MONTH');
+  const [claimingStorePass, setClaimingStorePass] = useState(false);
+
+  const handleClaimStorePass = async () => {
+    if (!user || claimingStorePass) return;
+    setClaimingStorePass(true);
+    try {
+      const res = claimDailyCreditSub(user);
+      if (res) {
+        const ok = await saveUserToLive(res.updatedUser);
+        if (ok) {
+          onUserUpdate(res.updatedUser);
+        }
+      }
+    } finally {
+      setClaimingStorePass(false);
+    }
+  };
 
   const totalScore = user.totalScore || 0;
   const scoreDiscount = getScoreDiscountFromScore(totalScore);
@@ -481,6 +517,20 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
 
   const handleSupportClick = (numEntry: any) => {
     if (!purchaseItem) return;
+    if (purchaseItem.isCreditSub || purchaseItem.dailyCredits !== undefined) {
+      const price = purchaseItem.finalPrice !== undefined ? purchaseItem.finalPrice : purchaseItem.price;
+      const totalCreds = (purchaseItem.dailyCredits || 0) * (purchaseItem.durationDays || 30);
+      const discountDetails = purchaseItem.discountPercent > 0
+        ? `\nDiscount Applied: ${purchaseItem.discountPercent}% OFF`
+        : '';
+      const durationText = purchaseItem.durationLabel
+        ? `${purchaseItem.durationLabel} (${purchaseItem.durationDays || 30} Days)`
+        : `${purchaseItem.durationDays || 30} Days`;
+      const msg = `Hello Admin, I want to subscribe to Daily Credit Pass:\n\nPlan: ${purchaseItem.name}\nPrice: ₹${price}${discountDetails}\nDaily Credits: ${purchaseItem.dailyCredits} CR/day\nValidity: ${durationText} (Total ${totalCreds.toLocaleString('en-IN')} Credits)\nUser ID: ${user.id}\nNote: Daily Credits Subscription (No Premium Content Unlock)\n\nPlease share payment details / activate my pass.`;
+      window.open(`https://wa.me/91${numEntry.number}?text=${encodeURIComponent(msg)}`, '_blank');
+      setShowSupportModal(false);
+      return;
+    }
     const isSub = purchaseItem.duration !== undefined;
     const price = isSub
       ? (purchaseItem.finalPrice !== undefined ? purchaseItem.finalPrice : (tierType === 'BASIC' ? purchaseItem.basicPrice : purchaseItem.ultraPrice))
@@ -494,22 +544,39 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
   const initiatePurchase = (item: any) => { setPurchaseItem(item); setShowSupportModal(true); };
 
 
+  const isFreeTab = tierType === 'FREE';
   const isPro = tierType === 'BASIC';
+  const isBasicTab = tierType === 'BASIC';
+  const isUltraTab = tierType === 'ULTRA';
+  const isCreditsTab = tierType === 'CREDITS';
+  const isHistoryTab = tierType === 'HISTORY';
 
-  const ac = isPro
+  const ac = isFreeTab
+    ? { color: '#94a3b8', bg: 'rgba(148,163,184,0.12)', border: 'rgba(148,163,184,0.3)', glow: 'rgba(148,163,184,0.18)', grad: 'linear-gradient(135deg,#64748b,#94a3b8)', pill: 'rgba(148,163,184,0.14)', label: 'FREE', emoji: '🎯' }
+    : isPro
     ? { color: C.pro, bg: C.proBg, border: C.proBorder, glow: C.proGlow, grad: C.proGrad, pill: 'rgba(34,211,238,0.14)', label: 'PRO', emoji: '⭐' }
+    : isCreditsTab
+    ? { color: C.gold, bg: C.goldBg, border: C.goldBorder, glow: 'rgba(251,191,36,0.22)', grad: 'linear-gradient(135deg,#d97706,#fbbf24)', pill: 'rgba(251,191,36,0.14)', label: 'CREDITS', emoji: '🪙' }
     : { color: C.max, bg: C.maxBg, border: C.maxBorder, glow: C.maxGlow, grad: C.maxGrad, pill: 'rgba(192,132,252,0.14)', label: 'MAX', emoji: '⚡' };
 
+  // Row 2 tabs: Free, Pro, Max, Credits, and History
   const allTabs = [
-    { id: 'BASIC'   as const, label: 'Pro',     emoji: '⭐', color: C.pro,  bg: C.proBg,  border: C.proBorder,  glow: C.proGlow  },
-    { id: 'ULTRA'   as const, label: 'Max',     emoji: '⚡', color: C.max,  bg: C.maxBg,  border: C.maxBorder,  glow: C.maxGlow  },
-    ...(packages.length > 0 ? [{ id: 'CREDITS' as const, label: 'Credits', emoji: '🪙', color: C.gold, bg: C.goldBg, border: C.goldBorder, glow: 'rgba(251,191,36,0.18)' }] : []),
+    { id: 'FREE'    as const, label: 'Free',    emoji: '🎯', color: '#94a3b8', bg: 'rgba(148,163,184,0.12)', border: 'rgba(148,163,184,0.3)', glow: 'rgba(148,163,184,0.18)' },
+    { id: 'BASIC'   as const, label: 'Pro',     emoji: '⭐', color: C.pro,    bg: C.proBg,                  border: C.proBorder,            glow: C.proGlow  },
+    { id: 'ULTRA'   as const, label: 'Max',     emoji: '⚡', color: C.max,    bg: C.maxBg,                  border: C.maxBorder,            glow: C.maxGlow  },
+    { id: 'CREDITS' as const, label: 'Credits', emoji: '🪙', color: C.gold,   bg: C.goldBg,                 border: C.goldBorder,           glow: 'rgba(251,191,36,0.22)' },
   ];
+
+  const isUltraUser = user.isPremium && (user.subscriptionLevel === 'ULTRA' || (user.subscriptionLevel as any) === 'PRO');
+  const isBasicUser = user.isPremium && user.subscriptionLevel === 'BASIC';
 
   const totalDiscount = (() => {
     let d = 0;
     if (activeEvent && event?.discountPercent) d += event.discountPercent;
-    if (isSubscribed) d += 5;
+    // Active subscription discount on Pro & Max plans: Ultra members get 10% OFF, Basic/Pro get 5% OFF
+    if (isSubscribed) {
+      d += isUltraUser ? 10 : 5;
+    }
     if (activeStoreDiscount > 0) d += activeStoreDiscount;
     if (scoreDiscount > 0) d += scoreDiscount;
     if (visitDiscount > 0) d += visitDiscount;
@@ -522,8 +589,17 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
   const creditDiscountPercent = (() => {
     const creditEvent = settings?.creditSubDiscountEvent;
     const discountEvent = creditEvent || event;
-    if (!isDiscountEventLive(discountEvent) || !isDiscountAudienceAllowed(discountEvent, !!isSubscribed)) return 0;
-    return Math.min(100, Math.max(0, Number(discountEvent?.discountPercent) || 0));
+    let disc = 0;
+    if (isDiscountEventLive(discountEvent) && isDiscountAudienceAllowed(discountEvent, !!isSubscribed)) {
+      disc = Number(discountEvent?.discountPercent) || 0;
+    }
+    // Ultra subscribers get 40% off credits anywhere, Basic subscribers get 20%
+    if (isUltraUser) {
+      disc = Math.max(disc, 40);
+    } else if (isBasicUser || isSubscribed) {
+      disc = Math.max(disc, 20);
+    }
+    return Math.min(100, Math.max(0, disc));
   })();
 
   const getPlanCreditCost = (plan: any, ultra: boolean) => {
@@ -533,11 +609,191 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
       : baseCost;
   };
 
-  const defaultBasicFeatures = ['Full MCQs Unlocked', 'Premium Notes', 'Audio Library', 'AI Videos (2D Basic)', 'Team Support'];
-  const defaultUltraFeatures = ['Everything in Pro', 'Deep Dive Notes', 'Studio HD Podcast', 'AI Videos (2D + 3D)', 'Competitive Mode 🏆'];
+  // ── FREE PLAN: What is included vs What is NOT included ──
+  const freeIncludedFeatures = [
+    { title: 'Standard Daily MCQs', desc: 'Har din free quota ke MCQ tests practice karne ki suvidha', icon: '❓' },
+    { title: 'Standard Reading Mode', desc: 'Syllabus chapters aur standard notes padhne ka access', icon: '📖' },
+    { title: 'Daily Free Coin Claim', desc: 'Rozana login karke muft bonus coins claim karein', icon: '🪙' },
+    { title: 'Login Streak & XP Tracker', desc: 'Consistency banayein aur daily streak points earn karein', icon: '🔥' },
+    { title: 'Homework & Syllabus Overview', desc: 'Classes aur daily assignments overview dekhne ka access', icon: '📝' },
+    { title: 'Public Leaderboard View', desc: 'Overall rankings aur student standing dekhne ki suvidha', icon: '🏆' },
+    { title: 'Basic Voice Audio Reader', desc: 'Normal speed par chapters audio sunne ka access', icon: '🎧' },
+  ];
+
+  const freeLockedFeatures = [
+    { title: 'Daily XP Limit Boost Locked', desc: 'XP limit normal (1,500 pts) par cap rehti hai — Score fast boost nahi hota', icon: '🔒' },
+    { title: 'XP Multipliers Locked (1.0X Standard)', desc: 'Credit Pass (1.2X), Pro (1.5X) aur Ultra (2.0X) ka point bonus lock rehta hai', icon: '🔒' },
+    { title: 'Daily 50/100 Credits Pass Locked', desc: 'Pro aur Ultra me milne wale daily free credits auto-claim locked hain', icon: '🔒' },
+    { title: 'Projector & PDF Mode Locked', desc: 'Badi screen par projector view aur PDF reading mode locked hai', icon: '🔒' },
+    { title: 'Writing & Correction Mode Locked', desc: 'Handwriting digital notebook aur question mistake correction locked hain', icon: '🔒' },
+    { title: 'Flashcard Memory Mode Locked', desc: 'Speed memory revision aur formula flashcards locked hain', icon: '🔒' },
+    { title: 'Full Video Mode & Lectures Locked', desc: 'Concept video lectures aur full video player locked hain', icon: '🔒' },
+    { title: '0% Store & Credit Discounts', desc: 'Store purchases aur app-wide credit costs par koi extra discount nahi', icon: '🔒' },
+    { title: 'Custom Themes & Text Colors Locked', desc: 'Personalized reading fonts, styles aur glowing VIP themes locked', icon: '🔒' },
+    { title: 'Global Student Community Chat Locked', desc: 'All-students open chat aur instant study discussions locked', icon: '🔒' },
+  ];
+
+  // ── SUPERPOWERS ADDED WITH BASIC (PRO) PLAN ──
+  const basicSuperPowers = [
+    { title: '+66% Extra Daily XP Limit', desc: 'Daily score limit 1,500 se badhkar 2,500 points ho jati hai — Rank fast badhao!', badge: '+66% XP', icon: '🚀', highlight: true },
+    { title: '1.5X Score Multiplier', desc: 'Har test, lesson aur activity par seedha 50% bonus XP point boost!', badge: '1.5X BOOST', icon: '⚡', highlight: true },
+    { title: 'Daily 50 Credits Pass', desc: 'Har din 50 credits auto-claim karein (Mahine ke 1,500 Credits bilkul muft)!', badge: '50 CR/DAY', icon: '🪙', highlight: true },
+    { title: '20% Off Everywhere (Credits)', desc: 'App me kisi bhi test/mode ke credit cost par flat 20% permanent discount', badge: '20% OFF', icon: '🏷️' },
+    { title: 'Projector Mode & PDF Mode', desc: 'Badi screen projector display aur full PDF reading interface unlock', badge: 'UNLOCKED', icon: '📽️' },
+    { title: 'Writing & Correction Mode', desc: 'Digital writing notebook aur community question mistake correction power', badge: 'UNLOCKED', icon: '✍️' },
+    { title: 'Text Color & Style Customization', desc: 'Apni pasand ke fonts, background text color aur custom contrast lagayein', badge: 'CUSTOM', icon: '🎨' },
+    { title: 'All Basic Themes Free', desc: 'Sabhi stylish basic themes bina kisi extra charge ke unlock', badge: 'THEMES FREE', icon: '🎭' },
+    { title: 'Offline Download Available', desc: 'Important revision lessons aur study material offline save karein', badge: 'DOWNLOAD', icon: '📥' },
+    { title: 'Detailed Score History', desc: 'Har test ka score graph aur deep performance analytics dekhein', badge: 'ANALYTICS', icon: '📊' },
+    { title: 'Community MCQ Submission', desc: 'Apne banaye huye sawal community me contribute karein', badge: 'CREATOR', icon: '💬' },
+    { title: '+5% Permanent Store Discount', desc: 'Har subscription renewal aur store purchase par extra 5% discount', badge: '5% OFF', icon: '💎' },
+  ];
+
+  // ── SUPERPOWERS ADDED WITH ULTRA (MAX) PLAN ──
+  const ultraSuperPowers = [
+    { title: '+133% Massive Daily XP Limit', desc: '1,400+ daily score capacity — Leaderboard me #1 rank hasil karne ki power!', badge: '+133% MAX', icon: '👑', highlight: true },
+    { title: '2.0X Ultra Score Multiplier', desc: 'Seedha 100% (2X Double) bonus points har activity par (Sabse tez rank boost)!', badge: '2X SPEED', icon: '🔥', highlight: true },
+    { title: 'Daily 100 Credits Pass', desc: 'Har din 100 credits muft claim karein (Mahine ke 3,000 Credits)!', badge: '100 CR/DAY', icon: '🪙', highlight: true },
+    { title: '40% Off Everywhere (Credits)', desc: 'Poore app me kisi bhi credit transaction par maximum 40% discount!', badge: '40% OFF', icon: '🏷️', highlight: true },
+    { title: '3,000 MCQ / Day Practice Limit', desc: 'Huge 3,000 MCQ quota per day — Practice aur self-study ki koi seema nahi!', badge: '3,000 MCQ', icon: '🎯', highlight: true },
+    { title: 'Flashcard Memory Revision Mode', desc: 'Super-fast memory cards revision mode se formula aur facts instant yaad karein', badge: 'UNLOCKED', icon: '🗂️' },
+    { title: 'Full Video Mode Unlocked', desc: 'High-quality concept video lectures aur video player full access', badge: 'UNLOCKED', icon: '🎬' },
+    { title: 'Global Student Community Chat', desc: 'Sabhi serious students ke sath group discussion aur direct doubt sharing', badge: 'COMMUNITY', icon: '🌐' },
+    { title: 'Priority Content Suggestions', desc: 'Aapki request par admin naye chapters aur study material add karega', badge: 'VIP RIGHT', icon: '💡' },
+    { title: 'All Ultra Premium Themes Free', desc: 'VIP glowing themes, neon dark styles aur dynamic UI layouts permanently free', badge: 'ALL THEMES', icon: '✨' },
+    { title: '+10% Store Discount (Pro & Max)', desc: 'Pro aur Max subscription purchase aur renewal par 10% permanent discount', badge: '10% OFF', icon: '💎', highlight: true },
+    { title: 'Golden VIP Crown & Glowing Name', desc: 'Leaderboard aur profile par VIP golden badge aur glowing royal effect', badge: 'VIP STATUS', icon: '👑' },
+    { title: 'Zero Interruptions & VIP Priority Help', desc: 'Completely distraction-free study aur fastest response priority support', badge: 'VIP SUPPORT', icon: '🛡️' },
+  ];
+
+  const defaultBasicFeatures = [
+    'Daily Claim: 50 Credits / Day',
+    'Community MCQ Send',
+    'Content Request',
+    'Correction Mode',
+    'Text Color Customization',
+    'Text Style Customization',
+    'Basic Themes Free',
+    'Daily XP Limit: +66%',
+    'Store Discount: +5%',
+    'Score History Unlocked',
+    'Download Available',
+    'Credit Off Anywhere: 20%',
+    'XP Multiplier: 1.5X',
+    'Projector Mode & PDF Mode',
+  ];
+
+  const defaultUltraFeatures = [
+    'Daily Claim: 100 Credits / Day',
+    'Everything in Basic',
+    '+ Additional Perks:',
+    '⚡ Ultra Mode (Chunk Notes / Reading Notes)',
+    'Store Discount: +10% (Pro & Max)',
+    'Daily XP Limit: +133%',
+    'XP Multiplier: 2.0X',
+    'Credit Off Anywhere: 40%',
+    'Global Chat Available',
+    'Ultra Themes Free',
+    'Suggestions',
+    'Flashcard Mode',
+    'Video Mode',
+    '3,000 MCQ / Day Limit',
+  ];
+
+  const pageTheme = isFreeTab ? {
+    bg: '#080d16',
+    bgGrad: 'radial-gradient(ellipse 120% 70% at 50% -10%, rgba(100,116,139,0.22) 0%, #080d16 65%)',
+    heroBg: 'linear-gradient(180deg, #111827 0%, #0b1120 100%)',
+    heroBorder: 'rgba(148,163,184,0.25)',
+    heroGlow1: 'rgba(148,163,184,0.16)',
+    heroGlow2: 'rgba(100,116,139,0.10)',
+    heroIconBg: 'linear-gradient(135deg,rgba(148,163,184,0.25),rgba(100,116,139,0.10))',
+    heroIconBorder: 'rgba(148,163,184,0.45)',
+    heroIconShadow: '0 0 16px rgba(148,163,184,0.25)',
+    heroIconColor: '#cbd5e1',
+    heroTitle: 'Free Plan',
+    heroSub: 'Free Starter Tier · Standard Access & Limits',
+    cardSurface: '#0f172a',
+    cardSurfaceHigh: '#1e293b',
+    cardBorder: 'rgba(148,163,184,0.18)',
+    accent: '#94a3b8',
+  } : isBasicTab ? {
+    bg: '#04111a',
+    bgGrad: 'radial-gradient(ellipse 120% 70% at 50% -10%, rgba(34,211,238,0.16) 0%, #04111a 65%)',
+    heroBg: 'linear-gradient(180deg, #071f2e 0%, #04131d 100%)',
+    heroBorder: 'rgba(34,211,238,0.25)',
+    heroGlow1: 'rgba(34,211,238,0.16)',
+    heroGlow2: 'rgba(6,182,212,0.10)',
+    heroIconBg: 'linear-gradient(135deg,rgba(34,211,238,0.25),rgba(6,182,212,0.10))',
+    heroIconBorder: 'rgba(34,211,238,0.45)',
+    heroIconShadow: '0 0 16px rgba(34,211,238,0.25)',
+    heroIconColor: '#22d3ee',
+    heroTitle: 'Pro Store',
+    heroSub: 'Basic Theme · Standard Tier Unlock',
+    cardSurface: '#071a26',
+    cardSurfaceHigh: '#0d2536',
+    cardBorder: 'rgba(34,211,238,0.18)',
+    accent: '#22d3ee',
+  } : isUltraTab ? {
+    bg: '#0c061a',
+    bgGrad: 'radial-gradient(ellipse 120% 70% at 50% -10%, rgba(192,132,252,0.18) 0%, #0c061a 65%)',
+    heroBg: 'linear-gradient(180deg, #160b2e 0%, #0c051a 100%)',
+    heroBorder: 'rgba(192,132,252,0.25)',
+    heroGlow1: 'rgba(192,132,252,0.16)',
+    heroGlow2: 'rgba(124,58,237,0.10)',
+    heroIconBg: 'linear-gradient(135deg,rgba(192,132,252,0.25),rgba(124,58,237,0.10))',
+    heroIconBorder: 'rgba(192,132,252,0.45)',
+    heroIconShadow: '0 0 16px rgba(192,132,252,0.25)',
+    heroIconColor: '#c084fc',
+    heroTitle: 'Ultra Store',
+    heroSub: 'Ultra Theme · Elite VIP Tier Unlock',
+    cardSurface: '#130c26',
+    cardSurfaceHigh: '#1c1236',
+    cardBorder: 'rgba(192,132,252,0.18)',
+    accent: '#c084fc',
+  } : isCreditsTab ? {
+    bg: '#0d0a04',
+    bgGrad: 'radial-gradient(ellipse 120% 70% at 50% -10%, rgba(251,191,36,0.16) 0%, #0d0a04 65%)',
+    heroBg: 'linear-gradient(180deg, #1c1507 0%, #0d0903 100%)',
+    heroBorder: 'rgba(251,191,36,0.25)',
+    heroGlow1: 'rgba(251,191,36,0.15)',
+    heroGlow2: 'rgba(217,119,6,0.10)',
+    heroIconBg: 'linear-gradient(135deg,rgba(251,191,36,0.25),rgba(251,191,36,0.10))',
+    heroIconBorder: 'rgba(251,191,36,0.45)',
+    heroIconShadow: '0 0 16px rgba(251,191,36,0.25)',
+    heroIconColor: '#fbbf24',
+    heroTitle: 'Credits Store',
+    heroSub: 'Instant Coin Packages & Top-ups',
+    cardSurface: '#161106',
+    cardSurfaceHigh: '#221b0a',
+    cardBorder: 'rgba(251,191,36,0.18)',
+    accent: '#fbbf24',
+  } : {
+    bg: C.bg,
+    bgGrad: 'none',
+    heroBg: C.surface,
+    heroBorder: C.border,
+    heroGlow1: 'rgba(34,211,238,0.07)',
+    heroGlow2: C.goldBg,
+    heroIconBg: 'linear-gradient(135deg,rgba(251,191,36,0.22),rgba(251,191,36,0.08))',
+    heroIconBorder: C.goldBorder,
+    heroIconShadow: '0 0 14px rgba(251,191,36,0.2)',
+    heroIconColor: C.gold,
+    heroTitle: 'Plan History',
+    heroSub: 'Pichle sabhi plans aur invoices',
+    cardSurface: C.surface,
+    cardSurfaceHigh: C.surfaceHigh,
+    cardBorder: C.border,
+    accent: C.gold,
+  };
+
   const featuresList = isPro
-    ? (settings?.storeFeatures?.basic?.filter(f => f.trim()) || defaultBasicFeatures)
-    : (settings?.storeFeatures?.ultra?.filter(f => f.trim()) || defaultUltraFeatures);
+    ? ((settings?.storeFeatures?.basic?.length && !settings?.storeFeatures?.basic?.includes('Full MCQs Unlocked'))
+        ? settings.storeFeatures.basic.filter(f => f.trim())
+        : defaultBasicFeatures)
+    : ((settings?.storeFeatures?.ultra?.length && !settings?.storeFeatures?.ultra?.includes('Everything in Pro'))
+        ? settings.storeFeatures.ultra.filter(f => f.trim())
+        : defaultUltraFeatures);
 
   const getPerMonthPrice = (plan: any, price: number) => {
     if ((plan.duration || '').toLowerCase().includes('year') || (plan.duration || '').includes('365')) return Math.round(price / 12);
@@ -564,7 +820,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
   }
 
   return (
-    <div className="min-h-[100dvh] pb-32 animate-in fade-in duration-300" style={{ background: C.bg }}>
+    <div className="min-h-[100dvh] pb-32 animate-in fade-in duration-300" style={{ background: pageTheme.bg, backgroundImage: pageTheme.bgGrad }}>
 
       {/* ── SUPPORT MODAL ── */}
       {showSupportModal && (
@@ -778,12 +1034,12 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
       })()}
 
       {/* ══════════ HERO HEADER ══════════ */}
-      <div className="relative overflow-hidden" style={{ background: C.surface, borderBottom: `1px solid ${C.border}` }}>
+      <div className="relative overflow-hidden" style={{ background: pageTheme.heroBg, borderBottom: `1px solid ${pageTheme.heroBorder}` }}>
         {/* Ambient glow blobs */}
         <div className="absolute -top-10 -left-10 w-48 h-48 rounded-full pointer-events-none"
-          style={{ background: isPro ? 'rgba(34,211,238,0.07)' : 'rgba(192,132,252,0.07)', filter: 'blur(40px)' }} />
+          style={{ background: pageTheme.heroGlow1, filter: 'blur(40px)' }} />
         <div className="absolute -bottom-10 right-0 w-40 h-40 rounded-full pointer-events-none"
-          style={{ background: C.goldBg, filter: 'blur(30px)' }} />
+          style={{ background: pageTheme.heroGlow2, filter: 'blur(30px)' }} />
 
         <div className="relative px-4 pt-5 pb-4">
           {/* Single header row: Back + Crown + Title | Credits + Status */}
@@ -791,26 +1047,35 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
             {onBack && (
               <button onClick={onBack}
                 className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 active:scale-90 transition-transform"
-                style={{ background: C.surfaceHigh, border: `1px solid ${C.border}` }}>
+                style={{ background: pageTheme.cardSurfaceHigh, border: `1px solid ${pageTheme.cardBorder}` }}>
                 <ArrowLeft size={16} color={C.textMuted} />
               </button>
             )}
             <div className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0"
-              style={{ background: 'linear-gradient(135deg,rgba(251,191,36,0.22),rgba(251,191,36,0.08))', border: `1.5px solid ${C.goldBorder}`, boxShadow: `0 0 14px rgba(251,191,36,0.2)` }}>
-              <Crown size={18} color={C.gold} />
+              style={{ background: pageTheme.heroIconBg, border: `1.5px solid ${pageTheme.heroIconBorder}`, boxShadow: pageTheme.heroIconShadow }}>
+              <Crown size={18} color={pageTheme.heroIconColor} />
             </div>
             <div className="flex-1 min-w-0">
-              <h1 className="text-xl font-black leading-none" style={{ color: C.text }}>Premium Store</h1>
-              <p className="text-[11px] mt-0.5 font-medium" style={{ color: C.textMuted }}>Sab kuch unlock karo</p>
+              <h1 className="text-xl font-black leading-none" style={{ color: C.text }}>{pageTheme.heroTitle}</h1>
+              <p className="text-[11px] mt-0.5 font-medium" style={{ color: C.textMuted }}>{pageTheme.heroSub}</p>
             </div>
-            {/* Credits display */}
-            <div className="flex items-center gap-1.5 px-2.5 rounded-2xl shrink-0" style={{ height: 34, background: C.goldBg, border: `1.5px solid ${C.goldBorder}`, boxShadow: `0 0 10px rgba(251,191,36,0.12)` }}>
+            {/* Credits display with + icon */}
+            <button
+              id="store-header-credits-btn"
+              onClick={() => setTierType('CREDITS')}
+              className="flex items-center gap-1.5 px-2.5 rounded-2xl shrink-0 active:scale-95 transition-all group"
+              style={{ height: 34, background: C.goldBg, border: `1.5px solid ${C.goldBorder}`, boxShadow: `0 0 10px rgba(251,191,36,0.12)` }}
+              title="Credits Pack Kharidein"
+            >
               <span className="text-sm leading-none">🪙</span>
               <span className="font-black text-sm leading-none" style={{ color: C.gold }}>
                 {userCredits.toLocaleString('en-IN')}
               </span>
               <span className="text-[9px] font-black" style={{ color: 'rgba(251,191,36,0.55)' }}>CR</span>
-            </div>
+              <span className="w-4 h-4 rounded-full bg-gradient-to-tr from-amber-400 to-yellow-300 text-slate-950 flex items-center justify-center font-black text-[10px] shadow-sm ml-0.5 group-hover:scale-110 transition-transform">
+                +
+              </span>
+            </button>
           </div>
 
           {/* Plan type tabs + History */}
@@ -818,27 +1083,27 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
             const totalCols = allTabs.length + 1;
             const colClass = totalCols === 3 ? 'grid-cols-3' : totalCols === 4 ? 'grid-cols-4' : totalCols === 5 ? 'grid-cols-5' : 'grid-cols-4';
             return (
-              <div className={`grid gap-2 ${colClass}`}>
+              <div className={`grid gap-1.5 sm:gap-2 ${colClass}`}>
                 {allTabs.map(tab => {
                   const isActive = tierType === tab.id;
                   return (
                     <button key={tab.id} onClick={() => setTierType(tab.id)}
-                      className="py-1.5 rounded-xl font-black transition-all flex items-center justify-center gap-1 relative overflow-hidden"
+                      className="py-1.5 px-0.5 sm:px-1 rounded-xl font-black transition-all flex items-center justify-center gap-1 relative overflow-hidden"
                       style={isActive
-                        ? { background: tab.bg, border: `2px solid ${tab.border}` }
-                        : { background: C.surfaceHigh, border: `1.5px solid ${C.border}` }}>
-                      <span className="text-sm leading-none relative z-10">{tab.emoji}</span>
-                      <span className="text-[10px] relative z-10" style={{ color: isActive ? tab.color : C.textMuted }}>{tab.label}</span>
+                        ? { background: tab.bg, border: `2px solid ${tab.border}`, boxShadow: `0 0 14px ${tab.glow}` }
+                        : { background: pageTheme.cardSurfaceHigh, border: `1.5px solid ${pageTheme.cardBorder}` }}>
+                      <span className="text-xs sm:text-sm leading-none relative z-10 shrink-0">{tab.emoji}</span>
+                      <span className="text-[9.5px] sm:text-[10px] relative z-10 truncate" style={{ color: isActive ? tab.color : C.textMuted }}>{tab.label}</span>
                     </button>
                   );
                 })}
                 {/* History tab — slim, no icon */}
                 <button onClick={() => setTierType('HISTORY')}
-                  className="py-1.5 rounded-xl font-black transition-all flex items-center justify-center"
+                  className="py-1.5 px-0.5 sm:px-1 rounded-xl font-black transition-all flex items-center justify-center"
                   style={tierType === 'HISTORY'
                     ? { background: 'rgba(251,191,36,0.10)', border: `2px solid rgba(251,191,36,0.35)` }
-                    : { background: C.surfaceHigh, border: `1.5px solid ${C.border}` }}>
-                  <span className="text-[10px]" style={{ color: tierType === 'HISTORY' ? C.gold : C.textMuted }}>History</span>
+                    : { background: pageTheme.cardSurfaceHigh, border: `1.5px solid ${pageTheme.cardBorder}` }}>
+                  <span className="text-[9.5px] sm:text-[10px] truncate" style={{ color: tierType === 'HISTORY' ? C.gold : C.textMuted }}>History</span>
                 </button>
               </div>
             );
@@ -848,9 +1113,6 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
 
       {/* ══════════ BODY ══════════ */}
       <div className="px-4 pt-5">
-        {/* Daily coin claim — always visible */}
-        <DailyClaimCard userId={user.id} user={user} settings={settings} onUpdateUser={onUserUpdate} />
-
 
         {/* ── HISTORY TAB ── */}
         {tierType === 'HISTORY' && (() => {
@@ -928,58 +1190,696 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
         })()}
 
         {/* ── CREDITS TAB ── */}
-        {tierType === 'CREDITS' && packages.length > 0 && (
-          <div className="animate-in fade-in duration-200 space-y-3">
-            <p className="text-[11px] font-black uppercase tracking-widest mb-4 flex items-center gap-2" style={{ color: C.textMuted }}>
-              <span className="text-base">🪙</span> Credits Kharido
-            </p>
-            {packages.map((pkg) => {
-              let finalPrice = pkg.price;
-              if (totalDiscount > 0) finalPrice = Math.round(finalPrice * (1 - totalDiscount / 100));
-              const perCredit = finalPrice > 0 ? (finalPrice / pkg.credits).toFixed(2) : '0';
-              const isPopular = pkg.credits === 500;
-              return (
-                <button key={pkg.id} onClick={() => initiatePurchase(pkg)}
-                  className="w-full p-5 rounded-2xl text-left transition-all active:scale-[0.99] relative overflow-hidden"
-                  style={isPopular
-                    ? { background: C.goldBg, border: `2px solid ${C.goldBorder}`, boxShadow: `0 0 20px rgba(251,191,36,0.12)` }
-                    : { background: C.surface, border: `1.5px solid ${C.border}` }}>
-                  {isPopular && (
-                    <div className="absolute top-0 right-0 text-[9px] font-black px-3 py-1.5 rounded-bl-xl rounded-tr-xl"
-                      style={{ background: C.gold, color: '#000' }}>POPULAR</div>
-                  )}
-                  <div className="flex items-center gap-4">
-                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shrink-0"
-                      style={{ background: C.goldBg, border: `1.5px solid ${C.goldBorder}` }}>🪙</div>
-                    <div className="flex-1">
-                      <p className="text-base font-black" style={{ color: C.text }}>{pkg.credits.toLocaleString('en-IN')} Credits</p>
-                      <p className="text-[11px] mt-0.5" style={{ color: C.textMuted }}>₹{perCredit} per credit</p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      {totalDiscount > 0 && (
-                        <span className="text-[10px] font-black px-2 py-0.5 rounded-full block mb-1.5"
-                          style={{ background: C.goldBg, color: C.gold, border: `1px solid ${C.goldBorder}` }}>
-                          {totalDiscount}% OFF
-                        </span>
-                      )}
-                      <p className="text-xl font-black" style={{ color: C.text }}>₹{finalPrice.toLocaleString('en-IN')}</p>
-                      {totalDiscount > 0 && <p className="text-[10px] line-through mt-0.5" style={{ color: C.textDim }}>₹{pkg.price.toLocaleString('en-IN')}</p>}
+        {tierType === 'CREDITS' && (
+          <div className="animate-in fade-in duration-200 space-y-4">
+            {/* Active Daily Pass Status Card */}
+            {isCreditSubActive(user) && (
+              <div className="rounded-2xl p-5 border relative overflow-hidden"
+                style={{
+                  background: 'linear-gradient(135deg, rgba(251,191,36,0.14), rgba(245,158,11,0.06), rgba(15,15,26,0.95))',
+                  borderColor: C.goldBorder,
+                  boxShadow: '0 0 25px rgba(251,191,36,0.15)',
+                }}>
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">⚡</span>
+                    <div>
+                      <span className="text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full"
+                        style={{ background: C.gold, color: '#000' }}>
+                        ACTIVE DAILY PASS
+                      </span>
+                      <h4 className="text-base font-black mt-1" style={{ color: C.text }}>
+                        {user.creditSubscription?.planName || 'Credit Pass'}
+                      </h4>
                     </div>
                   </div>
+                  <div className="text-right">
+                    <span className="text-sm font-black px-3 py-1 rounded-xl block"
+                      style={{ background: C.goldBg, color: C.gold, border: `1px solid ${C.goldBorder}` }}>
+                      🪙 +{user.creditSubscription?.dailyCredits} CR / din
+                    </span>
+                    <span className="text-[10px] text-slate-400 mt-0.5 block">
+                      {getCreditSubDaysRemaining(user.creditSubscription)} Din Baki
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 my-3 p-3 rounded-xl bg-black/30 border border-white/5 text-xs">
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">Total Claimed Days</span>
+                    <span className="font-black text-amber-400">
+                      {user.creditSubscription?.totalClaimedDays || 0} Din
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">Total Credits Earned</span>
+                    <span className="font-black text-amber-400">
+                      {user.creditSubscription?.totalCreditsClaimed || 0} 🪙 Credits
+                    </span>
+                  </div>
+                </div>
+
+                {canClaimCreditSubToday(user) ? (
+                  <button
+                    onClick={handleClaimStorePass}
+                    disabled={claimingStorePass}
+                    className="w-full py-3.5 rounded-xl font-black text-sm active:scale-[0.98] transition flex items-center justify-center gap-2 shadow-lg"
+                    style={{
+                      background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                      color: '#000',
+                      boxShadow: '0 4px 20px rgba(245,158,11,0.4)',
+                    }}>
+                    <Gift size={16} />
+                    {claimingStorePass ? 'Credits Claim Ho Rahe Hain...' : `Aaj Ke ${user.creditSubscription?.dailyCredits} Credits Claim Karo 🪙`}
+                  </button>
+                ) : (
+                  <div className="py-2.5 rounded-xl flex items-center justify-center gap-2"
+                    style={{ background: 'rgba(52,211,153,0.10)', border: `1px solid ${C.greenBorder}` }}>
+                    <Check size={15} color={C.green} />
+                    <span className="text-xs font-black" style={{ color: C.green }}>
+                      Aaj ka daily pass claim ho gaya! ({user.creditSubscription?.dailyCredits} 🪙) Agle credits kal milenge.
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Sub-tabs: Pass (Subscription) vs Packages */}
+            <div className="flex p-1 rounded-xl bg-[#13131f] border border-white/5">
+              <button
+                onClick={() => setCreditSubTab('PASS')}
+                className="flex-1 py-2 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5"
+                style={creditSubTab === 'PASS'
+                  ? { background: C.goldBg, color: C.gold, border: `1px solid ${C.goldBorder}` }
+                  : { color: C.textMuted }}>
+                <span>⚡</span> Daily Credit Pass
+                <span className="text-[9px] px-1.5 py-0.2 rounded-full font-bold ml-1"
+                  style={{ background: creditSubTab === 'PASS' ? C.gold : 'rgba(255,255,255,0.08)', color: creditSubTab === 'PASS' ? '#000' : '#aaa' }}>
+                  BEST VALUE
+                </span>
+              </button>
+              {packages.length > 0 && (
+                <button
+                  onClick={() => setCreditSubTab('PACKAGES')}
+                  className="flex-1 py-2 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5"
+                  style={creditSubTab === 'PACKAGES'
+                    ? { background: C.goldBg, color: C.gold, border: `1px solid ${C.goldBorder}` }
+                    : { color: C.textMuted }}>
+                  <span>📦</span> One-Time Packs
+                  <span className="text-[9px] px-1.5 py-0.2 rounded-full font-bold ml-1"
+                    style={{ background: creditSubTab === 'PACKAGES' ? C.gold : 'rgba(255,255,255,0.08)', color: creditSubTab === 'PACKAGES' ? '#000' : '#aaa' }}>
+                    {packages.length}
+                  </span>
                 </button>
-              );
-            })}
-            <div className="flex justify-center gap-8 pt-2">
-              {[{icon:<ShieldCheck size={13}/>,text:'Secure'},{icon:<Zap size={13}/>,text:'Instant'},{icon:<Star size={13}/>,text:'No Expiry'}].map(b=>(
-                <div key={b.text} className="flex items-center gap-1.5 text-[11px] font-bold" style={{ color: C.textDim }}>{b.icon}<span>{b.text}</span></div>
-              ))}
+              )}
+            </div>
+
+            {/* SECTION 1: DAILY CREDIT SUBSCRIPTION PLANS */}
+            {creditSubTab === 'PASS' && (
+              <div className="space-y-3.5">
+                {/* Important Notice Banner */}
+                <div className="rounded-xl p-3.5 flex items-start gap-2.5"
+                  style={{ background: 'rgba(251,191,36,0.08)', border: `1px dashed ${C.goldBorder}` }}>
+                  <span className="text-base shrink-0 mt-0.5">🛡️</span>
+                  <div>
+                    <p className="text-xs font-black" style={{ color: C.gold }}>
+                      Pure Daily Credits Subscription · 1.2X Score Boost
+                    </p>
+                    <p className="text-[11px] leading-relaxed mt-0.5" style={{ color: C.textMuted }}>
+                      Is pass se aapko <strong className="text-amber-300">har roz daily credits</strong> milenge aur sabhi activities par <strong className="text-amber-300">⚡ 1.2X Score Multiplier (20% Extra XP)</strong> boost unlock hoga! Daily login karke apne credits claim karein!
+                    </p>
+                  </div>
+                </div>
+
+                {/* Duration Selector Bar */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between px-0.5">
+                    <span className="text-[11px] font-black uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+                      <Clock size={12} /> Duration Chunein
+                    </span>
+                    <span className="text-[10px] font-medium text-slate-400">
+                      Lambi validity = Zyada discount
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {CREDIT_SUB_DURATIONS.map((dur) => {
+                      const isSelected = creditSubDuration === dur.id;
+                      return (
+                        <button
+                          key={dur.id}
+                          type="button"
+                          onClick={() => setCreditSubDuration(dur.id)}
+                          className={`relative p-2.5 rounded-xl text-left transition-all border ${
+                            isSelected
+                              ? 'bg-amber-500/15 border-amber-400/80 shadow-[0_0_15px_rgba(251,191,36,0.15)] ring-1 ring-amber-400/50'
+                              : 'bg-slate-900/60 border-white/10 hover:border-white/20 hover:bg-slate-900'
+                          }`}>
+                          {dur.badge && (
+                            <span className={`absolute -top-2 right-2 text-[9px] font-black px-1.5 py-0.5 rounded-full shadow ${
+                              dur.highlight ? 'bg-emerald-500 text-slate-950' : 'bg-amber-400 text-slate-950'
+                            }`}>
+                              {dur.badge}
+                            </span>
+                          )}
+                          <span className={`text-xs font-black block ${isSelected ? 'text-amber-300' : 'text-slate-200'}`}>
+                            {dur.label}
+                          </span>
+                          <span className="text-[10px] text-slate-400 block mt-0.5">
+                            {dur.subLabel}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Plan Cards */}
+                <div className="grid gap-3">
+                  {getCreditSubPlans(settings).filter(p => p.isActive !== false).map((plan) => {
+                    const selectedDurationOpt = CREDIT_SUB_DURATIONS.find(d => d.id === creditSubDuration) || CREDIT_SUB_DURATIONS[0];
+                    const pricing = calculateCreditSubPrice(plan, selectedDurationOpt);
+                    const isSuper = plan.price >= 300 || selectedDurationOpt.months >= 6;
+
+                    return (
+                      <div
+                        key={plan.id}
+                        className="rounded-2xl p-5 border relative overflow-hidden transition-all hover:border-amber-400/40"
+                        style={isSuper
+                          ? { background: C.goldBg, border: `2px solid ${C.goldBorder}`, boxShadow: '0 0 25px rgba(251,191,36,0.10)' }
+                          : { background: C.surface, border: `1.5px solid ${C.border}` }}>
+                        
+                        {plan.badge && (
+                          <div className="absolute top-0 right-0 text-[9px] font-black px-3 py-1.5 rounded-bl-xl rounded-tr-xl tracking-wider"
+                            style={{ background: isSuper ? C.gold : 'rgba(255,255,255,0.15)', color: isSuper ? '#000' : '#fff' }}>
+                            {plan.badge}
+                          </div>
+                        )}
+
+                        <div className="flex items-start justify-between gap-4 mb-3">
+                          <div>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-[10px] font-black uppercase tracking-wider block" style={{ color: C.gold }}>
+                                ⚡ {selectedDurationOpt.durationDays} Din Validity ({selectedDurationOpt.label})
+                              </span>
+                              {pricing.totalDiscountPercent > 0 && (
+                                <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-amber-400 text-slate-950">
+                                  {pricing.totalDiscountPercent}% OFF
+                                </span>
+                              )}
+                            </div>
+                            <h3 className="text-base font-black mt-0.5" style={{ color: C.text }}>
+                              {plan.name}
+                            </h3>
+                          </div>
+                          <div className="text-right shrink-0 pr-6">
+                            <div className="flex items-baseline justify-end gap-1.5">
+                              {pricing.totalDiscountPercent > 0 ? (
+                                <span className="text-xs line-through" style={{ color: C.textDim }}>
+                                  ₹{pricing.basePrice.toLocaleString('en-IN')}
+                                </span>
+                              ) : plan.dummyPrice ? (
+                                <span className="text-xs line-through" style={{ color: C.textDim }}>
+                                  ₹{pricing.dummyPrice.toLocaleString('en-IN')}
+                                </span>
+                              ) : null}
+                              <span className="text-xl font-black text-amber-400">
+                                ₹{pricing.finalPrice.toLocaleString('en-IN')}
+                              </span>
+                            </div>
+                            <span className="text-[10px] block" style={{ color: C.textMuted }}>
+                              ₹{pricing.perDayCost}/din
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Credits Highlight Pill */}
+                        <div className="flex items-center justify-between p-3 rounded-xl bg-black/40 border border-white/5 my-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-9 h-9 rounded-lg flex items-center justify-center text-base shrink-0"
+                              style={{ background: C.goldBg, border: `1px solid ${C.goldBorder}` }}>
+                              🪙
+                            </div>
+                            <div>
+                              <p className="text-sm font-black text-amber-300">
+                                +{plan.dailyCredits} Credits / Din
+                              </p>
+                              <p className="text-[10px]" style={{ color: C.textMuted }}>
+                                Roz claim karein ({selectedDurationOpt.durationDays} din tak)
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-xs font-black text-slate-200 block">
+                              Total {pricing.totalCredits.toLocaleString('en-IN')} 🪙
+                            </span>
+                            <span className="text-[9px] text-emerald-400 font-bold block">
+                              ₹{pricing.perCreditCost} / credit
+                            </span>
+                          </div>
+                        </div>
+
+                        {plan.description && (
+                          <p className="text-[11px] mb-3" style={{ color: C.textMuted }}>
+                            {plan.description}
+                          </p>
+                        )}
+
+                        <button
+                          onClick={() => initiatePurchase({
+                            ...plan,
+                            id: `${plan.id}_${selectedDurationOpt.id}`,
+                            basePlanId: plan.id,
+                            name: `${plan.name} (${selectedDurationOpt.label})`,
+                            price: pricing.finalPrice,
+                            finalPrice: pricing.finalPrice,
+                            basePrice: pricing.basePrice,
+                            dummyPrice: pricing.dummyPrice,
+                            dailyCredits: plan.dailyCredits,
+                            durationDays: selectedDurationOpt.durationDays,
+                            durationMonths: selectedDurationOpt.months,
+                            durationLabel: selectedDurationOpt.label,
+                            isCreditSub: true,
+                            discountPercent: pricing.totalDiscountPercent,
+                            durationDiscountPercent: pricing.durationDiscountPercent,
+                          })}
+                          className="w-full py-3 rounded-xl font-black text-xs transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-md"
+                          style={{
+                            background: isSuper
+                              ? 'linear-gradient(135deg, #f59e0b, #d97706)'
+                              : 'linear-gradient(135deg, #1e293b, #0f172a)',
+                            color: isSuper ? '#000' : '#fff',
+                            border: isSuper ? 'none' : `1px solid ${C.borderMed}`,
+                          }}>
+                          <Zap size={14} /> Pass Subscribe Karo — ₹{pricing.finalPrice.toLocaleString('en-IN')}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="flex justify-center gap-8 pt-2">
+                  {[{icon:<ShieldCheck size={13}/>,text:'Guaranteed Daily'},{icon:<Zap size={13}/>,text:'Multiple Durations'},{icon:<Star size={13}/>,text:'Max Savings'}].map(b=>(
+                    <div key={b.text} className="flex items-center gap-1.5 text-[11px] font-bold" style={{ color: C.textDim }}>{b.icon}<span>{b.text}</span></div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* SECTION 2: ONE-TIME CREDIT PACKAGES */}
+            {creditSubTab === 'PACKAGES' && packages.length > 0 && (
+              <div className="space-y-3">
+                <p className="text-[11px] font-black uppercase tracking-widest mb-2 flex items-center gap-2" style={{ color: C.textMuted }}>
+                  <span className="text-base">📦</span> Instant One-Time Packages
+                </p>
+                {packages.map((pkg) => {
+                  let finalPrice = pkg.price;
+                  if (totalDiscount > 0) finalPrice = Math.round(finalPrice * (1 - totalDiscount / 100));
+                  const perCredit = finalPrice > 0 ? (finalPrice / pkg.credits).toFixed(2) : '0';
+                  const isPopular = pkg.credits === 500;
+                  return (
+                    <button key={pkg.id} onClick={() => initiatePurchase(pkg)}
+                      className="w-full p-5 rounded-2xl text-left transition-all active:scale-[0.99] relative overflow-hidden"
+                      style={isPopular
+                        ? { background: C.goldBg, border: `2px solid ${C.goldBorder}`, boxShadow: `0 0 20px rgba(251,191,36,0.12)` }
+                        : { background: C.surface, border: `1.5px solid ${C.border}` }}>
+                      {isPopular && (
+                        <div className="absolute top-0 right-0 text-[9px] font-black px-3 py-1.5 rounded-bl-xl rounded-tr-xl"
+                          style={{ background: C.gold, color: '#000' }}>POPULAR</div>
+                      )}
+                      <div className="flex items-center gap-4">
+                        <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shrink-0"
+                          style={{ background: C.goldBg, border: `1.5px solid ${C.goldBorder}` }}>🪙</div>
+                        <div className="flex-1">
+                          <p className="text-base font-black" style={{ color: C.text }}>{pkg.credits.toLocaleString('en-IN')} Credits</p>
+                          <p className="text-[11px] mt-0.5" style={{ color: C.textMuted }}>₹{perCredit} per credit</p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          {totalDiscount > 0 && (
+                            <span className="text-[10px] font-black px-2 py-0.5 rounded-full block mb-1.5"
+                              style={{ background: C.goldBg, color: C.gold, border: `1px solid ${C.goldBorder}` }}>
+                              {totalDiscount}% OFF
+                            </span>
+                          )}
+                          <p className="text-xl font-black" style={{ color: C.text }}>₹{finalPrice.toLocaleString('en-IN')}</p>
+                          {totalDiscount > 0 && <p className="text-[10px] line-through mt-0.5" style={{ color: C.textDim }}>₹{pkg.price.toLocaleString('en-IN')}</p>}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+                <div className="flex justify-center gap-8 pt-2">
+                  {[{icon:<ShieldCheck size={13}/>,text:'Secure'},{icon:<Zap size={13}/>,text:'Instant'},{icon:<Star size={13}/>,text:'No Expiry'}].map(b=>(
+                    <div key={b.text} className="flex items-center gap-1.5 text-[11px] font-bold" style={{ color: C.textDim }}>{b.icon}<span>{b.text}</span></div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── FREE PLAN TAB ── */}
+        {tierType === 'FREE' && (
+          <div className="animate-in fade-in duration-200 space-y-4">
+            {/* Free Plan Status Card */}
+            <div className="rounded-2xl p-5 border relative overflow-hidden"
+              style={{
+                background: 'linear-gradient(135deg, rgba(148,163,184,0.12) 0%, rgba(30,41,59,0.7) 100%)',
+                border: '1.5px solid rgba(148,163,184,0.25)',
+                boxShadow: '0 0 25px rgba(100,116,139,0.10)',
+              }}>
+              <div className="flex items-start justify-between gap-3 mb-4">
+                <div>
+                  {(!user.isPremium || user.subscriptionLevel === 'FREE') ? (
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/35 text-emerald-400 text-[11px] font-black tracking-wide mb-2 shadow-sm">
+                      <BadgeCheck size={14} />
+                      <span>AAPKA CURRENT PLAN (ACTIVE)</span>
+                    </div>
+                  ) : (
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-700/50 border border-slate-600 text-slate-300 text-[11px] font-bold mb-2">
+                      <span>ℹ️ BASE TIER (Aapke paas {user.subscriptionLevel === 'ULTRA' ? 'MAX (Ultra)' : 'PRO (Basic)'} active hai)</span>
+                    </div>
+                  )}
+                  <h2 className="text-xl font-black text-white flex items-center gap-2">
+                    <span>🎯 Free Plan</span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/10 text-slate-300">Base Tier</span>
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                    Standard free access — sabhi basic features bina kisi payment ke hamesha muft available hain.
+                  </p>
+                </div>
+                <div className="text-right shrink-0">
+                  <span className="text-2xl font-black text-slate-100">₹0</span>
+                  <span className="text-[10px] block text-slate-400 font-bold uppercase tracking-wider">Free Forever</span>
+                </div>
+              </div>
+
+              {/* Free Limits Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-white/10">
+                <div className="p-2.5 rounded-xl bg-black/30 border border-white/5 text-center">
+                  <span className="text-base block mb-0.5">📅</span>
+                  <span className="text-xs font-black text-white block">1,500 XP/Day</span>
+                  <span className="text-[9px] text-slate-400 font-bold uppercase">Daily XP Limit</span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-black/30 border border-white/5 text-center">
+                  <span className="text-base block mb-0.5">⚡</span>
+                  <span className="text-xs font-black text-slate-300 block">1.0X Speed</span>
+                  <span className="text-[9px] text-slate-400 font-bold uppercase">Standard Score</span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-black/30 border border-white/5 text-center">
+                  <span className="text-base block mb-0.5">❓</span>
+                  <span className="text-xs font-black text-slate-300 block">Free Quota</span>
+                  <span className="text-[9px] text-slate-400 font-bold uppercase">Daily MCQs</span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-black/30 border border-white/5 text-center">
+                  <span className="text-base block mb-0.5">🏷️</span>
+                  <span className="text-xs font-black text-slate-400 block">0% OFF</span>
+                  <span className="text-[9px] text-slate-400 font-bold uppercase">Store Discount</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Credits Balance Bar */}
+            <div className="flex items-center justify-between p-3 rounded-2xl bg-black/40 border border-amber-400/20">
+              <div className="flex items-center gap-2">
+                <span className="text-base">🪙</span>
+                <span className="text-xs font-bold text-slate-300">
+                  Aapke Credits: <strong className="text-amber-400 font-black">{userCredits.toLocaleString('en-IN')} CR</strong>
+                </span>
+              </div>
+              <button
+                onClick={() => setTierType('CREDITS')}
+                className="px-2.5 py-1 rounded-lg text-[10px] font-black text-amber-950 bg-gradient-to-r from-amber-400 to-yellow-300 shadow-sm active:scale-95 transition-transform"
+              >
+                + Buy Credits
+              </button>
+            </div>
+
+            {/* Free: What is Included */}
+            <div className="rounded-2xl p-4 bg-[#0d1522] border border-emerald-500/25">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-sm font-black">
+                  ✓
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-emerald-400 leading-none">
+                    Free Me Kya-Kya Mil Raha Hai
+                  </h3>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Ye sabhi features aap Free plan me bina kisi charge ke use kar sakte hain:
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                {freeIncludedFeatures.map((item, idx) => (
+                  <div key={idx} className="flex items-start gap-2.5 p-2.5 rounded-xl bg-black/25 border border-emerald-500/15">
+                    <span className="text-base shrink-0 mt-0.5">{item.icon}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-black text-slate-200">{item.title}</span>
+                        <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/15 px-1.5 py-0.2 rounded">FREE</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 leading-snug mt-0.5">{item.desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Upgrade Cards: Superpowers in Basic vs Ultra */}
+            <div className="space-y-3">
+              <div className="text-center pt-2">
+                <h3 className="text-base font-black text-white">Upgrade Karne Par Kya Naya Judega?</h3>
+                <p className="text-xs text-slate-400 mt-0.5">Basic aur Ultra plans se aapke account me judne wale superpowers:</p>
+              </div>
+
+              {/* Basic Superpowers Teaser */}
+              <div className="rounded-2xl p-4 bg-[#071926] border border-cyan-400/30 relative overflow-hidden">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">⭐</span>
+                    <div>
+                      <span className="text-[10px] font-black uppercase tracking-wider text-cyan-400">Standard Tier</span>
+                      <h4 className="text-base font-black text-white">Basic (Pro) Plan Ke Superpowers</h4>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setTierType('BASIC')}
+                    className="px-3 py-1.5 rounded-xl text-xs font-black text-slate-950 bg-gradient-to-r from-cyan-400 to-cyan-300 active:scale-95 transition-transform flex items-center gap-1 shadow-sm"
+                  >
+                    <span>Pro Dekhein</span>
+                    <ChevronRight size={13} />
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-300">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-cyan-400 font-bold">✓</span>
+                    <span><strong>+66% Daily XP Boost</strong> (2,500 pts)</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-cyan-400 font-bold">✓</span>
+                    <span><strong>1.5X Score Multiplier</strong> (50% bonus XP)</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-cyan-400 font-bold">✓</span>
+                    <span><strong>Daily 50 Credits Pass</strong></span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-cyan-400 font-bold">✓</span>
+                    <span><strong>20% Off Everywhere</strong> (Credits)</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-cyan-400 font-bold">✓</span>
+                    <span><strong>Projector & PDF Mode</strong></span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-cyan-400 font-bold">✓</span>
+                    <span><strong>Correction Mode</strong> + Basic Themes</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Ultra Superpowers Teaser */}
+              <div className="rounded-2xl p-4 bg-[#140a26] border border-purple-400/35 relative overflow-hidden">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">⚡</span>
+                    <div>
+                      <span className="text-[10px] font-black uppercase tracking-wider text-purple-400">Elite VIP Tier</span>
+                      <h4 className="text-base font-black text-white">Ultra (Max) Plan Ke Superpowers</h4>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setTierType('ULTRA')}
+                    className="px-3 py-1.5 rounded-xl text-xs font-black text-white bg-gradient-to-r from-purple-600 to-indigo-600 active:scale-95 transition-transform flex items-center gap-1 shadow-sm"
+                  >
+                    <span>Ultra Dekhein</span>
+                    <ChevronRight size={13} />
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-300">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-purple-400 font-bold">✓</span>
+                    <span><strong>+133% Massive Daily XP</strong> (3,500 pts)</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-purple-400 font-bold">✓</span>
+                    <span><strong>2.0X Ultra Multiplier</strong> (100% Double XP)</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-purple-400 font-bold">✓</span>
+                    <span><strong>Daily 100 Credits Pass</strong></span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-purple-400 font-bold">✓</span>
+                    <span><strong>40% Off Everywhere</strong> (Credits)</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-purple-400 font-bold">✓</span>
+                    <span><strong>3,000 MCQ / Day</strong> practice</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-purple-400 font-bold">✓</span>
+                    <span><strong>Video Mode & Flashcards</strong></span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-purple-400 font-bold">✓</span>
+                    <span><strong>Global Student Chat</strong></span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-purple-400 font-bold">✓</span>
+                    <span><strong>Golden VIP Crown</strong></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Feature Comparison Table */}
+            <div className="rounded-2xl p-4 bg-[#0a0f1d] border border-white/10 overflow-x-auto">
+              <h3 className="text-sm font-black text-white mb-1 flex items-center gap-2">
+                <span>📊</span> Full Feature Comparison (Free vs Pro vs Max)
+              </h3>
+              <p className="text-[11px] text-slate-400 mb-3">Sabhi plans ki direct tulna ek nazar me dekhein:</p>
+
+              <table className="w-full text-left text-[11px] border-collapse">
+                <thead>
+                  <tr className="border-b border-white/10 text-slate-400">
+                    <th className="py-2 pr-2 font-black">Feature</th>
+                    <th className="py-2 px-1 text-center font-black text-slate-300">Free 🎯</th>
+                    <th className="py-2 px-1 text-center font-black text-cyan-400">Pro ⭐</th>
+                    <th className="py-2 pl-1 text-center font-black text-purple-400">Max ⚡</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  <tr>
+                    <td className="py-2 pr-2 font-bold text-slate-300">Daily XP Limit</td>
+                    <td className="py-2 px-1 text-center text-slate-400">1,500 pts</td>
+                    <td className="py-2 px-1 text-center text-cyan-300 font-bold">2,500 pts (+66%)</td>
+                    <td className="py-2 pl-1 text-center text-purple-300 font-bold">3,500 pts (+133%)</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 pr-2 font-bold text-slate-300">XP Multiplier</td>
+                    <td className="py-2 px-1 text-center text-slate-400">1.0X</td>
+                    <td className="py-2 px-1 text-center text-cyan-300 font-bold">1.5X Boost</td>
+                    <td className="py-2 pl-1 text-center text-purple-300 font-bold">2.0X Super Boost</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 pr-2 font-bold text-slate-300">Daily Credits Pass</td>
+                    <td className="py-2 px-1 text-center text-slate-500">—</td>
+                    <td className="py-2 px-1 text-center text-amber-300 font-bold">50 CR / Day</td>
+                    <td className="py-2 pl-1 text-center text-amber-300 font-bold">100 CR / Day</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 pr-2 font-bold text-slate-300">Credit Cost Off</td>
+                    <td className="py-2 px-1 text-center text-slate-500">0%</td>
+                    <td className="py-2 px-1 text-center text-emerald-400 font-bold">20% OFF</td>
+                    <td className="py-2 pl-1 text-center text-emerald-400 font-bold">40% OFF</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 pr-2 font-bold text-slate-300">MCQ / Day Practice</td>
+                    <td className="py-2 px-1 text-center text-slate-400">Free Quota</td>
+                    <td className="py-2 px-1 text-center text-cyan-300 font-bold">1,500 / Day</td>
+                    <td className="py-2 pl-1 text-center text-purple-300 font-bold">3,000 / Day</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 pr-2 font-bold text-slate-300">Projector & PDF Mode</td>
+                    <td className="py-2 px-1 text-center text-rose-400 font-bold">✕</td>
+                    <td className="py-2 px-1 text-center text-emerald-400 font-bold">✓</td>
+                    <td className="py-2 pl-1 text-center text-emerald-400 font-bold">✓</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 pr-2 font-bold text-slate-300">Writing & Correction</td>
+                    <td className="py-2 px-1 text-center text-rose-400 font-bold">✕</td>
+                    <td className="py-2 px-1 text-center text-emerald-400 font-bold">✓</td>
+                    <td className="py-2 pl-1 text-center text-emerald-400 font-bold">✓</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 pr-2 font-bold text-slate-300">Flashcard Memory Mode</td>
+                    <td className="py-2 px-1 text-center text-rose-400 font-bold">✕</td>
+                    <td className="py-2 px-1 text-center text-slate-500">—</td>
+                    <td className="py-2 pl-1 text-center text-emerald-400 font-bold">✓ Unlocked</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 pr-2 font-bold text-slate-300">Video Player Mode</td>
+                    <td className="py-2 px-1 text-center text-rose-400 font-bold">✕</td>
+                    <td className="py-2 px-1 text-center text-slate-500">—</td>
+                    <td className="py-2 pl-1 text-center text-emerald-400 font-bold">✓ Full Video</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 pr-2 font-bold text-slate-300">Global Student Chat</td>
+                    <td className="py-2 px-1 text-center text-rose-400 font-bold">✕</td>
+                    <td className="py-2 px-1 text-center text-slate-500">—</td>
+                    <td className="py-2 pl-1 text-center text-emerald-400 font-bold">✓ Live Chat</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 pr-2 font-bold text-slate-300">Themes & Styling</td>
+                    <td className="py-2 px-1 text-center text-slate-400">Default</td>
+                    <td className="py-2 px-1 text-center text-cyan-300 font-bold">Basic Themes</td>
+                    <td className="py-2 pl-1 text-center text-purple-300 font-bold">All Ultra Themes</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 pr-2 font-bold text-slate-300">Store Extra Discount</td>
+                    <td className="py-2 px-1 text-center text-slate-500">0%</td>
+                    <td className="py-2 px-1 text-center text-emerald-400 font-bold">+5% OFF</td>
+                    <td className="py-2 pl-1 text-center text-emerald-400 font-bold">+5% OFF</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 pr-2 font-bold text-slate-300">Leaderboard VIP Badge</td>
+                    <td className="py-2 px-1 text-center text-slate-500">—</td>
+                    <td className="py-2 px-1 text-center text-cyan-300 font-bold">PRO Badge</td>
+                    <td className="py-2 pl-1 text-center text-amber-300 font-bold">👑 Golden Crown</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
         )}
 
         {/* ── PRO / MAX PLANS ── */}
-        {tierType !== 'CREDITS' && tierType !== 'HISTORY' && (
+        {(tierType === 'BASIC' || tierType === 'ULTRA') && (
           <>
+            {/* Pro Daily Reward: ONLY shown on the Pro (BASIC) page */}
+            {tierType === 'BASIC' && (
+              <TierDailyClaimCard
+                targetTier="PRO"
+                userId={user.id}
+                user={user}
+                settings={settings}
+                onUpdateUser={onUserUpdate}
+              />
+            )}
+
+            {/* Max Daily Reward: ONLY shown on the Max (ULTRA) page */}
+            {tierType === 'ULTRA' && (
+              <TierDailyClaimCard
+                targetTier="MAX_PRO"
+                userId={user.id}
+                user={user}
+                settings={settings}
+                onUpdateUser={onUserUpdate}
+              />
+            )}
+
             {subscriptionPlans.length === 0 ? (
               <div className="rounded-2xl p-12 text-center" style={{ border: `1.5px dashed ${C.border}` }}>
                 <Package size={36} className="mx-auto mb-4" style={{ color: C.textDim }} />
@@ -1005,7 +1905,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
 
                   const ffGold = '#FFD700';
                   const ffGoldDim = 'rgba(255,215,0,0.65)';
-                  const ffCardBg = C.surface;
+                  const ffCardBg = isPro ? '#071b29' : '#140c29';
                   const ffBorder = isPro ? '#22d3ee' : '#c084fc';
                   const ffStripe = isPro ? 'rgba(34,211,238,0.18)' : 'rgba(192,132,252,0.18)';
 
@@ -1081,75 +1981,33 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
                           </div>
                         </div>
 
-                        {/* ▌▌ Stat bars — FF-style (dynamic from level system) ▌▌ */}
-                        {(() => {
-                          const userLevel = getLevelInfo(user.totalScore || 0).level;
-                          const ld = getLevelDailyLimitsWithOverride(userLevel, settings);
-                          const tier = isPro ? 'BASIC' : 'ULTRA';
-                          const dailyScore = getDailyScoreLimit(tier, true);
-                          const multiplier = SCORE_MULTIPLIERS[tier] ?? 1.0;
-                          const mcqLimit = ld?.mcq?.[isPro ? 'basic' : 'ultra'] ?? (isPro ? 70 : 100);
-                          const pdfLimit = ld?.pdf?.[isPro ? 'basic' : 'ultra'] ?? (isPro ? 5 : 10);
-                          const videoLimit = ld?.video?.[isPro ? 'basic' : 'ultra'] ?? (isPro ? 4 : 7);
-                          const flashLimit = ld?.flashcard?.['ultra'] ?? 20;
-                          const fmtLim = (v: number) => v === UNLIMITED ? '∞' : v.toLocaleString('en-IN');
-
-                          const topStats = [
-                            { icon: '📅', value: dailyScore.toLocaleString('en-IN'), sub: 'PTS/DIN' },
-                            { icon: '⚡', value: `${multiplier}×`, sub: 'SCORE BOOST' },
-                            { icon: '❓', value: fmtLim(mcqLimit), sub: 'MCQ/DIN' },
-                          ];
-                          const bottomStats = [
-                            { icon: '📄', label: 'PDF / Notes', value: fmtLim(pdfLimit) + '/day' },
-                            { icon: '🎬', label: 'Video',       value: fmtLim(videoLimit) + '/day' },
-                            { icon: '🃏', label: 'Flashcard',   value: fmtLim(flashLimit) + '/day' },
-                          ];
-
-                          return (
-                            <div className="relative" style={{ borderBottom: `1.5px solid rgba(255,255,255,0.06)` }}>
-                              <div className="px-3 py-1.5 flex items-center gap-1.5"
-                                style={{ background: 'rgba(255,255,255,0.035)', borderBottom: `1px solid rgba(255,255,255,0.055)` }}>
-                                <Zap size={9} color={ffBorder} />
-                                <span className="text-[9px] font-black uppercase tracking-[0.18em]" style={{ color: ffBorder }}>
-                                  {isPro ? 'PRO' : 'MAX'} PLAN LIMITS — Level {userLevel}
-                                </span>
-                              </div>
-                              {/* Top 3 main stats */}
-                              <div className="grid grid-cols-3" style={{ borderBottom: `1px solid rgba(255,255,255,0.04)` }}>
-                                {topStats.map((item, i) => (
-                                  <div key={i} className="flex flex-col items-center py-3 gap-0.5 relative"
-                                    style={{ borderRight: i < 2 ? `1px solid rgba(255,255,255,0.06)` : 'none' }}>
-                                    <span className="text-[17px] leading-none mb-0.5">{item.icon}</span>
-                                    <span className="text-[13px] font-black tabular-nums" style={{ color: ffGold }}>{item.value}</span>
-                                    <span className="text-[8px] font-black uppercase tracking-wide text-center leading-tight" style={{ color: 'rgba(255,255,255,0.28)' }}>{item.sub}</span>
-                                  </div>
-                                ))}
-                              </div>
-                              {/* Bottom activity limits row */}
-                              <div className="grid grid-cols-3" style={{ background: 'rgba(0,0,0,0.18)' }}>
-                                {bottomStats.map((item, i) => (
-                                  <div key={i} className="flex items-center justify-center gap-1 py-2 px-1"
-                                    style={{ borderRight: i < 2 ? `1px solid rgba(255,255,255,0.05)` : 'none' }}>
-                                    <span className="text-[11px] leading-none">{item.icon}</span>
-                                    <span className="text-[10px] font-black tabular-nums" style={{ color: ffGoldDim }}>{item.value}</span>
-                                  </div>
-                                ))}
-                              </div>
+                        {/* ▌▌ Feature list — Uniform clean display ▌▌ */}
+                        <div className="relative" style={{ borderBottom: `1.5px solid rgba(255,255,255,0.06)` }}>
+                          <div className="px-4 py-2 flex items-center justify-between"
+                            style={{ background: 'rgba(255,255,255,0.035)', borderBottom: `1px solid rgba(255,255,255,0.055)` }}>
+                            <div className="flex items-center gap-1.5">
+                              <Zap size={11} color={ffBorder} />
+                              <span className="text-[10px] font-black uppercase tracking-[0.16em]" style={{ color: ffBorder }}>
+                                {isPro ? 'PRO (BASIC)' : 'MAX (ULTRA)'} INCLUDED FEATURES & PERKS
+                              </span>
                             </div>
-                          );
-                        })()}
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                              style={{ background: 'rgba(255,215,0,0.12)', color: ffGold, border: '1px solid rgba(255,215,0,0.25)' }}>
+                              {featuresList.length} Features
+                            </span>
+                          </div>
 
-                        {/* ▌▌ Feature list ▌▌ */}
-                        <div className="px-4 py-3 grid grid-cols-2 gap-x-3 gap-y-2" style={{ borderBottom: `1.5px solid rgba(255,255,255,0.06)` }}>
-                          {featuresList.map((f, i) => (
-                            <div key={i} className="flex items-center gap-2">
-                              <div className="w-4 h-4 rounded flex items-center justify-center shrink-0"
-                                style={{ background: 'rgba(255,215,0,0.1)', border: `1px solid rgba(255,215,0,0.3)` }}>
-                                <Check size={9} color={ffGold} strokeWidth={3.5} />
+                          <div className="px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2">
+                            {featuresList.map((f, i) => (
+                              <div key={i} className="flex items-center gap-2.5 py-1">
+                                <div className="w-4 h-4 rounded-md flex items-center justify-center shrink-0"
+                                  style={{ background: 'rgba(255,215,0,0.12)', border: `1px solid rgba(255,215,0,0.3)` }}>
+                                  <Check size={10} color={ffGold} strokeWidth={3.5} />
+                                </div>
+                                <span className="text-[12px] font-semibold leading-tight" style={{ color: 'rgba(255,255,255,0.85)' }}>{f}</span>
                               </div>
-                              <span className="text-[11px] font-semibold leading-tight" style={{ color: 'rgba(255,255,255,0.55)' }}>{f}</span>
-                            </div>
-                          ))}
+                            ))}
+                          </div>
                         </div>
 
                         {/* ▌▌ Level discount row ▌▌ */}
@@ -1235,7 +2093,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
                             {isSubscribed ? (
                               <span className="text-[11px] font-black px-2.5 py-1 rounded-lg shrink-0"
                                 style={{ background: 'rgba(70,52,0,0.8)', color: ffGold, border: `1px solid rgba(255,215,0,0.4)` }}>
-                                +5% OFF
+                                +{isUltraUser ? 10 : 5}% OFF
                               </span>
                             ) : !subActive ? (
                               <span className="text-[10px] font-bold" style={{ color: C.textDim }}>None</span>
@@ -1370,6 +2228,81 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack })
                   </div>
                 )}
 
+
+                {/* ── SUPERPOWERS ADDED WITH THIS TIER ── */}
+                {isPro ? (
+                  <div className="rounded-2xl p-4 bg-[#071a26] border-2 border-cyan-400/40 shadow-lg mb-5 relative overflow-hidden">
+                    <div className="flex items-center gap-2.5 mb-3">
+                      <div className="w-8 h-8 rounded-xl bg-cyan-400/20 border border-cyan-400/40 flex items-center justify-center text-cyan-300 text-base font-black">
+                        ⭐
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-black uppercase tracking-wider text-cyan-400">
+                          Pro Unlocked Superpowers
+                        </span>
+                        <h3 className="text-sm font-black text-white leading-none">
+                          Basic (Pro) Plan Se Add Hone Wale Superpowers
+                        </h3>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-slate-300 mb-3 leading-relaxed">
+                      Free Plan ke mukable Basic plan lene par ye sabhi extra powers aapke account me jud jayengi:
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {basicSuperPowers.map((p, idx) => (
+                        <div key={idx} className="p-2.5 rounded-xl bg-black/35 border border-cyan-400/20 flex items-start gap-2.5">
+                          <span className="text-base shrink-0 mt-0.5">{p.icon}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="text-xs font-black text-cyan-200">{p.title}</span>
+                              <span className="text-[9px] font-black px-1.5 py-0.2 rounded bg-cyan-400/15 text-cyan-300 shrink-0">
+                                {p.badge}
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-slate-400 mt-0.5 leading-snug">{p.desc}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-2xl p-4 bg-[#140a28] border-2 border-purple-400/45 shadow-lg mb-5 relative overflow-hidden">
+                    <div className="flex items-center gap-2.5 mb-3">
+                      <div className="w-8 h-8 rounded-xl bg-purple-500/20 border border-purple-400/45 flex items-center justify-center text-purple-300 text-base font-black">
+                        👑
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-black uppercase tracking-wider text-purple-300">
+                          Elite VIP Superpowers
+                        </span>
+                        <h3 className="text-sm font-black text-white leading-none">
+                          Ultra (Max) Plan Se Add Hone Wale Superpowers
+                        </h3>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-slate-300 mb-3 leading-relaxed">
+                      Basic Plan ke upar ye sabhi ultimate perks aur exclusive superpowers unlock ho jayengi:
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {ultraSuperPowers.map((p, idx) => (
+                        <div key={idx} className="p-2.5 rounded-xl bg-black/35 border border-purple-400/20 flex items-start gap-2.5">
+                          <span className="text-base shrink-0 mt-0.5">{p.icon}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="text-xs font-black text-purple-200">{p.title}</span>
+                              <span className="text-[9px] font-black px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 shrink-0">
+                                {p.badge}
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-slate-400 mt-0.5 leading-snug">{p.desc}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Trust row */}
                 <div className="flex justify-center gap-8 mb-2">

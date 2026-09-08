@@ -212,6 +212,72 @@ export const ScoreHistoryDashboard: React.FC<Props> = ({ user, onBack }) => {
   };
 
   const noData = log.length === 0;
+  const isSubscriber = user.subscriptionLevel === 'BASIC' || user.subscriptionLevel === 'ULTRA' || !!user.isPremium || user.role === 'ADMIN';
+
+  if (!isSubscriber) {
+    return (
+      <div className="min-h-screen flex flex-col" style={{ background: '#0a0a12', color: '#e2e8f0' }}>
+        {/* Header */}
+        <div className="flex items-center gap-3 px-4 py-3.5 border-b"
+          style={{ background: 'rgba(10,10,18,0.95)', borderColor: 'rgba(255,255,255,0.08)' }}>
+          <button onClick={onBack}
+            className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90 transition-all shrink-0"
+            style={{ background: 'rgba(255,255,255,0.07)' }}>
+            <ChevronLeft size={18} color="#94a3b8" />
+          </button>
+          <div className="flex-1 min-w-0">
+            <p className="font-black text-white text-base leading-none">📊 Score History</p>
+            <p className="text-[10px] text-slate-500 mt-0.5">Tera score ka full record</p>
+          </div>
+          <span className="text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30 flex items-center gap-1">
+            🔒 Basic+
+          </span>
+        </div>
+
+        {/* Locked Hero Card */}
+        <div className="flex-1 flex items-center justify-center p-6">
+          <div className="max-w-md w-full rounded-3xl p-6 text-center"
+            style={{ background: 'linear-gradient(180deg, rgba(30,41,59,0.7) 0%, rgba(15,23,42,0.85) 100%)', border: '1px solid rgba(245,158,11,0.25)', boxShadow: '0 20px 40px -15px rgba(0,0,0,0.5)' }}>
+            
+            <div className="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center text-3xl"
+              style={{ background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.3)' }}>
+              🔒
+            </div>
+
+            <span className="inline-block px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-widest mb-3 bg-amber-500/20 text-amber-300 border border-amber-500/40">
+              Subscription Tier Required: Basic+
+            </span>
+
+            <h3 className="text-xl font-black text-white mb-2">
+              Score History Unlocked Nahi Hai
+            </h3>
+
+            <p className="text-sm text-slate-400 leading-relaxed mb-6">
+              Score History ka detailed daily breakdown, XP multipliers aur timeline analysis sirf <strong className="text-amber-300">Basic (Pro)</strong> ya <strong className="text-purple-300">Ultra (Max)</strong> members ke liye available hai.
+            </p>
+
+            <div className="grid grid-cols-2 gap-3 mb-6 text-left">
+              <div className="p-3 rounded-2xl" style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)' }}>
+                <p className="text-xs font-black text-blue-400 mb-1">⭐ Basic Plan</p>
+                <p className="text-[11px] text-slate-400">Score History Unlocked, 1.5X XP boost, +66% daily limit</p>
+              </div>
+              <div className="p-3 rounded-2xl" style={{ background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.2)' }}>
+                <p className="text-xs font-black text-purple-400 mb-1">👑 Ultra Plan</p>
+                <p className="text-[11px] text-slate-400">Score History + Global Chat, 2.0X XP boost, Ultra Mode</p>
+              </div>
+            </div>
+
+            <button
+              onClick={onBack}
+              className="w-full py-3.5 rounded-2xl font-black text-sm text-white transition-all active:scale-95 shadow-lg"
+              style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)' }}>
+              Store Check Karein / Plan Upgrade Karein
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const ALL_SCORE_ROWS = [
     { emoji:'✅', act:'MCQ Correct Answer',        base:'+2',        note:'Correct answer gives +2 base. Free=2×, Basic=2.4×, Ultra=3× pts.' },

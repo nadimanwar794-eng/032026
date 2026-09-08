@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback } from "react";
+import React, { useMemo, useState } from "react";
 import { useDebounce } from "../utils/useDebounce";
 import { DownloadApp, DownloadAppStore, SystemSettings } from "../types";
 import {
@@ -10,93 +10,7 @@ import {
   Smartphone,
   Search,
   PackageOpen,
-  Gift,
-  Check,
-  AlertCircle,
 } from "lucide-react";
-import {
-  loadRoutineData, saveRoutineData, checkAndResetDaily,
-  getUserSubTier, ensureTodayClaimEntry, claimAllPendingCoins,
-  getUnclaimedCoins, getDailyClaimAmount, DAILY_CLAIM_PRO, DAILY_CLAIM_MAX_PRO,
-  type UserSubTier,
-} from "../utils/routineStorage";
-import { saveUserToLive } from "../firebase";
-import { isSubscriptionFromCoins } from "../utils/subscriptionUtils";
-
-function getToday() { return new Date().toISOString().split('T')[0]; }
-
-// ── Daily Claim Card ──────────────────────────────────────────────────────────
-function DailyClaimCard({ tier, unclaimed, todayClaimed, dailyAmt, onClaim, isCoinSub }: {
-  tier: UserSubTier; unclaimed: number; todayClaimed: boolean; dailyAmt: number; onClaim: () => void; isCoinSub?: boolean;
-}) {
-  if (tier === 'NONE') return (
-    <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-5">
-      <div className="flex items-center gap-2 mb-1">
-        <Gift size={15} className="text-slate-400" />
-        <p className="text-sm font-black text-slate-500">Daily Coin Claim</p>
-      </div>
-      <p className="text-xs text-slate-400 font-medium">Pro ya Max Pro lo → roz {DAILY_CLAIM_PRO}–{DAILY_CLAIM_MAX_PRO} 🪙 pao!</p>
-    </div>
-  );
-
-  const grad  = tier === 'MAX_PRO' ? 'from-violet-600 to-purple-600' : 'from-blue-600 to-indigo-600';
-  const bg    = tier === 'MAX_PRO' ? 'bg-violet-50 border-violet-200' : 'bg-blue-50 border-blue-200';
-  const label = tier === 'MAX_PRO' ? 'Max Pro' : 'Pro';
-
-  return (
-    <div className={`rounded-2xl border-2 p-4 mb-5 ${bg}`}>
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <div className={`w-8 h-8 rounded-xl bg-gradient-to-br ${grad} flex items-center justify-center`}>
-            <Gift size={14} className="text-white" />
-          </div>
-          <div>
-            <p className="text-xs font-black text-slate-700">{label} Daily Reward</p>
-            <p className="text-[10px] text-slate-500 font-medium">Roz {dailyAmt} 🪙 · Kabhi expire nahi</p>
-          </div>
-        </div>
-        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-100 text-amber-700 font-black text-xs border border-amber-200">
-          🪙 {dailyAmt.toLocaleString()}
-        </span>
-      </div>
-      {isCoinSub ? (
-        <div>
-          <button disabled className="w-full py-3 rounded-xl bg-slate-200 text-slate-500 font-black text-xs cursor-not-allowed opacity-75 flex items-center justify-center gap-2 border border-slate-300">
-            🔒 Claim Off (Coins Subscription)
-          </button>
-          <div className="mt-3 p-3 rounded-xl bg-amber-50 border border-amber-200 text-left">
-            <div className="flex items-center gap-1.5 text-amber-800 font-bold text-xs">
-              <span>📢</span>
-              <span>Official Notice:</span>
-            </div>
-            <p className="text-[11px] text-amber-700 mt-1 leading-relaxed">
-              Credits/Coins se activate kiye gaye subscription plan me Daily Coin Claim ki suvidha uplabdh nahi hai. Yeh reward keval direct cash/UPI subscription plan ke sath diya jata hai.
-            </p>
-          </div>
-        </div>
-      ) : unclaimed > 0 ? (
-        <>
-          {unclaimed > dailyAmt && (
-            <div className="bg-amber-100 border border-amber-200 rounded-xl px-3 py-2 mb-3 flex items-center gap-2">
-              <AlertCircle size={12} className="text-amber-600 shrink-0" />
-              <p className="text-[10px] font-black text-amber-700">
-                {Math.floor(unclaimed / dailyAmt)} din ka stack = {unclaimed} 🪙!
-              </p>
-            </div>
-          )}
-          <button onClick={onClaim} className={`w-full py-3 rounded-xl bg-gradient-to-r ${grad} text-white font-black text-sm active:scale-[0.98] transition shadow-md flex items-center justify-center gap-2`}>
-            <Gift size={16} /> Claim {unclaimed} 🪙 Karo
-          </button>
-        </>
-      ) : (
-        <div className="flex items-center justify-center gap-2 py-2.5 bg-emerald-100 rounded-xl border border-emerald-200">
-          <Check size={14} className="text-emerald-600" />
-          <span className="text-xs font-black text-emerald-700">Aaj ka reward claim ho gaya! ✅</span>
-        </div>
-      )}
-    </div>
-  );
-}
 
 interface Props {
   settings: SystemSettings | null;
@@ -161,45 +75,6 @@ export const AppStore: React.FC<Props> = ({ settings, user, onUserUpdate }) => {
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);
 
-  // ── Subscription daily coin claim ──────────────────────────────────────────
-  const userId = user?.id || 'guest';
-  const subTier: UserSubTier = getUserSubTier(user ?? {});
-  const [routineData, setRoutineDataRaw] = useState(() => {
-    const d = loadRoutineData(userId);
-    const reset = checkAndResetDaily(d);
-    return ensureTodayClaimEntry(reset, getUserSubTier(user ?? {}));
-  });
-  const setRoutineData = useCallback((updater: (prev: typeof routineData) => typeof routineData) => {
-    setRoutineDataRaw(prev => {
-      const next = updater(prev);
-      saveRoutineData(userId, next);
-      return next;
-    });
-  }, [userId]);
-  const unclaimedCoins = getUnclaimedCoins(routineData, subTier);
-  const todayClaimed = routineData.dailyClaims?.[getToday()]?.claimed ?? false;
-  const dailyAmount = getDailyClaimAmount(subTier);
-  const isCoinSub = isSubscriptionFromCoins(user);
-
-  const handleClaim = async () => {
-    if (isCoinSub) {
-      window.alert("Coins se activate kiye gaye subscription plan me Daily Coin Claim uplabdh nahi hai.");
-      return;
-    }
-    const { data: updated, earned } = claimAllPendingCoins(routineData, subTier);
-    // Add earned coins to main app credits
-    if (earned > 0 && onUserUpdate && user) {
-      const updatedUser = { ...user, credits: (user.credits || 0) + earned };
-      if (!await saveUserToLive(updatedUser)) {
-        window.alert("Coins save nahi ho paaye. Internet check karke dobara try karein.");
-        return;
-      }
-      onUserUpdate(updatedUser);
-    }
-    setRoutineDataRaw(updated);
-    saveRoutineData(userId, updated);
-  };
-
   const apps: DownloadApp[] = useMemo(
     () => settings?.downloadApps || [],
     [settings?.downloadApps],
@@ -244,16 +119,6 @@ export const AppStore: React.FC<Props> = ({ settings, user, onUserUpdate }) => {
           </div>
         </div>
       </div>
-
-      {/* DAILY COIN CLAIM */}
-      <DailyClaimCard
-        tier={subTier}
-        unclaimed={unclaimedCoins}
-        todayClaimed={todayClaimed}
-        dailyAmt={dailyAmount}
-        onClaim={handleClaim}
-        isCoinSub={isCoinSub}
-      />
 
       {/* SEARCH */}
       {apps.length > 0 && (

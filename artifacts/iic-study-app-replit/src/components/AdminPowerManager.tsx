@@ -318,7 +318,6 @@ export const AdminPowerManager: React.FC<Props> = ({ settings, onUpdate }) => {
                     { key: 'notes', label: 'Notes Reading',       icon: '📖', hasTiers: true,  tiers: ['free', 'basic', 'ultra'] },
                     { key: 'tts',   label: 'Audio / TTS',         icon: '🔊', hasTiers: true,  tiers: ['free', 'basic', 'ultra'] },
                     { key: 'write', label: 'Write Mode (Free)',   icon: '✍️', hasTiers: true,  tiers: ['free', 'basic', 'ultra'] },
-                    { key: 'creditWriteMax',    label: 'Write Mode Max (Credit)',  icon: '💎', hasTiers: false, singleKey: 'creditWriteMax',    singleLabel: 'Max/Day' },
                     { key: 'bonusLoginCredits', label: 'Daily Login Bonus CR',     icon: '💰', hasTiers: false, singleKey: 'bonusLoginCredits', singleLabel: 'Bonus CR' },
                 ];
 
