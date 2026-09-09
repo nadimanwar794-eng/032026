@@ -54,6 +54,7 @@ import QRCode from "react-qr-code";
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 const DEFAULT_BASIC_FEATURES = [
+    'Group Study: Join Live Rooms & MCQ Battles',
     'Community MCQ Send',
     'Content Request',
     'Correction Mode',
@@ -72,6 +73,7 @@ const DEFAULT_BASIC_FEATURES = [
 const DEFAULT_ULTRA_FEATURES = [
     'Everything in Basic',
     '+ Additional Perks:',
+    '👑 Group Study Pro: Host Live Classroom, Whiteboard & Battles',
     '⚡ Ultra Mode (Chunk Notes / Reading Notes)',
     'Store Discount: +10% (Pro & Max)',
     'Daily XP Limit: +133%',
@@ -6641,6 +6643,37 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
               <div className="sticky top-0 z-20 bg-white flex items-center gap-4 mb-6 border-b pb-4 pt-1">
                   <button onClick={() => setActiveTab('DASHBOARD')} className="bg-slate-100 p-2 rounded-full hover:bg-slate-200 shrink-0"><ArrowLeft size={20} /></button>
                   <h3 className="text-xl font-black text-slate-800">General Settings</h3>
+              </div>
+
+              {/* HIDE LOCKED CONTENT FOR FREE & BASIC USERS */}
+              <div id="setting-hide-locked-content" className="mt-4 p-4 rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50/70 to-orange-50/70 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-amber-600 text-white flex items-center justify-center text-lg shrink-0 shadow-sm shadow-amber-300">
+                          🔒
+                      </div>
+                      <div>
+                          <h4 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                              Hide Locked Content for Free &amp; Basic Users
+                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${localSettings.hideLockedForFreeAndBasic ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-slate-200 text-slate-600'}`}>
+                                  {localSettings.hideLockedForFreeAndBasic ? 'ON (HIDDEN)' : 'OFF (VISIBLE)'}
+                              </span>
+                          </h4>
+                          <p className="text-[11px] text-slate-600 mt-0.5">
+                              ON hone par Free aur Basic users ko locked (Redeem / Plan required) cheezein bilkul nahi dikhengi. OFF hone par lock icon ke saath dikhengi.
+                          </p>
+                      </div>
+                  </div>
+                  <button
+                      type="button"
+                      id="toggle-hide-locked-free-basic"
+                      onClick={() => {
+                          const nextVal = !localSettings.hideLockedForFreeAndBasic;
+                          setLocalSettings({ ...localSettings, hideLockedForFreeAndBasic: nextVal });
+                      }}
+                      className={`w-12 h-6 rounded-full transition-colors relative shrink-0 p-0.5 ${localSettings.hideLockedForFreeAndBasic ? 'bg-amber-600' : 'bg-slate-300'}`}
+                  >
+                      <div className={`w-5 h-5 rounded-full bg-white shadow-md transition-transform ${localSettings.hideLockedForFreeAndBasic ? 'translate-x-6' : 'translate-x-0'}`} />
+                  </button>
               </div>
 
               {/* CARD ROTATING BORDER ANIMATION */}
@@ -17884,7 +17917,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
 
               <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
-                      <thead className="bg-slate-50 border-b border-slate-100 text-slate-600"><tr className="uppercase text-xs"><th className="p-4">User</th><th className="p-4">Credits</th><th className="p-4">Role</th><th className="p-4 text-right">Actions</th></tr></thead>
+                      <thead className="bg-slate-50 border-b border-slate-100 text-slate-600"><tr className="uppercase text-xs"><th className="p-4">User</th><th className="p-4">Status / Last Seen</th><th className="p-4">Credits</th><th className="p-4">Role</th><th className="p-4 text-right">Actions</th></tr></thead>
                       <tbody className="divide-y divide-slate-50">
                           {users.filter(u => matchesUserSearch(u, searchTerm)).map(u => (
                               <tr key={u.id} className="hover:bg-slate-50 transition-colors">
@@ -17900,6 +17933,48 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                       <p className="text-xs text-slate-500 font-mono mt-0.5">
                                           UID: {u.id} {u.email ? `• ${u.email}` : ''} {u.mobile ? `• 📞 ${u.mobile}` : ''}
                                       </p>
+                                  </td>
+                                  <td className="p-4">
+                                      {(() => {
+                                          const isOnline = u.lastActiveTime && (Date.now() - new Date(u.lastActiveTime).getTime() < 6 * 60 * 1000);
+                                          const formatSeen = (t?: string) => {
+                                              if (!t) return 'Never seen';
+                                              try {
+                                                  const diff = Date.now() - new Date(t).getTime();
+                                                  const m = Math.floor(diff / 60000);
+                                                  if (m < 6) return '🟢 Online';
+                                                  if (m < 60) return `${m}m ago`;
+                                                  const h = Math.floor(m / 60);
+                                                  if (h < 24) return `${h}h ago`;
+                                                  const d = Math.floor(h / 24);
+                                                  if (d < 7) return `${d}d ago`;
+                                                  return new Date(t).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+                                              } catch {
+                                                  return 'Unknown';
+                                              }
+                                          };
+
+                                          return (
+                                              <div>
+                                                  {isOnline ? (
+                                                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                                                          Online
+                                                          {u.currentActivity && <span className="font-normal text-[10px] text-emerald-600">({u.currentActivity})</span>}
+                                                      </span>
+                                                  ) : (
+                                                      <span className="text-xs font-semibold text-slate-500">
+                                                          🕒 {formatSeen(u.lastActiveTime)}
+                                                      </span>
+                                                  )}
+                                                  {u.lastActiveTime && !isOnline && (
+                                                      <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+                                                          {new Date(u.lastActiveTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                      </p>
+                                                  )}
+                                              </div>
+                                          );
+                                      })()}
                                   </td>
                                   <td className="p-4 font-bold text-blue-600">{u.credits}</td>
                                   <td className="p-4"><span className={`px-2 py-1 rounded text-xs font-bold ${u.role === 'ADMIN' ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-600'}`}>{u.role}</span></td>
@@ -19421,7 +19496,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
 
 
       {activeTab === 'NSTA_CONTROL' && (
-          <NstaFeatureManager settings={localSettings} onUpdateSettings={setLocalSettings} onBack={() => setActiveTab('DASHBOARD')} />
+          <NstaFeatureManager settings={localSettings} onUpdateSettings={setLocalSettings} onBack={() => setActiveTab('DASHBOARD')} users={users} />
       )}
 
             {/* --- VISIBILITY CONTROL (Legacy Restored) --- */}

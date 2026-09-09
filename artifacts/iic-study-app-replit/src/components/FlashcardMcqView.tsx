@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, ChevronRight, ChevronLeft, RotateCw, Volume2, Square, Shuffle, Lightbulb, Edit2, X, MoreVertical, RefreshCw, BookOpen, Tv, CheckCircle, Maximize2, Minimize2, LayoutGrid } from 'lucide-react';
+import { ArrowLeft, ChevronRight, ChevronLeft, RotateCw, Volume2, Square, Shuffle, Lightbulb, Edit2, X, MoreVertical, RefreshCw, BookOpen, Tv, CheckCircle, Maximize2, Minimize2, LayoutGrid, Users, Radio } from 'lucide-react';
 import type { MCQItem } from '../types';
 import type { User, SystemSettings } from '../types';
 import { speakText, stopSpeech } from '../utils/textToSpeech';
@@ -46,6 +46,8 @@ interface Props {
   tabBar?: React.ReactNode;
   /** If true, hides the "PROJECTOR MODE" badge in the projector header */
   hideProjectorLabel?: boolean;
+  /** Trigger to open Group Study / Live Room modal for this flashcard set */
+  onOpenGroupStudy?: () => void;
 }
 
 const CREDIT_COST = 5;
@@ -82,7 +84,7 @@ const addTodayCount = (userId: string, n: number) => {
 };
 
 export const FlashcardMcqView: React.FC<Props> = ({
-  questions, title, subtitle, subject, onBack, user, settings, onUpdateUser, sourceMeta, sourceKey, startInProjectorMode, onProjectorModeChange, tabBar, hideProjectorLabel
+  questions, title, subtitle, subject, onBack, user, settings, onUpdateUser, sourceMeta, sourceKey, startInProjectorMode, onProjectorModeChange, tabBar, hideProjectorLabel, onOpenGroupStudy
 }) => {
   const isMountedRef = useRef(true);
   const [pickedIndices, setPickedIndices] = useState<number[]>([]);
@@ -573,6 +575,18 @@ export const FlashcardMcqView: React.FC<Props> = ({
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
+            {/* Live Room / Group Study */}
+            {onOpenGroupStudy && (
+              <button
+                type="button"
+                onClick={onOpenGroupStudy}
+                className="px-2.5 py-1.5 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 text-emerald-300 flex items-center gap-1 active:scale-95 transition"
+                title="Live Flashcard Study Room"
+              >
+                <Users size={14} className="text-emerald-300" />
+                <span className="text-[10px] font-black uppercase tracking-wider">Live</span>
+              </button>
+            )}
             {/* Projector Mode */}
             {questions.length > 0 && (
               <button
@@ -1053,30 +1067,41 @@ export const FlashcardMcqView: React.FC<Props> = ({
                    style={{ width:36, height:36, background: projectorNavigatorOpen ? '#e0e7ff' : 'rgba(248,250,252,0.94)', border: projectorNavigatorOpen ? '1px solid #a5b4fc' : '1px solid #e2e8f0', borderRadius:12, color:'#4338ca', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 4px 14px rgba(15,23,42,0.12)' }}>
                    <LayoutGrid size={17} />
                  </button>
+                 {onOpenGroupStudy && (
+                   <button
+                     onClick={onOpenGroupStudy}
+                     title="Live Class Room"
+                     aria-label="Live Class Room"
+                     style={{ height:36, padding:'0 10px', background:'#fdf2f8', border:'1px solid #f472b6', borderRadius:12, color:'#db2777', cursor:'pointer', display:'flex', alignItems:'center', gap:5, fontWeight:900, fontSize:11, boxShadow:'0 4px 14px rgba(15,23,42,0.12)' }}>
+                     <Radio size={13} className="animate-pulse text-pink-600" />
+                     <span>LIVE</span>
+                   </button>
+                 )}
                </div>
              )}
             {/* Header — hidden in focus mode */}
             {!projectorFocused && (
               <div style={{ display:'flex', alignItems:'center', gap:8, padding:'10px 12px', borderBottom:'1px solid #f1f5f9', background:'#ffffff', flexShrink:0, boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
-                {/* Back button — only when no external tabBar (standalone MCQ set) */}
-                {!tabBar && (
-                  <button
-                    onClick={() => {
-                      stopSpeech();
-                      // If opened directly in projector mode (e.g. from MCQ Practice Sets),
-                      // back should close the overlay entirely, not drop to flashcard view.
-                      if (startInProjectorMode) {
-                        handleBack();
-                      } else {
-                        setIsProjectorMode(false);
-                        setProjectorRotated(false);
-                        onProjectorModeChange?.(false);
-                      }
-                    }}
-                    style={{ flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', width:36, height:36, background:'#f1f5f9', border:'1px solid #e2e8f0', borderRadius:10, color:'#475569', cursor:'pointer' }}>
-                    <ChevronLeft size={18} />
-                  </button>
-                )}
+                {/* Back button */}
+                <button
+                  onClick={() => {
+                    stopSpeech();
+                    if (onBack && tabBar) {
+                      onBack();
+                    } else if (startInProjectorMode) {
+                      handleBack();
+                    } else {
+                      setIsProjectorMode(false);
+                      setProjectorRotated(false);
+                      onProjectorModeChange?.(false);
+                    }
+                  }}
+                  style={{ flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', width:36, height:36, background:'#f1f5f9', border:'1px solid #e2e8f0', borderRadius:10, color:'#475569', cursor:'pointer' }}
+                  title="Back"
+                  aria-label="Back"
+                >
+                  <ChevronLeft size={18} />
+                </button>
                 {/* Title block */}
                 <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ fontSize:13, fontWeight:900, color:'#1e293b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', lineHeight:1.2 }}>
@@ -1136,6 +1161,17 @@ export const FlashcardMcqView: React.FC<Props> = ({
                    style={{ flexShrink:0, width:36, height:36, background:'#f0fdf4', border:'2px solid #bbf7d0', borderRadius:12, color:'#16a34a', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
                    <Maximize2 size={18} />
                  </button>
+                 {/* Live Class / Group Study */}
+                 {onOpenGroupStudy && (
+                   <button
+                     onClick={onOpenGroupStudy}
+                     title="Live Class Room"
+                     aria-label="Live Class Room"
+                     style={{ flexShrink:0, height:36, padding:'0 10px', background:'#fdf2f8', border:'1.5px solid #f472b6', borderRadius:12, color:'#db2777', cursor:'pointer', display:'flex', alignItems:'center', gap:5, fontWeight:900, fontSize:11 }}>
+                     <Radio size={14} className="animate-pulse text-pink-600" />
+                     <span>LIVE</span>
+                   </button>
+                 )}
               </div>
             )}
             {/* Scrollable content — shared Revision Hub card, scaled for projection */}

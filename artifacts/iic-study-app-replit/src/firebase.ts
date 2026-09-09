@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase/app";
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, setDoc, getDoc, getDocFromServer, collection, updateDoc, deleteDoc, onSnapshot, getDocs, query, where, limitToLast, orderBy, increment, arrayUnion, limit, startAfter, QueryDocumentSnapshot } from "firebase/firestore";
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, setLogLevel, doc, setDoc, getDoc, getDocFromServer, collection, updateDoc, deleteDoc, onSnapshot, getDocs, query, where, limitToLast, orderBy, increment, arrayUnion, limit, startAfter, QueryDocumentSnapshot } from "firebase/firestore";
 import { getDatabase, ref, set, get, onValue, update, remove, query as rtdbQuery, limitToLast as rtdbLimitToLast, orderByChild as rtdbOrderByChild, equalTo as rtdbEqualTo, runTransaction } from "firebase/database";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 import { storage } from "./utils/storage";
@@ -49,6 +49,15 @@ if (typeof window !== 'undefined') {
       console.warn('[IIC] Firestore write stream reached backpressure limit — throttled writes will sync on backoff.');
       return;
     }
+    if (
+      msg.includes('Could not reach Cloud Firestore backend') ||
+      msg.includes('client will operate in offline mode') ||
+      msg.includes("backend didn't respond within")
+    ) {
+      event.preventDefault();
+      console.warn('[IIC] Firestore operating in offline cache mode.');
+      return;
+    }
     if (msg.includes('FIRESTORE') && msg.includes('INTERNAL ASSERTION FAILED')) {
       event.preventDefault();
       console.warn('[IIC] Firestore assertion error — clearing IndexedDB cache and reloading…');
@@ -74,6 +83,9 @@ const app = initializeApp(firebaseConfig);
 const analytics: any = null;
 export { analytics };
 // Use new persistentLocalCache API (replaces deprecated enableMultiTabIndexedDbPersistence)
+try {
+  setLogLevel('error');
+} catch {}
 const db = initializeFirestore(app, {
   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
 });
@@ -1369,10 +1381,17 @@ export const getFreshUserData = async (userId: string) => {
             const docSnap = await getDocFromServer(doc(db, "users", userId));
             if (docSnap.exists()) coreData = docSnap.data();
         } catch {
-            // RTDB is also mirrored on every account write and works as the
-            // recovery path when Firestore is offline or unauthenticated.
-            const snap = await get(ref(rtdb, `users/${userId}`));
-            if (snap.exists()) coreData = snap.val();
+            // RTDB / local cache is used when Firestore is offline or unauthenticated.
+            try {
+                const cacheSnap = await getDoc(doc(db, "users", userId));
+                if (cacheSnap.exists()) coreData = cacheSnap.data();
+            } catch {}
+            if (!coreData) {
+                try {
+                    const snap = await get(ref(rtdb, `users/${userId}`));
+                    if (snap.exists()) coreData = snap.val();
+                } catch {}
+            }
         }
 
         if (!coreData) return null;
@@ -1390,8 +1409,10 @@ export const getFreshUserData = async (userId: string) => {
             const bulkySnap = await getDocFromServer(doc(db, "user_data", userId));
             if (bulkySnap.exists()) accountData = bulkySnap.data();
         } catch {
-            // The mirrored account fields on RTDB are enough to keep credits and
-            // subscription state accurate when user_data is not readable yet.
+            try {
+                const cacheSnap = await getDoc(doc(db, "user_data", userId));
+                if (cacheSnap.exists()) accountData = cacheSnap.data();
+            } catch {}
         }
 
         const merged = { ...(rtdbData || {}), ...coreData, ...(accountData || {}) };
@@ -2639,23 +2660,20 @@ export const getUserSavedNotes = async (userId: string) => {
     }
 };
 
-export const updateUserStatus = async (userId: string, time: number) => {
+export const updateUserStatus = async (userId: string, time?: number, activity?: string) => {
      try {
-        const today = new Date().toISOString().split('T')[0];
+        const nowIso = new Date().toISOString();
         const userRef = ref(rtdb, `users/${userId}`);
 
-        // Use a transaction or simple read-update to handle streak
-        // Since Firebase transactions can be tricky with partial data, we'll try a simpler approach first
-        // Ideally this should be server-side, but for now client-side logic in App.tsx handles streak display.
-        // Here we primarily update active time for "Online" status.
+        const payload: any = { lastActiveTime: nowIso };
+        if (activity) payload.currentActivity = activity;
 
-        // HOWEVER, user reported streak not working.
-        // Streak is calculated in `App.tsx` (useEffect) -> `checkStreak`.
-        // `updateUserStatus` is called every 10 seconds.
-        // We should ensure we are NOT overwriting `streak` here accidentally if we were doing so.
-        // We are ONLY updating `lastActiveTime`.
+        // Update RTDB for real-time listeners
+        update(userRef, payload).catch(() => {});
 
-        await update(userRef, { lastActiveTime: new Date().toISOString() });
+        // Also update Firestore users document so Admin Dashboard and Nsta Manager see lastActiveTime
+        const docRef = doc(db, 'users', userId);
+        setDoc(docRef, payload, { merge: true }).catch(() => {});
     } catch (error: any) {
         const msg = String(error?.message || error || '');
         if (msg.includes('PERMISSION_DENIED') || msg.includes('Permission denied')) {

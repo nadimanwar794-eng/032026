@@ -175,6 +175,17 @@ export async function logErrorToFirebase(
     const message = typeof error === 'string' ? error : (error?.message || String(error));
     const stack = typeof error === 'string' ? undefined : error?.stack;
 
+    const lowerMsg = message.toLowerCase();
+    if (
+      lowerMsg.includes('could not reach cloud firestore backend') ||
+      lowerMsg.includes('client will operate in offline mode') ||
+      lowerMsg.includes("backend didn't respond within") ||
+      lowerMsg.includes('client is offline') ||
+      lowerMsg.includes('failed to get document because the client is offline')
+    ) {
+      return;
+    }
+
     const severity = opts.severity ?? classifyError(message);
 
     if (SEVERITY_RANK[severity] < SEVERITY_RANK[MIN_SEVERITY_TO_LOG]) return;

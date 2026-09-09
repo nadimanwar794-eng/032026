@@ -170,7 +170,8 @@ export const CREDIT_SUB_DURATIONS: CreditSubDurationOption[] = [
 export function calculateCreditSubPrice(
   base30DayPlan: CreditSubscriptionPlan,
   durationOption: CreditSubDurationOption,
-  _isUltraUser?: boolean
+  _isUltraUser?: boolean,
+  customDurationDiscountPercent?: number | null
 ): {
   basePrice: number;
   dummyPrice: number;
@@ -186,8 +187,10 @@ export function calculateCreditSubPrice(
   const dummyMultiplier = durationOption.multiplier;
   const dummyPrice = (base30DayPlan.dummyPrice || Math.round(base30DayPlan.price * 1.8)) * dummyMultiplier;
 
-  // Duration discount (1 month: 5%, 3 months: 10%, 6 months: 15%, 1 year: 25%)
-  const durationDiscountPercent = durationOption.durationDiscountPercent;
+  // Duration discount (custom override or from durationOption)
+  const durationDiscountPercent = typeof customDurationDiscountPercent === 'number'
+    ? customDurationDiscountPercent
+    : durationOption.durationDiscountPercent;
   const totalDiscountPercent = durationDiscountPercent;
 
   // Discounted final price

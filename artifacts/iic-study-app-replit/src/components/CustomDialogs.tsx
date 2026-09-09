@@ -1,5 +1,6 @@
 
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { X, AlertCircle, CheckCircle, HelpCircle } from 'lucide-react';
 
 interface AlertProps {
@@ -16,9 +17,9 @@ export const CustomAlert: React.FC<AlertProps> = ({ isOpen, type = 'INFO', title
   const isSuccess = type === 'SUCCESS';
   const isError = type === 'ERROR';
 
-  return (
-    <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in">
-      <div className="bg-white rounded-2xl w-full shadow-2xl p-6 text-center transform transition-all scale-100">
+  return createPortal(
+    <div className="fixed inset-0 z-[10000000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+      <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6 text-center transform transition-all scale-100">
         <div className={`mx-auto w-12 h-12 rounded-full flex items-center justify-center mb-4 ${
           isSuccess ? 'bg-green-100 text-green-600' :
           isError   ? 'bg-red-100 text-red-600'    :
@@ -31,7 +32,7 @@ export const CustomAlert: React.FC<AlertProps> = ({ isOpen, type = 'INFO', title
         <h3 className="text-lg font-black text-slate-800 mb-2">
           {title || (isSuccess ? 'Success' : isError ? 'Error' : 'Notice')}
         </h3>
-        <p className="text-slate-600 mb-6 text-sm">{message}</p>
+        <p className="text-slate-600 mb-6 text-sm whitespace-pre-line">{message}</p>
         <button
           onClick={onClose}
           className="w-full py-3 text-white font-bold rounded-xl"
@@ -40,7 +41,8 @@ export const CustomAlert: React.FC<AlertProps> = ({ isOpen, type = 'INFO', title
           Okay
         </button>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
@@ -55,11 +57,11 @@ interface ConfirmProps {
 export const CustomConfirm: React.FC<ConfirmProps> = ({ isOpen, title, message, onConfirm, onCancel }) => {
   if (!isOpen) return null;
 
-  return (
-    <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in">
-      <div className="bg-white rounded-2xl w-full shadow-2xl p-6 text-center">
+  return createPortal(
+    <div className="fixed inset-0 z-[10000000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+      <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6 text-center">
         <h3 className="text-lg font-black text-slate-800 mb-2">{title}</h3>
-        <p className="text-slate-600 mb-6 text-sm">{message}</p>
+        <p className="text-slate-600 mb-6 text-sm whitespace-pre-line">{message}</p>
         <div className="flex gap-3">
           <button
             onClick={onCancel}
@@ -76,6 +78,7 @@ export const CustomConfirm: React.FC<ConfirmProps> = ({ isOpen, title, message, 
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

@@ -477,7 +477,9 @@ export const StudentLevelPage: React.FC<StudentLevelPageProps> = ({
         id="student-current-features-card"
         className="rounded-3xl p-4 md:p-5 border border-white/15 relative overflow-hidden shadow-2xl backdrop-blur-md"
         style={{
-          background: `linear-gradient(145deg, ${userLvl.color}18 0%, rgba(18, 23, 38, 0.96) 60%, rgba(10, 13, 22, 1) 100%)`,
+          borderColor: `${userLvl.color}50`,
+          backgroundColor: '#0e1424',
+          backgroundImage: `linear-gradient(145deg, ${userLvl.color}20 0%, #121727 60%, #0a0d16 100%)`,
           boxShadow: `0 10px 30px -10px ${userLvl.color}25, 0 0 0 1px ${userLvl.color}20`,
         }}
       >
@@ -507,7 +509,7 @@ export const StudentLevelPage: React.FC<StudentLevelPageProps> = ({
         </div>
 
         {/* Progress to Next Level Bar */}
-        <div className="mt-3 bg-black/40 rounded-xl p-2.5 border border-white/5">
+        <div className="mt-3 bg-[#111728] rounded-xl p-2.5 border border-white/10">
           <div className="flex items-center justify-between text-[9px] font-bold text-slate-400 mb-1">
             <span>Level {userLvl.level} ({lvlFrom.toLocaleString('en-IN')})</span>
             <span className="text-white font-black">
@@ -537,7 +539,7 @@ export const StudentLevelPage: React.FC<StudentLevelPageProps> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-2 text-xs">
             {/* Store Discount */}
-            <div className="bg-black/40 rounded-xl p-2 border border-white/5 flex items-center gap-2.5">
+            <div className="bg-[#111728] rounded-xl p-2 border border-white/10 flex items-center gap-2.5">
               <span className="text-base">🏷️</span>
               <div className="min-w-0">
                 <p className="text-[11px] font-black text-white">
@@ -554,7 +556,7 @@ export const StudentLevelPage: React.FC<StudentLevelPageProps> = ({
             </div>
 
             {/* Daily Login Bonus Credits */}
-            <div className="bg-black/40 rounded-xl p-2 border border-white/5 flex items-center gap-2.5">
+            <div className="bg-[#111728] rounded-xl p-2 border border-white/10 flex items-center gap-2.5">
               <span className="text-base">💰</span>
               <div className="min-w-0">
                 <p className="text-[11px] font-black text-white">
@@ -571,7 +573,7 @@ export const StudentLevelPage: React.FC<StudentLevelPageProps> = ({
             </div>
 
             {/* Top Bar Animation */}
-            <div className="bg-black/40 rounded-xl p-2 border border-white/5 flex items-center gap-2.5">
+            <div className="bg-[#111728] rounded-xl p-2 border border-white/10 flex items-center gap-2.5">
               <span className="text-base">✨</span>
               <div className="min-w-0">
                 <p className="text-[11px] font-black text-white">
@@ -586,7 +588,7 @@ export const StudentLevelPage: React.FC<StudentLevelPageProps> = ({
             </div>
 
             {/* Glowing Username Color */}
-            <div className="bg-black/40 rounded-xl p-2 border border-white/5 flex items-center gap-2.5">
+            <div className="bg-[#111728] rounded-xl p-2 border border-white/10 flex items-center gap-2.5">
               <span className="text-base">🎨</span>
               <div className="min-w-0">
                 <p
@@ -606,7 +608,7 @@ export const StudentLevelPage: React.FC<StudentLevelPageProps> = ({
             </div>
 
             {/* Reading Time Scoring Window */}
-            <div className="bg-black/40 rounded-xl p-2 border border-white/5 flex items-center gap-2.5">
+            <div className="bg-[#111728] rounded-xl p-2 border border-white/10 flex items-center gap-2.5">
               <span className="text-base">⏱️</span>
               <div className="min-w-0">
                 <p className="text-[11px] font-black text-white">
@@ -621,7 +623,7 @@ export const StudentLevelPage: React.FC<StudentLevelPageProps> = ({
             </div>
 
             {/* Progress Bonus or Limit Multiplier */}
-            <div className="bg-black/40 rounded-xl p-2 border border-white/5 flex items-center gap-2.5">
+            <div className="bg-[#111728] rounded-xl p-2 border border-white/10 flex items-center gap-2.5">
               <span className="text-base">🚀</span>
               <div className="min-w-0">
                 <p className="text-[11px] font-black text-amber-400">
@@ -635,7 +637,7 @@ export const StudentLevelPage: React.FC<StudentLevelPageProps> = ({
           </div>
 
           {/* Active Events Access */}
-          <div className="mt-2 bg-black/40 rounded-xl p-2.5 border border-white/5">
+          <div className="mt-2 bg-[#111728] rounded-xl p-2.5 border border-white/10">
             <p className="text-[8px] font-black uppercase tracking-wider text-slate-400 mb-1.5">
               Current Events Access:
             </p>
@@ -704,14 +706,15 @@ export const StudentLevelPage: React.FC<StudentLevelPageProps> = ({
   return (
     <div
       id="level-system-full-page"
-      className="fixed inset-0 z-[9990] text-white flex flex-col h-[100dvh] w-full overflow-hidden select-none"
+      className="fixed inset-0 z-[9990] text-white flex flex-col h-[100dvh] w-full overflow-hidden select-none bg-[#07090e]"
       style={{
-        background:
-          'radial-gradient(ellipse 90% 50% at 50% -5%, rgba(99, 102, 241, 0.16) 0%, rgba(15, 23, 42, 0.8) 50%, #07090e 100%)',
+        backgroundColor: '#07090e',
+        backgroundImage:
+          'radial-gradient(ellipse 90% 50% at 50% -5%, #182442 0%, #0d1424 50%, #07090e 100%)',
       }}
     >
       {/* ── TOP APP-BAR / HEADER ── */}
-      <div className="flex-shrink-0 bg-[#0c101c]/90 backdrop-blur-md px-4 md:px-6 py-3 border-b border-white/10 flex items-center justify-between shadow-xl">
+      <div className="flex-shrink-0 bg-[#0c101c] px-4 md:px-6 py-3 border-b border-white/10 flex items-center justify-between shadow-xl">
         <div className="flex items-center gap-3">
           <button
             id="level-page-back-btn"
@@ -806,20 +809,21 @@ export const StudentLevelPage: React.FC<StudentLevelPageProps> = ({
               <div
                 key={lvl.level}
                 id={`level-card-${lvl.level}`}
-                className={`rounded-2xl p-4 md:p-5 transition-all relative overflow-hidden border ${
+                className={`rounded-2xl p-4 md:p-5 transition-all relative overflow-hidden ${
                   isUserLevel
                     ? 'border-2 shadow-2xl ring-2'
                     : isUnlocked
                     ? 'border'
-                    : 'border opacity-90'
+                    : 'border'
                 }`}
                 style={{
-                  borderColor: isUserLevel ? lvl.color : `${lvl.color}${isUnlocked ? '60' : '30'}`,
-                  background: isUserLevel
-                    ? `linear-gradient(135deg, ${lvl.color}25 0%, rgba(15,23,42,0.95) 100%)`
+                  borderColor: isUserLevel ? lvl.color : `${lvl.color}${isUnlocked ? '60' : '25'}`,
+                  backgroundColor: isUserLevel ? '#111728' : isUnlocked ? '#0e1422' : '#080d16',
+                  backgroundImage: isUserLevel
+                    ? `linear-gradient(135deg, ${lvl.color}28 0%, #111728 50%, #0c101c 100%)`
                     : isUnlocked
-                    ? `linear-gradient(135deg, ${lvl.color}15 0%, rgba(15,23,42,0.85) 100%)`
-                    : `linear-gradient(135deg, ${lvl.color}0a 0%, rgba(10,14,26,0.9) 100%)`,
+                    ? `linear-gradient(135deg, ${lvl.color}15 0%, #0e1422 60%, #090d16 100%)`
+                    : `linear-gradient(135deg, ${lvl.color}08 0%, #0c101a 60%, #080c14 100%)`,
                   boxShadow: isUserLevel
                     ? `0 0 32px ${lvl.glowColor}, inset 0 0 16px ${lvl.color}20`
                     : `0 4px 16px ${lvl.glowColor}15`,
@@ -876,8 +880,8 @@ export const StudentLevelPage: React.FC<StudentLevelPageProps> = ({
                         ✓ UNLOCKED
                       </span>
                     ) : (
-                      <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-white/5 text-slate-400 border border-white/10">
-                        🔒 {ptsNeeded.toLocaleString('en-IN')} pts baki
+                      <span className="text-[10px] font-black px-2.5 py-1 rounded-full bg-[#162035] text-amber-300 border border-amber-500/30 flex items-center gap-1 shadow-sm">
+                        <span>🔒</span> {ptsNeeded.toLocaleString('en-IN')} pts baki
                       </span>
                     )}
                   </div>
@@ -891,7 +895,7 @@ export const StudentLevelPage: React.FC<StudentLevelPageProps> = ({
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                     {/* Store Discount */}
-                    <div className="bg-black/30 rounded-xl p-2.5 border border-white/5 flex items-start gap-2.5">
+                    <div className="bg-[#12192b] rounded-xl p-2.5 border border-white/10 flex items-start gap-2.5">
                       <span className="text-base mt-0.5">🏷️</span>
                       <div>
                         <p className="text-[11px] font-black text-white">
@@ -908,7 +912,7 @@ export const StudentLevelPage: React.FC<StudentLevelPageProps> = ({
                     </div>
 
                     {/* Daily Login Bonus Credits */}
-                    <div className="bg-black/30 rounded-xl p-2.5 border border-white/5 flex items-start gap-2.5">
+                    <div className="bg-[#12192b] rounded-xl p-2.5 border border-white/10 flex items-start gap-2.5">
                       <span className="text-base mt-0.5">💰</span>
                       <div>
                         <p className="text-[11px] font-black text-white">
@@ -925,7 +929,7 @@ export const StudentLevelPage: React.FC<StudentLevelPageProps> = ({
                     </div>
 
                     {/* Top Bar Animation Effect */}
-                    <div className="bg-black/30 rounded-xl p-2.5 border border-white/5 flex items-start gap-2.5">
+                    <div className="bg-[#12192b] rounded-xl p-2.5 border border-white/10 flex items-start gap-2.5">
                       <span className="text-base mt-0.5">✨</span>
                       <div>
                         <p className="text-[11px] font-black text-white">
@@ -940,7 +944,7 @@ export const StudentLevelPage: React.FC<StudentLevelPageProps> = ({
                     </div>
 
                     {/* Username Glow Color */}
-                    <div className="bg-black/30 rounded-xl p-2.5 border border-white/5 flex items-start gap-2.5">
+                    <div className="bg-[#12192b] rounded-xl p-2.5 border border-white/10 flex items-start gap-2.5">
                       <span className="text-base mt-0.5">🎨</span>
                       <div>
                         <p
@@ -960,7 +964,7 @@ export const StudentLevelPage: React.FC<StudentLevelPageProps> = ({
                     </div>
 
                     {/* Reading Time Scoring Window */}
-                    <div className="bg-black/30 rounded-xl p-2.5 border border-white/5 flex items-start gap-2.5">
+                    <div className="bg-[#12192b] rounded-xl p-2.5 border border-white/10 flex items-start gap-2.5">
                       <span className="text-base mt-0.5">⏱️</span>
                       <div>
                         <p className="text-[11px] font-black text-white">
@@ -977,7 +981,7 @@ export const StudentLevelPage: React.FC<StudentLevelPageProps> = ({
                     </div>
 
                     {/* Progress Bonus or Limit Boost */}
-                    <div className="bg-black/30 rounded-xl p-2.5 border border-white/5 flex items-start gap-2.5">
+                    <div className="bg-[#12192b] rounded-xl p-2.5 border border-white/10 flex items-start gap-2.5">
                       <span className="text-base mt-0.5">🚀</span>
                       <div>
                         <p className="text-[11px] font-black text-amber-400">
@@ -991,7 +995,7 @@ export const StudentLevelPage: React.FC<StudentLevelPageProps> = ({
                   </div>
 
                   {/* Events Access Pills */}
-                  <div className="mt-2 bg-black/40 rounded-xl p-2.5 border border-white/5">
+                  <div className="mt-2 bg-[#12192b] rounded-xl p-2.5 border border-white/10">
                     <p className="text-[8px] font-black uppercase tracking-wider text-slate-400 mb-1.5">
                       Special Events Access:
                     </p>
@@ -1081,7 +1085,7 @@ export const StudentLevelPage: React.FC<StudentLevelPageProps> = ({
            ═════════════════════════════════════════════════════════════════ */}
         <div
           id="student-profile-column"
-          className="hidden lg:block w-[380px] xl:w-[420px] bg-[#0b0e18]/80 backdrop-blur-md border-l border-white/10 overflow-y-auto no-scrollbar p-5 order-1 lg:order-2 shrink-0"
+          className="hidden lg:block w-[380px] xl:w-[420px] bg-[#0b0e18] border-l border-white/10 overflow-y-auto no-scrollbar p-5 order-1 lg:order-2 shrink-0"
         >
           {renderStudentProfileAndFeatures()}
         </div>

@@ -87,6 +87,15 @@ export const ALL_FEATURES: Feature[] = [
         description: 'Resume exactly where you left off.',
         isDummy: true // Not implemented
     },
+    {
+        id: 'GROUP_STUDY',
+        label: 'Group Study & Live Class',
+        group: 'TOOLS',
+        surfaceLevel: 1,
+        adminVisible: true,
+        icon: 'Users',
+        description: 'Live synchronized classrooms, interactive whiteboard and live MCQ battles.',
+    },
 
     // --- NEW STUDENT UI ELEMENTS ---
     {

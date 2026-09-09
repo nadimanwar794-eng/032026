@@ -1,7 +1,7 @@
 // @ts-nocheck
 import React, { useState, useEffect } from 'react';
 import { SystemSettings } from '../../types';
-import { Save, Calendar, Clock, ChevronDown, ChevronUp, Zap, TrendingUp, Globe, Coins, Palette, Tag, Gift, Timer } from 'lucide-react';
+import { Save, Calendar, Clock, ChevronDown, ChevronUp, Zap, TrendingUp, Globe, Coins, Palette, Tag, Gift, Timer, Sparkles, Percent } from 'lucide-react';
 
 interface Props {
   settings: SystemSettings;
@@ -348,10 +348,10 @@ export const EventManager: React.FC<Props> = ({ settings, onUpdate, onSave, isSa
     },
     {
       key: 'discountSale',
-      title: 'Discount Sale',
+      title: 'Discount Event (Flat Store Sale)',
       icon: <Tag size={18} style={{ color: '#ec4899' }} />,
       accentColor: '#ec4899',
-      description: 'Store plans pe % discount apply karega',
+      description: 'Sabhi tiers aur plans pe ek samaan (same) % discount apply karega',
       enabled: settings.specialDiscountEvent?.enabled ?? false,
       eventName: settings.specialDiscountEvent?.eventName,
       startsAt: settings.specialDiscountEvent?.startsAt,
@@ -363,7 +363,7 @@ export const EventManager: React.FC<Props> = ({ settings, onUpdate, onSave, isSa
       extraSettings: (
         <div className="space-y-3">
           <div>
-            <label className="text-[10px] font-black text-slate-500 uppercase mb-1 block">Discount %</label>
+            <label className="text-[10px] font-black text-slate-500 uppercase mb-1 block">Flat Discount % (All Items)</label>
             <div className="flex items-center gap-2">
               <input type="number" min={1} max={99}
                 value={settings.specialDiscountEvent?.discountPercent ?? 20}
@@ -371,6 +371,7 @@ export const EventManager: React.FC<Props> = ({ settings, onUpdate, onSave, isSa
                 className="w-24 p-2 border border-slate-200 rounded-xl text-sm font-bold" />
               <span className="text-sm font-black text-pink-600">% OFF</span>
             </div>
+            <p className="text-[10px] text-slate-400 mt-1">Ye discount pure store par sabhi tiers pe ek sath apply hota hai.</p>
           </div>
           <div className="flex gap-4">
             {[
@@ -383,6 +384,160 @@ export const EventManager: React.FC<Props> = ({ settings, onUpdate, onSave, isSa
                   style={{ background: (settings.specialDiscountEvent as any)?.[fk] ? '#ec4899' : '#cbd5e1' }}
                   onClick={() => upd({ specialDiscountEvent: { ...(settings.specialDiscountEvent || { enabled: false, eventName: '', discountPercent: 20, showToFreeUsers: true, showToPremiumUsers: true }), [fk]: !(settings.specialDiscountEvent as any)?.[fk] } })}>
                   <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform m-0.5 ${(settings.specialDiscountEvent as any)?.[fk] ? 'translate-x-5' : ''}`} />
+                </div>
+                <span className="text-[10px] font-bold text-slate-600">{label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: 'validitySpecialDiscount',
+      title: 'Special Discount (Validity-Based Offer)',
+      icon: <Sparkles size={18} style={{ color: '#8b5cf6' }} />,
+      accentColor: '#8b5cf6',
+      description: 'Har validity (Monthly, 3-Month, 6-Month, Yearly) ke liye alag discount deta hai. Off karne par sabhi validity discounts khatam ho jayenge.',
+      enabled: settings.validityDiscountEvent?.enabled ?? true,
+      eventName: settings.validityDiscountEvent?.eventName || 'Special Validity Discount',
+      startsAt: settings.validityDiscountEvent?.startsAt,
+      endsAt: settings.validityDiscountEvent?.endsAt,
+      onToggle: (v: boolean) => upd({
+        validityDiscountEvent: {
+          ...(settings.validityDiscountEvent || {
+            eventName: 'Special Validity Discount',
+            monthlyPercent: 5,
+            threeMonthlyPercent: 10,
+            sixMonthlyPercent: 15,
+            yearlyPercent: 20,
+            showToFreeUsers: true,
+            showToPremiumUsers: true,
+          }),
+          enabled: v,
+        },
+      }),
+      onNameChange: (n: string) => upd({
+        validityDiscountEvent: {
+          ...(settings.validityDiscountEvent || {
+            enabled: true,
+            monthlyPercent: 5,
+            threeMonthlyPercent: 10,
+            sixMonthlyPercent: 15,
+            yearlyPercent: 20,
+            showToFreeUsers: true,
+            showToPremiumUsers: true,
+          }),
+          eventName: n,
+        },
+      }),
+      onStartChange: (s: string) => upd({
+        validityDiscountEvent: {
+          ...(settings.validityDiscountEvent || {
+            enabled: true,
+            eventName: 'Special Validity Discount',
+            monthlyPercent: 5,
+            threeMonthlyPercent: 10,
+            sixMonthlyPercent: 15,
+            yearlyPercent: 20,
+            showToFreeUsers: true,
+            showToPremiumUsers: true,
+          }),
+          startsAt: s || undefined,
+        },
+      }),
+      onEndChange: (e: string) => upd({
+        validityDiscountEvent: {
+          ...(settings.validityDiscountEvent || {
+            enabled: true,
+            eventName: 'Special Validity Discount',
+            monthlyPercent: 5,
+            threeMonthlyPercent: 10,
+            sixMonthlyPercent: 15,
+            yearlyPercent: 20,
+            showToFreeUsers: true,
+            showToPremiumUsers: true,
+          }),
+          endsAt: e || undefined,
+        },
+      }),
+      extraSettings: (
+        <div className="space-y-3">
+          <div>
+            <label className="text-[10px] font-black text-slate-500 uppercase mb-2 block">
+              Har Validity Ke Liye Alag Discount (% OFF):
+            </label>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {[
+                { label: 'Monthly (1M)', key: 'monthlyPercent', def: 5, color: '#06b6d4' },
+                { label: '3-Monthly (3M)', key: 'threeMonthlyPercent', def: 10, color: '#3b82f6' },
+                { label: '6-Monthly (6M)', key: 'sixMonthlyPercent', def: 15, color: '#8b5cf6' },
+                { label: 'Yearly (1Y)', key: 'yearlyPercent', def: 20, color: '#ec4899' },
+              ].map(({ label, key, def, color }) => (
+                <div key={key} className="p-2 rounded-xl bg-slate-50 border border-slate-200">
+                  <label className="text-[9px] font-black uppercase block mb-1" style={{ color }}>{label}</label>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      min={0}
+                      max={99}
+                      value={(settings.validityDiscountEvent as any)?.[key] ?? def}
+                      onChange={e => upd({
+                        validityDiscountEvent: {
+                          ...(settings.validityDiscountEvent || {
+                            enabled: true,
+                            eventName: 'Special Validity Discount',
+                            monthlyPercent: 5,
+                            threeMonthlyPercent: 10,
+                            sixMonthlyPercent: 15,
+                            yearlyPercent: 20,
+                            showToFreeUsers: true,
+                            showToPremiumUsers: true,
+                          }),
+                          [key]: Math.max(0, Math.min(99, Number(e.target.value))),
+                        },
+                      })}
+                      className="w-full p-1.5 border border-slate-200 rounded-lg text-xs font-bold text-center bg-white"
+                    />
+                    <span className="text-[10px] font-black text-slate-500">%</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-slate-400 mt-1.5">
+              💡 <strong>Important:</strong> Jab admin is event ko toggle switch se OFF karega, to Monthly, 3-Monthly, 6-Monthly aur Yearly ke sabhi discounts khatam (0% OFF) ho jayenge.
+            </p>
+          </div>
+
+          <div className="flex gap-4 pt-1">
+            {[
+              { label: 'Free Users ko dikhao', fk: 'showToFreeUsers' as const },
+              { label: 'Premium ko bhi dikhao', fk: 'showToPremiumUsers' as const },
+            ].map(({ label, fk }) => (
+              <label key={fk} className="flex items-center gap-2 cursor-pointer">
+                <div
+                  className="w-10 h-5 rounded-full transition-colors"
+                  style={{ background: (settings.validityDiscountEvent as any)?.[fk] !== false ? '#8b5cf6' : '#cbd5e1' }}
+                  onClick={() => upd({
+                    validityDiscountEvent: {
+                      ...(settings.validityDiscountEvent || {
+                        enabled: true,
+                        eventName: 'Special Validity Discount',
+                        monthlyPercent: 5,
+                        threeMonthlyPercent: 10,
+                        sixMonthlyPercent: 15,
+                        yearlyPercent: 20,
+                        showToFreeUsers: true,
+                        showToPremiumUsers: true,
+                      }),
+                      [fk]: (settings.validityDiscountEvent as any)?.[fk] === false,
+                    },
+                  })}
+                >
+                  <div
+                    className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform m-0.5 ${
+                      (settings.validityDiscountEvent as any)?.[fk] !== false ? 'translate-x-5' : ''
+                    }`}
+                  />
                 </div>
                 <span className="text-[10px] font-bold text-slate-600">{label}</span>
               </label>

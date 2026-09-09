@@ -1,6 +1,8 @@
 // My Routine — localStorage-based data layer
 // All routine state, coins, rewards persisted here.
 
+import { isSubscriptionFromCoins } from './subscriptionUtils';
+
 export type SubjectCategory = 'SCIENCE' | 'SOCIAL_SCIENCE' | 'OTHER';
 
 export interface RoutineSubjectConfig {
@@ -402,11 +404,21 @@ export function getUserSubTier(user: {
   isPremium?: boolean;
   subscriptionLevel?: string;
   subscriptionEndDate?: string;
+  subscriptionSource?: string;
+  activeSubscriptions?: any[];
+  subscriptionHistory?: any[];
 }): UserSubTier {
   const now = new Date();
   const end = user.subscriptionEndDate ? new Date(user.subscriptionEndDate) : null;
   const isActive = user.isPremium && (!end || end > now);
   if (!isActive) return 'NONE';
+
+  // If subscription was purchased using credits/coins, daily subscription coin claim is NOT granted
+  // (Prevents infinite credit loop / economy exploit)
+  if (isSubscriptionFromCoins(user)) {
+    return 'NONE';
+  }
+
   if (user.subscriptionLevel === 'ULTRA' || (user.subscriptionLevel as any) === 'PRO') return 'MAX_PRO';
   if (user.subscriptionLevel === 'BASIC') return 'PRO';
   return 'NONE';

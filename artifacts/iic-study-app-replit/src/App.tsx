@@ -1632,7 +1632,7 @@ const App: React.FC = () => {
                     });
                 }
 
-                if (next % 10 === 0) updateUserStatus(state.user!.id, next); 
+                if (next % 10 === 0) updateUserStatus(state.user!.id, next, 'Studying'); 
                 return next;
             });
         }, 1000);
@@ -1642,6 +1642,28 @@ const App: React.FC = () => {
         if (interval) clearInterval(interval);
     };
   }, [state.user?.id, state.view]); 
+
+  // Heartbeat to mark user online whenever app is open or study is active
+  useEffect(() => {
+    if (!state.user?.id) return;
+    const uid = state.user.id;
+    const act = state.view === 'ADMIN' ? 'Admin Panel' : 'App Open';
+    updateUserStatus(uid, dailyStudySeconds, act);
+
+    const hbInterval = setInterval(() => {
+        updateUserStatus(uid, dailyStudySeconds, act);
+    }, 20000); // Heartbeat every 20s while app is open
+
+    const onFocus = () => {
+        updateUserStatus(uid, dailyStudySeconds, act);
+    };
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+        clearInterval(hbInterval);
+        window.removeEventListener('focus', onFocus);
+    };
+  }, [state.user?.id, state.view, dailyStudySeconds]); 
 
     useEffect(() => {
         if (!activeReward || !state.user) return;

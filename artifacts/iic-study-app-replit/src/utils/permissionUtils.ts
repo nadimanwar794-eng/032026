@@ -307,9 +307,10 @@ export const checkFeatureAccess = (
     const hasAccess = allowedTiers.includes(userTier);
 
     // 8. Determine Hidden Status
-    // A feature is considered "hidden" if the dynamic config explicitly sets `visible` to false.
-    // The prompt requested: "hide kiya hua chijhe wo logo ko na dikhega".
-    const isHidden = dynamicConfig?.visible === false;
+    // A feature is considered "hidden" if the dynamic config explicitly sets `visible` to false,
+    // or if the admin enabled "hideLockedForFreeAndBasic" and this Free/Basic user lacks access.
+    const shouldHideLocked = !!settings.hideLockedForFreeAndBasic && (userTier === 'FREE' || userTier === 'BASIC');
+    const isHidden = dynamicConfig?.visible === false || (shouldHideLocked && !hasAccess);
 
     let reason: FeatureAccessResult['reason'] = hasAccess ? 'GRANTED' : 'TIER_RESTRICTED';
 

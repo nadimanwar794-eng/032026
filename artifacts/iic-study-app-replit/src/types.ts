@@ -191,6 +191,7 @@ export interface User {
   
   // Chat & Premium Features
   isPremium?: boolean;
+  blockLimitExpansions?: number; // Number of +10 block limit expansions purchased with coins
   lastChatTime?: string; // ISO String for cooldown
   lastSpinTime?: string; // ISO String (Legacy)
   dailySpinDate?: string; // YYYY-MM-DD for resetting daily count
@@ -747,6 +748,7 @@ export interface SystemSettings {
   // Force Profile to live in the menu drawer regardless of Revision Hub V2 setting.
   // When true, Profile is always in the drawer; when false, Profile only moves to drawer if Revision Hub V2 is enabled.
   profileInMenuForced?: boolean;
+  hideLockedForFreeAndBasic?: boolean; // When ON, locked content & features are hidden for Free & Basic users. When OFF, shown with lock icons.
   officialAppUrl?: string; // NEW: Play Store Link
   enable3DModels?: boolean; // NEW: 3D Models in Notes
   showMcqMakerCard?: boolean; // NEW: Show MCQ Maker card on student home page
@@ -1140,6 +1142,18 @@ export interface SystemSettings {
       seconds: number;
     };
   };
+  validityDiscountEvent?: {
+    enabled: boolean;
+    eventName: string; // e.g. "Special Validity Discount"
+    monthlyPercent: number; // e.g. 5
+    threeMonthlyPercent: number; // e.g. 10
+    sixMonthlyPercent: number; // e.g. 15
+    yearlyPercent: number; // e.g. 20
+    endsAt?: string;
+    startsAt?: string;
+    showToFreeUsers?: boolean;
+    showToPremiumUsers?: boolean;
+  };
   creditSubDiscountEvent?: CreditSubDiscountEvent; // Discount event for credit store subscriptions
   
   // NEW: App Modes (Global Control)
@@ -1191,6 +1205,25 @@ export interface SystemSettings {
   revisionConfig?: RevisionConfig; // NEW: Dynamic Revision Logic
   isWatermarkEnabled?: boolean; // NEW: Global Watermark Toggle
   isLogoutEnabled?: boolean; // NEW: Global Logout Toggle
+  isGroupStudyEnabled?: boolean; // Master toggle to enable/disable Group Study & Live Classroom
+  groupStudyConfig?: GroupStudyConfig; // Tier permissions and daily usage limits for Group Study
+}
+
+export interface GroupStudyConfig {
+  enabled?: boolean; // Master toggle
+  allowFreeUsers?: boolean; // Can Free users access Group Study lobby & public rooms
+  dailySessionsFree?: number; // Daily session/join limit for Free tier (default 2)
+  dailySessionsBasic?: number; // Daily session/join limit for Basic tier (default 10)
+  dailySessionsUltra?: number; // Daily session limit for Ultra tier (default 9999 = unlimited)
+  canCreateRoomsFree?: boolean; // Can Free user create/host a study room (default false)
+  canCreateRoomsBasic?: boolean; // Can Basic user create/host a study room (default true)
+  canCreateRoomsUltra?: boolean; // Can Ultra user create/host a study room (default true)
+  canHostMcqBattleFree?: boolean; // Can Free user launch live MCQ battles (default false)
+  canHostMcqBattleBasic?: boolean; // Can Basic user launch live MCQ battles (default true)
+  canHostMcqBattleUltra?: boolean; // Can Ultra user launch live MCQ battles (default true)
+  maxMembersFree?: number; // Max members per room created by Free (default 5)
+  maxMembersBasic?: number; // Max members per room created by Basic (default 25)
+  maxMembersUltra?: number; // Max members per room created by Ultra (default 100)
 }
 
 export interface RevisionConfig {

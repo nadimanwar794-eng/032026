@@ -4,6 +4,7 @@ import { User, UserCustomTheme, SystemSettings, ThemeHistoryEntry, AdminSavedThe
 import { saveUserToLive, saveSystemSettings } from '../firebase';
 import { getTotalCredits, applyDeduction } from '../utils/creditSystem';
 import { DEFAULT_NAV_ACTIVE_COLORS } from '../utils/tierTheme';
+import { LEVEL_THEMES } from '../utils/levelThemes';
 import {
     ArrowLeft, Sparkles, RotateCcw, Eye, Palette,
     Layers, Navigation, Square, Type, Zap, Star,
@@ -65,11 +66,11 @@ const DEFAULT_THEME: ThemeState = {
     bgColor: '#ffffff',
     topBarStart: '#1e3a5f',
     topBarEnd: '#0f1e3c',
-    navBg: '#ffffff',
+    navBg: '#0b1329',
     navActive: '#3b82f6',
-    navInactive: '#ffffff',
+    navInactive: '#64748b',
     navActiveColors: [...DEFAULT_NAV_ACTIVE_COLORS],
-    navBorder: '#e2e8f0',
+    navBorder: '#1e293b',
     cardBg: '#f8fafc',
     cardBorder: '#e2e8f0',
     btnStart: '#3b82f6',
@@ -84,14 +85,14 @@ const DEFAULT_THEME: ThemeState = {
     mcqTabActive: '#3b82f6',
 };
 
-const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefault?: boolean; isStoreFree?: boolean }> = [
+const BASE_PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefault?: boolean; isStoreFree?: boolean }> = [
     {
         name: 'Light', emoji: '☀️', isStoreFree: true,
         colors: {
             ...DEFAULT_THEME,
             themeName: 'Light', themeEmoji: '☀️',
             topBarStart: '#f8fafc', topBarEnd: '#e2e8f0',
-            navBg: '#ffffff', navActive: '#334155', navBorder: '#cbd5e1',
+            navBg: '#0f172a', navActive: '#38bdf8', navBorder: '#1e293b',
             cardBg: '#ffffff', cardBorder: '#cbd5e1',
             btnStart: '#334155', btnEnd: '#64748b',
             textPrimary: '#0f172a', textSecondary: '#64748b',
@@ -121,7 +122,7 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
             ...DEFAULT_THEME,
             themeName: 'Blue', themeEmoji: '💙',
             bgColor: '#eff6ff', topBarStart: '#1e3a8a', topBarEnd: '#0c4a6e',
-            navBg: '#ffffff', navActive: '#2563eb', navBorder: '#bfdbfe',
+            navBg: '#0a1636', navActive: '#38bdf8', navBorder: '#1e3a8a',
             cardBg: '#f8fbff', cardBorder: '#bfdbfe',
             btnStart: '#2563eb', btnEnd: '#0ea5e9',
             textPrimary: '#1e3a8a', textSecondary: '#2563eb',
@@ -148,8 +149,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Default — ULTRA', emoji: '💙', isDefault: true,
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#020714', topBarEnd: '#071232',
-            navBg: '#ffffff', navActive: '#1e3a8a', navBorder: '#bfdbfe',
+            navBg: '#050c20', navActive: '#60a5fa', navBorder: '#1e3a8a',
             cardBg: '#eff6ff', cardBorder: '#bfdbfe',
             btnStart: '#1e3a8a', btnEnd: '#2563eb',
             textPrimary: '#1e3a8a', textSecondary: '#1d4ed8',
@@ -161,8 +163,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Default — BASIC', emoji: '⭐', isDefault: true,
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#060c1a', topBarEnd: '#0a1535',
-            navBg: '#ffffff', navActive: '#2563eb', navBorder: '#dbeafe',
+            navBg: '#071026', navActive: '#3b82f6', navBorder: '#2563eb',
             cardBg: '#eff6ff', cardBorder: '#dbeafe',
             btnStart: '#2563eb', btnEnd: '#3b82f6',
             textPrimary: '#1d4ed8', textSecondary: '#2563eb',
@@ -174,8 +177,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Default — FREE', emoji: '🎓', isDefault: true,
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#0369a1', topBarEnd: '#0284c7',
-            navBg: '#ffffff', navActive: '#0ea5e9', navBorder: '#bae6fd',
+            navBg: '#081c30', navActive: '#38bdf8', navBorder: '#0284c7',
             cardBg: '#f0f9ff', cardBorder: '#bae6fd',
             btnStart: '#0284c7', btnEnd: '#0ea5e9',
             textPrimary: '#0369a1', textSecondary: '#0284c7',
@@ -187,8 +191,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Ocean Blue', emoji: '🌊',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#0c2d6b', topBarEnd: '#061635',
-            navBg: '#ffffff', navActive: '#38bdf8', navBorder: '#e0f2fe',
+            navBg: '#061630', navActive: '#38bdf8', navBorder: '#0ea5e9',
             cardBg: '#f0f9ff', cardBorder: '#bae6fd',
             btnStart: '#0ea5e9', btnEnd: '#6366f1',
             textPrimary: '#0c1a2e', textSecondary: '#0369a1',
@@ -200,8 +205,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Sakura', emoji: '🌸',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#7b1045', topBarEnd: '#9d174d',
-            navBg: '#ffffff', navActive: '#f43f5e', navBorder: '#fecdd3',
+            navBg: '#2a0518', navActive: '#f43f5e', navBorder: '#9d174d',
             cardBg: '#fff1f2', cardBorder: '#fecdd3',
             btnStart: '#f43f5e', btnEnd: '#ec4899',
             textPrimary: '#1e0a10', textSecondary: '#9f1239',
@@ -213,8 +219,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Forest', emoji: '🌿',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#064e20', topBarEnd: '#065f46',
-            navBg: '#ffffff', navActive: '#22c55e', navBorder: '#dcfce7',
+            navBg: '#041f0d', navActive: '#22c55e', navBorder: '#065f46',
             cardBg: '#f0fdf4', cardBorder: '#bbf7d0',
             btnStart: '#16a34a', btnEnd: '#059669',
             textPrimary: '#052e16', textSecondary: '#166534',
@@ -226,8 +233,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Gold', emoji: '⚡',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#7c4a00', topBarEnd: '#92400e',
-            navBg: '#ffffff', navActive: '#f59e0b', navBorder: '#fef3c7',
+            navBg: '#241400', navActive: '#f59e0b', navBorder: '#92400e',
             cardBg: '#fffbeb', cardBorder: '#fde68a',
             btnStart: '#f59e0b', btnEnd: '#f97316',
             textPrimary: '#1c0a00', textSecondary: '#92400e',
@@ -239,8 +247,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Violet', emoji: '💜',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#4a1d96', topBarEnd: '#6d28d9',
-            navBg: '#ffffff', navActive: '#a855f7', navBorder: '#f3e8ff',
+            navBg: '#180733', navActive: '#a855f7', navBorder: '#6d28d9',
             cardBg: '#faf5ff', cardBorder: '#e9d5ff',
             btnStart: '#8b5cf6', btnEnd: '#ec4899',
             textPrimary: '#1e0a3c', textSecondary: '#6d28d9',
@@ -252,8 +261,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Sunset', emoji: '🔥',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#9a2a00', topBarEnd: '#c2410c',
-            navBg: '#ffffff', navActive: '#f97316', navBorder: '#ffedd5',
+            navBg: '#260a02', navActive: '#f97316', navBorder: '#c2410c',
             cardBg: '#fff7ed', cardBorder: '#fed7aa',
             btnStart: '#f97316', btnEnd: '#ef4444',
             textPrimary: '#1c0a00', textSecondary: '#c2410c',
@@ -265,8 +275,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Arctic', emoji: '❄️',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#0e4060', topBarEnd: '#0e7490',
-            navBg: '#ffffff', navActive: '#67e8f9', navBorder: '#cffafe',
+            navBg: '#061d2d', navActive: '#67e8f9', navBorder: '#0e7490',
             cardBg: '#ecfeff', cardBorder: '#a5f3fc',
             btnStart: '#22d3ee', btnEnd: '#06b6d4',
             textPrimary: '#082f49', textSecondary: '#0e7490',
@@ -278,8 +289,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Ruby', emoji: '❤️',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#7f1d1d', topBarEnd: '#991b1b',
-            navBg: '#ffffff', navActive: '#ef4444', navBorder: '#fee2e2',
+            navBg: '#280707', navActive: '#ef4444', navBorder: '#991b1b',
             cardBg: '#fff5f5', cardBorder: '#fecaca',
             btnStart: '#ef4444', btnEnd: '#dc2626',
             textPrimary: '#1c0a0a', textSecondary: '#991b1b',
@@ -291,8 +303,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Midnight', emoji: '🌌',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#1a1a3a', topBarEnd: '#312e81',
-            navBg: '#ffffff', navActive: '#818cf8', navBorder: '#e0e7ff',
+            navBg: '#0d0d22', navActive: '#818cf8', navBorder: '#312e81',
             cardBg: '#eef2ff', cardBorder: '#c7d2fe',
             btnStart: '#6366f1', btnEnd: '#4f46e5',
             textPrimary: '#1e1b4b', textSecondary: '#4338ca',
@@ -304,8 +317,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Emerald', emoji: '💎',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#065f46', topBarEnd: '#047857',
-            navBg: '#ffffff', navActive: '#10b981', navBorder: '#d1fae5',
+            navBg: '#021f17', navActive: '#10b981', navBorder: '#047857',
             cardBg: '#ecfdf5', cardBorder: '#a7f3d0',
             btnStart: '#10b981', btnEnd: '#059669',
             textPrimary: '#022c22', textSecondary: '#065f46',
@@ -317,8 +331,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Royal', emoji: '👑',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#1e3a8a', topBarEnd: '#1e40af',
-            navBg: '#ffffff', navActive: '#60a5fa', navBorder: '#dbeafe',
+            navBg: '#0a1432', navActive: '#60a5fa', navBorder: '#1e40af',
             cardBg: '#eff6ff', cardBorder: '#bfdbfe',
             btnStart: '#2563eb', btnEnd: '#1d4ed8',
             textPrimary: '#1e3a8a', textSecondary: '#1d4ed8',
@@ -330,8 +345,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Rose Gold', emoji: '🌹',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#881337', topBarEnd: '#be123c',
-            navBg: '#ffffff', navActive: '#fb7185', navBorder: '#ffe4e6',
+            navBg: '#2b0612', navActive: '#fb7185', navBorder: '#be123c',
             cardBg: '#fff1f2', cardBorder: '#fecdd3',
             btnStart: '#fb7185', btnEnd: '#f43f5e',
             textPrimary: '#1c0a0e', textSecondary: '#be123c',
@@ -343,8 +359,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Neon Cyan', emoji: '💠',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#003d50', topBarEnd: '#0e7490',
-            navBg: '#ffffff', navActive: '#06b6d4', navBorder: '#cffafe',
+            navBg: '#001c24', navActive: '#06b6d4', navBorder: '#0e7490',
             cardBg: '#ecfeff', cardBorder: '#a5f3fc',
             btnStart: '#00bcd4', btnEnd: '#00acc1',
             textPrimary: '#082f49', textSecondary: '#0e7490',
@@ -356,8 +373,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Dracula', emoji: '🧛',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#44005c', topBarEnd: '#6b21a8',
-            navBg: '#ffffff', navActive: '#bd93f9', navBorder: '#f3e8ff',
+            navBg: '#190022', navActive: '#bd93f9', navBorder: '#6b21a8',
             cardBg: '#faf5ff', cardBorder: '#e9d5ff',
             btnStart: '#bd93f9', btnEnd: '#ff79c6',
             textPrimary: '#1a0030', textSecondary: '#6b21a8',
@@ -369,8 +387,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Harvest', emoji: '🍂',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#78340f', topBarEnd: '#92400e',
-            navBg: '#ffffff', navActive: '#fb923c', navBorder: '#ffedd5',
+            navBg: '#230f04', navActive: '#fb923c', navBorder: '#92400e',
             cardBg: '#fff7ed', cardBorder: '#fed7aa',
             btnStart: '#ea580c', btnEnd: '#b45309',
             textPrimary: '#1c0a00', textSecondary: '#92400e',
@@ -382,8 +401,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Jade', emoji: '🍃',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#005f3d', topBarEnd: '#047857',
-            navBg: '#ffffff', navActive: '#34d399', navBorder: '#d1fae5',
+            navBg: '#002115', navActive: '#34d399', navBorder: '#047857',
             cardBg: '#ecfdf5', cardBorder: '#a7f3d0',
             btnStart: '#059669', btnEnd: '#047857',
             textPrimary: '#022c22', textSecondary: '#065f46',
@@ -395,8 +415,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Crimson', emoji: '🔴',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#7f0010', topBarEnd: '#9f1239',
-            navBg: '#ffffff', navActive: '#f43f5e', navBorder: '#fff1f2',
+            navBg: '#280005', navActive: '#f43f5e', navBorder: '#9f1239',
             cardBg: '#fff1f2', cardBorder: '#fecdd3',
             btnStart: '#e11d48', btnEnd: '#be123c',
             textPrimary: '#1c0008', textSecondary: '#9f1239',
@@ -408,8 +429,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Saffron', emoji: '🌼',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#92400e', topBarEnd: '#b45309',
-            navBg: '#ffffff', navActive: '#fbbf24', navBorder: '#fef3c7',
+            navBg: '#261102', navActive: '#fbbf24', navBorder: '#b45309',
             cardBg: '#fffbeb', cardBorder: '#fde68a',
             btnStart: '#f59e0b', btnEnd: '#d97706',
             textPrimary: '#1c0e00', textSecondary: '#92400e',
@@ -421,8 +443,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Deep Space', emoji: '🚀',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#0f0f30', topBarEnd: '#1e1b4b',
-            navBg: '#ffffff', navActive: '#7c6fcd', navBorder: '#e0e7ff',
+            navBg: '#09091d', navActive: '#7c6fcd', navBorder: '#1e1b4b',
             cardBg: '#eef2ff', cardBorder: '#c7d2fe',
             btnStart: '#4c46a8', btnEnd: '#3730a3',
             textPrimary: '#1e1b4b', textSecondary: '#3730a3',
@@ -434,8 +457,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Bubblegum', emoji: '🍬',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#701a75', topBarEnd: '#a21caf',
-            navBg: '#ffffff', navActive: '#e879f9', navBorder: '#fdf4ff',
+            navBg: '#260928', navActive: '#e879f9', navBorder: '#a21caf',
             cardBg: '#fdf4ff', cardBorder: '#f0abfc',
             btnStart: '#d946ef', btnEnd: '#c026d3',
             textPrimary: '#1a0620', textSecondary: '#a21caf',
@@ -447,8 +471,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Bronze', emoji: '🥉',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#7a3c00', topBarEnd: '#92400e',
-            navBg: '#ffffff', navActive: '#cd7f32', navBorder: '#fef3c7',
+            navBg: '#241100', navActive: '#cd7f32', navBorder: '#92400e',
             cardBg: '#fffbeb', cardBorder: '#fde68a',
             btnStart: '#b45309', btnEnd: '#92400e',
             textPrimary: '#1c0e00', textSecondary: '#92400e',
@@ -460,8 +485,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Electric Lime', emoji: '⚡',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#2d5a00', topBarEnd: '#3f6212',
-            navBg: '#ffffff', navActive: '#a3e635', navBorder: '#ecfccb',
+            navBg: '#0d1c00', navActive: '#a3e635', navBorder: '#3f6212',
             cardBg: '#f7fee7', cardBorder: '#d9f99d',
             btnStart: '#84cc16', btnEnd: '#65a30d',
             textPrimary: '#1a2e05', textSecondary: '#3f6212',
@@ -473,8 +499,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Glacier', emoji: '🧊',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#0c3352', topBarEnd: '#075985',
-            navBg: '#ffffff', navActive: '#7dd3fc', navBorder: '#e0f2fe',
+            navBg: '#051828', navActive: '#7dd3fc', navBorder: '#075985',
             cardBg: '#f0f9ff', cardBorder: '#bae6fd',
             btnStart: '#0ea5e9', btnEnd: '#0284c7',
             textPrimary: '#0c2038', textSecondary: '#075985',
@@ -486,8 +513,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Inferno', emoji: '🌋',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#991b1b', topBarEnd: '#b91c1c',
-            navBg: '#ffffff', navActive: '#f87171', navBorder: '#fee2e2',
+            navBg: '#2b0707', navActive: '#f87171', navBorder: '#b91c1c',
             cardBg: '#fff5f5', cardBorder: '#fecaca',
             btnStart: '#dc2626', btnEnd: '#b91c1c',
             textPrimary: '#1c0a0a', textSecondary: '#991b1b',
@@ -499,8 +527,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Purple Haze', emoji: '🔮',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#5b21b6', topBarEnd: '#7e22ce',
-            navBg: '#ffffff', navActive: '#c084fc', navBorder: '#faf5ff',
+            navBg: '#180833', navActive: '#c084fc', navBorder: '#7e22ce',
             cardBg: '#faf5ff', cardBorder: '#e9d5ff',
             btnStart: '#9333ea', btnEnd: '#7e22ce',
             textPrimary: '#1a0a3c', textSecondary: '#7e22ce',
@@ -512,8 +541,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Cobalt', emoji: '💙',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#0e2870', topBarEnd: '#1e3a8a',
-            navBg: '#ffffff', navActive: '#60a5fa', navBorder: '#dbeafe',
+            navBg: '#051233', navActive: '#60a5fa', navBorder: '#1e3a8a',
             cardBg: '#eff6ff', cardBorder: '#bfdbfe',
             btnStart: '#2563eb', btnEnd: '#1d4ed8',
             textPrimary: '#0a1a50', textSecondary: '#1e3a8a',
@@ -525,8 +555,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Coral', emoji: '🪸',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#9a3412', topBarEnd: '#c2410c',
-            navBg: '#ffffff', navActive: '#fb923c', navBorder: '#ffedd5',
+            navBg: '#290e05', navActive: '#fb923c', navBorder: '#c2410c',
             cardBg: '#fff7ed', cardBorder: '#fed7aa',
             btnStart: '#f97316', btnEnd: '#ea580c',
             textPrimary: '#1c0a00', textSecondary: '#c2410c',
@@ -538,8 +569,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Onyx', emoji: '⬛',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#1a1a1a', topBarEnd: '#374151',
-            navBg: '#ffffff', navActive: '#6b7280', navBorder: '#f1f5f9',
+            navBg: '#0f131a', navActive: '#94a3b8', navBorder: '#374151',
             cardBg: '#f8fafc', cardBorder: '#e2e8f0',
             btnStart: '#475569', btnEnd: '#334155',
             textPrimary: '#0f172a', textSecondary: '#475569',
@@ -551,8 +583,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Cosmic', emoji: '🌠',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#1a003d', topBarEnd: '#4c1d95',
-            navBg: '#ffffff', navActive: '#a78bfa', navBorder: '#f5f3ff',
+            navBg: '#100026', navActive: '#a78bfa', navBorder: '#4c1d95',
             cardBg: '#f5f3ff', cardBorder: '#ddd6fe',
             btnStart: '#7c3aed', btnEnd: '#c026d3',
             textPrimary: '#1a0040', textSecondary: '#4c1d95',
@@ -564,8 +597,9 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
     {
         name: 'Turquoise', emoji: '🐟',
         colors: {
+            ...DEFAULT_THEME,
             bgColor: '#ffffff', topBarStart: '#0f5a52', topBarEnd: '#0f766e',
-            navBg: '#ffffff', navActive: '#2dd4bf', navBorder: '#ccfbf1',
+            navBg: '#04211e', navActive: '#2dd4bf', navBorder: '#0f766e',
             cardBg: '#f0fdfa', cardBorder: '#99f6e4',
             btnStart: '#0d9488', btnEnd: '#0f766e',
             textPrimary: '#042f2e', textSecondary: '#0f766e',
@@ -574,6 +608,41 @@ const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefaul
             chapterAccent: '#2dd4bf', mcqTabActive: '#0d9488',
         }
     },
+];
+
+// Dynamically generate the 15 Level Luxury Themes
+const LEVEL_PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefault?: boolean; isStoreFree?: boolean }> = LEVEL_THEMES.map(lt => ({
+    name: `L${lt.level} ${lt.name}`,
+    emoji: lt.emoji,
+    isStoreFree: lt.level === 1,
+    colors: {
+        ...DEFAULT_THEME,
+        themeName: `Level ${lt.level} ${lt.name}`,
+        themeEmoji: lt.emoji,
+        bgColor: lt.bgHex,
+        topBarStart: lt.topBarStart,
+        topBarEnd: lt.topBarEnd,
+        navBg: lt.navBg,
+        navActive: lt.accentHex,
+        navBorder: lt.cardBorder,
+        cardBg: lt.cardBg,
+        cardBorder: lt.cardBorder,
+        btnStart: lt.accentHex,
+        btnEnd: lt.glowHex,
+        textPrimary: '#ffffff',
+        textSecondary: '#cbd5e1',
+        accentGlow: lt.glowHex,
+        progressColor: lt.accentHex,
+        flashcardBg1: lt.topBarStart,
+        flashcardBg2: lt.topBarEnd,
+        chapterAccent: lt.accentHex,
+        mcqTabActive: lt.accentHex,
+    }
+}));
+
+const PRESETS: Array<{ name: string; emoji: string; colors: ThemeState; isDefault?: boolean; isStoreFree?: boolean }> = [
+    ...BASE_PRESETS,
+    ...LEVEL_PRESETS,
 ];
 
 type LoadingTemplate = 'cards' | 'orbit' | 'pulse' | 'sort';

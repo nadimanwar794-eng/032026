@@ -417,6 +417,7 @@ export const AdminPowerManager: React.FC<Props> = ({ settings, onUpdate }) => {
                          <h4 className="font-bold text-slate-700 text-sm mb-4">Module Visibility</h4>
                          <div className="flex flex-wrap gap-4">
                              {[
+                                 {key: 'isGroupStudyEnabled', label: '👥 Group Study & Live Classroom', defaultVal: true},
                                  {key: 'isChatEnabled', label: 'Chat Module'},
                                  {key: 'isGameEnabled', label: 'Game Module'},
                                  {key: 'isPaymentEnabled', label: 'Payment Gateway'},
@@ -433,6 +434,190 @@ export const AdminPowerManager: React.FC<Props> = ({ settings, onUpdate }) => {
                                      <span className="text-xs font-bold text-slate-700">{mod.label}</span>
                                  </label>
                              ))}
+                         </div>
+                     </div>
+
+                     {/* GROUP STUDY ACCESS & USAGE LIMITS */}
+                     <div className="p-5 border border-indigo-200 rounded-2xl bg-gradient-to-br from-indigo-50/70 via-white to-slate-50">
+                         <div className="flex items-center justify-between gap-3 mb-3 border-b border-indigo-100 pb-3">
+                             <div className="flex items-center gap-2.5">
+                                 <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-black">
+                                     👥
+                                 </div>
+                                 <div>
+                                     <h4 className="font-black text-slate-800 text-sm">Group Study & Live Classroom Power Controls</h4>
+                                     <p className="text-[11px] text-slate-500">Kon student kitna use kar sakta hai, room create karne ki power aur daily limits</p>
+                                 </div>
+                             </div>
+                             <span className={`px-2.5 py-1 rounded-full text-[10px] font-black ${localSettings.isGroupStudyEnabled !== false ? 'bg-emerald-100 text-emerald-700 border border-emerald-300' : 'bg-rose-100 text-rose-700 border border-rose-300'}`}>
+                                 {localSettings.isGroupStudyEnabled !== false ? 'ACTIVE & VISIBLE' : 'HIDDEN FROM STUDENTS & STORE'}
+                             </span>
+                         </div>
+
+                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                             {/* FREE TIER USAGE */}
+                             <div className="p-3.5 rounded-xl bg-white border border-slate-200 shadow-sm space-y-3">
+                                 <div className="flex items-center justify-between border-b pb-1.5">
+                                     <span className="text-xs font-black text-slate-700 uppercase flex items-center gap-1.5">
+                                         <span>🆓</span> Free Students
+                                     </span>
+                                     <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">Starter</span>
+                                 </div>
+                                 <label className="flex items-center gap-2 cursor-pointer text-[11px] font-bold text-slate-700">
+                                     <input
+                                         type="checkbox"
+                                         checked={localSettings.groupStudyConfig?.allowFreeUsers !== false}
+                                         onChange={e => {
+                                             const curr = localSettings.groupStudyConfig || {};
+                                             updateSetting('groupStudyConfig' as any, { ...curr, allowFreeUsers: e.target.checked });
+                                         }}
+                                         className="accent-indigo-600 w-3.5 h-3.5"
+                                     />
+                                     Can Access Group Study Lobby
+                                 </label>
+                                 <div>
+                                     <label className="text-[10px] font-bold text-slate-500 block mb-1">Daily Free Sessions (Joins/Day):</label>
+                                     <input
+                                         type="number"
+                                         min="0"
+                                         max="999"
+                                         value={localSettings.groupStudyConfig?.dailySessionsFree ?? 2}
+                                         onChange={e => {
+                                             const curr = localSettings.groupStudyConfig || {};
+                                             updateSetting('groupStudyConfig' as any, { ...curr, dailySessionsFree: Number(e.target.value) });
+                                         }}
+                                         className="w-full p-1.5 border rounded-lg text-xs font-black"
+                                     />
+                                     <span className="text-[9px] text-slate-400">Default: 2 sessions / day</span>
+                                 </div>
+                                 <label className="flex items-center gap-2 cursor-pointer text-[11px] font-bold text-slate-700">
+                                     <input
+                                         type="checkbox"
+                                         checked={localSettings.groupStudyConfig?.canCreateRoomsFree === true}
+                                         onChange={e => {
+                                             const curr = localSettings.groupStudyConfig || {};
+                                             updateSetting('groupStudyConfig' as any, { ...curr, canCreateRoomsFree: e.target.checked });
+                                         }}
+                                         className="accent-indigo-600 w-3.5 h-3.5"
+                                     />
+                                     Can Create Rooms (Default: No)
+                                 </label>
+                             </div>
+
+                             {/* BASIC (PRO) TIER USAGE */}
+                             <div className="p-3.5 rounded-xl bg-cyan-50/50 border border-cyan-200 shadow-sm space-y-3">
+                                 <div className="flex items-center justify-between border-b border-cyan-100 pb-1.5">
+                                     <span className="text-xs font-black text-cyan-800 uppercase flex items-center gap-1.5">
+                                         <span>⭐</span> Basic (Pro) Plan
+                                     </span>
+                                     <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-cyan-100 text-cyan-700">Recommended</span>
+                                 </div>
+                                 <div>
+                                     <label className="text-[10px] font-bold text-cyan-700 block mb-1">Daily Sessions Limit:</label>
+                                     <input
+                                         type="number"
+                                         min="0"
+                                         max="9999"
+                                         value={localSettings.groupStudyConfig?.dailySessionsBasic ?? 10}
+                                         onChange={e => {
+                                             const curr = localSettings.groupStudyConfig || {};
+                                             updateSetting('groupStudyConfig' as any, { ...curr, dailySessionsBasic: Number(e.target.value) });
+                                         }}
+                                         className="w-full p-1.5 border border-cyan-300 rounded-lg text-xs font-black bg-white"
+                                     />
+                                     <span className="text-[9px] text-cyan-600">Default: 10 sessions (9999 = unlimited)</span>
+                                 </div>
+                                 <label className="flex items-center gap-2 cursor-pointer text-[11px] font-bold text-cyan-900">
+                                     <input
+                                         type="checkbox"
+                                         checked={localSettings.groupStudyConfig?.canCreateRoomsBasic !== false}
+                                         onChange={e => {
+                                             const curr = localSettings.groupStudyConfig || {};
+                                             updateSetting('groupStudyConfig' as any, { ...curr, canCreateRoomsBasic: e.target.checked });
+                                         }}
+                                         className="accent-cyan-600 w-3.5 h-3.5"
+                                     />
+                                     Can Create Rooms (Yes)
+                                 </label>
+                                 <label className="flex items-center gap-2 cursor-pointer text-[11px] font-bold text-cyan-900">
+                                     <input
+                                         type="checkbox"
+                                         checked={localSettings.groupStudyConfig?.canHostMcqBattleBasic !== false}
+                                         onChange={e => {
+                                             const curr = localSettings.groupStudyConfig || {};
+                                             updateSetting('groupStudyConfig' as any, { ...curr, canHostMcqBattleBasic: e.target.checked });
+                                         }}
+                                         className="accent-cyan-600 w-3.5 h-3.5"
+                                     />
+                                     Can Host Live MCQ Battle (Yes)
+                                 </label>
+                                 <div>
+                                     <label className="text-[10px] font-bold text-cyan-700 block mb-1">Max Room Capacity:</label>
+                                     <input
+                                         type="number"
+                                         min="5"
+                                         max="100"
+                                         value={localSettings.groupStudyConfig?.maxMembersBasic ?? 25}
+                                         onChange={e => {
+                                             const curr = localSettings.groupStudyConfig || {};
+                                             updateSetting('groupStudyConfig' as any, { ...curr, maxMembersBasic: Number(e.target.value) });
+                                         }}
+                                         className="w-full p-1.5 border border-cyan-300 rounded-lg text-xs font-black bg-white"
+                                     />
+                                     <span className="text-[9px] text-cyan-600">Max members in room (Default: 25)</span>
+                                 </div>
+                             </div>
+
+                             {/* ULTRA (MAX) TIER USAGE */}
+                             <div className="p-3.5 rounded-xl bg-purple-50/60 border border-purple-200 shadow-sm space-y-3">
+                                 <div className="flex items-center justify-between border-b border-purple-100 pb-1.5">
+                                     <span className="text-xs font-black text-purple-900 uppercase flex items-center gap-1.5">
+                                         <span>👑</span> Ultra (Max VIP) Plan
+                                     </span>
+                                     <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">VIP Unlimited</span>
+                                 </div>
+                                 <div>
+                                     <label className="text-[10px] font-bold text-purple-700 block mb-1">Daily Sessions Limit:</label>
+                                     <input
+                                         type="number"
+                                         min="0"
+                                         max="9999"
+                                         value={localSettings.groupStudyConfig?.dailySessionsUltra ?? 9999}
+                                         onChange={e => {
+                                             const curr = localSettings.groupStudyConfig || {};
+                                             updateSetting('groupStudyConfig' as any, { ...curr, dailySessionsUltra: Number(e.target.value) });
+                                         }}
+                                         className="w-full p-1.5 border border-purple-300 rounded-lg text-xs font-black bg-white text-purple-900"
+                                     />
+                                     <span className="text-[9px] text-purple-600">9999 = Unlimited Access</span>
+                                 </div>
+                                 <div className="space-y-1.5 text-[11px] font-bold text-purple-900">
+                                     <div className="flex items-center gap-1.5 text-emerald-700">
+                                         <span>✓</span> Unlimited Room Creation & Hosting
+                                     </div>
+                                     <div className="flex items-center gap-1.5 text-emerald-700">
+                                         <span>✓</span> Live Whiteboard Broadcasting
+                                     </div>
+                                     <div className="flex items-center gap-1.5 text-emerald-700">
+                                         <span>✓</span> Host Live MCQ Battle (Custom Timer & Questions)
+                                     </div>
+                                 </div>
+                                 <div>
+                                     <label className="text-[10px] font-bold text-purple-700 block mb-1">Max VIP Room Capacity:</label>
+                                     <input
+                                         type="number"
+                                         min="10"
+                                         max="200"
+                                         value={localSettings.groupStudyConfig?.maxMembersUltra ?? 100}
+                                         onChange={e => {
+                                             const curr = localSettings.groupStudyConfig || {};
+                                             updateSetting('groupStudyConfig' as any, { ...curr, maxMembersUltra: Number(e.target.value) });
+                                         }}
+                                         className="w-full p-1.5 border border-purple-300 rounded-lg text-xs font-black bg-white"
+                                     />
+                                     <span className="text-[9px] text-purple-600">Max members in room (Default: 100)</span>
+                                 </div>
+                             </div>
                          </div>
                      </div>
                 </div>

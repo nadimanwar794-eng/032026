@@ -1,6 +1,6 @@
 // @ts-nocheck
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Volume2, Square, BookOpen, Star, Palette, Check, Type, RotateCcw, Search, Monitor, X, LayoutGrid, MoreVertical, ChevronRight, WifiOff, Flame, Lightbulb, Pencil, Presentation, Copy } from 'lucide-react';
+import { Volume2, Square, BookOpen, Star, Palette, Check, Type, RotateCcw, Search, Monitor, X, LayoutGrid, MoreVertical, ChevronRight, WifiOff, Flame, Lightbulb, Pencil, Presentation, Copy, Users } from 'lucide-react';
 import { AdminWhiteBoard } from './AdminWhiteBoard';
 import { rotateScreen, isDesktopModeOn, setDesktopMode } from '../utils/displayPrefs';
 import { saveSuggestion, auth, findDuplicateSuggestionByPoint, incrementSuggestionReportCount, updateSuggestionLeaderboard } from '../firebase';
@@ -208,10 +208,14 @@ interface Props {
   /** Current user level (1–15). Used to enforce star-lock for Free users at L1–L4.
    *  Falls back to readingScoreConfig.userLevel when omitted; defaults to 5 (unlocked) if neither is provided. */
   userLevel?: number;
+  /** When true, locked tabs (Smart Notes, Explanation) are completely hidden for Free & Basic users. */
+  hideLockedTabs?: boolean;
+  /** Trigger to open Group Study / Live Room modal for reading this note */
+  onOpenGroupStudy?: () => void;
 }
 
 
-export const ChunkedNotesReader: React.FC<Props> = ({ content, className, language = 'hi-IN', topBarLabel, autoStart, onComplete, onReadingStart, onReadingActive, hideTopBar, initialIndex, onPositionChange, noteKey, isStarred, onStarToggle, searchQuery, getStarCount, textColorOverride, preferChunkMode, onDesktopModeChange, hideDesktopToggle, suppressStickyControls, htmlContent, isUltraUser, ultraHtmlRemaining, userCredits = 0, htmlUnlockCost = 5, onSpendCredits, onHtmlOpen, onUpgradeClick, isBasicUser = false, basicHtmlRemaining = 0, onHtmlViewChange, onMoreOptions, triggerControlsRef, hideInline3dot, hideFix, onBack, onSaveOffline, isSavedOffline, readingScoreConfig, isAdmin, useImportantMark2, isMarked2, onMark2Toggle, isAdminImportant, sourceMeta, onAdminEdit, userLevel }) => {
+export const ChunkedNotesReader: React.FC<Props> = ({ content, className, language = 'hi-IN', topBarLabel, autoStart, onComplete, onReadingStart, onReadingActive, hideTopBar, initialIndex, onPositionChange, noteKey, isStarred, onStarToggle, searchQuery, getStarCount, textColorOverride, preferChunkMode, onDesktopModeChange, hideDesktopToggle, suppressStickyControls, htmlContent, isUltraUser, ultraHtmlRemaining, userCredits = 0, htmlUnlockCost = 5, onSpendCredits, onHtmlOpen, onUpgradeClick, isBasicUser = false, basicHtmlRemaining = 0, onHtmlViewChange, onMoreOptions, triggerControlsRef, hideInline3dot, hideFix, onBack, onSaveOffline, isSavedOffline, readingScoreConfig, isAdmin, useImportantMark2, isMarked2, onMark2Toggle, isAdminImportant, sourceMeta, onAdminEdit, userLevel, hideLockedTabs, onOpenGroupStudy }) => {
   // ── "Suno" 3-section chunk notes (📖 Book Text / 📝 Smart Notes / 💡 आसान समझ) ──
   // When the pasted content repeats these three labelled sections per topic,
   // split them out so the reader can show three separate pages (Book Text,
@@ -230,12 +234,16 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
 
   const NOTE_PAGES = useMemo(() => {
     if (!noteSections) return [] as { key: 'book' | 'smart' | 'explain'; label: string; badge?: string; badgeColor?: string; locked: boolean; text: string }[];
-    return [
+    const pages = [
       { key: 'book'    as const, label: '📖 Book Text',    badge: undefined,    badgeColor: undefined, locked: false,               text: noteSections.bookText    },
       { key: 'smart'   as const, label: '📝 Smart Notes',  badge: '⭐ Basic',   badgeColor: 'amber',   locked: !_canAccessSmart,    text: noteSections.smartNotes  },
       { key: 'explain' as const, label: '💡 आसान समझ',    badge: '👑 Ultra',   badgeColor: 'purple',  locked: !_canAccessExplain,  text: noteSections.explanation },
     ].filter(p => p.text.trim());
-  }, [noteSections, _canAccessSmart, _canAccessExplain]);
+    if (hideLockedTabs) {
+      return pages.filter(p => !p.locked);
+    }
+    return pages;
+  }, [noteSections, _canAccessSmart, _canAccessExplain, hideLockedTabs]);
 
   const [notePage, setNotePage] = useState<'book' | 'smart' | 'explain'>('book');
 
@@ -1417,6 +1425,18 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                 title="WhiteBoard (Admin)"
               >
                 <Presentation size={14} />
+              </button>
+            )}
+            {/* 👥 Live Group Study Room */}
+            {onOpenGroupStudy && (
+              <button
+                type="button"
+                onClick={onOpenGroupStudy}
+                className="h-7 px-2 flex items-center gap-1 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-700 active:scale-90 transition shrink-0"
+                title="Group Study / Live Room"
+              >
+                <Users size={12} className="text-emerald-600" />
+                <span className="text-[10px] font-black uppercase tracking-wider">Live</span>
               </button>
             )}
             {/* 3-dot icon — opens full controls panel */}

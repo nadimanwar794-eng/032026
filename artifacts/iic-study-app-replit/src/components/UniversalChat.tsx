@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { User } from '../types';
 import { buildSubColorsFromHex } from '../utils/tierTheme';
 import { useAppTheme } from '../utils/themeContext';
-import { Send, MessageSquare, Shield, Users, X, Trash2, Crown, Zap, Lock, Megaphone, BookOpen, CheckCircle, ThumbsUp, ThumbsDown, Award, Flag, ChevronDown, ChevronUp } from 'lucide-react';
+import { Send, MessageSquare, Shield, Users, X, Trash2, Crown, Zap, Lock, Megaphone, BookOpen, CheckCircle, ThumbsUp, ThumbsDown, Award, Flag, ChevronDown, ChevronUp, MessageCircle } from 'lucide-react';
 import { ref, onValue, query, limitToLast, remove, set, get } from 'firebase/database';
 import { rtdb } from '../firebase';
 import { TopBarEffectsLayer } from '../utils/topBarEffects';
@@ -444,7 +444,7 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
             {/* Profile popup */}
             {selectedUserProfile && (
                 <div className="absolute inset-0 z-[110] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setSelectedUserProfile(null)}>
-                    <div className="bg-white p-6 rounded-2xl shadow-2xl text-center animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+                    <div className="bg-white p-6 rounded-2xl shadow-2xl text-center animate-in zoom-in-95 max-w-xs w-full" onClick={e => e.stopPropagation()}>
                         <div className="w-16 h-16 bg-slate-100 rounded-full mx-auto mb-3 flex items-center justify-center text-2xl font-bold text-slate-600">
                             {selectedUserProfile.name.charAt(0)}
                         </div>
@@ -472,7 +472,10 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                             </p>
                         </div>
                     </div>
-                    <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors"><X size={20} /></button>
+                    
+                    <div className="flex items-center gap-2">
+                        <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors"><X size={20} /></button>
+                    </div>
                 </div>
 
                 {/* Tabs */}

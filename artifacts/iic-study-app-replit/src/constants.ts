@@ -600,6 +600,11 @@ export const NSTA_DEFAULT_FEATURES = [
     { category: '📚 CONTENT', id: 'UNIVERSAL_VIDEO', label: 'Universal Video', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
     { category: '📚 CONTENT', id: 'PREMIUM_AUDIO', label: 'Premium Audio', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
     { category: '🤖 AI HUB', id: 'AI_TUTOR', label: 'AI Tutor', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
+    { category: '📑 NOTES', id: 'NOTES_READING_MODE', label: 'Notes Reading Mode', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
+    { category: '📄 PDF', id: 'PDF_READER_ACCESS', label: 'PDF Reader & Cache Mode', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
+    { category: '🗂️ FLASHCARDS', id: 'FLASHCARDS_MODE', label: 'Flashcards Decks Mode', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
+    { category: '🎧 AUDIO', id: 'TTS_AUDIO_READ', label: 'TTS Audio Read-Aloud Mode', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
+    { category: '📝 MCQ', id: 'PREMIUM_MCQ_EXAM', label: 'VIP / Competition MCQ Mode', visible: true, allowedTiers: ['BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
 ];
 
 export const DEFAULT_PLAN_COMPARISON = [

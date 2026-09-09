@@ -23,6 +23,22 @@ if (navigator.storage && navigator.storage.persist) {
   }).catch(() => {});
 }
 
+// Intercept benign Firestore offline transition and network warnings so they don't get logged as fatal uncaught console errors
+const _origConsoleError = console.error;
+console.error = (...args: any[]) => {
+  const text = args.map(a => (a?.stack || a?.message || String(a || ''))).join(' ').toLowerCase();
+  if (
+    text.includes('could not reach cloud firestore backend') ||
+    text.includes('client will operate in offline mode') ||
+    text.includes("backend didn't respond within") ||
+    (text.includes('@firebase/firestore') && (text.includes('offline') || text.includes('10 seconds')))
+  ) {
+    console.warn('[IIC Offline Mode Notice]', ...args);
+    return;
+  }
+  _origConsoleError.apply(console, args);
+};
+
 const isNetworkLikeError = (reason: any): boolean => {
   if (!reason) return false;
   const code = reason.code || reason.name || '';
@@ -38,7 +54,10 @@ const isNetworkLikeError = (reason: any): boolean => {
     msg.includes('offline') ||
     msg.includes('failed to fetch') ||
     msg.includes('load failed') ||
-    msg.includes('client is offline')
+    msg.includes('client is offline') ||
+    msg.includes('could not reach cloud firestore backend') ||
+    msg.includes("backend didn't respond") ||
+    msg.includes('client will operate in offline mode')
   );
 };
 

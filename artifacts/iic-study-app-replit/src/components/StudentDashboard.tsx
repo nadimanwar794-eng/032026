@@ -222,6 +222,7 @@ import {
   Presentation,
   Tv,
   Loader2,
+  Radio,
 } from "lucide-react";
 import { FaInstagram, FaWhatsapp, FaYoutube } from "react-icons/fa";
 import { SiGmail } from "react-icons/si";
@@ -250,6 +251,7 @@ import { CustomAlert } from "./CustomDialogs";
 import { LiveResultsFeed } from "./LiveResultsFeed";
 import { UniversalInfoPage } from "./UniversalInfoPage";
 import { UniversalChat } from "./UniversalChat";
+import { WhatsAppChatModal } from "./WhatsAppChatModal";
 import { ExpiryPopup } from "./ExpiryPopup";
 import { SubscriptionHistory } from "./SubscriptionHistory";
 import { getTierTheme, buildOverrideTierTheme, buildGranularTierTheme, getEffectiveOverrideColor, getUserTier, DEFAULT_NAV_ACTIVE_COLORS } from '../utils/tierTheme';
@@ -292,6 +294,18 @@ import { ThemeCustomizer } from "./ThemeCustomizer";
 import AppFeedback from "./AppFeedback";
 import { saveOfflineItem } from "../utils/offlineStorage";
 import { NotificationPrompt } from "./NotificationPrompt";
+import { GroupStudyModal, type GroupStudyPrefilledContext } from "./GroupStudyModal";
+import { LiveSessionIndicator } from "./LiveSessionIndicator";
+import {
+  subscribeToActiveRooms,
+  subscribeToRoom,
+  type GroupStudyRoom,
+  type GroupStudyHostSync,
+  syncHostActivity,
+  broadcastHostMcq,
+  leaveGroupRoom,
+  cleanRtdbPayload
+} from "../services/groupStudyService";
 // @ts-ignore
 import jsPDF from "jspdf";
 // @ts-ignore
@@ -653,6 +667,10 @@ export const StudentDashboard: React.FC<Props> = ({
     return () => window.removeEventListener('nst-dark-theme-change', handler);
   }, []);
 
+  const [levelAnimOff, setLevelAnimOff] = useState(() => {
+    try { return localStorage.getItem('nst_level_anim_off') === '1'; } catch { return false; }
+  });
+
   const analysisLogs = (() => { try { return JSON.parse(localStorage.getItem("nst_universal_analysis_logs") || "[]"); } catch { return []; } })();
   const isGameEnabled = settings?.isGameEnabled !== false;
 
@@ -904,18 +922,23 @@ export const StudentDashboard: React.FC<Props> = ({
   };
   const _bottomNavBg = (() => {
     const configuredNavBg = (tierTheme as any).navBg;
-    if (typeof configuredNavBg === 'string' && configuredNavBg.trim()) {
-      return configuredNavBg;
+    const isExplicitLightOnly = !isDarkMode && (user?.personalTheme?.themeName === 'Light' || (tierTheme as any).themeName === 'Light');
+    if (typeof configuredNavBg === 'string' && configuredNavBg.trim() && (isExplicitLightOnly || configuredNavBg.toLowerCase() !== '#ffffff')) {
+      const lum = _surfaceLuminance(configuredNavBg);
+      if (isExplicitLightOnly || (lum !== null && lum < 0.48)) {
+        return configuredNavBg;
+      }
     }
     const candidates = [
       (tierTheme as any).profileBg,
       String(tierTheme.topBarGrad || '').match(/#[0-9a-f]{6}/i)?.[0],
+      '#0e1428',
       '#151a43',
     ];
     return candidates.find((candidate) => {
       const lum = _surfaceLuminance(candidate);
       return typeof candidate === 'string' && lum !== null && lum < 0.42;
-    }) || '#151a43';
+    }) || '#0e1428';
   })();
 
   // ── Nav background luminance — for dynamic icon/text color ───────────────
@@ -1036,6 +1059,7 @@ export const StudentDashboard: React.FC<Props> = ({
 
   // Active Top Bar Effects (Custom user animation -> Admin configured Top Bar Effects -> Level fallback)
   const activeTopBarEffects = React.useMemo(() => {
+    if (levelAnimOff) return [];
     if (user.customAnimation?.effectId) {
       return [{
         id: user.customAnimation.effectId,
@@ -1050,16 +1074,17 @@ export const StudentDashboard: React.FC<Props> = ({
     }
     const effLvl = (user.role === 'ADMIN' || user.role === 'SUB_ADMIN') ? LEVEL_INFO[14] : _userLevelInfo;
     return getLevelTopBarEffects(effLvl);
-  }, [user.customAnimation, user.role, _userLevelInfo, settings?.topBarEffects]);
+  }, [levelAnimOff, user.customAnimation, user.role, _userLevelInfo, settings?.topBarEffects]);
 
   // Active Profile Card Effects (Admin Profile Card Effects -> Admin Top Bar Effects -> Active Top Bar Effects)
   const activeProfileEffects = React.useMemo(() => {
+    if (levelAnimOff) return [];
     const adminProfileEffects = (settings?.profileBarEffects || []).filter(e => e.enabled);
     if (adminProfileEffects.length > 0) {
       return adminProfileEffects;
     }
     return activeTopBarEffects;
-  }, [settings?.profileBarEffects, activeTopBarEffects]);
+  }, [levelAnimOff, settings?.profileBarEffects, activeTopBarEffects]);
 
   // Free quota (0 free views — credit-only, but track key for limit enforcement)
   const _freeHtmlKey   = `nst_free_html_${user.id}_${_todayKey}`;
@@ -1360,6 +1385,26 @@ export const StudentDashboard: React.FC<Props> = ({
   const [showBoardPromptForClass, setShowBoardPromptForClass] = useState<
     string | null
   >(null);
+
+  // --- GROUP STUDY & LIVE CLASSROOM STATE ---
+  const [showGroupStudyModal, setShowGroupStudyModal] = useState<boolean>(false);
+  const [groupStudyPrefilledContext, setGroupStudyPrefilledContext] = useState<GroupStudyPrefilledContext | null>(null);
+  const [showWhatsAppChatModal, setShowWhatsAppChatModal] = useState<boolean>(false);
+  const [activeGroupStudyRoom, setActiveGroupStudyRoom] = useState<GroupStudyRoom | null>(null);
+  const [liveGroupRoomsCount, setLiveGroupRoomsCount] = useState<number>(0);
+  const [isLiveSessionMinimized, setIsLiveSessionMinimized] = useState<boolean>(false);
+
+  const isGroupStudyHidden =
+    settings?.isGroupStudyEnabled === false ||
+    (settings?.hiddenFeatures || []).includes('GROUP_STUDY') ||
+    (settings?.hiddenHomeButtons || []).includes('GROUP_STUDY');
+
+  useEffect(() => {
+    const unsub = subscribeToActiveRooms((rooms) => {
+      setLiveGroupRoomsCount(rooms.length);
+    });
+    return () => unsub();
+  }, []);
 
   // --- TEACHER EXPIRY CHECK ---
   const [isTeacherLocked, setIsTeacherLocked] = useState(false);
@@ -2240,6 +2285,234 @@ export const StudentDashboard: React.FC<Props> = ({
   const [initialParentSubject, setInitialParentSubject] = useState<
     string | null
   >(null);
+
+  // ── Group Study & Live Classroom Host Synchronization ──
+  const [autoFollowHost, setAutoFollowHost] = useState<boolean>(true);
+  const lastSyncKeyRef = useRef<string>('');
+
+  const handleActiveRoomChange = useCallback((room: GroupStudyRoom | null) => {
+    setActiveGroupStudyRoom((prev) => {
+      if (!prev && !room) return null;
+      if (
+        prev?.id === room?.id &&
+        prev?.lastActive === room?.lastActive &&
+        prev?.hostSync?.timestamp === room?.hostSync?.timestamp
+      ) {
+        return prev;
+      }
+      return room;
+    });
+  }, []);
+
+  // Subscribe to real-time room updates when a room is active
+  useEffect(() => {
+    const roomId = activeGroupStudyRoom?.id;
+    if (!roomId) return;
+    const unsub = subscribeToRoom(roomId, (updatedRoom) => {
+      if (!updatedRoom) {
+        setActiveGroupStudyRoom(null);
+        return;
+      }
+      setActiveGroupStudyRoom((prev) => {
+        if (
+          prev?.id === updatedRoom.id &&
+          prev.lastActive === updatedRoom.lastActive &&
+          prev.hostSync?.timestamp === updatedRoom.hostSync?.timestamp &&
+          prev.hostSync?.activeMcq?.startTime === updatedRoom.hostSync?.activeMcq?.startTime &&
+          prev.hostSync?.activeMcq?.status === updatedRoom.hostSync?.activeMcq?.status
+        ) {
+          return prev;
+        }
+        return updatedRoom;
+      });
+    });
+    return () => unsub();
+  }, [activeGroupStudyRoom?.id]);
+
+  // Host Broadcasts App Navigation to Firebase RTDB in real-time
+  useEffect(() => {
+    if (!activeGroupStudyRoom?.id) return;
+    const isHost = activeGroupStudyRoom.hostId === user.id || user.role === 'ADMIN';
+    if (!isHost) return;
+
+    const currentBoard = (activeSessionBoard || user.board || 'BSEB') as any;
+    const currentClass = (activeSessionClass || user.classLevel || '10') as any;
+
+    const payloadKey = `${activeTab}_${contentViewStep}_${currentBoard}_${currentClass}_${selectedSubject?.id || ''}_${selectedChapter?.id || ''}`;
+    if (lastSyncKeyRef.current === payloadKey) return;
+    lastSyncKeyRef.current = payloadKey;
+
+    const syncPayload: Partial<GroupStudyHostSync> = {
+      view: 'STUDENT_DASHBOARD',
+      activeTab: String(activeTab || ''),
+      contentViewStep,
+      selectedBoard: currentBoard,
+      selectedClass: currentClass,
+      contentType: activeTab === 'MCQ' ? 'MCQ' : (contentViewStep === 'PLAYER' ? 'NOTES' : 'OTHER'),
+      timestamp: Date.now(),
+    };
+
+    if (selectedSubject) {
+      syncPayload.selectedSubject = {
+        id: String(selectedSubject.id || ''),
+        name: String(selectedSubject.name || ''),
+      };
+    }
+    if (selectedChapter) {
+      syncPayload.selectedChapter = {
+        id: String(selectedChapter.id || ''),
+        title: String(selectedChapter.title || ''),
+        subject: String(selectedChapter.subject || selectedSubject?.name || ''),
+        chapterNumber: Number(selectedChapter.order) || 0,
+      };
+    }
+    if (contentViewStep === 'PLAYER' && selectedChapter) {
+      syncPayload.notesState = {
+        isOpen: true,
+        title: String(selectedChapter.title || ''),
+        chapterId: String(selectedChapter.id || ''),
+      };
+    }
+
+    syncHostActivity(activeGroupStudyRoom.id, syncPayload);
+  }, [
+    activeGroupStudyRoom?.id,
+    activeGroupStudyRoom?.hostId,
+    user.id,
+    user.role,
+    user.board,
+    user.classLevel,
+    activeTab,
+    contentViewStep,
+    activeSessionBoard,
+    activeSessionClass,
+    selectedSubject,
+    selectedChapter,
+  ]);
+
+  const handleFollowHost = useCallback((sync: GroupStudyHostSync) => {
+    if (!sync) return;
+    const currentBoard = activeSessionBoard || user.board || 'BSEB';
+    const currentClass = activeSessionClass || user.classLevel || '10';
+
+    if (sync.selectedBoard && sync.selectedBoard !== currentBoard) {
+      setActiveSessionBoard(sync.selectedBoard as any);
+    }
+    if (sync.selectedClass && sync.selectedClass !== currentClass) {
+      setActiveSessionClass(sync.selectedClass as any);
+    }
+    if (sync.selectedSubject) {
+      setSelectedSubject((prev) => {
+        if (prev?.id === sync.selectedSubject?.id && prev?.name === sync.selectedSubject?.name) {
+          return prev;
+        }
+        return {
+          id: sync.selectedSubject!.id,
+          name: sync.selectedSubject!.name,
+          classLevel: (sync.selectedClass || currentClass || '10') as any,
+          chapters: [],
+        } as any;
+      });
+    }
+    if (sync.selectedChapter) {
+      setSelectedChapter((prev) => {
+        if (prev?.id === sync.selectedChapter?.id) {
+          return prev;
+        }
+        return {
+          id: sync.selectedChapter!.id,
+          title: sync.selectedChapter!.title,
+          subject: sync.selectedChapter!.subject || sync.selectedSubject?.name || '',
+          board: (sync.selectedBoard as any) || currentBoard || 'BSEB',
+          classLevel: (sync.selectedClass as any) || currentClass || '10',
+          order: Number(sync.selectedChapter!.chapterNumber) || 0,
+          isLocked: false,
+        };
+      });
+    }
+    if (sync.activeTab && sync.activeTab !== activeTab) {
+      onTabChange(sync.activeTab as any);
+    }
+    if (sync.contentViewStep && sync.contentViewStep !== contentViewStep) {
+      setContentViewStep(sync.contentViewStep);
+    }
+  }, [activeSessionBoard, user.board, activeSessionClass, user.classLevel, activeTab, contentViewStep, onTabChange]);
+
+  const handleNavigateFromGroupStudy = useCallback((target: {
+    tab?: string;
+    board?: string;
+    classLevel?: string;
+    subjectId?: string;
+    subjectName?: string;
+    chapterId?: string;
+    chapterTitle?: string;
+    mode?: 'NOTES' | 'MCQ' | 'PDF';
+  }) => {
+    const currentBoard = activeSessionBoard || user.board || 'BSEB';
+    const currentClass = activeSessionClass || user.classLevel || '10';
+
+    if (target.tab && target.tab !== activeTab) {
+      onTabChange(target.tab as any);
+    }
+    if (target.board) setActiveSessionBoard(target.board as any);
+    if (target.classLevel) setActiveSessionClass(target.classLevel as any);
+    if (target.subjectId && target.subjectName) {
+      setSelectedSubject((prev) => {
+        if (prev?.id === target.subjectId && prev?.name === target.subjectName) return prev;
+        return {
+          id: target.subjectId!,
+          name: target.subjectName!,
+          classLevel: (target.classLevel || currentClass || '10') as any,
+          chapters: [],
+        } as any;
+      });
+      setContentViewStep('CHAPTERS');
+    }
+    if (target.chapterId && target.chapterTitle) {
+      setSelectedChapter((prev) => {
+        if (prev?.id === target.chapterId) return prev;
+        return {
+          id: target.chapterId!,
+          title: target.chapterTitle!,
+          subject: target.subjectName || '',
+          board: (target.board as any) || currentBoard || 'BSEB',
+          classLevel: (target.classLevel as any) || currentClass || '10',
+          order: 1,
+          isLocked: false,
+        };
+      });
+      setContentViewStep('PLAYER');
+    }
+  }, [activeSessionBoard, user.board, activeSessionClass, user.classLevel, activeTab, onTabChange]);
+
+  const handleOpenGroupStudyForContext = useCallback((context: GroupStudyPrefilledContext) => {
+    hapticMedium();
+    setGroupStudyPrefilledContext(context);
+    if (activeGroupStudyRoom && activeGroupStudyRoom.hostId === user?.id) {
+      const isMcq = context.contentType === 'MCQ' || context.contentType === 'PREMIUM_MCQ';
+      syncHostActivity(activeGroupStudyRoom.id, cleanRtdbPayload({
+        view: 'STUDENT_DASHBOARD',
+        selectedBoard: context.board || activeSessionBoard || user?.board || 'BSEB',
+        selectedClass: context.classLevel || activeSessionClass || user?.classLevel || '10',
+        selectedSubject: context.subject ? { id: context.subject, name: context.subject } : undefined,
+        selectedChapter: context.chapterTitle ? {
+          id: context.chapterId || '',
+          title: context.chapterTitle,
+          subject: context.subject || '',
+          chapterNumber: 1,
+        } : undefined,
+        contentType: isMcq ? 'MCQ' : (context.contentType === 'PDF' ? 'OTHER' : 'NOTES'),
+        notesState: {
+          isOpen: true,
+          title: context.chapterTitle || context.title || '',
+          chapterId: context.chapterId || '',
+        },
+        timestamp: Date.now(),
+      })).catch(err => console.warn('Could not sync host activity:', err));
+      showAlert(`📡 Live Room Synced: ${context.chapterTitle || context.title || context.contentType}`, 'SUCCESS');
+    }
+    setShowGroupStudyModal(true);
+  }, [hapticMedium, activeGroupStudyRoom, user?.id, user?.board, user?.classLevel, activeSessionBoard, activeSessionClass, showAlert]);
 
   useEffect(() => {
     getChapterData("nst_universal_notes").then((data) => {
@@ -8451,6 +8724,21 @@ export const StudentDashboard: React.FC<Props> = ({
                       <RotateCcw size={14} />
                     </button>
                   )}
+                  {/* Live Room button for Homework (MCQ, PDF, Notes) */}
+                  <button
+                    onClick={() => handleOpenGroupStudyForContext({
+                      contentType: effectiveMode === 'mcq' ? 'MCQ' : (effectiveMode === 'pdf' ? 'PDF' : (effectiveMode === 'notes' && hwNotesViewMode === 'html' ? 'WRITING_NOTES' : 'READING_NOTES')),
+                      title: activeHw.title,
+                      subject: activeHw.targetSubject,
+                      chapterTitle: activeHw.title,
+                      pdfUrl: (activeHw as any).pdfUrl,
+                    })}
+                    className="h-8 px-2 flex items-center gap-1 rounded-xl bg-emerald-500/25 border border-emerald-400/40 text-emerald-200 active:scale-90 transition shrink-0"
+                    title="Live Study Room"
+                  >
+                    <Users size={13} className="text-emerald-300" />
+                    <span className="text-[10px] font-black uppercase tracking-wider">Live</span>
+                  </button>
                   <span className="bg-white/20 text-white text-[11px] font-black px-2.5 py-1 rounded-full shrink-0">
                     {flatIdx + 1}/{filteredHw.length}
                   </span>
@@ -8488,6 +8776,10 @@ export const StudentDashboard: React.FC<Props> = ({
                   ...(hasMcq ? [
                     { mode: 'MCQ',       label: 'MCQ Practice', emoji: '🧠', cost: 20,
                       isUnlocked: isMcqPageUnlocked(activeHw.id, 0), isAccessible: true,                         requiredTier: 'free'  as const, unlockAction: () => markMcqPageUnlocked(activeHw.id, 0) },
+                    { mode: 'PROJECTOR', label: 'Premium MCQ',   emoji: '🎯', cost: 20,
+                      isUnlocked: isProjectorUnlocked(activeHw.id, 0), isAccessible: true,                       requiredTier: 'free'  as const, unlockAction: () => markProjectorUnlocked(activeHw.id, 0) },
+                    { mode: 'FLASHCARD', label: 'Flashcard',     emoji: '🃏', cost: 20,
+                      isUnlocked: isFcPageUnlocked(activeHw.id, 0),  isAccessible: _isUltraUser,                 requiredTier: 'ultra' as const, unlockAction: () => markFcPageUnlocked(activeHw.id, 0) },
                   ] : []),
                   ...(hasPdf   ? [{ mode: 'PDF',   label: 'PDF',   emoji: '📄', cost: 0, isUnlocked: true, isAccessible: _isBasicUser || _isUltraUser, requiredTier: 'basic' as const, unlockAction: undefined }] : []),
                   ...(hasVideo ? [{ mode: 'VIDEO', label: 'Video', emoji: '🎬', cost: 0, isUnlocked: true, isAccessible: _isUltraUser,                 requiredTier: 'ultra' as const, unlockAction: undefined }] : []),
@@ -8536,6 +8828,78 @@ export const StudentDashboard: React.FC<Props> = ({
                         MCQ Practice
                       </button>
                     )}
+                    {/* Premium MCQ (Projector Mode) for Competition Homework */}
+                    {hasMcq && (
+                      <button
+                        style={_hwTabStyle}
+                        className={_hwTabCls(false, 'bg-amber-500', 'text-white')}
+                        onClick={() => {
+                          handleProjectorModeGate(activeHw.id, 0, () => {
+                            stopSpeech();
+                            setFlashcardMcqs({
+                              items: _hwMcqs,
+                              title: activeHw.title || 'Competition MCQs',
+                              subtitle: `${_hwMcqs.length} Questions`,
+                              subject: activeHw.subject || '',
+                              sourceKey: getStudyActivityKey(activeHw.id, 0),
+                              startInProjectorMode: true,
+                              fromLesson: {
+                                hasMcq: true,
+                                isAdmin: _isAdminUser,
+                                activeMode: 'projector',
+                                hasPdf,
+                                hasVideo,
+                                hasAudio,
+                                isCompetition: true,
+                                returnMode: effectiveMode,
+                                unlockId: activeHw.id,
+                                unlockPageIndex: 0,
+                              },
+                            });
+                          }, _hwPgInfo);
+                        }}
+                      >
+                        🎯 Premium MCQ
+                      </button>
+                    )}
+                    {/* Flashcard for Competition Homework */}
+                    {hasMcq && (() => {
+                      return (
+                        <button
+                          style={_hwTabStyle}
+                          className={_hwTabCls(false, 'bg-amber-500', 'text-white') + (_fcLocked ? ' opacity-60' : '')}
+                          onClick={() => {
+                            if (_fcLocked) {
+                              showAlert('🔒 Flashcard ke liye ULTRA subscription chahiye! Store se upgrade karein.', 'INFO');
+                              return;
+                            }
+                            stopSpeech();
+                            setFlashcardMcqs({
+                              items: _hwMcqs,
+                              title: activeHw.title || 'Competition Flashcards',
+                              subtitle: `${_hwMcqs.length} Cards`,
+                              subject: activeHw.subject || '',
+                              sourceKey: getStudyActivityKey(activeHw.id, 0),
+                              startInProjectorMode: false,
+                              fromLesson: {
+                                hasMcq: true,
+                                isAdmin: _isAdminUser,
+                                activeMode: 'flashcard',
+                                hasPdf,
+                                hasVideo,
+                                hasAudio,
+                                isCompetition: true,
+                                returnMode: effectiveMode,
+                                unlockId: activeHw.id,
+                                unlockPageIndex: 0,
+                              },
+                            });
+                          }}
+                        >
+                          {_fcLocked ? '🔒' : '🃏'} Flashcard{_fcLocked ? ' · ULTRA' : ''}
+                        </button>
+                      );
+                    })()}
                     {/* PDF — BASIC locked, inline viewer (Lucent jaisa, window.open nahi) */}
                     {hasPdf && (() => {
                       return (
@@ -8604,6 +8968,20 @@ export const StudentDashboard: React.FC<Props> = ({
                     {activeHw.title || 'Competition'}
                     {activeHw.date && <span className="text-slate-400 font-medium"> · {new Date(activeHw.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</span>}
                   </span>
+                  <button
+                    onClick={() => handleOpenGroupStudyForContext({
+                      contentType: effectiveMode === 'mcq' ? 'MCQ' : 'WRITING_NOTES',
+                      title: activeHw.title || 'Competition Homework',
+                      subject: activeHw.targetSubject || 'Competition',
+                      chapterTitle: activeHw.title,
+                      totalQuestions: _hwMcqs.length,
+                    })}
+                    className="h-7 px-2 flex items-center gap-1 rounded-lg bg-pink-50 border border-pink-300 text-pink-700 active:scale-90 transition shrink-0"
+                    title="Live Study Room"
+                  >
+                    <Radio size={12} className="text-pink-600 animate-pulse" />
+                    <span className="text-[10px] font-black uppercase tracking-wider">Live</span>
+                  </button>
                   {/* Write mode badges + controls */}
                   {effectiveMode === 'notes' && hwNotesViewMode === 'html' && (
                     <>
@@ -8887,6 +9265,12 @@ export const StudentDashboard: React.FC<Props> = ({
                         key={`hw-reader-${activeHw.id}-chunk`}
                         triggerControlsRef={hwControlsRef}
                         onBack={goBack}
+                        onOpenGroupStudy={() => handleOpenGroupStudyForContext({
+                          contentType: 'READING_NOTES',
+                          title: activeHw.title || 'Homework',
+                          subject: activeHw.targetSubject || 'Competition',
+                          chapterTitle: activeHw.title,
+                        })}
                         onSaveOffline={async () => {
                           try {
                             const chunkSrc = (activeHw as any).chunkNotes;
@@ -8911,6 +9295,7 @@ export const StudentDashboard: React.FC<Props> = ({
                         isBasicUser={_isBasicUser}
                         basicHtmlRemaining={basicHtmlRemaining}
                         userLevel={_userLevel}
+                        hideLockedTabs={!!(settings?.hideLockedForFreeAndBasic && _isFreeOrBasicUser)}
                         userCredits={user.credits || 0}
                         htmlUnlockCost={settings?.htmlUnlockCost ?? 5}
                         onHtmlOpen={_trackHtmlOpen}
@@ -12014,7 +12399,7 @@ export const StudentDashboard: React.FC<Props> = ({
                 {(() => {
                   const _lvl = _pLvl.level;
                   const _col = _pLvl.color;
-                  const _anim = !cardFxOff;
+                  const _anim = !cardFxOff && !levelAnimOff;
                   // Avatar grows with level
                   const _sz  = _lvl >= 13 ? 114 : _lvl >= 9 ? 106 : _lvl >= 5 ? 98 : 90;
                   // Extra space around avatar for decorations
@@ -13603,6 +13988,45 @@ export const StudentDashboard: React.FC<Props> = ({
               </div>
             </button>
 
+            {/* ── Level Animation Toggle (Top Bar & Profile Card) ── */}
+            <button
+              id="profile-level-anim-toggle-btn"
+              onClick={() => {
+                const next = !levelAnimOff;
+                setLevelAnimOff(next);
+                try {
+                  localStorage.setItem('nst_level_anim_off', next ? '1' : '0');
+                  window.dispatchEvent(new Event('nst-level-anim-change'));
+                } catch {}
+                showAlert(next ? '⏸️ Top Bar aur Profile Card animation off kar di gayi (Static)' : '⚡ Level animation on kar di gayi', 'SUCCESS');
+              }}
+              className={`w-full px-4 py-4 flex items-center gap-3.5 ${_pHovCls} transition-colors`}
+              style={{ borderBottom: _pSep }}>
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{
+                background: !levelAnimOff ? `${_displayLvl.color}22` : _pIconBg,
+                border: `1px solid ${!levelAnimOff ? _displayLvl.color + '55' : 'rgba(255,255,255,0.10)'}`,
+              }}>
+                <span className="text-base leading-none">{levelAnimOff ? '⏸️' : '⚡'}</span>
+              </div>
+              <div className="flex-1 text-left">
+                <p className={`text-sm font-bold ${_pTxt}`}>Level Animation</p>
+                <p className={`text-[10px] mt-0.5 ${_pTxtSub}`}>
+                  {levelAnimOff
+                    ? 'Top Bar aur Profile Card level animations off hain (Static mode)'
+                    : `${_displayLvl.emoji} Level ${_displayLvl.level} Top Bar aur Profile animations active hain`}
+                </p>
+              </div>
+              <div className="shrink-0 w-10 h-5 rounded-full relative transition-all cursor-pointer"
+                style={{ background: !levelAnimOff ? `${_displayLvl.color}bb` : 'rgba(255,255,255,0.14)' }}>
+                <div className="absolute top-0.5 w-4 h-4 rounded-full transition-all"
+                  style={{
+                    background: '#fff',
+                    left: !levelAnimOff ? '1.375rem' : '0.125rem',
+                    boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
+                  }} />
+              </div>
+            </button>
+
             {/* ── Haptic Vibration Toggle ── */}
             <button
               onClick={() => {
@@ -13625,8 +14049,8 @@ export const StudentDashboard: React.FC<Props> = ({
                   {hapticEnabled ? 'Button tap pe vibration on hai' : 'Vibration off hai'}
                 </p>
               </div>
-              <div className="shrink-0 w-10 h-5 rounded-full relative transition-all"
-                style={{ background: hapticEnabled ? 'rgba(16,185,129,0.7)' : 'rgba(255,255,255,0.12)' }}>
+              <div className="shrink-0 w-10 h-5 rounded-full relative transition-all cursor-pointer"
+                style={{ background: hapticEnabled ? 'rgba(16,185,129,0.7)' : 'rgba(255,255,255,0.14)' }}>
                 <div className="absolute top-0.5 w-4 h-4 rounded-full transition-all"
                   style={{ background: '#fff', left: hapticEnabled ? '1.375rem' : '0.125rem', boxShadow: '0 1px 4px rgba(0,0,0,0.3)' }} />
               </div>
@@ -13639,6 +14063,11 @@ export const StudentDashboard: React.FC<Props> = ({
                 setCardBorderAnimOff(next);
                 try {
                   localStorage.setItem('nst_card_border_anim_off', next ? '1' : '0');
+                  if (next) {
+                    document.documentElement.classList.remove('global-rotating-border-cards');
+                  } else {
+                    document.documentElement.classList.add('global-rotating-border-cards');
+                  }
                   window.dispatchEvent(new Event('nst-card-border-anim-change'));
                 } catch {}
                 showAlert(next ? '✨ Card rotating border animation off kar di gayi' : '✨ Card rotating border animation on kar di gayi', 'SUCCESS');
@@ -13646,8 +14075,8 @@ export const StudentDashboard: React.FC<Props> = ({
               className={`w-full px-4 py-4 flex items-center gap-3.5 ${_pHovCls} transition-colors`}
               style={{ borderBottom: _pSep }}>
               <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{
-                background: !cardBorderAnimOff && settings?.cardBorderAnimation !== false ? 'rgba(59,130,246,0.15)' : _pIconBg,
-                border: `1px solid ${!cardBorderAnimOff && settings?.cardBorderAnimation !== false ? 'rgba(59,130,246,0.45)' : 'rgba(255,255,255,0.10)'}`,
+                background: !cardBorderAnimOff ? 'rgba(59,130,246,0.15)' : _pIconBg,
+                border: `1px solid ${!cardBorderAnimOff ? 'rgba(59,130,246,0.45)' : 'rgba(255,255,255,0.10)'}`,
               }}>
                 <span className="text-base leading-none">✨</span>
               </div>
@@ -13655,18 +14084,16 @@ export const StudentDashboard: React.FC<Props> = ({
                 <p className={`text-sm font-bold ${_pTxt}`}>Card Border Animation</p>
                 <p className={`text-[10px] mt-0.5 ${_pTxtSub}`}>
                   {!cardBorderAnimOff
-                    ? (settings?.cardBorderAnimation === false
-                        ? 'Admin dwara globally off hai'
-                        : 'Rotating border glow sabhi cards par active hai')
+                    ? 'Rotating border glow sabhi cards par active hai'
                     : 'Rotating border animation off hai'}
                 </p>
               </div>
-              <div className="shrink-0 w-10 h-5 rounded-full relative transition-all"
-                style={{ background: !cardBorderAnimOff && settings?.cardBorderAnimation !== false ? 'rgba(59,130,246,0.85)' : 'rgba(255,255,255,0.12)' }}>
+              <div className="shrink-0 w-10 h-5 rounded-full relative transition-all cursor-pointer"
+                style={{ background: !cardBorderAnimOff ? 'rgba(59,130,246,0.85)' : 'rgba(255,255,255,0.14)' }}>
                 <div className="absolute top-0.5 w-4 h-4 rounded-full transition-all"
                   style={{
                     background: '#fff',
-                    left: !cardBorderAnimOff && settings?.cardBorderAnimation !== false ? '1.375rem' : '0.125rem',
+                    left: !cardBorderAnimOff ? '1.375rem' : '0.125rem',
                     boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
                   }} />
               </div>
@@ -15087,21 +15514,17 @@ export const StudentDashboard: React.FC<Props> = ({
             user={user}
             settings={settings}
             activeTab={activeTab}
+            levelAnimOff={levelAnimOff}
             onOpenScorePanel={() => setShowScorePanel(true)}
           />
 
           {/* Right: Credits button */}
           <div className="flex items-center gap-1.5 shrink-0">
-            {/* Credit Balance with Plus (+) icon */}
+            {/* Credit Balance with Plus (+) icon - no background */}
             <button
               id="topbar-row2-credits-btn"
               onClick={() => onTabChange("STORE")}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full active:scale-95 transition-all shrink-0 cursor-pointer group"
-              style={{
-                background: 'rgba(245,158,11,0.18)',
-                border: '1px solid rgba(245,158,11,0.38)',
-                boxShadow: '0 1px 6px rgba(245,158,11,0.2)',
-              }}
+              className="inline-flex items-center gap-1 px-1 py-0.5 active:scale-95 transition-all shrink-0 cursor-pointer group select-none"
               title="Aapke Credits — Tap karke Store se aur paayein"
             >
               <span className="text-[12px] leading-none select-none">🪙</span>
@@ -19095,6 +19518,20 @@ export const StudentDashboard: React.FC<Props> = ({
                     >
                       <RotateCcw size={12} /> Rotate
                     </button>
+                    <button
+                      onClick={() => handleOpenGroupStudyForContext({
+                        contentType: lessonCompareFullViewMode === 'html' ? 'WRITING_NOTES' : 'READING_NOTES',
+                        title: lce.lessonTitle,
+                        subject: selectedSubject?.name,
+                        chapterTitle: lce.lessonTitle,
+                        board: selectedBoard,
+                        classLevel: selectedClass,
+                      })}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-black bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100 transition-all shadow-sm"
+                      title="Live Study Room"
+                    >
+                      <Users size={12} className="text-emerald-600" /> Live
+                    </button>
                   </div>
                   {lessonCompareFullViewMode === 'html' ? (
                     fullLessonHtml ? (
@@ -19132,6 +19569,7 @@ export const StudentDashboard: React.FC<Props> = ({
                           isBasicUser={_isBasicUser}
                           basicHtmlRemaining={basicHtmlRemaining}
                           userLevel={_userLevel}
+                          hideLockedTabs={!!(settings?.hideLockedForFreeAndBasic && _isFreeOrBasicUser)}
                           userCredits={user.credits || 0}
                           htmlUnlockCost={settings?.htmlUnlockCost ?? 5}
                           onHtmlOpen={_trackHtmlOpen}
@@ -19143,6 +19581,14 @@ export const StudentDashboard: React.FC<Props> = ({
                           isAdmin={user.role === 'ADMIN' || user.role === 'SUB_ADMIN'}
                           isAdminImportant={isTopicAdminImportant}
                           language="hi-IN"
+                          onOpenGroupStudy={() => handleOpenGroupStudyForContext({
+                            contentType: 'READING_NOTES',
+                            title: lce.lessonTitle,
+                            subject: selectedSubject?.name,
+                            chapterTitle: lce.lessonTitle,
+                            board: selectedBoard,
+                            classLevel: selectedClass,
+                          })}
                         />
                       </div>
                     ) : (
@@ -19531,6 +19977,52 @@ export const StudentDashboard: React.FC<Props> = ({
         onClose={() => setCurrentAudioTrack(null)}
       />
 
+      {/* ── FLOATING GROUP STUDY BUTTON (Home Page Only) ── */}
+      {activeTab === 'HOME' &&
+        !showRevisionHubScreen &&
+        !showMyRoutine &&
+        !showChat &&
+        !showStarredPage &&
+        !showProgressDashboard &&
+        !showDailyEventPage &&
+        !activeExternalApp &&
+        !isDocFullscreen &&
+        contentViewStep !== "PLAYER" &&
+        !isLandscapeUiHidden &&
+        !isInternalImmersive &&
+        !hwActiveHwId &&
+        !lucentNoteViewer &&
+        !coachingNotesReaderOpen &&
+        !isGroupStudyHidden && (
+          <div className="fixed bottom-[76px] right-3 sm:right-6 z-[250] pointer-events-auto flex items-center gap-2 animate-in fade-in slide-in-from-bottom-3 duration-300">
+            {/* Nsta Messenger Floating Button (Enlarged & Prominent) */}
+            <button
+              id="home-whatsapp-chat-fab"
+              type="button"
+              onClick={() => {
+                hapticMedium();
+                setShowWhatsAppChatModal(true);
+              }}
+              className="group relative flex items-center justify-center w-12 h-12 rounded-2xl shadow-xl border active:scale-95 transition-all duration-200 hover:scale-105"
+              style={{
+                background: 'linear-gradient(135deg, #4f46e5, #7c3aed, #db2777)',
+                borderColor: '#c084fc99',
+                boxShadow: '0 8px 20px -3px rgba(219, 39, 119, 0.45)',
+              }}
+              title="Nsta Messenger"
+              aria-label="Nsta Messenger"
+            >
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-amber-400 via-rose-500 to-purple-600 flex items-center justify-center text-white shadow-inner">
+                <MessageCircle size={19} className="fill-white stroke-purple-900" />
+              </div>
+              <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-pink-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500 border-2 border-white dark:border-slate-900" />
+              </span>
+            </button>
+          </div>
+        )}
+
       {/* FIXED BOTTOM NAVIGATION */}
       <nav
         data-iic-bottom-nav=""
@@ -19906,8 +20398,11 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
               : [((tierTheme as any).navActive || tierTheme.primary), ...DEFAULT_NAV_ACTIVE_COLORS.slice(1)];
             const getNavActiveColor = (index: number) =>
               navActiveColors[index] || (tierTheme as any).navActive || tierTheme.primary;
-            const getNavInactiveColor = () =>
-              (tierTheme as any).navInactive || '#ffffff';
+            const getNavInactiveColor = () => {
+              const custom = (tierTheme as any).navInactive;
+              if (custom && custom !== '#ffffff') return custom;
+              return _isNavDark ? 'rgba(255,255,255,0.65)' : 'rgba(15,23,42,0.65)';
+            };
 
             return (
               <>
@@ -20195,7 +20690,9 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                   </button>
                 );
 
-                const externalBtns = hasExternalApps ? settings!.externalApps!.map((app) => (
+                const externalBtns = hasExternalApps ? settings!.externalApps!
+                  .filter(app => !(settings?.hideLockedForFreeAndBasic && _isFreeOrBasicUser && app.isLocked))
+                  .map((app) => (
                   <button
                     key={app.id}
                     onClick={() => { handleExternalAppClick(app); setShowSidebar(false); }}
@@ -21925,6 +22422,19 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                   {lucentActiveTab === 'NOTES' && lucentNotesViewMode === 'html' && (
                     <>
                       <span className="text-[9px] font-black text-teal-600 bg-teal-50 border border-teal-200 px-1.5 py-0.5 rounded-full whitespace-nowrap shrink-0">✏️ WRITE</span>
+                      <button
+                        onClick={() => handleOpenGroupStudyForContext({
+                          contentType: 'WRITING_NOTES',
+                          title: `${entry.lessonTitle || 'Notes'} · Pg ${currentPage?.pageNo || safeIndex + 1}`,
+                          subject: entry.subject || 'Lucent',
+                          chapterTitle: entry.lessonTitle,
+                        })}
+                        className="h-7 px-2 flex items-center gap-1 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-700 active:scale-90 transition shrink-0"
+                        title="Live Writing Room"
+                      >
+                        <Users size={12} className="text-emerald-600" />
+                        <span className="text-[10px] font-black uppercase tracking-wider">Live</span>
+                      </button>
                       {_isAdminUser && (
                         <button onClick={() => { const src = (currentPage as any)?.htmlNotes || (currentPage as any)?.content || ''; setInlineEditContent(src); setInlineEditPoints(splitHtmlIntoBlocks(src)); setInlineEditPointIdx(null); setInlineEditPointDraft(''); setInlineEditModal({ type: 'lucent_html', entryId: entry.id, pageIndex: safeIndex, title: `${entry.lessonTitle} · Page ${currentPage?.pageNo ?? safeIndex + 1}`, originalEntry: entry }); setLucentWriteMenuOpen(false); }} className="w-7 h-7 flex items-center justify-center rounded-lg bg-orange-50 border border-orange-200 text-orange-500 active:scale-90 transition shrink-0" title="Edit HTML"><Pencil size={12} /></button>
                       )}
@@ -21950,6 +22460,19 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                   {/* MCQ MODE */}
                   {lucentActiveTab === 'MCQS' && (
                     <>
+                      <button
+                        onClick={() => handleOpenGroupStudyForContext({
+                          contentType: 'MCQ',
+                          title: `${entry.lessonTitle || 'MCQ'} · Pg ${currentPage?.pageNo || safeIndex + 1}`,
+                          subject: entry.subject || 'Lucent',
+                          chapterTitle: entry.lessonTitle,
+                        })}
+                        className="h-7 px-2 flex items-center gap-1 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-700 active:scale-90 transition shrink-0"
+                        title="Live MCQ Room"
+                      >
+                        <Users size={12} className="text-emerald-600" />
+                        <span className="text-[10px] font-black uppercase tracking-wider">Live</span>
+                      </button>
                       <button
                         onClick={() => {
                           const next = !lucentMcqAutoTts;
@@ -21992,6 +22515,20 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                   {/* PDF MODE */}
                   {lucentActiveTab === 'PDF' && (
                     <>
+                      <button
+                        onClick={() => handleOpenGroupStudyForContext({
+                          contentType: 'PDF',
+                          title: `${entry.lessonTitle || 'PDF'} · Pg ${currentPage?.pageNo || safeIndex + 1}`,
+                          subject: entry.subject || 'Lucent',
+                          chapterTitle: entry.lessonTitle,
+                          pdfUrl: (currentPage as any)?.pdfUrl,
+                        })}
+                        className="h-7 px-2 flex items-center gap-1 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-700 active:scale-90 transition shrink-0"
+                        title="Live PDF Room"
+                      >
+                        <Users size={12} className="text-emerald-600" />
+                        <span className="text-[10px] font-black uppercase tracking-wider">Live</span>
+                      </button>
                       <button onClick={async () => { const r = await rotateScreen(); if (r !== null) { setLucentPdfRotated(r === 'landscape'); } else { alert('📱 Phone ko sideways karein'); } }} className={`w-7 h-7 flex items-center justify-center rounded-lg border active:scale-90 transition shrink-0 ${lucentPdfRotated ? 'bg-emerald-50 border-emerald-300 text-emerald-600' : 'bg-slate-100 border-slate-200 text-slate-500'}`} title="Rotate"><RotateCcw size={12} /></button>
                       <button onClick={() => setLucentPdfNight(m => m === 'normal' ? 'night' : m === 'night' ? 'sepia' : 'normal')} className={`w-7 h-7 flex items-center justify-center rounded-lg border active:scale-90 transition shrink-0 text-sm ${lucentPdfNight !== 'normal' ? 'bg-indigo-50 border-indigo-300' : 'bg-slate-100 border-slate-200'}`} title="Night/Sepia">{lucentPdfNight === 'night' ? '🌙' : lucentPdfNight === 'sepia' ? '📜' : '☀️'}</button>
                       <button onClick={() => setLucentImmersive(v => !v)} className={`w-7 h-7 flex items-center justify-center rounded-lg border active:scale-90 transition shrink-0 ${lucentImmersive ? 'bg-indigo-50 border-indigo-300 text-indigo-600' : 'bg-slate-100 border-slate-200 text-slate-500'}`} title="Focus">{lucentImmersive ? <Minimize2 size={12} /> : <Maximize2 size={12} />}</button>
@@ -22142,6 +22679,12 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                     key={`lucent-reader-${entry.id}-${safeIndex}-${autoSyncOn ? 'auto' : 'manual'}-chunk`}
                     onBack={closeLucentViewer}
                     triggerControlsRef={lucentControlsRef}
+                    onOpenGroupStudy={() => handleOpenGroupStudyForContext({
+                      contentType: 'READING_NOTES',
+                      title: `${entry.lessonTitle || 'Lucent'} · Pg ${currentPage?.pageNo || safeIndex + 1}`,
+                      subject: entry.subject || 'Lucent Samanya Gyan',
+                      chapterTitle: entry.lessonTitle,
+                    })}
                     onMoreOptions={undefined}
                     onSaveOffline={() => handleLucentSaveOffline(false)}
                     isSavedOffline={lucentSaved}
@@ -22150,6 +22693,7 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                     isBasicUser={_isBasicUser}
                     basicHtmlRemaining={basicHtmlRemaining}
                     userLevel={_userLevel}
+                    hideLockedTabs={!!(settings?.hideLockedForFreeAndBasic && _isFreeOrBasicUser)}
                     userCredits={user.credits || 0}
                     htmlUnlockCost={settings?.htmlUnlockCost ?? 5}
                     onHtmlOpen={_trackHtmlOpen}
@@ -24543,7 +25087,7 @@ RULES:
           mode: 'READING' | 'WRITING' | 'MCQ' | 'QA' | 'FLASHCARD',
           action: () => void,
         ) => {
-          if (_isAdminUser) { action(); return; }
+          if (_isAdminUser || fl?.isCompetition) { action(); return; }
           const modeConfig = {
             READING: { label: 'Reading Mode', isUnlocked: isPgReadUnlocked(_overlayUnlockId, _overlayUnlockPage), mark: () => markPgReadUnlocked(_overlayUnlockId, _overlayUnlockPage) },
             WRITING: { label: 'Writing Mode', isUnlocked: isPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage), mark: () => markPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage) },
@@ -24583,36 +25127,68 @@ RULES:
         const tabBarNode = fl ? (
            <div className="border-b border-[#30315a] shadow-[0_2px_8px_rgba(10,12,45,0.22)] shrink-0 overflow-x-auto bg-[#17183a]" style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' } as any}>
              <div className="flex min-w-max bg-[#17183a]">
+              {/* Back button */}
+              <button
+                style={{ minWidth: 64, padding: '0 10px' }}
+                className="flex items-center justify-center gap-1 text-slate-300 hover:text-white bg-[#1a1b40] border-r border-white/10 text-xs font-bold shrink-0 transition"
+                onClick={() => {
+                  stopSpeech();
+                  setFlashcardMcqs(null);
+                }}
+                title="Exit / Back"
+              >
+                <ChevronRight size={14} className="rotate-180 text-slate-400" />
+                <span>Back</span>
+              </button>
               {/* Reading Mode */}
               <button style={_ts} className={_tcls(false, 'bg-indigo-600')}
                 onClick={() => {
-                   _gateOverlayMode('READING', () => {
+                   stopSpeech();
+                   if (fl?.isCompetition) {
                      setFlashcardMcqs(null);
-                     if (fl?.isCompetition) { setHwViewMode('notes'); setHwNotesViewMode('chunk'); }
-                     else { setLucentActiveTab('NOTES'); setLucentNotesViewMode('chunk'); }
-                   });
+                     setHwViewMode('notes');
+                     setHwNotesViewMode('chunk');
+                   } else {
+                     _gateOverlayMode('READING', () => {
+                       setFlashcardMcqs(null);
+                       setLucentActiveTab('NOTES');
+                       setLucentNotesViewMode('chunk');
+                     });
+                   }
                 }}>
                 Reading Mode
               </button>
               {/* Writing Mode — coin gate for competition */}
               <button style={_ts} className={_tcls(false, 'bg-teal-600')}
                 onClick={() => {
-                   _gateOverlayMode('WRITING', () => {
+                   stopSpeech();
+                   if (fl?.isCompetition) {
                      setFlashcardMcqs(null);
-                     if (fl?.isCompetition) { setHwViewMode('notes'); setHwNotesViewMode('html'); }
-                     else { setLucentActiveTab('NOTES'); setLucentNotesViewMode('html'); }
-                   });
+                     setHwViewMode('notes');
+                     setHwNotesViewMode('html');
+                   } else {
+                     _gateOverlayMode('WRITING', () => {
+                       setFlashcardMcqs(null);
+                       setLucentActiveTab('NOTES');
+                       setLucentNotesViewMode('html');
+                     });
+                   }
                 }}>
                 Writing Mode
               </button>
               {fl.hasMcq && (
                 <button style={_ts} className={_tcls(false, 'bg-purple-600')}
                   onClick={() => {
-                     _gateOverlayMode('MCQ', () => {
+                     stopSpeech();
+                     if (fl?.isCompetition) {
                        setFlashcardMcqs(null);
-                       if (fl?.isCompetition) { setHwViewMode('mcq'); }
-                       else { setLucentActiveTab('MCQS'); }
-                     });
+                       setHwViewMode('mcq');
+                     } else {
+                       _gateOverlayMode('MCQ', () => {
+                         setFlashcardMcqs(null);
+                         setLucentActiveTab('MCQS');
+                       });
+                     }
                   }}>
                   MCQ Practice
                 </button>
@@ -24623,13 +25199,22 @@ RULES:
                   className={_tcls(fl.activeMode === 'projector', 'bg-amber-500')}
                   onClick={() => {
                      if (fl.activeMode === 'projector') return;
-                     handleProjectorModeGate(_overlayUnlockId, _overlayUnlockPage, () => {
+                     stopSpeech();
+                     if (fl?.isCompetition) {
                        setFlashcardMcqs(prev => prev ? {
                          ...prev,
                          startInProjectorMode: true,
                          fromLesson: prev.fromLesson ? { ...prev.fromLesson, activeMode: 'projector' } : prev.fromLesson,
                        } : null);
-                     });
+                     } else {
+                       handleProjectorModeGate(_overlayUnlockId, _overlayUnlockPage, () => {
+                         setFlashcardMcqs(prev => prev ? {
+                           ...prev,
+                           startInProjectorMode: true,
+                           fromLesson: prev.fromLesson ? { ...prev.fromLesson, activeMode: 'projector' } : prev.fromLesson,
+                         } : null);
+                       });
+                     }
                   }}>
                   🎯 Premium MCQ
                 </button>
@@ -24637,53 +25222,73 @@ RULES:
               {fl.hasMcq && (
                 <button style={_ts}
                   ref={el => { if (el && fl.activeMode === 'flashcard' && !el.dataset.scrolled) { el.dataset.scrolled = '1'; el.scrollIntoView({ behavior: 'instant' as ScrollBehavior, inline: 'center', block: 'nearest' }); } }}
-                  className={_tcls(fl.activeMode === 'flashcard', 'bg-amber-500') + (!_isUltraUser && !_isAdminUser ? ' opacity-60' : '')}
+                  className={_tcls(fl.activeMode === 'flashcard', 'bg-amber-500') + (!_isUltraUser && !_isAdminUser && !fl?.isCompetition ? ' opacity-60' : '')}
                   onClick={() => {
-                    if (!_isUltraUser && !_isAdminUser) { showAlert('🔒 Flashcard ke liye ULTRA subscription chahiye!', 'INFO'); return; }
+                    if (!_isUltraUser && !_isAdminUser && !fl?.isCompetition) { showAlert('🔒 Flashcard ke liye ULTRA subscription chahiye!', 'INFO'); return; }
                      if (fl.activeMode !== 'flashcard') {
-                       _gateOverlayMode('FLASHCARD', () => setFlashcardMcqs(prev => prev ? {
+                       stopSpeech();
+                       setFlashcardMcqs(prev => prev ? {
                          ...prev,
                          startInProjectorMode: false,
                          fromLesson: prev.fromLesson ? { ...prev.fromLesson, activeMode: 'flashcard' } : prev.fromLesson,
-                       } : null));
+                       } : null);
                      }
                   }}>
-                  {!_isUltraUser && !_isAdminUser ? '🔒' : '🃏'} Flashcard
+                  {!_isUltraUser && !_isAdminUser && !fl?.isCompetition ? '🔒' : '🃏'} Flashcard
                 </button>
               )}
               {fl.hasPdf && (
                 <button style={_ts}
-                  className={_tcls(false, 'bg-blue-600') + (!_isBasicUser && !_isUltraUser && !_isAdminUser ? ' opacity-60' : '')}
+                  className={_tcls(false, 'bg-blue-600') + (!_isBasicUser && !_isUltraUser && !_isAdminUser && !fl?.isCompetition ? ' opacity-60' : '')}
                   onClick={() => {
-                    if (!_isBasicUser && !_isUltraUser && !_isAdminUser) { showAlert('🔒 PDF ke liye BASIC subscription chahiye!', 'INFO'); return; }
+                    if (!_isBasicUser && !_isUltraUser && !_isAdminUser && !fl?.isCompetition) { showAlert('🔒 PDF ke liye BASIC subscription chahiye!', 'INFO'); return; }
+                    stopSpeech();
                     setFlashcardMcqs(null);
                     if (fl.isCompetition) { setHwViewMode('pdf'); } else { setLucentActiveTab('PDF'); }
                   }}>
-                  {!_isBasicUser && !_isUltraUser && !_isAdminUser ? '🔒' : ''} PDF
+                  {!_isBasicUser && !_isUltraUser && !_isAdminUser && !fl?.isCompetition ? '🔒' : ''} PDF
                 </button>
               )}
               {fl.hasVideo && (
                 <button style={_ts}
-                  className={_tcls(false, 'bg-rose-600') + (!_isUltraUser && !_isAdminUser ? ' opacity-60' : '')}
+                  className={_tcls(false, 'bg-rose-600') + (!_isUltraUser && !_isAdminUser && !fl?.isCompetition ? ' opacity-60' : '')}
                   onClick={() => {
-                    if (!_isUltraUser && !_isAdminUser) { showAlert('🔒 Video ke liye ULTRA subscription chahiye!', 'INFO'); return; }
+                    if (!_isUltraUser && !_isAdminUser && !fl?.isCompetition) { showAlert('🔒 Video ke liye ULTRA subscription chahiye!', 'INFO'); return; }
+                    stopSpeech();
                     setFlashcardMcqs(null);
                     if (fl.isCompetition) { setHwViewMode('video'); } else { setLucentActiveTab('VIDEO'); }
                   }}>
-                  {!_isUltraUser && !_isAdminUser ? '🔒' : ''} Video
+                  {!_isUltraUser && !_isAdminUser && !fl?.isCompetition ? '🔒' : ''} Video
                 </button>
               )}
               {fl.hasAudio && (
                 <button style={_ts}
-                  className={_tcls(false, 'bg-violet-600') + (!_isUltraUser && !_isAdminUser ? ' opacity-60' : '')}
+                  className={_tcls(false, 'bg-violet-600') + (!_isUltraUser && !_isAdminUser && !fl?.isCompetition ? ' opacity-60' : '')}
                   onClick={() => {
-                    if (!_isUltraUser && !_isAdminUser) { showAlert('🔒 Audio ke liye ULTRA subscription chahiye!', 'INFO'); return; }
+                    if (!_isUltraUser && !_isAdminUser && !fl?.isCompetition) { showAlert('🔒 Audio ke liye ULTRA subscription chahiye!', 'INFO'); return; }
+                    stopSpeech();
                     setFlashcardMcqs(null);
                     if (fl.isCompetition) { setHwViewMode('audio'); } else { setLucentActiveTab('AUDIO'); }
                   }}>
-                  {!_isUltraUser && !_isAdminUser ? '🔒' : ''} Audio
+                  {!_isUltraUser && !_isAdminUser && !fl?.isCompetition ? '🔒' : ''} Audio
                 </button>
               )}
+              {/* Live Class Option in Projector / Lesson bar */}
+              <button
+                style={{ minWidth: 72, padding: '0 12px' }}
+                className="flex items-center justify-center gap-1.5 text-pink-300 hover:text-pink-100 bg-pink-950/50 hover:bg-pink-900/60 border-l border-pink-500/30 text-xs font-black shrink-0 transition"
+                onClick={() => handleOpenGroupStudyForContext({
+                  contentType: 'MCQ',
+                  title: flashcardMcqs?.title || 'Live Projector MCQs',
+                  subject: flashcardMcqs?.subject || 'Live Class',
+                  chapterTitle: flashcardMcqs?.title,
+                  totalQuestions: flashcardMcqs?.items?.length,
+                })}
+                title="Live Study Room"
+              >
+                <Radio size={13} className="animate-pulse text-pink-400" />
+                <span>LIVE</span>
+              </button>
             </div>
           </div>
         ) : undefined;
@@ -24718,6 +25323,13 @@ RULES:
               subtitle={flashcardMcqs.subtitle}
               subject={flashcardMcqs.subject}
               onBack={() => setFlashcardMcqs(null)}
+              onOpenGroupStudy={() => handleOpenGroupStudyForContext({
+                contentType: 'FLASHCARD',
+                title: flashcardMcqs.title,
+                subject: flashcardMcqs.subject,
+                chapterTitle: flashcardMcqs.title,
+                totalQuestions: flashcardMcqs.items?.length,
+              })}
               user={user}
               settings={settings}
               onUpdateUser={handleUserUpdate}
@@ -24823,6 +25435,20 @@ RULES:
                 <p className="text-sm font-black text-white truncate leading-tight">{compMcqSession.title}</p>
                 <p className="text-[10px] font-bold text-white/70 leading-tight">{compMcqSession.subtitle}</p>
               </div>
+              <button
+                onClick={() => handleOpenGroupStudyForContext({
+                  contentType: 'PREMIUM_MCQ',
+                  title: compMcqSession.title,
+                  subject: 'Competition',
+                  chapterTitle: compMcqSession.title,
+                  totalQuestions: totalQ,
+                })}
+                className="px-2.5 py-1.5 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 text-emerald-300 flex items-center gap-1 active:scale-95 transition shrink-0"
+                title="Live Battle Room"
+              >
+                <Users size={14} className="text-emerald-300" />
+                <span className="text-[10px] font-black uppercase tracking-wider">Live</span>
+              </button>
               {attempted > 0 && !compMcqShowReview && (
                 <span className="text-[11px] font-black text-white/80 shrink-0">{attempted}/{totalQ}</span>
               )}
@@ -24965,6 +25591,29 @@ RULES:
                        onSelect={handleCompOption}
                         actions={(
                           <>
+                            {activeGroupStudyRoom && (activeGroupStudyRoom.hostId === user.id || user.role === 'ADMIN') && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  broadcastHostMcq(activeGroupStudyRoom.id, {
+                                    chapterTitle: compMcqSession?.title || 'Live MCQ',
+                                    questionIndex: ci,
+                                    totalQuestions: totalQ,
+                                    questionText: cq.question,
+                                    options: cq.options || [],
+                                    correctIndex: cq.correctAnswer,
+                                    explanation: cq.explanation || '',
+                                    durationSeconds: 30,
+                                  });
+                                }}
+                                aria-label="Broadcast MCQ to Room"
+                                title="Broadcast to Live Room Students"
+                                className="shrink-0 px-2.5 py-1 rounded-full bg-rose-500 hover:bg-rose-600 text-white text-[10px] font-black flex items-center gap-1 active:scale-95 transition shadow"
+                              >
+                                <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                                <span>Broadcast</span>
+                              </button>
+                            )}
                             <McqSpeakButtons
                               question={cq.question}
                               options={cq.options}
@@ -27478,7 +28127,7 @@ RULES:
 
         return (
         <div
-          className="fixed inset-0 z-[99999] flex items-center justify-center px-4"
+          className="fixed inset-0 z-[100000] flex items-center justify-center px-4"
           style={{ background: 'rgba(4,4,22,0.9)', backdropFilter: 'blur(20px)' }}
           onClick={dismissGate}
         >
@@ -28897,6 +29546,69 @@ Explanation: Yahan explanation...`}</p>
         activeTab={activeTab as string}
         onTabChange={t => onTabChange(t as any)}
       />
+
+      {/* Group Study & Live Classroom Modal */}
+      <GroupStudyModal
+        isOpen={showGroupStudyModal && !isGroupStudyHidden}
+        onClose={() => {
+          setShowGroupStudyModal(false);
+          setGroupStudyPrefilledContext(null);
+        }}
+        prefilledContext={groupStudyPrefilledContext}
+        user={user}
+        settings={settings}
+        tierTheme={tierTheme}
+        activeRoom={activeGroupStudyRoom}
+        onActiveRoomChange={handleActiveRoomChange}
+        onOpenStore={() => onTabChange('STORE')}
+        onNavigateToContent={handleNavigateFromGroupStudy}
+      />
+
+      {/* Floating Live Dot / HUD for Live Classroom Synchronization */}
+      {activeGroupStudyRoom && !isGroupStudyHidden && !showGroupStudyModal && (
+        <LiveSessionIndicator
+          room={activeGroupStudyRoom}
+          currentUser={user}
+          settings={settings}
+          onOpenRoomModal={() => setShowGroupStudyModal(true)}
+          onLeaveRoom={() => {
+            leaveGroupRoom(activeGroupStudyRoom.id, user.id);
+            setActiveGroupStudyRoom(null);
+          }}
+          onFollowHost={handleFollowHost}
+          autoFollowHost={autoFollowHost}
+          onToggleAutoFollow={setAutoFollowHost}
+          onBroadcastCurrentMcq={() => {
+            if (!activeGroupStudyRoom) return;
+            broadcastHostMcq(activeGroupStudyRoom.id, {
+              chapterTitle: selectedChapter?.title || 'Live Classroom MCQ',
+              questionIndex: 0,
+              totalQuestions: 1,
+              questionText: `${selectedChapter?.title || 'Chapter Study'}: Live Quiz Question`,
+              options: ['Option A', 'Option B', 'Option C', 'Option D'],
+              correctIndex: 0,
+              explanation: 'Live answer explanation.',
+              durationSeconds: 30,
+            });
+          }}
+          isCurrentPageMcq={activeTab === 'MCQ' || !!compMcqSession}
+          isMinimized={isLiveSessionMinimized}
+          onMinimizeChange={setIsLiveSessionMinimized}
+        />
+      )}
+
+      {/* WhatsApp Study Chat Modal (Private DMs & Groups) */}
+      {showWhatsAppChatModal && (
+        <WhatsAppChatModal
+          user={user}
+          onClose={() => setShowWhatsAppChatModal(false)}
+          onOpenGroupStudy={() => {
+            setShowWhatsAppChatModal(false);
+            setShowGroupStudyModal(true);
+          }}
+          onUpdateUser={handleUserUpdate}
+        />
+      )}
     </div>
   </ThemeProvider>
   );

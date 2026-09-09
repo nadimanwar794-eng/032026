@@ -8,6 +8,7 @@ interface TopBarRow2XpBarProps {
   settings?: SystemSettings;
   activeTab: string;
   onOpenScorePanel: () => void;
+  levelAnimOff?: boolean;
 }
 
 export const TopBarRow2XpBar: React.FC<TopBarRow2XpBarProps> = ({
@@ -15,7 +16,11 @@ export const TopBarRow2XpBar: React.FC<TopBarRow2XpBarProps> = ({
   settings,
   activeTab,
   onOpenScorePanel,
+  levelAnimOff: propLevelAnimOff,
 }) => {
+  const isLevelAnimDisabled = propLevelAnimOff ?? (() => {
+    try { return localStorage.getItem('nst_level_anim_off') === '1'; } catch { return false; }
+  })();
   const currentTotalScore = user.totalScore || 0;
   const currentLevelInfo = getLevelInfo(currentTotalScore, settings);
   const nextLevelInfo = getNextLevelInfo(currentTotalScore);
@@ -31,12 +36,8 @@ export const TopBarRow2XpBar: React.FC<TopBarRow2XpBarProps> = ({
   // Shimmer key to trigger the shine sweep animation
   const [shimmerKey, setShimmerKey] = useState<number>(0);
 
-  // Calculation badge state: "1184 + 80 = 1264"
-  const [xpGainAnim, setXpGainAnim] = useState<{
-    oldScore: number;
-    delta: number;
-    newScore: number;
-  } | null>(null);
+  // Level-up celebration state (e.g. Lv 2)
+  const [levelUpAnim, setLevelUpAnim] = useState<number | null>(null);
 
   // 1. Shimmer shine sweep once when entering HOME tab
   useEffect(() => {
@@ -49,7 +50,7 @@ export const TopBarRow2XpBar: React.FC<TopBarRow2XpBarProps> = ({
     return undefined;
   }, [activeTab]);
 
-  // 2. Animate bar and show calculation on XP increase
+  // 2. Animate bar on score increase and celebrate if level increased
   useEffect(() => {
     if (isInitialMount.current) {
       isInitialMount.current = false;
@@ -60,39 +61,38 @@ export const TopBarRow2XpBar: React.FC<TopBarRow2XpBarProps> = ({
 
     const prev = prevScoreRef.current;
     if (currentTotalScore > prev && prev > 0) {
-      const delta = currentTotalScore - prev;
+      const oldLevel = getLevelInfo(prev, settings).level;
+      const newLevel = getLevelInfo(currentTotalScore, settings).level;
       const oldPct = getLevelProgress(prev);
       const newPct = getLevelProgress(currentTotalScore);
 
       // Start from oldPct so bar smoothly fills forward
       setDisplayedPct(oldPct);
 
-      setXpGainAnim({
-        oldScore: prev,
-        delta,
-        newScore: currentTotalScore,
-      });
+      let hideTimer: ReturnType<typeof setTimeout> | undefined;
+      if (newLevel > oldLevel) {
+        setLevelUpAnim(newLevel);
+        hideTimer = setTimeout(() => {
+          setLevelUpAnim(null);
+        }, 5000);
+      }
 
       const animTimer = setTimeout(() => {
         setDisplayedPct(newPct);
         setShimmerKey(k => k + 1);
       }, 60);
 
-      const hideTimer = setTimeout(() => {
-        setXpGainAnim(null);
-      }, 10000); // Show for exactly 10 seconds, then automatically switch to new total score
-
       prevScoreRef.current = currentTotalScore;
       return () => {
         clearTimeout(animTimer);
-        clearTimeout(hideTimer);
+        if (hideTimer) clearTimeout(hideTimer);
       };
     } else {
       setDisplayedPct(currentLevelPct);
       prevScoreRef.current = currentTotalScore;
       return undefined;
     }
-  }, [currentTotalScore, currentLevelPct]);
+  }, [currentTotalScore, currentLevelPct, settings]);
 
   const clampedPct = Math.min(100, Math.max(0, displayedPct));
   const levelColor = currentLevelInfo.color || '#38bdf8';
@@ -136,11 +136,11 @@ export const TopBarRow2XpBar: React.FC<TopBarRow2XpBarProps> = ({
         }
         @keyframes row2BinduPulse {
           0%, 100% {
-            transform: translate(-50%, -50%) scale(1);
+            transform: scale(1);
             box-shadow: 0 0 8px 2px ${levelGlow}, 0 0 3px #fff;
           }
           50% {
-            transform: translate(-50%, -50%) scale(1.2);
+            transform: scale(1.2);
             box-shadow: 0 0 12px 3px ${levelGlow}, 0 0 5px #fff;
           }
         }
@@ -151,7 +151,7 @@ export const TopBarRow2XpBar: React.FC<TopBarRow2XpBarProps> = ({
         id="topbar-row2-xp-track-container"
         onClick={onOpenScorePanel}
         className="relative flex-1 min-w-[50px] cursor-pointer py-1 group"
-        title={`Level ${currentLevelInfo.level}: ${Math.round(clampedPct)}% (${currentTotalScore.toLocaleString('en-IN')} XP)`}
+        title={`Level ${currentLevelInfo.level} (${currentLevelInfo.label}): ${Math.round(clampedPct)}%`}
       >
         {/* Track bar */}
         <div className="relative w-full h-1.5 sm:h-2 rounded-full overflow-hidden bg-white/20 border border-white/25">
@@ -166,22 +166,24 @@ export const TopBarRow2XpBar: React.FC<TopBarRow2XpBarProps> = ({
             }}
           >
             {/* Shimmer light sweep — sweeps on Home tab land or on XP gain */}
-            <div
-              key={shimmerKey}
-              className="absolute inset-0 pointer-events-none"
-              style={{
-                width: '60%',
-                background: 'linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.95) 50%, transparent 100%)',
-                animation: shimmerKey > 0 ? 'row2ShimmerSweep 1.2s cubic-bezier(0.4, 0, 0.2, 1) forwards' : 'none',
-              }}
-            />
+            {!isLevelAnimDisabled && (
+              <div
+                key={shimmerKey}
+                className="absolute inset-0 pointer-events-none"
+                style={{
+                  width: '60%',
+                  background: 'linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.95) 50%, transparent 100%)',
+                  animation: shimmerKey > 0 ? 'row2ShimmerSweep 1.2s cubic-bezier(0.4, 0, 0.2, 1) forwards' : 'none',
+                }}
+              />
+            )}
           </div>
         </div>
 
         {/* HIGHLIGHTED BINDU (GLOWING INDICATOR DOT) AT PROGRESS ENDPOINT */}
         <div
           id="topbar-row2-xp-bindu"
-          className="absolute top-1/2 pointer-events-none z-10"
+          className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none z-10"
           style={{
             left: `${clampedPct}%`,
             transition: 'left 1.2s cubic-bezier(0.22, 1, 0.36, 1)',
@@ -190,49 +192,38 @@ export const TopBarRow2XpBar: React.FC<TopBarRow2XpBarProps> = ({
           <div
             className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full bg-white border border-amber-300 pointer-events-none"
             style={{
-              animation: 'row2BinduPulse 2s infinite ease-in-out',
+              animation: isLevelAnimDisabled ? 'none' : 'row2BinduPulse 2s infinite ease-in-out',
+              boxShadow: isLevelAnimDisabled ? `0 0 4px ${levelGlow}` : undefined,
             }}
           />
         </div>
       </div>
 
-      {/* TOTAL XP BUTTON (FULL DETAILS, NEVER 1.1K) OR XP GAIN ANIMATION BADGE */}
-      {xpGainAnim ? (
-        /* Animated calculation badge: 1184 + 80 = 1264 */
-        <div
-          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black shrink-0 border select-none"
-          style={{
-            animation: 'row2GainPop 0.35s ease-out forwards',
-            background: 'linear-gradient(135deg, #f59e0b, #ea580c)',
-            borderColor: '#fde047',
-            color: '#ffffff',
-            boxShadow: '0 1px 8px rgba(245, 158, 11, 0.45)',
-          }}
-        >
-          <Zap size={10} className="text-yellow-200 fill-yellow-200 animate-pulse" />
-          <span className="tabular-nums font-bold text-amber-100">{xpGainAnim.oldScore.toLocaleString('en-IN')}</span>
-          <span className="text-yellow-300 font-bold">+{xpGainAnim.delta.toLocaleString('en-IN')}</span>
-          <span className="text-amber-200 font-bold">=</span>
-          <span className="tabular-nums font-black text-white underline decoration-yellow-300">
-            {xpGainAnim.newScore.toLocaleString('en-IN')}
-          </span>
-        </div>
-      ) : (
-        /* Total XP button in full details (e.g. 1,184 XP) */
+      {/* LEVEL DISPLAY BUTTON (e.g. Lv 1) OR LEVEL UP ANIMATION BADGE */}
+      {levelUpAnim ? (
+        /* Animated level-up celebration badge */
         <button
           id="topbar-row2-total-xp-btn"
           onClick={onOpenScorePanel}
-          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full active:scale-95 transition-all shrink-0 cursor-pointer group select-none"
+          className="inline-flex items-center gap-0.5 px-1 py-0.5 select-none active:scale-95 cursor-pointer"
           style={{
-            background: 'rgba(56, 189, 248, 0.18)',
-            border: '1px solid rgba(56, 189, 248, 0.38)',
-            boxShadow: '0 1px 6px rgba(56, 189, 248, 0.2)',
+            animation: 'row2GainPop 0.35s ease-out forwards',
           }}
-          title="Total XP Details — Tap karke Level details dekhein"
+          title={`Level Up! Level ${levelUpAnim} — Tap karke details dekhein`}
         >
-          <span className="text-[10px] leading-none select-none">🏆</span>
-          <span className="font-black text-[10.5px] tabular-nums text-sky-200 group-hover:text-sky-100">
-            {currentTotalScore.toLocaleString('en-IN')} XP
+          <Zap size={10} className="text-yellow-300 fill-yellow-300 animate-pulse" />
+          <span className="font-black text-[11px] text-amber-300 whitespace-nowrap">Lv {levelUpAnim}</span>
+        </button>
+      ) : (
+        /* Level button showing Lv {level} (e.g. Lv 1) - no background */
+        <button
+          id="topbar-row2-total-xp-btn"
+          onClick={onOpenScorePanel}
+          className="inline-flex items-center gap-0.5 px-1 py-0.5 active:scale-95 transition-all shrink-0 cursor-pointer group select-none"
+          title={`Level ${currentLevelInfo.level} (${currentLevelInfo.label}) — Tap karke Level details dekhein`}
+        >
+          <span className="font-black text-[11px] tabular-nums text-sky-200 group-hover:text-sky-100 whitespace-nowrap tracking-wide">
+            Lv {currentLevelInfo.level}
           </span>
         </button>
       )}
