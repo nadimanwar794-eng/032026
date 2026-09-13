@@ -1,0 +1,724 @@
+// @ts-nocheck
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { User, TopicItem } from '../types';
+import { X, Play, BookOpen, CheckCircle, Loader2, Pause, Volume2, SkipForward, FileText } from 'lucide-react';
+import { getChapterData } from '../firebase';
+import { storage } from '../utils/storage';
+import { DEFAULT_SUBJECTS } from '../constants';
+import { SpeakButton } from './SpeakButton';
+import { formatMcqNotes, findRelevantNote } from '../utils/noteFormatter';
+import { ChunkedNotesReader } from './ChunkedNotesReader';
+import { renderMathInHtml } from '../utils/mathUtils';
+import { tryEarnScore } from '../utils/scoreSystem';
+import { getEffectiveDailyLimit, getLevelInfo, UNLIMITED } from '../utils/levelSystem';
+import { SubscriptionEngine } from '../utils/engines/subscriptionEngine';
+
+interface Props {
+    user: User;
+    topics: TopicItem[];
+    onClose: () => void;
+    onComplete: (completedTopics: TopicItem[]) => void;
+}
+
+interface LoadedTopic extends TopicItem {
+    content: string; // HTML Content
+    plainText: string; // For TTS fallback or analysis
+}
+
+export const TodayRevisionView: React.FC<Props> = ({ user, topics, onClose, onComplete }) => {
+    const [loading, setLoading] = useState(true);
+    const [loadedTopics, setLoadedTopics] = useState<LoadedTopic[]>([]);
+    const [showExitConfirm, setShowExitConfirm] = useState(false);
+    const [completedTopicIds, setCompletedTopicIds] = useState<Set<string>>(new Set());
+
+    // ── Per-topic 60-second minimum reading enforcement ───────────────────────
+    const MIN_READ_SECS = 60;
+    const [topicTimers, setTopicTimers]   = useState<Record<string, number>>({});
+    const [activeTopicId, setActiveTopicId] = useState<string | null>(null);
+    const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    // ── Level-based Notes Daily Limit ─────────────────────────────────────────
+    const _getNotesLimit = () => {
+        const _subValid = SubscriptionEngine.isPremium(user);
+        const _tier: 'FREE' | 'BASIC' | 'ULTRA' =
+            _subValid && user.subscriptionLevel === 'ULTRA' ? 'ULTRA' :
+            _subValid && user.subscriptionLevel === 'BASIC' ? 'BASIC' : 'FREE';
+        const userLevel = getLevelInfo(user.totalScore || 0).level;
+        return getEffectiveDailyLimit('notes', userLevel, _tier);
+    };
+    const _getTodayNotesKey = () => {
+        const today = new Date().toISOString().split('T')[0];
+        return `nst_revision_notes_today_${user.id}_${today}`;
+    };
+    const _getTodayNotesCount = () => {
+        try { return parseInt(localStorage.getItem(_getTodayNotesKey()) || '0', 10); } catch { return 0; }
+    };
+    const _addTodayNotesCount = (n: number) => {
+        try { localStorage.setItem(_getTodayNotesKey(), String(_getTodayNotesCount() + n)); } catch {}
+    };
+
+    const notesLimit = _getNotesLimit();
+    const [dailyNotesRemaining, setDailyNotesRemaining] = useState<number>(() => {
+        if (notesLimit === UNLIMITED) return UNLIMITED;
+        return Math.max(0, notesLimit - _getTodayNotesCount());
+    });
+    const [limitReached, setLimitReached] = useState(dailyNotesRemaining === 0 && notesLimit !== UNLIMITED);
+
+    // ── Revision Score System (1 min = +10, need ≥5% scroll) ──────────────────
+    const [revisionScore, setRevisionScore]     = useState(0);
+    const [scorePopup, setScorePopup]           = useState<number | null>(null);
+    const [scorePopupVisible, setScorePopupVisible] = useState(false);
+    const scrollContainerRef                    = useRef<HTMLDivElement | null>(null);
+    const lastValidationScrollRef               = useRef(0);
+    const scoreTimerRef                         = useRef<ReturnType<typeof setInterval> | null>(null);
+    const popupTimerRef                         = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const showScoreReward = useCallback((pts: number) => {
+        if (popupTimerRef.current) clearTimeout(popupTimerRef.current);
+        setScorePopup(pts);
+        setScorePopupVisible(true);
+        popupTimerRef.current = setTimeout(() => setScorePopupVisible(false), 2500);
+    }, []);
+
+    useEffect(() => {
+        if (loading) return;
+
+        scoreTimerRef.current = setInterval(() => {
+            const el = scrollContainerRef.current;
+            if (!el) return;
+            const max = el.scrollHeight - el.clientHeight;
+            const currentPct = max > 0 ? Math.round((el.scrollTop / max) * 100) : 0;
+            const netProgress = currentPct - lastValidationScrollRef.current;
+
+            if (netProgress >= 5) {
+                // Award +10 score
+                const pts = user?.id
+                    ? tryEarnScore(user.id, 10, user.subscriptionTier, !!(user.isPremium || user.subscriptionTier !== 'FREE'), 0, 'REVISION_READ_1MIN')
+                    : 10;
+                setRevisionScore(s => s + pts);
+                showScoreReward(pts);
+                lastValidationScrollRef.current = currentPct;
+            }
+        }, 60000); // every 1 minute
+
+        return () => {
+            if (scoreTimerRef.current) clearInterval(scoreTimerRef.current);
+            if (popupTimerRef.current) clearTimeout(popupTimerRef.current);
+        };
+    }, [loading, user, showScoreReward]);
+
+    const toggleTopicComplete = (id: string) => {
+        const next = new Set(completedTopicIds);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        setCompletedTopicIds(next);
+    };
+
+
+    // TTS State (Simplified)
+    const [currentPlayingIndex, setCurrentPlayingIndex] = useState<number | null>(null);
+    const [isPlayingAll, setIsPlayingAll] = useState(false);
+
+    // Refs for scrolling and reading
+    const topicRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+    // Categorized Topics (for display)
+    const [scienceTopics, setScienceTopics] = useState<LoadedTopic[]>([]);
+    const [socialTopics, setSocialTopics] = useState<LoadedTopic[]>([]);
+    const [otherTopics, setOtherTopics] = useState<LoadedTopic[]>([]);
+
+    // Master Display List (to ensure TTS follows visual order)
+    const [displayList, setDisplayList] = useState<LoadedTopic[]>([]);
+
+    // Topics without Notes (Self Study)
+    const [missingNoteTopics, setMissingNoteTopics] = useState<LoadedTopic[]>([]);
+    const [chunkTopics, setChunkTopics] = useState<Set<string>>(new Set());
+
+
+    const userBoard = user.board || 'CBSE';
+    const userClass = user.classLevel || '10';
+    const userStream = user.stream || null;
+
+    // LOAD CONTENT
+    useEffect(() => {
+        let isMounted = true;
+        const loadContent = async () => {
+            if (loadedTopics.length > 0) return;
+            setLoading(true);
+            const loaded: LoadedTopic[] = [];
+
+            // Level-based notes daily limit — slice topics to remaining allowance
+            const _curLimit = _getNotesLimit();
+            const _remaining = _curLimit === UNLIMITED ? topics.length : Math.max(0, _curLimit - _getTodayNotesCount());
+            if (_remaining === 0 && _curLimit !== UNLIMITED) {
+                setLimitReached(true);
+                setLoading(false);
+                return;
+            }
+            const allowedTopics = _curLimit === UNLIMITED ? topics : topics.slice(0, _remaining);
+
+            for (const topic of allowedTopics) {
+                if (!isMounted) return;
+                try {
+                    let content = '';
+                    let plainText = '';
+
+                    // Fetch Logic
+                    const streamKey = (userClass === '11' || userClass === '12') && userStream ? `-${userStream}` : '';
+
+                    let subject = topic.subjectName || 'Unknown';
+                    const hindiMapReverse: Record<string, string> = {
+                        'भौतिकी': 'Physics',
+                        'रसायन शास्त्र': 'Chemistry',
+                        'जीव विज्ञान': 'Biology',
+                        'गणित': 'Mathematics',
+                        'इतिहास': 'History',
+                        'भूगोल': 'Geography',
+                        'राजनीति विज्ञान': 'Political Science',
+                        'अर्थशास्त्र': 'Economics',
+                        'व्यवसाय अध्ययन': 'Business Studies',
+                        'लेखाशास्त्र': 'Accountancy',
+                        'विज्ञान': 'Science',
+                        'सामाजिक विज्ञान': 'Social Science',
+                        'अंग्रेजी': 'English',
+                        'हिन्दी': 'Hindi',
+                        'संस्कृत': 'Sanskrit',
+                        'कंप्यूटर विज्ञान': 'Computer Science'
+                    };
+                    if (hindiMapReverse[subject]) {
+                        subject = hindiMapReverse[subject];
+                    }
+
+                    const englishSubject = topic.subjectId && (DEFAULT_SUBJECTS as any)[topic.subjectId] ? (DEFAULT_SUBJECTS as any)[topic.subjectId].name : subject;
+                    const strictKey = `nst_content_${userBoard}_${userClass}${streamKey}_${englishSubject}_${topic.chapterId}`;
+
+
+                    let data = await storage.getItem(strictKey);
+
+                    // 2. If Failed, Search by Chapter ID (Robust Search)
+                    if (!data) {
+                        try {
+                            const allKeys = await storage.keys();
+                            const matchKey = allKeys.find(k => k.endsWith(`_${topic.chapterId}`) && k.startsWith('nst_content_'));
+                            if (matchKey) {
+                                data = await storage.getItem(matchKey);
+                            }
+                        } catch(e) { console.warn("Storage Scan failed", e); }
+                    }
+
+                    if (!data) {
+                        try { data = await getChapterData(strictKey); } catch (e) {}
+                    }
+                    if (!data) {
+                         try { data = await getChapterData(topic.chapterId); } catch (e) {}
+                    }
+
+                    if (data) {
+                        let relevantNote = null;
+                        const combinedNotes = [...(data.topicNotes || []), ...(data.deepDiveEntries || []), ...(data.allTopics || [])];
+                        if (combinedNotes.length > 0) {
+                            relevantNote = findRelevantNote(combinedNotes, topic.name);
+                        }
+
+                        if (relevantNote && relevantNote.content) {
+                            content = formatMcqNotes(relevantNote.content);
+                        } else if (data.content && data.content.length > 5) {
+                            // If a specific subtopic note wasn't found, default to main chapter content if it exists.
+                            content = formatMcqNotes(data.content);
+                        } else if (combinedNotes.length > 0) {
+                            // Fallback to aggregating all topic notes if data.content is insufficient
+                            content = combinedNotes.map((n: any) => formatMcqNotes(n.content)).join('<hr class="my-6 border-slate-200" />');
+                        } else {
+                            content = "<p>No specific notes found.</p>";
+                        }
+                    } else {
+                        content = "<p>Content not available.</p>";
+                    }
+
+                    const tempDiv = document.createElement("div");
+                    tempDiv.innerHTML = content;
+                    plainText = tempDiv.textContent || tempDiv.innerText || "";
+
+                    loaded.push({ ...topic, content, plainText });
+
+                } catch (e) {
+                    console.error(`Failed to load content for ${topic.name}`, e);
+                    loaded.push({ ...topic, content: "<p>Error loading content.</p>", plainText: "Error loading content." });
+                }
+            }
+
+            if (!isMounted) return;
+            setLoadedTopics(loaded);
+
+            // Save how many topics were loaded into daily count
+            if (_curLimit !== UNLIMITED && loaded.length > 0) {
+                _addTodayNotesCount(loaded.length);
+                const newRemaining = Math.max(0, _curLimit - _getTodayNotesCount());
+                setDailyNotesRemaining(newRemaining);
+            }
+
+            // Filter: Valid vs Missing
+            const valid = loaded.filter(t => t.content && t.content.length > 5 && !t.content.includes("Content not available") && !t.content.includes("No specific notes found"));
+            const missing = loaded.filter(t => !valid.includes(t));
+
+            setMissingNoteTopics(missing);
+
+            // Group Valid Topics Only
+            const sci = valid.filter(t => (t.subjectName || '').toLowerCase().includes('science') && !(t.subjectName || '').toLowerCase().includes('social'));
+            const soc = valid.filter(t => (t.subjectName || '').toLowerCase().includes('social') || (t.subjectName || '').toLowerCase().includes('history') || (t.subjectName || '').toLowerCase().includes('geography'));
+            const oth = valid.filter(t => !sci.includes(t) && !soc.includes(t));
+
+            setScienceTopics(sci);
+            setSocialTopics(soc);
+            setOtherTopics(oth);
+
+            // Set the master display order (Only Valid Notes)
+            setDisplayList([...sci, ...soc, ...oth]);
+
+            setLoading(false);
+        };
+
+        loadContent();
+        return () => { isMounted = false; };
+    }, [topics, userBoard, userClass, userStream]);
+
+    // Initialize refs array size
+    useEffect(() => {
+        topicRefs.current = topicRefs.current.slice(0, displayList.length);
+    }, [displayList]);
+
+    // IntersectionObserver: whichever topic is most visible becomes the active timer target
+    useEffect(() => {
+        if (!displayList.length) return;
+        const obs = new IntersectionObserver(
+            (entries) => {
+                // Pick the entry with the largest intersection ratio
+                let best: string | null = null;
+                let bestRatio = 0;
+                entries.forEach(entry => {
+                    if (entry.isIntersecting && entry.intersectionRatio > bestRatio) {
+                        bestRatio = entry.intersectionRatio;
+                        best = entry.target.getAttribute('data-topic-id');
+                    }
+                });
+                if (best) setActiveTopicId(best);
+            },
+            { threshold: [0.2, 0.5, 0.8] }
+        );
+        displayList.forEach((topic, idx) => {
+            const el = topicRefs.current[idx];
+            if (el) {
+                el.setAttribute('data-topic-id', topic.id);
+                obs.observe(el);
+            }
+        });
+        return () => obs.disconnect();
+    }, [displayList]);
+
+    // Per-second timer: increment whichever topic is currently active (capped at MIN_READ_SECS)
+    useEffect(() => {
+        if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+        if (!activeTopicId) return;
+        timerIntervalRef.current = setInterval(() => {
+            setTopicTimers(prev => {
+                const cur = prev[activeTopicId] || 0;
+                if (cur >= MIN_READ_SECS) return prev; // already done, no re-render
+                return { ...prev, [activeTopicId]: cur + 1 };
+            });
+        }, 1000);
+        return () => { if (timerIntervalRef.current) clearInterval(timerIntervalRef.current); };
+    }, [activeTopicId]);
+
+
+    // Limit reached screen
+    if (limitReached) {
+        const _subValid = SubscriptionEngine.isPremium(user);
+        const _tier: 'FREE' | 'BASIC' | 'ULTRA' =
+            _subValid && user.subscriptionLevel === 'ULTRA' ? 'ULTRA' :
+            _subValid && user.subscriptionLevel === 'BASIC' ? 'BASIC' : 'FREE';
+        const userLevel = getLevelInfo(user.totalScore || 0).level;
+        const lim = getEffectiveDailyLimit('notes', userLevel, _tier);
+        return (
+            <div className="fixed inset-0 z-[50] bg-white flex flex-col items-center justify-center p-6 text-center gap-6">
+                <div className="text-5xl">📚</div>
+                <div>
+                    <h2 className="text-2xl font-black text-slate-800 mb-2">Daily Reading Limit Reached</h2>
+                    <p className="text-slate-500 font-medium text-sm">
+                        You've read your daily limit of <span className="font-bold text-indigo-600">{lim} topics</span> today.
+                    </p>
+                    <p className="text-slate-400 text-xs mt-1">Level up or upgrade your plan to unlock more daily reading!</p>
+                </div>
+                <div className="bg-indigo-50 rounded-2xl p-4 w-full max-w-xs">
+                    <p className="text-xs font-bold text-indigo-700 mb-1">Your Level: {userLevel} • {_tier}</p>
+                    <p className="text-xs text-indigo-500">L1 Free = 10 topics/day • L9+ = Unlimited</p>
+                </div>
+                <button
+                    onClick={onClose}
+                    className="px-8 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700"
+                >
+                    Back to Dashboard
+                </button>
+            </div>
+        );
+    }
+
+    return (
+        <div className="fixed inset-0 z-[50] bg-white flex flex-col h-[100dvh] w-screen animate-in slide-in-from-bottom-10 overflow-hidden">
+            {/* EXIT CONFIRMATION MODAL */}
+            {showExitConfirm && (
+                <div className="fixed inset-0 z-[100] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+                    <div className="bg-white rounded-2xl w-full shadow-2xl p-6 flex flex-col max-h-[85dvh] overflow-hidden">
+                         <div className="mx-auto w-12 h-12 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mb-4 shrink-0">
+                            <CheckCircle size={24} />
+                         </div>
+                         <h3 className="text-lg font-black text-slate-800 mb-2 text-center">Revision Checklist</h3>
+                         <p className="text-slate-600 mb-4 text-sm text-center">
+                            Select the topics you have successfully revised:
+                         </p>
+
+                         <div className="flex-1 min-h-0 overflow-y-auto mb-6 pr-2 space-y-2 overscroll-contain">
+                             {topics.map(topic => {
+                                 const secs = topicTimers[topic.id] || 0;
+                                 const ready = secs >= MIN_READ_SECS;
+                                 const secsLeft = Math.max(0, MIN_READ_SECS - secs);
+                                 return (
+                                 <label
+                                    key={topic.id}
+                                    className={`flex items-start gap-3 p-3 rounded-xl border transition-all ${
+                                        !ready
+                                            ? 'bg-orange-50 border-orange-200 opacity-60 cursor-not-allowed'
+                                            : completedTopicIds.has(topic.id)
+                                                ? 'bg-indigo-50 border-indigo-200 cursor-pointer'
+                                                : 'bg-slate-50 border-slate-200 hover:bg-slate-100 cursor-pointer'
+                                    }`}
+                                    onClick={(e) => {
+                                        e.preventDefault();
+                                        if (ready) toggleTopicComplete(topic.id);
+                                    }}
+                                >
+                                     <div className={`mt-0.5 w-5 h-5 rounded flex items-center justify-center border shrink-0 transition-colors ${
+                                         !ready ? 'bg-orange-100 border-orange-300' :
+                                         completedTopicIds.has(topic.id) ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-300'
+                                     }`}>
+                                         {completedTopicIds.has(topic.id) && <CheckCircle size={14} className="stroke-[3]" />}
+                                     </div>
+                                     <div className="flex-1">
+                                         <p className={`text-sm font-bold ${completedTopicIds.has(topic.id) ? 'text-indigo-900' : ready ? 'text-slate-700' : 'text-orange-700'}`}>{topic.name}</p>
+                                         <p className="text-[10px] text-slate-500 font-medium uppercase mt-0.5">{topic.subjectName} • {topic.chapterName}</p>
+                                         {!ready && (
+                                             <p className="text-[10px] font-black text-orange-500 mt-0.5">⏱️ {secsLeft}s aur padhna hai</p>
+                                         )}
+                                     </div>
+                                 </label>
+                                 );
+                             })}
+                         </div>
+
+                         <div className="flex flex-col gap-2 shrink-0">
+                             <button
+                                onClick={() => {
+                                    const completed = topics.filter(t => completedTopicIds.has(t.id));
+                                    onComplete(completed);
+                                    onClose();
+                                }}
+                                className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                                disabled={completedTopicIds.size === 0}
+                             >
+                                <CheckCircle size={20} />
+                                Submit Completed ({completedTopicIds.size})
+                             </button>
+                             <button
+                                onClick={() => onClose()}
+                                className="w-full py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200"
+                             >
+                                Exit Without Saving
+                             </button>
+                             <button
+                                onClick={() => setShowExitConfirm(false)}
+                                className="mt-2 text-xs font-bold text-slate-500 hover:text-slate-600 text-center py-2"
+                             >
+                                Cancel (Go Back to Revision)
+                             </button>
+                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* HEADER */}
+            <div className="bg-white border-b border-slate-100 p-4 flex items-center justify-between shadow-sm sticky top-0 z-20">
+                <div>
+                    <h2 className="text-xl font-black text-slate-800 flex items-center gap-2">
+                        <BookOpen className="text-indigo-600" /> Today's Revision
+                    </h2>
+                    <p className="text-xs text-slate-600 font-bold">
+                        {loadedTopics.length} Topics to Cover
+                        {notesLimit !== UNLIMITED && (
+                            <span className="ml-2 text-indigo-500">
+                                • {dailyNotesRemaining} remaining today
+                            </span>
+                        )}
+                    </p>
+                </div>
+                {/* Revision Score Badge */}
+                {revisionScore > 0 && (
+                    <div
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            background: 'linear-gradient(135deg,#6366f1,#8b5cf6)',
+                            borderRadius: 999,
+                            padding: '4px 12px',
+                            fontSize: 13,
+                            fontWeight: 900,
+                            color: '#fff',
+                            boxShadow: '0 2px 10px rgba(99,102,241,0.35)',
+                        }}
+                    >
+                        <span>⭐</span>
+                        <span>+{revisionScore}</span>
+                    </div>
+                )}
+                <div className="flex gap-2">
+                    <button
+                        onClick={() => {
+                            if(isPlayingAll) {
+                                setIsPlayingAll(false);
+                                setCurrentPlayingIndex(null);
+                            } else {
+                                setIsPlayingAll(true);
+                                setCurrentPlayingIndex(0);
+                            }
+                        }}
+                        className={`p-2 rounded-full transition-all ${isPlayingAll ? 'bg-red-100 text-red-600 animate-pulse' : 'bg-indigo-100 text-indigo-600'}`}
+                    >
+                        {isPlayingAll ? <Pause size={20} /> : <Play size={20} />}
+                    </button>
+                    <button onClick={() => setShowExitConfirm(true)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 text-slate-600 transition-colors">
+                        <X size={20} />
+                    </button>
+                </div>
+            </div>
+
+            {/* +Score Reward Popup */}
+            {scorePopup !== null && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        bottom: 96,
+                        right: 20,
+                        zIndex: 60,
+                        background: 'linear-gradient(135deg,#6366f1,#8b5cf6)',
+                        color: '#fff',
+                        borderRadius: 16,
+                        padding: '10px 18px',
+                        fontSize: 15,
+                        fontWeight: 900,
+                        boxShadow: '0 8px 24px rgba(99,102,241,0.45)',
+                        opacity: scorePopupVisible ? 1 : 0,
+                        transform: scorePopupVisible ? 'translateY(0)' : 'translateY(12px)',
+                        transition: 'opacity 0.3s, transform 0.3s',
+                        pointerEvents: 'none',
+                    }}
+                >
+                    ⭐ +{scorePopup} Revision Score!
+                </div>
+            )}
+
+            {/* CONTENT */}
+            <div ref={scrollContainerRef} className="flex-1 overflow-y-auto bg-slate-50 p-4 pb-48 overscroll-contain">
+                {loading ? (
+                    <div className="flex flex-col items-center justify-center h-64 text-slate-500">
+                        <Loader2 size={32} className="animate-spin mb-2" />
+                        <p className="text-xs font-bold">Loading Revision Content...</p>
+                    </div>
+                ) : (
+                    <div className="max-w-7xl mx-auto space-y-8">
+                        {displayList.map((topic, index) => {
+                            const isCurrent = currentPlayingIndex === index;
+
+                            // Determine Badge Color based on Category (Science/Social/Other)
+                            let badgeClass = "bg-slate-100 text-slate-600";
+                            const sub = (topic.subjectName || '').toLowerCase();
+
+                            if (sub.includes('science') && !sub.includes('social')) {
+                                badgeClass = "bg-indigo-100 text-indigo-700";
+                            } else if (sub.includes('social') || sub.includes('history') || sub.includes('geography')) {
+                                badgeClass = "bg-orange-100 text-orange-700";
+                            } else if (sub.includes('math')) {
+                                badgeClass = "bg-blue-100 text-blue-700";
+                            }
+
+                            const topicSecs    = topicTimers[topic.id] || 0;
+                            const topicReady   = topicSecs >= MIN_READ_SECS;
+                            const secsLeft     = Math.max(0, MIN_READ_SECS - topicSecs);
+                            const timerPct     = Math.min(100, Math.round((topicSecs / MIN_READ_SECS) * 100));
+
+                            return (
+                                <div
+                                    key={index}
+                                    ref={el => topicRefs.current[index] = el}
+                                    className={`bg-white p-6 rounded-2xl shadow-sm border transition-all duration-300 ${
+                                        isCurrent ? 'border-indigo-500 ring-4 ring-indigo-50 scale-[1.02]' : 'border-slate-200'
+                                    }`}
+                                >
+                                    <div className="flex justify-between items-start mb-4">
+                                        <div>
+                                            <span className={`text-[10px] font-black uppercase px-2 py-1 rounded mb-2 inline-block ${badgeClass}`}>
+                                                {topic.subjectName || 'General'}
+                                            </span>
+                                            <h4 className="font-bold text-slate-800 text-lg leading-tight">
+                                                {topic.name}
+                                            </h4>
+                                            <p className="text-xs text-slate-500 font-bold mt-1 uppercase">{topic.chapterName}</p>
+                                        </div>
+                                        <div className="flex gap-2 items-center">
+                                            <button
+                                                onClick={() => setChunkTopics(prev => {
+                                                    const next = new Set(prev);
+                                                    if (next.has(topic.id)) next.delete(topic.id); else next.add(topic.id);
+                                                    return next;
+                                                })}
+                                                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 ${chunkTopics.has(topic.id) ? 'bg-amber-500 text-white shadow-md shadow-amber-200' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-200'}`}
+                                            >
+                                                {chunkTopics.has(topic.id) ? <><FileText size={15} /> Notes</> : <><Volume2 size={15} /> TTS</>}
+                                            </button>
+                                            <button
+                                                onClick={() => topicReady && toggleTopicComplete(topic.id)}
+                                                disabled={!topicReady}
+                                                className={`p-2 rounded-full transition-all flex items-center gap-1 ${
+                                                    completedTopicIds.has(topic.id)
+                                                        ? 'bg-green-100 text-green-700 ring-2 ring-green-500'
+                                                        : topicReady
+                                                            ? 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                                                            : 'bg-slate-50 text-slate-300 cursor-not-allowed'
+                                                }`}
+                                                title={topicReady ? (completedTopicIds.has(topic.id) ? 'Marked as Completed' : 'Mark as Complete') : `${secsLeft}s aur padhna hai`}
+                                            >
+                                                <CheckCircle size={20} />
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* ── Reading timer bar ─────────────────────────────── */}
+                                    {!topicReady && (
+                                        <div className="mb-4">
+                                            <div className="flex items-center justify-between mb-1">
+                                                <p className="text-[10px] font-black text-orange-600 uppercase tracking-widest">
+                                                    ⏱️ Padhte raho — {secsLeft}s aur baaki
+                                                </p>
+                                                <p className="text-[10px] font-bold text-orange-400">{timerPct}%</p>
+                                            </div>
+                                            <div className="h-1.5 bg-orange-100 rounded-full overflow-hidden">
+                                                <div
+                                                    className="h-full bg-orange-400 rounded-full transition-all duration-1000"
+                                                    style={{ width: `${timerPct}%` }}
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+                                    {topicReady && !completedTopicIds.has(topic.id) && (
+                                        <div className="mb-3">
+                                            <div className="h-1.5 bg-emerald-100 rounded-full overflow-hidden">
+                                                <div className="h-full bg-emerald-400 rounded-full w-full" />
+                                            </div>
+                                            <p className="text-[10px] font-black text-emerald-600 mt-1">✅ 60s complete — ab mark kar sakte ho!</p>
+                                        </div>
+                                    )}
+
+                                    {/* CONTENT CONTAINER — styled HTML or ChunkedNotesReader */}
+                                    {chunkTopics.has(topic.id) ? (
+                                        <ChunkedNotesReader
+                                            key={`trv-chunk-${topic.id}`}
+                                            content={topic.plainText || topic.content
+                                                .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+                                                .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+                                                .replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>|<\/div>|<\/li>|<\/h[1-6]>/gi, '\n')
+                                                .replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ')
+                                                .replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim()}
+                                            topBarLabel={topic.name}
+                                            hideTopBar={false}
+                                            preferChunkMode
+                                        />
+                                    ) : (
+                                        <div
+                                            className="prose prose-sm prose-slate max-w-none text-justify"
+                                            dangerouslySetInnerHTML={{ __html: renderMathInHtml(topic.content) }}
+                                        />
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+
+                {/* SELF STUDY BOX (Topics without notes) */}
+                {!loading && missingNoteTopics.length > 0 && (
+                    <div className="max-w-7xl mx-auto mt-8 bg-orange-50 border-2 border-orange-100 rounded-2xl p-6">
+                        <h4 className="font-black text-orange-800 flex items-center gap-2 mb-4">
+                            <BookOpen size={20} /> Self Study Topics
+                        </h4>
+                        <p className="text-xs text-orange-700 mb-4">
+                            No digital notes found for these topics. Please revise them from your textbooks.
+                        </p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {missingNoteTopics.map((t, i) => (
+                                <div key={i} className="bg-white p-3 rounded-xl border border-orange-100 flex flex-col gap-3">
+                                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between w-full gap-3 sm:gap-0">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-2 h-2 rounded-full bg-orange-400"></div>
+                                            <div>
+                                                <p className="text-xs font-bold text-slate-700">{t.name}</p>
+                                                <p className="text-[10px] text-slate-500 uppercase">{t.subjectName}</p>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2 w-full sm:w-auto">
+                                            {(() => {
+                                                const sSecs  = topicTimers[t.id] || 0;
+                                                const sReady = sSecs >= MIN_READ_SECS;
+                                                const sLeft  = Math.max(0, MIN_READ_SECS - sSecs);
+                                                return (
+                                                    <button
+                                                        onClick={() => sReady && toggleTopicComplete(t.id)}
+                                                        disabled={!sReady}
+                                                        className={`flex-1 sm:flex-none px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider border rounded-lg transition-colors active:scale-95 text-center ${
+                                                            completedTopicIds.has(t.id) ? 'bg-green-100 text-green-700 border-green-200' :
+                                                            sReady ? 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100' :
+                                                            'bg-orange-50 text-orange-400 border-orange-200 cursor-not-allowed'
+                                                        }`}
+                                                    >
+                                                        {completedTopicIds.has(t.id) ? 'Done ✓' : sReady ? 'Mark as Done' : `⏱️ ${sLeft}s aur`}
+                                                    </button>
+                                                );
+                                            })()}
+                                        </div>
+                                    </div>
+                                    {/* MODIFIED: Always show notes instead of hiding them behind expanded state */}
+                                    <div className="mt-2 text-xs text-slate-700 leading-relaxed p-3 bg-slate-50 rounded-lg border border-slate-100 animate-in fade-in slide-in-from-top-2 duration-200">
+                                        {t.content && t.content.trim() && !t.content.includes("Content not available") && !t.content.includes("No specific notes found") ? (
+                                            <div dangerouslySetInnerHTML={{ __html: renderMathInHtml(t.content) }} className="prose prose-sm prose-slate max-w-none text-justify" />
+                                        ) : (
+                                            <div className="italic text-slate-500 text-center py-2">Sorry, detailed notes could not be automatically generated for this specific sub-topic at this time. Please refer to the main chapter material.</div>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* FOOTER ACTIONS */}
+            <div className="fixed bottom-0 left-0 right-0 w-full mx-auto bg-white border-t border-slate-200 p-4 shadow-2xl flex flex-col sm:flex-row gap-4 items-center justify-center z-30">
+                <button
+                    onClick={() => setShowExitConfirm(true)}
+                    disabled={loading}
+                    className="w-full sm:w-auto flex items-center justify-center gap-2 px-8 py-3 bg-indigo-600 text-white rounded-xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 hover:scale-105 transition-all"
+                >
+                    <CheckCircle size={20} />
+                    Complete Revision
+                </button>
+            </div>
+        </div>
+    );
+};
