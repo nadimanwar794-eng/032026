@@ -1,0 +1,42 @@
+{
+  "entities": {
+    "User": {
+      "path": "users/{userId}",
+      "fields": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "subcollections": {
+        "test_results": "users/{userId}/test_results/{resultId}",
+        "history": "users/{userId}/history/{historyId}"
+      }
+    },
+    "UserData": {
+      "path": "user_data/{userId}",
+      "fields": {
+        "mcqHistory": { "type": "array" },
+        "progress": { "type": "map" },
+        "topicStrength": { "type": "map" }
+      }
+    },
+    "School": {
+      "path": "schools/{schoolId}",
+      "fields": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "adminUid": { "type": "string" }
+      }
+    },
+    "Coaching": {
+      "path": "coachings/{coachingId}",
+      "fields": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "adminUid": { "type": "string" }
+      }
+    }
+  }
+}
