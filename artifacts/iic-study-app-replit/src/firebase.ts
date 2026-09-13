@@ -32,9 +32,21 @@ if (_lastProject && _lastProject !== firebaseConfig.projectId) {
 }
 try { localStorage.setItem(_FSP_KEY, firebaseConfig.projectId); } catch {}
 
-// ── Global Firestore assertion-error auto-recovery ─────────────────────────
-// If the assertion error slips through (e.g. mid-session project switch),
-// delete all Firebase IndexedDB databases and hard-reload automatically.
+// ── Global Firestore assertion-error auto-recovery & quota handling ─────────
+let isFirestoreQuotaExceeded = false;
+export const checkFirestoreQuotaExceeded = () => isFirestoreQuotaExceeded;
+export const markFirestoreQuotaExceeded = () => {
+  if (!isFirestoreQuotaExceeded) {
+    isFirestoreQuotaExceeded = true;
+    console.warn('[IIC] Cloud Firestore daily quota reached (Spark plan free tier). Operating seamlessly in Realtime Database & offline mode.');
+    if (typeof window !== 'undefined') {
+      try {
+        window.dispatchEvent(new CustomEvent('nst:firestore_quota_exceeded'));
+      } catch {}
+    }
+  }
+};
+
 if (typeof window !== 'undefined') {
   window.addEventListener('unhandledrejection', (event) => {
     const msg = String(event?.reason?.message || event?.reason || '');
@@ -43,10 +55,10 @@ if (typeof window !== 'undefined') {
       event.preventDefault();
       return;
     }
-    if (msg.includes('resource-exhausted') || msg.includes('Write stream exhausted')) {
+    if (msg.includes('resource-exhausted') || msg.includes('Write stream exhausted') || msg.includes('Quota exceeded')) {
       // Suppress benign Firestore write stream backpressure warnings; throttled writes will sync on backoff
       event.preventDefault();
-      console.warn('[IIC] Firestore write stream reached backpressure limit — throttled writes will sync on backoff.');
+      markFirestoreQuotaExceeded();
       return;
     }
     if (
@@ -76,15 +88,24 @@ if (typeof window !== 'undefined') {
       } catch { doReload(); }
     }
   });
+
+  window.addEventListener('error', (event) => {
+    const msg = String(event?.message || event?.error?.message || '');
+    if (msg.includes('resource-exhausted') || msg.includes('Quota exceeded') || msg.includes('maximum backoff delay')) {
+      event.preventDefault();
+      markFirestoreQuotaExceeded();
+      return;
+    }
+  });
 }
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const analytics: any = null;
 export { analytics };
-// Use new persistentLocalCache API (replaces deprecated enableMultiTabIndexedDbPersistence)
+// Use silent log level so Firestore quota backoff warnings don't spam the console
 try {
-  setLogLevel('error');
+  setLogLevel('silent');
 } catch {}
 const db = initializeFirestore(app, {
   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
@@ -1196,8 +1217,12 @@ export const subscribeToUsers = (callback: (users: any[]) => void) => {
       }
     },
     (err) => {
+      const msg = String(err?.message || err?.code || err || '');
+      if (msg.includes('resource-exhausted') || msg.includes('Quota exceeded')) {
+        markFirestoreQuotaExceeded();
+      }
       console.warn('[firebase] subscribeToUsers error:', err?.code || err);
-      // Fallback to RTDB on permission-denied or offline
+      // Fallback to RTDB on permission-denied, quota-exhausted, or offline
       const usersRef = ref(rtdb, 'users');
       onValue(usersRef, (snap) => {
          const data = snap.val();
@@ -1247,8 +1272,17 @@ export const subscribeToRecentUsers = (callback: (users: any[]) => void) => {
       callback(snap.docs.map(d => d.data()));
     },
     (err) => {
+      const msg = String(err?.message || err?.code || err || '');
+      if (msg.includes('resource-exhausted') || msg.includes('Quota exceeded')) {
+        markFirestoreQuotaExceeded();
+      }
       console.warn('[firebase] subscribeToRecentUsers error:', err?.code || err);
-      callback([]);
+      // Fallback to RTDB recent users
+      const usersRef = rtdbQuery(ref(rtdb, 'users'), rtdbLimitToLast(10));
+      onValue(usersRef, (snap) => {
+        const val = snap.val();
+        callback(val ? Object.values(val) : []);
+      }, { onlyOnce: true });
     }
   );
 };
@@ -1308,6 +1342,10 @@ export const subscribeToUser = (userId: string, callback: (user: any) => void) =
             }
         },
         (error) => {
+            const msg = String(error?.message || error?.code || error || '');
+            if (msg.includes('resource-exhausted') || msg.includes('Quota exceeded')) {
+                markFirestoreQuotaExceeded();
+            }
             // RTDB stays active regardless of Firestore permission/cache state.
             // Any Firestore error must not log the user out or hide account data.
             if (error.code !== 'permission-denied') {
@@ -1326,6 +1364,10 @@ export const subscribeToUser = (userId: string, callback: (user: any) => void) =
             emitCombined();
         },
         (error) => {
+            const msg = String(error?.message || error?.code || error || '');
+            if (msg.includes('resource-exhausted') || msg.includes('Quota exceeded')) {
+                markFirestoreQuotaExceeded();
+            }
             if (error.code !== 'permission-denied') {
                 console.warn('[IIC] subscribeToUser user_data error:', error.code);
             }
@@ -1746,7 +1788,16 @@ const _subscribeShardedArray = (
         _rebuild();
       },
       (err) => {
+        const msg = String(err?.message || err?.code || err || '');
+        if (msg.includes('resource-exhausted') || msg.includes('Quota exceeded')) {
+          markFirestoreQuotaExceeded();
+        }
         console.warn(`[firebase] _listenToShard error (${fsPrefix}_shard_${idx}):`, err?.code || err);
+        // Quota / network fallback: allow RTDB or local state to fulfill this shard
+        if (!shardsConfirmed.has(idx) && shardsData[idx] !== undefined) {
+          shardsConfirmed.add(idx);
+          _rebuild();
+        }
       }
     );
     const unsubRtdb = onValue(ref(rtdb, `${rtdbPrefix}_shard_${idx}`), (snap) => {
@@ -1787,7 +1838,16 @@ const _subscribeShardedArray = (
       _rebuild(); // re-check now that meta is confirmed
     },
     (err) => {
+      const msg = String(err?.message || err?.code || err || '');
+      if (msg.includes('resource-exhausted') || msg.includes('Quota exceeded')) {
+        markFirestoreQuotaExceeded();
+      }
       console.warn(`[firebase] unsubMeta error (${fsPrefix}_meta):`, err?.code || err);
+      // Quota / network fallback: unblock rebuild so RTDB metadata or shard 0 is used
+      if (!metaConfirmed) {
+        metaConfirmed = true;
+        _rebuild();
+      }
     }
   );
   const unsubMetaRtdb = onValue(ref(rtdb, `${rtdbPrefix}_meta`), (snap) => {
@@ -1946,7 +2006,17 @@ const _subscribePerItemCollection = (
       _rebuild();
     },
     (err) => {
+      const msg = String(err?.message || err?.code || err || '');
+      if (msg.includes('resource-exhausted') || msg.includes('Quota exceeded')) {
+        markFirestoreQuotaExceeded();
+      }
       console.warn(`[firebase] collection listener error (${collectionName}):`, err?.code || err);
+      collectionFromFs = false;
+      // Quota / error fallback: allow RTDB to confirm and rebuild if populated
+      if (!collectionConfirmed && Object.keys(itemMap).length > 0) {
+        collectionConfirmed = true;
+        _rebuild();
+      }
     }
   );
 
@@ -1973,7 +2043,17 @@ const _subscribePerItemCollection = (
       _rebuild();
     },
     (err) => {
+      const msg = String(err?.message || err?.code || err || '');
+      if (msg.includes('resource-exhausted') || msg.includes('Quota exceeded')) {
+        markFirestoreQuotaExceeded();
+      }
       console.warn(`[firebase] index listener error (${indexFsDocId}):`, err?.code || err);
+      indexFromFs = false;
+      // Quota / error fallback: allow RTDB index to be confirmed
+      if (!indexConfirmed && order.length > 0) {
+        indexConfirmed = true;
+        _rebuild();
+      }
     }
   );
 
@@ -2129,7 +2209,12 @@ export const subscribeToSettings = (callback: (settings: any) => void) => {
       if (snap.exists()) { latestCore = snap.data(); emit(); }
     },
     (err) => {
+      const msg = String(err?.message || err?.code || err || '');
+      if (msg.includes('resource-exhausted') || msg.includes('Quota exceeded')) {
+        markFirestoreQuotaExceeded();
+      }
       console.warn('[firebase] unsubCoreFs error:', err?.code || err);
+      coreFromFs = false;
     }
   );
   const unsubCoreRtdb = onValue(ref(rtdb, 'system_settings'), (snap) => {
@@ -2175,7 +2260,15 @@ export const subscribeToSettings = (callback: (settings: any) => void) => {
       emit();
     },
     (err) => {
+      const msg = String(err?.message || err?.code || err || '');
+      if (msg.includes('resource-exhausted') || msg.includes('Quota exceeded')) {
+        markFirestoreQuotaExceeded();
+      }
       console.warn('[firebase] unsubLucentEntries error:', err?.code || err);
+      if (!lucentEntriesConfirmed && Object.keys(latestLucentMap).length > 0) {
+        lucentEntriesConfirmed = true;
+        emit();
+      }
     }
   );
   const unsubLucentRtdb = onValue(ref(rtdb, 'lucent_entries'), (snap) => {
@@ -2197,7 +2290,15 @@ export const subscribeToSettings = (callback: (settings: any) => void) => {
       if (snap.exists()) { latestOrder = snap.data()?.ids ?? []; emit(); }
     },
     (err) => {
+      const msg = String(err?.message || err?.code || err || '');
+      if (msg.includes('resource-exhausted') || msg.includes('Quota exceeded')) {
+        markFirestoreQuotaExceeded();
+      }
       console.warn('[firebase] unsubLucentIndex error:', err?.code || err);
+      lucentIndexFromFs = false;
+      if (latestOrder.length > 0) {
+        emit();
+      }
     }
   );
   const unsubLucentIndexRtdb = onValue(ref(rtdb, 'lucent_index'), (snap) => {
@@ -2455,16 +2556,22 @@ export const getChapterData = async (key: string) => {
         console.warn("RTDB fetch failed for chapter data:", e);
     }
 
-    try {
-        const docSnap = await getDoc(doc(db, "content_data", key));
-        if (docSnap.exists()) {
-            const data = docSnap.data();
-            _memCachePut(key, data);
-            await storage.setItem(key, data);
-            return data;
+    if (!checkFirestoreQuotaExceeded()) {
+        try {
+            const docSnap = await getDoc(doc(db, "content_data", key));
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                _memCachePut(key, data);
+                await storage.setItem(key, data);
+                return data;
+            }
+        } catch (e: any) {
+            const msg = String(e?.message || e?.code || e || '');
+            if (msg.includes('resource-exhausted') || msg.includes('Quota exceeded')) {
+                markFirestoreQuotaExceeded();
+            }
+            console.warn("Firestore fetch failed for chapter data:", e);
         }
-    } catch (e) {
-        console.warn("Firestore fetch failed for chapter data:", e);
     }
 
     return null;
@@ -2510,10 +2617,8 @@ export const subscribeToChapterData = (key: string, callback: (data: any) => voi
     return onValue(rtdbRef, (snapshot) => {
         if (snapshot.exists()) {
             callback(snapshot.val());
-        } else {
-            // RTDB empty — fall back to Firestore with error handling.
-            // Errors are logged but never silently swallowed so the caller
-            // can detect failures (previously: blank page with no clue why).
+        } else if (!checkFirestoreQuotaExceeded()) {
+            // RTDB empty — fall back to Firestore if quota has not been exhausted
             getDoc(doc(db, "content_data", key))
                 .then(docSnap => {
                     if (docSnap.exists()) {
@@ -2522,17 +2627,14 @@ export const subscribeToChapterData = (key: string, callback: (data: any) => voi
                         set(ref(rtdb, `content_data/${key}`), data).catch(() => {});
                         callback(data);
                     }
-                    // else: document truly doesn't exist yet — leave content blank (correct)
                 })
                 .catch(e => {
-                    console.error(`[IIC] subscribeToChapterData Firestore fallback failed for "${key}":`, e);
-                    // Re-try once with anonymous auth in case the session expired
-                    import('firebase/auth').then(({ signInAnonymously: _signIn }) =>
-                        _signIn(auth)
-                            .then(() => getDoc(doc(db, "content_data", key)))
-                            .then(docSnap => { if (docSnap.exists()) callback(docSnap.data()); })
-                            .catch(e2 => console.error('[IIC] Auth retry also failed:', e2))
-                    );
+                    const msg = String(e?.message || e?.code || e || '');
+                    if (msg.includes('resource-exhausted') || msg.includes('Quota exceeded')) {
+                        markFirestoreQuotaExceeded();
+                    } else {
+                        console.warn(`[IIC] subscribeToChapterData Firestore fallback warning for "${key}":`, e?.code || e);
+                    }
                 });
         }
     }, (error) => {

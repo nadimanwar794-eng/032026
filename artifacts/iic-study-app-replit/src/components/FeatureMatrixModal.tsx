@@ -1,8 +1,7 @@
-
-import React from 'react';
-import { X, Check, Lock, AlertTriangle, Crown, List, Shield, Zap, Sparkles, BookOpen, Star, Layout, MessageSquare, Gamepad2, Trophy, Video, FileText, Headphones } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { X, Check, Lock, Crown, Search, Sparkles, Filter, ShieldCheck, Zap } from 'lucide-react';
 import { SystemSettings } from '../types';
-import { NSTA_DEFAULT_FEATURES } from '../constants';
+import { getMergedTierFeatures, TierFeatureItem } from '../constants/tierConfig';
 
 interface Props {
   isOpen: boolean;
@@ -11,135 +10,265 @@ interface Props {
   discountActive?: boolean;
 }
 
-export const FeatureMatrixModal: React.FC<Props> = ({ isOpen, onClose, settings, discountActive }) => {
+export const FeatureMatrixModal: React.FC<Props> = ({ isOpen, onClose, settings }) => {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
+
+  const allFeatures = useMemo(() => {
+    return getMergedTierFeatures(settings?.featureConfig);
+  }, [settings?.featureConfig]);
+
+  const categories = useMemo(() => {
+    const set = new Set<string>();
+    allFeatures.forEach(f => {
+      if (f.category) set.add(f.category);
+    });
+    return ['ALL', ...Array.from(set)];
+  }, [allFeatures]);
+
+  const filteredFeatures = useMemo(() => {
+    return allFeatures.filter(f => {
+      if (selectedCategory !== 'ALL' && f.category !== selectedCategory) return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchLabel = f.label.toLowerCase().includes(q);
+        const matchCategory = f.category.toLowerCase().includes(q);
+        const matchId = f.id.toLowerCase().includes(q);
+        const matchDesc = f.description ? f.description.toLowerCase().includes(q) : false;
+        return matchLabel || matchCategory || matchId || matchDesc;
+      }
+      return true;
+    });
+  }, [allFeatures, selectedCategory, searchQuery]);
+
   if (!isOpen) return null;
 
-  // Merge dynamic config with defaults to ensure all rows exist
-  const featureConfig = settings?.featureConfig || {};
-  const mergedFeatures = NSTA_DEFAULT_FEATURES.map(def => {
-      const stored = featureConfig[def.id];
-      return stored ? { ...def, ...stored } : def;
-  });
+  const renderCellBadge = (val: string, tier: 'free' | 'basic' | 'ultra', unlockLevel?: number) => {
+    const text = val || '—';
+    const isDenied = text === '✗' || text.toLowerCase().includes('locked');
+    const isFullCheck = text === '✓' || text === 'Free' || text.toLowerCase().includes('unlimited');
+    const hasLevel = text.toLowerCase().includes('level') || unlockLevel;
 
-  // Group by Category
-  const groupedFeatures: Record<string, any[]> = {};
-  mergedFeatures.forEach(f => {
-      if (!groupedFeatures[f.category]) groupedFeatures[f.category] = [];
-      groupedFeatures[f.category].push(f);
-  });
+    if (isDenied) {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-500 bg-rose-50 px-2 py-0.5 rounded-lg border border-rose-200">
+          <X size={12} className="stroke-[2.5]" />
+          <span>Locked</span>
+        </span>
+      );
+    }
 
-  const getLimitDisplay = (feature: any, tier: 'free' | 'basic' | 'ultra') => {
-      // 1. Check if Tier is Allowed
-      const allowedTiers = (feature.allowedTiers || ['FREE', 'BASIC', 'ULTRA']).map((t: string) => t.toLowerCase());
-      if (!allowedTiers.includes(tier)) {
-          return <span className="text-red-500 font-bold flex items-center justify-center gap-1"><Lock size={12}/> Locked</span>;
-      }
+    if (isFullCheck) {
+      const colorCls = tier === 'ultra'
+        ? 'text-purple-700 bg-purple-50 border-purple-200'
+        : tier === 'basic'
+        ? 'text-blue-700 bg-blue-50 border-blue-200'
+        : 'text-emerald-700 bg-emerald-50 border-emerald-200';
 
-      // 2. Check for Specific Limit
-      const limit = feature.limits?.[tier];
-      if (limit !== undefined) {
-          return <span className="text-slate-700 font-bold">{limit} / Day</span>;
-      }
+      return (
+        <span className={`inline-flex items-center gap-1 text-[11px] font-black px-2 py-0.5 rounded-lg border ${colorCls}`}>
+          <Check size={13} className="stroke-[3]" />
+          <span>{text === 'Free' ? 'Free' : 'Included'}</span>
+        </span>
+      );
+    }
 
-      // 3. Unlimited (if allowed but no limit)
-      return <span className="text-green-600 font-black flex items-center justify-center gap-1"><Check size={14}/> Unlimited</span>;
+    // Custom formatted text (e.g. "20 cr / 5 diamond", "✓ Level 2", "50 cr", "1500", "1.5x", etc.)
+    return (
+      <span
+        className={`inline-flex items-center justify-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-lg text-center ${
+          tier === 'ultra'
+            ? 'bg-purple-50/90 text-purple-900 border border-purple-200/80 font-black'
+            : tier === 'basic'
+            ? 'bg-blue-50/90 text-blue-900 border border-blue-200/80 font-bold'
+            : 'bg-slate-100 text-slate-800 border border-slate-200 font-medium'
+        }`}
+      >
+        {hasLevel && <span className="text-[10px]">⭐</span>}
+        {text}
+      </span>
+    );
   };
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in">
-      <div className="bg-white rounded-3xl w-full max-w-5xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
-
-        {/* HEADER */}
-        <div className="bg-slate-900 p-6 flex justify-between items-center shrink-0 border-b border-slate-800">
-            <div>
-                <h2 className="text-2xl font-black text-white flex items-center gap-2">
-                    <Crown className="text-yellow-400 fill-yellow-400" /> Plan Matrix
-                </h2>
-                <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mt-1">Feature Comparison & Availability</p>
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-2.5 sm:p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+      <div className="bg-white rounded-3xl w-full max-w-5xl shadow-2xl overflow-hidden max-h-[94vh] flex flex-col border border-slate-200">
+        
+        {/* Header */}
+        <div className="bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950 p-4 sm:p-6 text-white shrink-0 border-b border-white/10">
+          <div className="flex justify-between items-start">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 rounded-xl bg-amber-400/20 border border-amber-400/30 text-amber-300">
+                  <Crown size={20} className="fill-amber-400 text-amber-400" />
+                </span>
+                <h2 className="text-xl sm:text-2xl font-black tracking-tight">Plan Features Matrix</h2>
+                <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-black px-2 py-0.5 rounded-full border border-emerald-400/30">
+                  FREE vs BASIC vs ULTRA
+                </span>
+              </div>
+              <p className="text-slate-400 text-xs font-medium">
+                Sabhi 31+ features, study modes, revision slates aur messenger limits ki complete tulna
+              </p>
             </div>
-            <button onClick={onClose} className="p-2 bg-white/10 rounded-full hover:bg-white/20 text-white transition-colors">
-                <X size={24} />
+            <button
+              onClick={onClose}
+              className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-slate-300 hover:text-white transition-all cursor-pointer"
+              title="Close"
+            >
+              <X size={18} />
             </button>
+          </div>
+
+          {/* Search & Category Filter Bar */}
+          <div className="mt-4 flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center justify-between">
+            <div className="relative flex-1 max-w-md">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search any feature (e.g. Reading mode, MCQ, Video, Slate)..."
+                className="w-full bg-white/10 border border-white/15 text-white placeholder-slate-400 text-xs rounded-xl pl-9 pr-3 py-2 outline-none focus:border-sky-400 focus:bg-white/15 transition-all"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            <div className="text-[11px] text-slate-400 font-medium self-end sm:self-center">
+              Total {filteredFeatures.length} features listed
+            </div>
+          </div>
+
+          {/* Category Filter Pills */}
+          <div className="flex gap-1.5 overflow-x-auto pt-3 pb-1 scrollbar-none text-[10px]">
+            {categories.map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setSelectedCategory(cat)}
+                className={`px-3 py-1 rounded-lg font-bold whitespace-nowrap transition-all cursor-pointer ${
+                  selectedCategory === cat
+                    ? 'bg-sky-500 text-white shadow-sm'
+                    : 'bg-white/5 text-slate-300 hover:bg-white/10 border border-white/5'
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
         </div>
 
-        {/* STICKY COLUMN HEADERS */}
-        <div className="grid grid-cols-4 bg-slate-100 border-b border-slate-200 shrink-0 text-center sticky top-0 z-20 shadow-md">
-            <div className="p-4 flex items-center justify-start pl-6 font-black text-slate-500 text-xs uppercase tracking-wider bg-slate-50">
-                Feature
-            </div>
-            <div className="p-4 bg-green-50/90 border-l border-white backdrop-blur-sm">
-                <h3 className="font-black text-green-700 text-sm">FREE</h3>
-                <p className="text-[10px] text-green-600 font-bold">Starter</p>
-            </div>
-            <div className="p-4 bg-blue-50/90 border-l border-white backdrop-blur-sm relative overflow-hidden">
-                <h3 className="font-black text-blue-700 text-sm">BASIC</h3>
-                <p className="text-[10px] text-blue-600 font-bold">Standard</p>
-            </div>
-            <div className="p-4 bg-purple-50/90 border-l border-white backdrop-blur-sm relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-8 h-8 bg-gradient-to-bl from-yellow-400 to-transparent"></div>
-                <h3 className="font-black text-purple-700 text-sm flex items-center justify-center gap-1">ULTRA <Crown size={12} className="fill-purple-700"/></h3>
-                <p className="text-[10px] text-purple-600 font-bold">Best Value</p>
-            </div>
+        {/* Sticky Column Headers */}
+        <div className="grid grid-cols-12 bg-slate-100 border-b border-slate-200 shrink-0 text-center sticky top-0 z-20 shadow-xs text-xs font-black">
+          <div className="col-span-5 sm:col-span-4 p-3 pl-4 flex items-center justify-start text-slate-600 uppercase tracking-wider text-[11px]">
+            Feature / Item
+          </div>
+          <div className="col-span-2 sm:col-span-2 p-3 bg-emerald-50/90 text-emerald-800 border-l border-white">
+            <span className="block text-xs font-black">FREE</span>
+            <span className="block text-[9px] font-semibold text-emerald-600">Starter Plan</span>
+          </div>
+          <div className="col-span-2 sm:col-span-3 p-3 bg-sky-50/90 text-sky-800 border-l border-white">
+            <span className="block text-xs font-black">⭐ BASIC</span>
+            <span className="block text-[9px] font-semibold text-sky-600">Pro Plan</span>
+          </div>
+          <div className="col-span-3 sm:col-span-3 p-3 bg-purple-50/90 text-purple-900 border-l border-white">
+            <span className="block text-xs font-black flex items-center justify-center gap-1">
+              👑 ULTRA
+            </span>
+            <span className="block text-[9px] font-semibold text-purple-600">All Unlocked</span>
+          </div>
         </div>
 
-        {/* CONTENT (SCROLLABLE) */}
-        <div className="overflow-y-auto custom-scrollbar bg-white flex-1">
-            {Object.keys(groupedFeatures).map((category, catIndex) => (
-                <div key={catIndex}>
-                    {/* CATEGORY HEADER */}
-                    <div className="bg-slate-50 p-3 px-6 border-y border-slate-100 flex items-center gap-2 sticky top-0 z-10 shadow-sm">
-                        <span className="font-black text-slate-800 text-xs uppercase tracking-widest">{category}</span>
+        {/* Scrollable Table Body */}
+        <div className="overflow-y-auto flex-1 custom-scrollbar divide-y divide-slate-100 bg-white">
+          {filteredFeatures.length === 0 ? (
+            <div className="p-12 text-center text-slate-400 space-y-2">
+              <p className="font-bold text-sm">Koi feature match nahi hua.</p>
+              <p className="text-xs">Search query ya category filter clear karke dekhein.</p>
+              <button
+                onClick={() => { setSearchQuery(''); setSelectedCategory('ALL'); }}
+                className="mt-2 px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition cursor-pointer"
+              >
+                Filters Reset Karein
+              </button>
+            </div>
+          ) : (
+            filteredFeatures.map((f, idx) => {
+              const isLockedByAdmin = f.visible === false;
+              return (
+                <div
+                  key={f.id}
+                  className={`grid grid-cols-12 items-center py-2.5 px-1 hover:bg-slate-50/80 transition-colors ${
+                    isLockedByAdmin ? 'bg-slate-50/60 opacity-60' : idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'
+                  }`}
+                >
+                  {/* Feature Title & Category */}
+                  <div className="col-span-5 sm:col-span-4 pl-3 pr-2">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[9px] font-black text-slate-400 bg-slate-100 px-1 rounded font-mono">
+                        #{f.sn}
+                      </span>
+                      <span className="font-bold text-xs text-slate-800 leading-snug">
+                        {f.label}
+                      </span>
                     </div>
 
-                    {/* FEATURE ROWS */}
-                    {groupedFeatures[category].map((feature: any, featIndex: number) => {
-                        const isLocked = feature.visible === false;
+                    <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                      <span className="text-[9px] font-semibold text-slate-500">
+                        {f.category}
+                      </span>
+                      {f.unlockLevel ? (
+                        <span className="text-[8.5px] font-black bg-amber-100 text-amber-800 px-1 rounded border border-amber-200">
+                          🔒 Level {f.unlockLevel}+ Required
+                        </span>
+                      ) : null}
+                      {f.description && (
+                        <span className="text-[9px] text-slate-400 hidden sm:inline truncate max-w-[200px]" title={f.description}>
+                          • {f.description}
+                        </span>
+                      )}
+                    </div>
+                  </div>
 
-                        return (
-                            <div key={featIndex} className={`grid grid-cols-4 border-b border-slate-50 hover:bg-slate-50/50 transition-colors relative group ${isLocked ? 'grayscale opacity-70 bg-slate-50' : ''}`}>
+                  {/* Free Column */}
+                  <div className="col-span-2 sm:col-span-2 text-center px-1">
+                    {renderCellBadge(f.free, 'free', f.unlockLevel)}
+                  </div>
 
-                                {/* LOCKED OVERLAY */}
-                                {isLocked && (
-                                    <div className="absolute inset-0 flex items-center justify-center z-20 bg-white/50 backdrop-blur-[1px]">
-                                        <div className="bg-red-100 text-red-700 border border-red-200 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-2 shadow-sm">
-                                            <Lock size={12} /> FEATURE CURRENTLY LOCKED
-                                        </div>
-                                    </div>
-                                )}
+                  {/* Basic Column */}
+                  <div className="col-span-2 sm:col-span-3 text-center px-1">
+                    {renderCellBadge(f.basic, 'basic', f.unlockLevel)}
+                  </div>
 
-                                <div className="p-4 pl-6 flex items-center gap-3 text-sm font-bold text-slate-700 border-r border-slate-50">
-                                    {feature.label}
-                                </div>
-                                <div className="p-4 flex items-center justify-center text-xs font-medium text-slate-600 border-r border-slate-50 text-center">
-                                    {/* HIDDEN IN MATRIX - REMOVE THIS */}
-                                    {/* {getLimitDisplay(feature, 'free')} */}
-                                    <span className="text-[10px] text-slate-500 font-bold">Standard</span>
-                                </div>
-                                <div className="p-4 flex items-center justify-center text-xs font-bold bg-blue-50/10 border-r border-slate-50 text-center">
-                                    {getLimitDisplay(feature, 'basic')}
-                                </div>
-                                <div className="p-4 flex items-center justify-center text-xs font-black bg-purple-50/10 text-center">
-                                    {getLimitDisplay(feature, 'ultra')}
-                                </div>
-                            </div>
-                        );
-                    })}
+                  {/* Ultra Column */}
+                  <div className="col-span-3 sm:col-span-3 text-center px-1">
+                    {renderCellBadge(f.ultra, 'ultra', f.unlockLevel)}
+                  </div>
                 </div>
-            ))}
+              );
+            })
+          )}
         </div>
 
-        {/* FOOTER */}
-        <div className="p-4 bg-slate-50 border-t border-slate-200 text-center flex justify-between items-center shrink-0">
-            <p className="text-[10px] text-slate-500 font-medium">
-                * Prices and features subject to change. Admin controls all access rights via NSTA Control Panel.
-            </p>
-            <button
-                onClick={onClose}
-                className="px-6 py-2 bg-slate-900 text-white text-xs font-bold rounded-xl hover:bg-slate-800 transition-colors"
-            >
-                Close Matrix
-            </button>
+        {/* Footer */}
+        <div className="p-3.5 sm:p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-2 shrink-0">
+          <div className="text-[10px] text-slate-500 font-medium text-center sm:text-left">
+            * Features and limits are dynamically synced with Admin NSTA Control. Unlocks below required levels remain locked until reached.
+          </div>
+          <button
+            onClick={onClose}
+            className="w-full sm:w-auto px-6 py-2 bg-slate-900 hover:bg-slate-800 active:scale-95 text-white font-bold text-xs rounded-xl transition cursor-pointer"
+          >
+            Close Matrix
+          </button>
         </div>
+
       </div>
     </div>
   );

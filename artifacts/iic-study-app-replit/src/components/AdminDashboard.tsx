@@ -4886,6 +4886,35 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                 </div>
               </div>
 
+              {/* Quick Feature & Tier Manager Banner */}
+              <div
+                onClick={() => setActiveTab('NSTA_CONTROL')}
+                className="mb-4 bg-gradient-to-r from-violet-900 via-indigo-900 to-purple-950 p-3.5 rounded-2xl border border-violet-500/30 text-white flex items-center justify-between cursor-pointer hover:shadow-lg transition-all active:scale-[0.99] group shadow-md"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-violet-600/40 border border-violet-400/40 flex items-center justify-center text-xl shadow-inner group-hover:scale-110 transition-transform">
+                    ⚡
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-black text-sm text-white flex items-center gap-1.5">
+                        Feature & Tier Manager
+                        <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-2 py-0.5 rounded-full font-black">
+                          FREE • BASIC • ULTRA
+                        </span>
+                      </h4>
+                    </div>
+                    <p className="text-[10px] text-violet-200">
+                      Limits, unlock levels, tier access aur study modes control karein
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 bg-white/10 group-hover:bg-white/20 text-violet-200 px-3 py-1.5 rounded-xl text-xs font-bold transition">
+                  <span>Manage</span>
+                  <ChevronRight size={14} />
+                </div>
+              </div>
+
               <FeatureGroupList
                   activeTab={activeTab}
                   onNavigate={(tab) => {

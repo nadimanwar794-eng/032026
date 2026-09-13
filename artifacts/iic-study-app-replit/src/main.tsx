@@ -23,7 +23,7 @@ if (navigator.storage && navigator.storage.persist) {
   }).catch(() => {});
 }
 
-// Intercept benign Firestore offline transition and network warnings so they don't get logged as fatal uncaught console errors
+// Intercept benign Firestore offline transition, quota exceeded, and network warnings so they don't get logged as fatal uncaught console errors
 const _origConsoleError = console.error;
 console.error = (...args: any[]) => {
   const text = args.map(a => (a?.stack || a?.message || String(a || ''))).join(' ').toLowerCase();
@@ -31,9 +31,17 @@ console.error = (...args: any[]) => {
     text.includes('could not reach cloud firestore backend') ||
     text.includes('client will operate in offline mode') ||
     text.includes("backend didn't respond within") ||
-    (text.includes('@firebase/firestore') && (text.includes('offline') || text.includes('10 seconds')))
+    text.includes('quota exceeded') ||
+    text.includes('resource-exhausted') ||
+    text.includes('maximum backoff delay') ||
+    (text.includes('@firebase/firestore') && (text.includes('offline') || text.includes('10 seconds') || text.includes('quota') || text.includes('exhausted')))
   ) {
-    console.warn('[IIC Offline Mode Notice]', ...args);
+    if (typeof window !== 'undefined') {
+      try {
+        window.dispatchEvent(new CustomEvent('nst:firestore_quota_exceeded'));
+      } catch {}
+    }
+    console.warn('[IIC Data & Quota Fallback Notice]', ...args);
     return;
   }
   _origConsoleError.apply(console, args);
@@ -50,6 +58,7 @@ const isNetworkLikeError = (reason: any): boolean => {
     code === 'cancelled' ||
     code === 'AbortError' ||
     code === 'NetworkError' ||
+    code === 'resource-exhausted' ||
     msg.includes('network') ||
     msg.includes('offline') ||
     msg.includes('failed to fetch') ||
@@ -57,7 +66,10 @@ const isNetworkLikeError = (reason: any): boolean => {
     msg.includes('client is offline') ||
     msg.includes('could not reach cloud firestore backend') ||
     msg.includes("backend didn't respond") ||
-    msg.includes('client will operate in offline mode')
+    msg.includes('client will operate in offline mode') ||
+    msg.includes('quota exceeded') ||
+    msg.includes('resource-exhausted') ||
+    msg.includes('maximum backoff delay')
   );
 };
 

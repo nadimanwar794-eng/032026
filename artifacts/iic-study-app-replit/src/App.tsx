@@ -379,6 +379,13 @@ const App: React.FC = () => {
   const [showTopBanner, setShowTopBanner] = useState(true);
   const [showBottomBanner, setShowBottomBanner] = useState(true);
   const [inAppBrowserUrl, setInAppBrowserUrl] = useState<string | null>(null);
+  const [firestoreQuotaExceeded, setFirestoreQuotaExceeded] = useState(false);
+
+  useEffect(() => {
+    const handler = () => setFirestoreQuotaExceeded(true);
+    window.addEventListener('nst:firestore_quota_exceeded', handler);
+    return () => window.removeEventListener('nst:firestore_quota_exceeded', handler);
+  }, []);
 
   useEffect(() => {
       if (state.settings?.globalCards3D) {
@@ -3243,6 +3250,42 @@ const App: React.FC = () => {
                 Offline — Saved content available
               </span>
             ))}
+          </div>
+        </div>
+      )}
+
+      {firestoreQuotaExceeded && (
+        <div
+          role="status"
+          className="w-full shrink-0 bg-gradient-to-r from-sky-700 via-indigo-700 to-blue-800 text-white px-3 py-1.5 flex items-center justify-between text-xs shadow-md border-b border-white/10"
+          style={{ zIndex: 9997 }}
+        >
+          <div className="flex items-center gap-2 truncate">
+            <span className="bg-white/20 text-white text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider shrink-0">
+              Live Backup Mode
+            </span>
+            <span className="truncate text-[11px] sm:text-xs">
+              Cloud Firestore daily free quota reached. App is operating seamlessly using Realtime Database & offline cache.
+            </span>
+          </div>
+          <div className="flex items-center gap-2.5 shrink-0 ml-2">
+            {state.user?.role === 'ADMIN' && (
+              <a
+                href="https://console.firebase.google.com/project/students-app-deae5/firestore/databases/(default)/data?openUpgradeDialog=true"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline hover:text-sky-200 text-[11px] font-semibold text-white/90"
+              >
+                Upgrade Quota
+              </a>
+            )}
+            <button
+              onClick={() => setFirestoreQuotaExceeded(false)}
+              className="text-white/70 hover:text-white text-xs px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20 transition-colors leading-none"
+              title="Dismiss banner"
+            >
+              ✕
+            </button>
           </div>
         </div>
       )}

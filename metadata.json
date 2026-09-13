@@ -1,6 +1,6 @@
 {
   "name": "Remix 032026",
-  "description": "Imported from GitHub: nadimanwar794-eng/032026",
+  "description": "NSTA Study App with Free, Basic, and Ultra 3-tier system, live Feature & Tier Manager, and interactive store comparison matrix.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

@@ -2,6 +2,7 @@
 // @ts-nocheck
 import { Subject } from './types';
 import { FULL_SYLLABUS } from './utils/full_syllabus_data';
+import { MASTER_TIER_FEATURES } from './constants/tierConfig';
 // @ts-ignore
 // import { COMPETITION_DATA } from './competition_syllabus';
 
@@ -526,41 +527,7 @@ export const LEVEL_UP_CONFIG = [
     { level: 15, featureId: 'ABSOLUTE',      label: 'Absolute — MAX',      description: '30% discount + white glowing name — highest level' },
 ];
 
-export const NSTA_DEFAULT_FEATURES = [
-    { category: '⭐ PAGE 1', id: 'LEADER_BOARD', label: 'Leader Board', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'READING_MODE', label: 'Reading mode', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'WRITING_MODE', label: 'Writing mode', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'MCQ_MODE', label: 'Mcq mode', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'PROJECTOR_MODE', label: 'Projector mode', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'FLASHCARD', label: 'Flashcard', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'PDF', label: 'Pdf', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'VIDEO', label: 'Video', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'SOLUTION_MCQ', label: 'Solution (Mcq)', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'OFFICIAL_MARKSHEET', label: 'Official Marksheet', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'FULL_ANALYSIS', label: 'Full Analysis', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'REVISION_HUB', label: 'Revision Hub', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'ROUTINE', label: 'Routine', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'COMMUNITY', label: 'Community', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'GLOBAL_MESSAGE', label: 'Global message', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'MCQ', label: 'Mcq', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'HELP_ADMIN', label: 'Help (Admin support)', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'THEME_STUDIO', label: 'Theme Studio', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'SCORE_HISTORY', label: 'Score History', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'ROUTINE_COMPILATION', label: 'Routine multiple Books compilation', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'NSTA_MESSENGER', label: 'Nsta messenger', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'DAILY_LIMITE', label: 'Daily limite', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'VP_MULTIPLAYER', label: 'Vp multiplayer', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'CREDIT_DISCOUNT', label: 'Credit Discount', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'FONT_STYLE_COLOR', label: 'Font & style color', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'OFFLINE_DOWNLOAD', label: 'Offline Download', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'DAILY_CLAIM', label: 'Daily claim', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'STORE_DISCOUNT', label: 'Store discount', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '🚀 PAGE 2', id: 'WRITING_CORRECTION', label: 'Writing & Correction mode', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '🚀 PAGE 2', id: 'BASIC_THEME', label: 'Basic Theme', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '🚀 PAGE 2', id: 'ULTRA_THEME', label: 'Ultra Theme', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '🚀 PAGE 2', id: 'MCQ_LIMITE', label: 'Mcq limite', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '🚀 PAGE 2', id: 'NAME_CHANGE', label: 'Name change', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 }
-];
+export const NSTA_DEFAULT_FEATURES = MASTER_TIER_FEATURES;
 
 export const DEFAULT_PLAN_COMPARISON = [
     {

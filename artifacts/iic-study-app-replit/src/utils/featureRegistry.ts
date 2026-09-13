@@ -869,9 +869,9 @@ export const ALL_FEATURES: Feature[] = [
     },
     {
         id: 'ADMIN_NSTA_CONTROL',
-        label: 'Nsta',
-        group: 'GAME',
-        surfaceLevel: 3,
+        label: 'Feature & Tier Manager (Free, Basic, Ultra)',
+        group: 'CORE',
+        surfaceLevel: 1,
         adminVisible: true,
         adminTab: 'NSTA_CONTROL',
         requiredPermission: 'MANAGE_SETTINGS',
