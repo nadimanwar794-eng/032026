@@ -1875,7 +1875,14 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
             delete (updated as any).personalThemeColor;
         }
         onUpdateUser(updated);
-        try { await saveUserToLive(updated); } catch {}
+        try {
+            localStorage.setItem("nst_current_user", JSON.stringify(updated));
+            if (updated?.id) {
+                localStorage.setItem(`nst_user_profile_${updated.id}`, JSON.stringify(updated));
+                localStorage.setItem("nst_user_profile", JSON.stringify(updated));
+            }
+            await saveUserToLive(updated, { immediate: true });
+        } catch {}
         setThemeDurationEntry(null);
         if (selected && !isAdmin) {
             const duration = selectedDuration || selected.accessDurationDays || 7;
@@ -1994,6 +2001,38 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
             </>
         ),
     };
+
+    const isBasicOrUltra = user.role === 'ADMIN' || user.role === 'SUB_ADMIN' || user.isPremium || user.subscriptionLevel === 'BASIC' || user.subscriptionLevel === 'ULTRA';
+    const userLevel = (user as any).level || (user as any).totalScore ? Math.max(1, Math.floor(Math.sqrt((user as any).totalScore || 0) / 10)) : 1;
+    const isThemeStudioUnlocked = isBasicOrUltra || userLevel >= 3;
+
+    if (!isThemeStudioUnlocked) {
+        return (
+            <div className="min-h-screen bg-[#06080f] text-white p-6 flex flex-col items-center justify-center text-center">
+                <div className="w-20 h-20 rounded-3xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400 mb-6 shadow-2xl">
+                    <Palette size={40} />
+                </div>
+                <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 text-xs font-black mb-3">
+                    🔒 Level 3 Required
+                </div>
+                <h2 className="text-2xl font-black text-white mb-2">Theme Studio Locked</h2>
+                <p className="text-slate-400 text-xs max-w-xs mb-6 leading-relaxed">
+                    Free users ke liye Theme Studio <span className="text-purple-400 font-bold">Level 3</span> par unlock hota hai.
+                    Aap abhi <span className="text-indigo-400 font-bold">Level {userLevel}</span> par hain.
+                    <br /><br />
+                    Study karke Level 3 achieve karein ya <span className="text-indigo-400 font-bold">Basic / Ultra</span> subscription lein jisme instant access mil jata hai!
+                </p>
+                {onBack && (
+                    <button
+                        onClick={onBack}
+                        className="px-6 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-white font-bold text-xs transition-all active:scale-95"
+                    >
+                        Wapas Jayein
+                    </button>
+                )}
+            </div>
+        );
+    }
 
     return (
         <>

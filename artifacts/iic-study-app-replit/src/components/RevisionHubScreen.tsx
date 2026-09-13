@@ -296,7 +296,14 @@ export const RevisionHubScreen: React.FC<Props> = ({
           diamonds: Math.max(0, curDiamonds - LESSON_OPEN_DIAMOND_COST),
         };
         onUpdateUser(updated);
-        saveUserToLive(updated);
+        try {
+          localStorage.setItem("nst_current_user", JSON.stringify(updated));
+          if (updated?.id) {
+            localStorage.setItem(`nst_user_profile_${updated.id}`, JSON.stringify(updated));
+            localStorage.setItem("nst_user_profile", JSON.stringify(updated));
+          }
+        } catch (_) {}
+        saveUserToLive(updated, { immediate: true });
         setCoinModal(null);
         setMcqSelectedLesson(lesson);
         setPendingLesson(null);

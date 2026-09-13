@@ -35,13 +35,27 @@ export const consumeDeferredStudyCoins = (userId: string | undefined): number =>
   }
 };
 
+const isUserSubscribed = (userId?: string): boolean => {
+  if (!userId) return false;
+  try {
+    const raw = localStorage.getItem('nst_current_user');
+    if (raw) {
+      const u = JSON.parse(raw);
+      const tier = String(u.subscriptionTier || u.subscriptionLevel || '').toUpperCase();
+      if (tier.includes('BASIC') || tier.includes('ULTRA') || tier.includes('PRO') || u.isPremium || u.role === 'ADMIN') {
+        return true;
+      }
+    }
+  } catch {}
+  return false;
+};
+
 /**
  * Convert XP to study credits cumulatively.
  *
- * Credits are earned from the total XP, not independently per question. The
- * carry value preserves the fractional part between answers/sessions so a
- * user earns exactly floor(total XP / 6) with Routine enabled, or
- * floor(total XP / 8) otherwise.
+ * Credits are earned from the total XP, not independently per question.
+ * - Basic & Ultra: Always full rate without penalty (floor(total XP / 6)).
+ * - Free users: floor(total XP / 6) with Routine enabled, or half credits (floor(total XP / 12)) if Routine is OFF.
  */
 export const deferCreditsFromXp = (
   userId: string | undefined,
@@ -51,7 +65,10 @@ export const deferCreditsFromXp = (
 ): void => {
   if (!userId || !Number.isFinite(xpEarned) || xpEarned <= 0) return;
   try {
-    const divisor = routineEnabled ? 6 : 8;
+    const isSubscribed = isUserSubscribed(userId);
+    // Basic/Ultra: no penalty (divisor = 6)
+    // Free: routine ON = 6, routine OFF = half credits (divisor = 12)
+    const divisor = (isSubscribed || routineEnabled) ? 6 : 12;
     const date = new Date().toISOString().split('T')[0];
     const key = xpCreditCarryKey(userId, date, divisor, scope);
     const previousCarry = Number.parseInt(localStorage.getItem(key) || '0', 10) || 0;

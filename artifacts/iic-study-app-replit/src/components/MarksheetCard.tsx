@@ -668,25 +668,37 @@ export const MarksheetCard: React.FC<Props> = ({
   const handleUnlockAnalysis = (currency: 'CREDITS' | 'DIAMONDS') => {
     const COST_CREDITS = 20;
     const COST_DIAMONDS = 5;
+    let updatedUser: User | null = null;
     if (currency === 'DIAMONDS') {
       const curDia = user.diamonds || 0;
       if (curDia < COST_DIAMONDS) {
         alert(`Insufficient Diamonds! Unlock costs ${COST_DIAMONDS} diamonds. You have ${curDia} 💎.`);
         return;
       }
-      if (onUpdateUser) {
-        onUpdateUser({ ...user, diamonds: Math.max(0, curDia - COST_DIAMONDS) });
-      }
+      updatedUser = { ...user, diamonds: Math.max(0, curDia - COST_DIAMONDS) };
     } else {
       const curCr = (user.credits || 0) + (user.bonusCredits || 0);
       if (curCr < COST_CREDITS) {
         alert(`Insufficient Credits! Unlock costs ${COST_CREDITS} coins. You have ${curCr} 🪙.`);
         return;
       }
-      if (onUpdateUser) {
-        onUpdateUser(applyDeduction(user, COST_CREDITS) ?? user);
-      }
+      updatedUser = applyDeduction(user, COST_CREDITS) ?? user;
     }
+
+    if (updatedUser) {
+      if (onUpdateUser) {
+        onUpdateUser(updatedUser);
+      }
+      try {
+        localStorage.setItem("nst_current_user", JSON.stringify(updatedUser));
+        if (updatedUser?.id) {
+          localStorage.setItem(`nst_user_profile_${updatedUser.id}`, JSON.stringify(updatedUser));
+          localStorage.setItem("nst_user_profile", JSON.stringify(updatedUser));
+        }
+      } catch (_) {}
+      saveUserToLive(updatedUser, { immediate: true });
+    }
+
     setIsAnalysisUnlocked(true);
     setActiveTab("ANALYSIS_TOPIC");
     setShowAnalysisUnlockModal(false);

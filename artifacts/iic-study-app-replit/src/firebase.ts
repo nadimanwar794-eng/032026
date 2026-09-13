@@ -883,6 +883,8 @@ const ACCOUNT_STATE_FIELDS = [
   'bonusCredits',
   'giftedCredits',
   'giftedCreditsExpiry',
+  'diamonds',
+  'diamondSubscription',
   'isPremium',
   'subscriptionTier',
   'subscriptionLevel',

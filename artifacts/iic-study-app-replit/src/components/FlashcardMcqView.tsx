@@ -1408,6 +1408,7 @@ export const FlashcardMcqView: React.FC<Props> = ({
                   user={user}
                   settings={settings}
                   onClose={() => setProjectorShowReview(false)}
+                  onUpdateUser={onUpdateUser}
                   onRestart={() => {
                     setProjectorQIndex(0);
                     setProjectorReveal(false);

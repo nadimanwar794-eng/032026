@@ -1243,6 +1243,9 @@ const App: React.FC = () => {
                       if (!cloudUser.hasOwnProperty('redeemedCodes')) mergedUser.redeemedCodes = prev.user.redeemedCodes;
                       if (!cloudUser.hasOwnProperty('unlockedContent')) mergedUser.unlockedContent = prev.user.unlockedContent;
                       if (!cloudUser.hasOwnProperty('dailyRoutine')) mergedUser.dailyRoutine = prev.user.dailyRoutine;
+                      if (typeof (cloudUser as any).diamonds === 'undefined' && typeof prev.user.diamonds !== 'undefined') {
+                          mergedUser.diamonds = prev.user.diamonds;
+                      }
 
                       if (prev.user.role === 'ADMIN' && cloudUser.role !== 'ADMIN') {
                           mergedUser.role = 'ADMIN';
@@ -3897,6 +3900,17 @@ const App: React.FC = () => {
                   };
                   savePublicActivity(activity);
                   setAlertConfig({isOpen: true, message: "Result published!"});
+              }}
+              onUpdateUser={(updatedUser: User) => {
+                  setState(prev => ({ ...prev, user: updatedUser }));
+                  try {
+                      localStorage.setItem("nst_current_user", JSON.stringify(updatedUser));
+                      if (updatedUser?.id) {
+                          localStorage.setItem(`nst_user_profile_${updatedUser.id}`, JSON.stringify(updatedUser));
+                          localStorage.setItem("nst_user_profile", JSON.stringify(updatedUser));
+                      }
+                  } catch (_) {}
+                  saveUserToLive(updatedUser, { immediate: true });
               }}
           />
         </Suspense>

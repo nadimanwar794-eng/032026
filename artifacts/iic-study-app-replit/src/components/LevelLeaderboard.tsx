@@ -194,7 +194,7 @@ export const LevelLeaderboard: React.FC<Props> = ({ user, settings, onBack }) =>
   };
 
   const isBasicOrUltra = user.role === 'ADMIN' || user.role === 'SUB_ADMIN' || user.isPremium || user.subscriptionLevel === 'BASIC' || user.subscriptionLevel === 'ULTRA';
-  const userLevel = user.level || getLevelProgress(user.score || 0).currentLevel || 1;
+  const userLevel = user.level || getLevelInfo(user.totalScore || 0).level || 1;
   const isLeaderboardUnlocked = isBasicOrUltra || userLevel >= 2;
 
   if (!isLeaderboardUnlocked) {

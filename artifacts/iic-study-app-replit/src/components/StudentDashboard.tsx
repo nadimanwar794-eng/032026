@@ -1133,14 +1133,14 @@ export const StudentDashboard: React.FC<Props> = ({
   const _trackBasicHtmlOpen = _trackHtmlOpen;
 
   // ── COIN GATE helpers ────────────────────────────────────────────────────
-  // Returns effective cost after discount: Ultra gets 40% off everywhere, Basic gets 20% off; Routine can boost to 50%
+  // Returns effective cost after discount: Ultra gets 10% off everywhere, Basic gets 5% off; Routine can boost to 50%
   const _getCoinCost = (baseCost: number): { cost: number; discountPct: number } => {
     const _isAdm = user.role === 'ADMIN' || user.role === 'SUB_ADMIN';
     if (_isAdm) return { cost: 0, discountPct: 100 };
     try {
       let disc = 0;
-      if (_isUltraUser) disc = 40;
-      else if (_isBasicUser) disc = 20;
+      if (_isUltraUser) disc = 10;
+      else if (_isBasicUser) disc = 5;
 
       const _rd = loadRoutineData(user.id);
       if (_rd?.enabled) {
@@ -1155,7 +1155,7 @@ export const StudentDashboard: React.FC<Props> = ({
       }
       return { cost: Math.max(1, Math.floor(baseCost * (1 - disc / 100))), discountPct: disc };
     } catch {
-      const disc = _isUltraUser ? 40 : _isBasicUser ? 20 : 0;
+      const disc = _isUltraUser ? 10 : _isBasicUser ? 5 : 0;
       return { cost: Math.max(1, Math.floor(baseCost * (1 - disc / 100))), discountPct: disc };
     }
   };
@@ -2048,11 +2048,13 @@ export const StudentDashboard: React.FC<Props> = ({
     deducted: number;
     current: number;
     type: 'ADD' | 'DEDUCT';
+    currency?: 'COIN' | 'DIAMOND';
     xpPrevious?: number;
     xpEarned?: number;
     xpCurrent?: number;
   } | null>(null);
   const creditToastTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastDiamondDeductTimeRef = React.useRef<number>(0);
 
   // COIN GATE STATE — full-screen confirmation popup before any coin spend
   const [coinGate, setCoinGate] = React.useState<{
@@ -2802,6 +2804,64 @@ export const StudentDashboard: React.FC<Props> = ({
   const [splashPurchaseDuration, setSplashPurchaseDuration] = useState<1 | 7 | 30>(7);
   const [showLevelChooser, setShowLevelChooser] = useState(false);
   const [showProfileSettings, setShowProfileSettings] = useState(false);
+  const [isUpdatingName, setIsUpdatingName] = useState(false);
+
+  const handleChangeName = async (currency: 'CREDITS' | 'DIAMONDS') => {
+    const trimmed = newNameInput.trim();
+    if (!trimmed || trimmed.length < 2) {
+      showAlert('⚠️ Naam kam se kam 2 aksharon ka hona chahiye.', 'ERROR');
+      return;
+    }
+    if (trimmed === user.name) {
+      showAlert('⚠️ Yeh naam pehle se set hai.', 'INFO');
+      return;
+    }
+    const costCredits = 100;
+    const costDiamonds = 20;
+    const curCredits = getTotalCredits(user);
+    const curDiamonds = user.diamonds || 0;
+
+    if (currency === 'CREDITS') {
+      if (curCredits < costCredits) {
+        showAlert(`⚠️ Credits kam hain! Zaroorat: ${costCredits} 🪙, Aapke paas: ${curCredits} 🪙.`, 'ERROR');
+        return;
+      }
+    } else {
+      if (curDiamonds < costDiamonds) {
+        showAlert(`⚠️ Diamonds kam hain! Zaroorat: ${costDiamonds} 💎, Aapke paas: ${curDiamonds} 💎.`, 'ERROR');
+        return;
+      }
+    }
+
+    setIsUpdatingName(true);
+    try {
+      const updatedUser: User = currency === 'CREDITS'
+        ? (applyDeduction(user, costCredits) || { ...user, credits: Math.max(0, (user.credits || 0) - costCredits) })
+        : { ...user, diamonds: Math.max(0, curDiamonds - costDiamonds) };
+
+      updatedUser.name = trimmed;
+
+      try {
+        await updateDoc(doc(db, 'users', user.id), {
+          name: trimmed,
+          credits: updatedUser.credits,
+          diamonds: updatedUser.diamonds,
+        });
+      } catch (err) {
+        console.warn('Firestore user name update error:', err);
+      }
+
+      await saveUserToLive(updatedUser);
+      handleUserUpdate(updatedUser);
+      setShowNameChangeModal(false);
+      showAlert(`🎉 Naam safaltapoorvak badal kar "${trimmed}" kar diya gaya!`, 'SUCCESS');
+    } catch (e: any) {
+      console.error('Name update failed:', e);
+      showAlert('Naam update nahi ho saka. Kripya punah koshish karein.', 'ERROR');
+    } finally {
+      setIsUpdatingName(false);
+    }
+  };
   const [rewardSubTab, setRewardSubTab] = useState<'EARNED' | 'RULES' | 'HISTORY'>('EARNED');
   const [rewardHistorySeenCount, setRewardHistorySeenCount] = useState<number>(() => {
     const saved = localStorage.getItem(`nst_reward_hist_seen_${user?.id || ''}`);
@@ -6750,27 +6810,8 @@ export const StudentDashboard: React.FC<Props> = ({
   };
 
   useEffect(() => {
-    const checkCompetitionAccess = () => {
-      if (syllabusMode === "COMPETITION") {
-        const access = checkFeatureAccess(
-          "COMPETITION_MODE",
-          user,
-          settings || {},
-        );
-        if (!access.hasAccess) {
-          setSyllabusMode("SCHOOL");
-          document.documentElement.style.setProperty(
-            "--primary",
-            settings?.themeColor || "#3b82f6",
-          );
-          showAlert(
-            "⚠️ Competition Mode is locked! Please upgrade to an Ultra subscription to access competition content.",
-            "ERROR",
-            "Locked Feature",
-          );
-        }
-      }
-    };
+    // Competition Mode is open for all users (Lucent book is free for all; extra books require Basic/Ultra)
+    const checkCompetitionAccess = () => {};
     checkCompetitionAccess();
     const interval = setInterval(checkCompetitionAccess, 60000);
     return () => clearInterval(interval);
@@ -7123,6 +7164,16 @@ export const StudentDashboard: React.FC<Props> = ({
             updated.unlockedContent = currentUser.unlockedContent;
           if (!cloudData.hasOwnProperty("dailyRoutine"))
             updated.dailyRoutine = currentUser.dailyRoutine;
+          if (typeof (cloudData as any).diamonds === 'undefined' && typeof currentUser.diamonds !== 'undefined') {
+            updated.diamonds = currentUser.diamonds;
+          } else if (
+            Date.now() - lastDiamondDeductTimeRef.current < 5000 &&
+            typeof currentUser.diamonds === 'number' &&
+            typeof (cloudData as any).diamonds === 'number' &&
+            (cloudData as any).diamonds > currentUser.diamonds
+          ) {
+            updated.diamonds = currentUser.diamonds;
+          }
 
           // Recalculate only from backend subscription records. Local cached
           // subscription fields must not override an admin/device change.
@@ -7552,7 +7603,39 @@ export const StudentDashboard: React.FC<Props> = ({
     return true;
   };
 
+  const handleSpendDiamonds = (amount: number): boolean => {
+    if (user.role === 'ADMIN' || user.role === 'SUB_ADMIN') return true;
+    const freshU = (window as any).__dashUserRef?.current ?? userRef.current ?? user;
+    const currentDiamonds = typeof freshU.diamonds === 'number' ? freshU.diamonds : (user.diamonds ?? 0);
+    if (currentDiamonds < amount) return false;
+    const updated: User = {
+      ...freshU,
+      diamonds: Math.max(0, currentDiamonds - amount),
+    };
+    handleUserUpdate(updated);
+    return true;
+  };
+
   const handleUserUpdate = async (updatedUser: User) => {
+    // Keep internal refs in sync immediately to avoid stale closures
+    userRef.current = updatedUser;
+    if ((window as any).__dashUserRef) {
+      (window as any).__dashUserRef.current = updatedUser;
+    }
+
+    // Detect diamond deduction and show toast
+    const prevDiamonds = user.diamonds ?? 0;
+    const newDiamonds = updatedUser.diamonds ?? 0;
+    if (newDiamonds < prevDiamonds) {
+      const diaDeducted = prevDiamonds - newDiamonds;
+      lastDiamondDeductTimeRef.current = Date.now();
+      if (creditToastTimerRef.current) clearTimeout(creditToastTimerRef.current);
+      setCreditDeductToast({ visible: true, previous: prevDiamonds, deducted: diaDeducted, current: newDiamonds, type: 'DEDUCT', currency: 'DIAMOND' });
+      creditToastTimerRef.current = setTimeout(() => {
+        setCreditDeductToast(null);
+      }, 2000);
+    }
+
     // Detect credit deduction and show toast (compare total credits including bonus/gifted)
     const prevCredits = getTotalCredits(user);
     const newCredits = getTotalCredits(updatedUser);
@@ -7560,7 +7643,7 @@ export const StudentDashboard: React.FC<Props> = ({
       const deducted = prevCredits - newCredits;
       // Credit Invest Bonus removed — credit spend pe score nahi milega
       if (creditToastTimerRef.current) clearTimeout(creditToastTimerRef.current);
-      setCreditDeductToast({ visible: true, previous: prevCredits, deducted, current: newCredits, type: 'DEDUCT' });
+      setCreditDeductToast({ visible: true, previous: prevCredits, deducted, current: newCredits, type: 'DEDUCT', currency: 'COIN' });
       creditToastTimerRef.current = setTimeout(() => {
         setCreditDeductToast(null);
       }, 2000);
@@ -7570,7 +7653,7 @@ export const StudentDashboard: React.FC<Props> = ({
       const _newXP  = updatedUser.totalScore || 0;
       const _xpGained = Math.max(0, _newXP - _prevXP);
       if (creditToastTimerRef.current) clearTimeout(creditToastTimerRef.current);
-      setCreditDeductToast({ visible: true, previous: prevCredits, deducted: added, current: newCredits, type: 'ADD', xpPrevious: _prevXP, xpEarned: _xpGained > 0 ? _xpGained : undefined, xpCurrent: _xpGained > 0 ? _newXP : undefined });
+      setCreditDeductToast({ visible: true, previous: prevCredits, deducted: added, current: newCredits, type: 'ADD', currency: 'COIN', xpPrevious: _prevXP, xpEarned: _xpGained > 0 ? _xpGained : undefined, xpCurrent: _xpGained > 0 ? _newXP : undefined });
       creditToastTimerRef.current = setTimeout(() => {
         setCreditDeductToast(null);
       }, 2000);
@@ -7588,7 +7671,7 @@ export const StudentDashboard: React.FC<Props> = ({
 
     // Sync to cloud in background
     if (!isImpersonating) {
-      saveUserToLive(updatedUser).then(saved => {
+      saveUserToLive(updatedUser, { immediate: true }).then(saved => {
         if (!saved) {
           console.warn("[StudentDashboard] saveUserToLive returned false, saved in localStorage.");
         }
@@ -7729,6 +7812,12 @@ export const StudentDashboard: React.FC<Props> = ({
   };
 
   const handleContentSubjectSelect = (subject: Subject) => {
+    if (syllabusMode === 'COMPETITION' && subject.id !== 'lucent') {
+      if (!_isBasicUser && !_isUltraUser && user.role !== 'ADMIN') {
+        showAlert('🔒 Yeh Book Compilation Basic aur Ultra members ke liye hai. Free mode me Lucent Book available hai.', 'INFO');
+        return;
+      }
+    }
     setSelectedSubject(subject);
     setHomeworkSubjectView(null);
     setLucentCategoryView(false);
@@ -9795,6 +9884,7 @@ export const StudentDashboard: React.FC<Props> = ({
                              user={user}
                              settings={settings}
                              onClose={() => setHwShowAnalysis(null)}
+                             onUpdateUser={handleUserUpdate}
                              onRestart={() => {
                                setHwShowAnalysis(null);
                                setHwAnswers(prev => {
@@ -12142,6 +12232,12 @@ export const StudentDashboard: React.FC<Props> = ({
                 setSelectedSubject(subject);
                 setHomeworkSubjectView(null);
                 setLucentCategoryView(false);
+                if (syllabusMode === 'COMPETITION' && subject.id !== 'lucent') {
+                  if (!_isBasicUser && !_isUltraUser && user.role !== 'ADMIN') {
+                    showAlert('🔒 Yeh Book Compilation Basic aur Ultra members ke liye hai. Free mode me Lucent Book available hai.', 'INFO');
+                    return;
+                  }
+                }
                 if (HOMEWORK_SUBJECTS.includes(subject.id)) {
                   setHomeworkSubjectView(subject.id);
                   setHwSubjectOpenedFrom('COURSES');
@@ -14050,8 +14146,10 @@ export const StudentDashboard: React.FC<Props> = ({
             {/* ── Score History Button ── */}
             <button
               onClick={() => {
-                if (!_isBasicUser && !_isUltraUser && user.role !== 'ADMIN') {
-                  showAlert('🔒 Score History Basic aur Ultra members ke liye unlocked hai. Upgrade karein!', 'INFO');
+                const userLvl = user.level || getLevelInfo(user.totalScore || 0).level || 1;
+                const isScoreUnlocked = _isBasicUser || _isUltraUser || user.role === 'ADMIN' || userLvl >= 3;
+                if (!isScoreUnlocked) {
+                  showAlert('🔒 Score History Free users ke liye Level 3 par unlock hota hai. Basic aur Ultra members ke liye Level 1 se unlocked hai.', 'INFO');
                   return;
                 }
                 setShowScoreHistoryDirect(true);
@@ -14065,7 +14163,7 @@ export const StudentDashboard: React.FC<Props> = ({
                 <div className="flex items-center gap-1.5">
                   <p className={`text-sm font-bold ${_pTxt}`}>Score History</p>
                   {!_isBasicUser && !_isUltraUser && user.role !== 'ADMIN' && (
-                    <span className="text-[9px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-black">PRO+</span>
+                    <span className="text-[9px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-black">Lvl 3</span>
                   )}
                 </div>
                 <p className={`text-[10px] mt-0.5 ${_pTxtSub}`}>Apna activity score ka pura record</p>
@@ -14085,6 +14183,30 @@ export const StudentDashboard: React.FC<Props> = ({
               <ChevronRight size={15} style={{ color: _pTxtMutedColor, transform: showProfileSettings ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }} className="shrink-0" />
             </button>
             {showProfileSettings && (<>
+
+            {/* ── Change Name Button ── */}
+            <button
+              onClick={() => {
+                setNewNameInput(user.name || '');
+                setShowNameChangeModal(true);
+              }}
+              className={`w-full px-4 py-4 flex items-center gap-3.5 ${_pHovCls} transition-colors`}
+              style={{ borderBottom: _pSep }}>
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{
+                background: `${tierTheme.primary}18`,
+                border: `1px solid ${tierTheme.primary}40`,
+              }}>
+                <span className="text-base leading-none">👤</span>
+              </div>
+              <div className="flex-1 text-left">
+                <div className="flex items-center gap-1.5">
+                  <p className={`text-sm font-bold ${_pTxt}`}>Change Name</p>
+                  <span className="text-[9px] bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.5 rounded font-black">100 Cr / 20 Dia</span>
+                </div>
+                <p className={`text-[10px] mt-0.5 ${_pTxtSub}`}>Apna profile name badlein</p>
+              </div>
+              <ChevronRight size={14} style={{ color: _pTxtMutedColor }} className="shrink-0" />
+            </button>
 
             {/* ── Theme Override Toggle ── */}
             {(() => {
@@ -15691,10 +15813,11 @@ export const StudentDashboard: React.FC<Props> = ({
                           },
                           {
                             label: 'Score History',
-                            locked: !_isBasicUser && !_isUltraUser && user.role !== 'ADMIN',
+                            locked: !_isBasicUser && !_isUltraUser && user.role !== 'ADMIN' && (user.level || getLevelInfo(user.totalScore || 0).level || 1) < 3,
                             action: () => {
-                              if (!_isBasicUser && !_isUltraUser && user.role !== 'ADMIN') {
-                                showAlert('🔒 Score History Basic aur Ultra members ke liye unlocked hai. Upgrade karein!', 'INFO');
+                              const userLvl = user.level || getLevelInfo(user.totalScore || 0).level || 1;
+                              if (!_isBasicUser && !_isUltraUser && user.role !== 'ADMIN' && userLvl < 3) {
+                                showAlert('🔒 Score History Free users ke liye Level 3 par unlock hota hai. Basic aur Ultra members ke liye Level 1 se unlocked hai.', 'INFO');
                                 return;
                               }
                               setShowScoreHistoryDirect(true); setShowDotsMenu(false);
@@ -19640,6 +19763,8 @@ export const StudentDashboard: React.FC<Props> = ({
               allowStudentMcq={!!settings?.allowStudentCommunityMcq}
               hideGlobalTab={!!settings?.hideGlobalChat}
               onSpendCoins={handleSpendCoins}
+              onSpendDiamonds={handleSpendDiamonds}
+              onUpdateUser={handleUserUpdate}
               themeColor={_overrideColor || undefined}
             />
           </div>
@@ -20019,64 +20144,101 @@ export const StudentDashboard: React.FC<Props> = ({
               defaultTab="MCQ"
               initialMcqDraft={mcqCommunityDraft}
               onSpendCoins={handleSpendCoins}
+              onSpendDiamonds={handleSpendDiamonds}
+              onUpdateUser={handleUserUpdate}
               themeColor={_overrideColor || undefined}
             />
           </div>
         </div>
       )}
 
-      {/* NAME CHANGE MODAL */}
+      {/* NAME CHANGE MODAL (100 CREDITS OR 20 DIAMONDS) */}
       {showNameChangeModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-white rounded-2xl p-6 w-full shadow-xl">
-            <h3 className="text-lg font-bold mb-4 text-slate-800">
-              Change Display Name
-            </h3>
-            <input
-              type="text"
-              value={newNameInput}
-              onChange={(e) => setNewNameInput(e.target.value)}
-              className="w-full p-3 border rounded-xl mb-2"
-              placeholder="Enter new name"
-            />
-            <p className="text-xs text-slate-600 mb-4">
-              Cost:{" "}
-              <span className="font-bold text-orange-600">
-                {settings?.nameChangeCost || 10} Coins
-              </span>
-            </p>
-            <div className="flex gap-2">
-              <Button
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 text-center shadow-2xl border border-slate-200 dark:border-slate-800 max-w-sm w-full space-y-4">
+            <div className="w-14 h-14 rounded-2xl mx-auto flex items-center justify-center bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 text-2xl shadow-inner border border-indigo-100 dark:border-indigo-900">
+              👤
+            </div>
+
+            <div>
+              <h3 className="text-base font-black text-slate-900 dark:text-white">
+                Apna Naam Badlein
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Aapka naya naam Leaderboard aur Profile par dikhega.
+              </p>
+            </div>
+
+            <div className="space-y-1.5 text-left">
+              <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                Naya Naam Likhein:
+              </label>
+              <input
+                type="text"
+                value={newNameInput}
+                onChange={(e) => setNewNameInput(e.target.value)}
+                placeholder="Enter your new name"
+                maxLength={30}
+                className="w-full px-3.5 py-2.5 rounded-xl text-sm font-bold bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+
+            {/* Price Box */}
+            <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-3 text-xs space-y-1.5 border border-slate-200 dark:border-slate-700/60 text-left">
+              <div className="flex justify-between items-center text-slate-600 dark:text-slate-300">
+                <span>Fee:</span>
+                <span className="font-black text-indigo-600 dark:text-indigo-400">100 Credits ya 20 Diamonds</span>
+              </div>
+              <div className="flex justify-between items-center text-slate-600 dark:text-slate-300">
+                <span>Aapke Credits:</span>
+                <span className={getTotalCredits(user) >= 100 ? 'font-black text-emerald-600' : 'font-black text-rose-500'}>
+                  🪙 {getTotalCredits(user)}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-slate-600 dark:text-slate-300">
+                <span>Aapke Diamonds:</span>
+                <span className={(user.diamonds || 0) >= 20 ? 'font-black text-cyan-600' : 'font-black text-rose-500'}>
+                  💎 {user.diamonds || 0}
+                </span>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="space-y-2 pt-1">
+              <button
+                type="button"
+                onClick={() => handleChangeName('CREDITS')}
+                disabled={isUpdatingName || getTotalCredits(user) < 100}
+                className={`w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                  getTotalCredits(user) >= 100
+                    ? 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 cursor-pointer'
+                    : 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-300 dark:border-slate-700'
+                }`}
+              >
+                <span>100 Credits dekar Badlein</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleChangeName('DIAMONDS')}
+                disabled={isUpdatingName || (user.diamonds || 0) < 20}
+                className={`w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                  (user.diamonds || 0) >= 20
+                    ? 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 text-white cursor-pointer'
+                    : 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-300 dark:border-slate-700'
+                }`}
+              >
+                <span>20 Diamonds dekar Badlein</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setShowNameChangeModal(false)}
-                variant="ghost"
-                className="flex-1"
+                disabled={isUpdatingName}
+                className="w-full py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
               >
                 Cancel
-              </Button>
-              <Button
-                onClick={() => {
-                  const cost = settings?.nameChangeCost || 10;
-                  if (newNameInput && newNameInput !== user.name) {
-                    if (getTotalCredits(user) < cost) {
-                      showAlert(`Insufficient Coins! Need ${cost}.`, "ERROR");
-                      return;
-                    }
-                    const _deducted = applyDeduction(user, cost);
-                    if (!_deducted) return;
-                    const u = {
-                      ..._deducted,
-                      name: newNameInput,
-                      totalScore: (user.totalScore || 0) + cost,
-                    };
-                    handleUserUpdate(u);
-                    setShowNameChangeModal(false);
-                    showAlert("Name Updated Successfully!", "SUCCESS");
-                  }
-                }}
-                className="flex-1"
-              >
-                Pay & Update
-              </Button>
+              </button>
             </div>
           </div>
         </div>
@@ -23591,6 +23753,7 @@ RULES:
                             user={user}
                             settings={settings}
                             onClose={() => setLucentMcqShowReview(prev => ({ ...prev, [pageKey]: false }))}
+                            onUpdateUser={handleUserUpdate}
                             onRestart={doRestart}
                           />
                         );
@@ -25890,6 +26053,7 @@ RULES:
                        user={user}
                        settings={settings}
                        onClose={() => setCompMcqShowReview(false)}
+                       onUpdateUser={handleUserUpdate}
                        onRestart={doCompRestart}
                      />
                    );
@@ -28629,22 +28793,21 @@ RULES:
                     </button>
                     <button
                       onClick={() => {
-                        const userDiamonds = user.diamonds ?? 0;
+                        const freshU = (window as any).__dashUserRef?.current ?? userRef.current ?? user;
+                        const userDiamonds = typeof freshU.diamonds === 'number' ? freshU.diamonds : (user.diamonds ?? 0);
                         if (userDiamonds < diamondCostOnly) {
                           setCoinGate(null);
                           onOpenStore?.();
                           return;
                         }
-                        const freshU = (window as any).__dashUserRef?.current ?? user;
                         const contentKey = pageInfo?.pageLabel || reason;
                         const updatedUnlocked = Array.from(new Set([...(freshU.unlockedContent || []), contentKey]));
                         const updatedU = {
                           ...freshU,
-                          diamonds: Math.max(0, (freshU.diamonds ?? 0) - diamondCostOnly),
+                          diamonds: Math.max(0, userDiamonds - diamondCostOnly),
                           unlockedContent: updatedUnlocked,
                         };
                         handleUserUpdate(updatedU);
-                        saveUserToLive(updatedU);
                         setCoinGate(null);
                         action();
                       }}
@@ -28908,22 +29071,21 @@ RULES:
                     type="button"
                     onClick={() => {
                       const diamondCost = getDiamondUnlockCost(activeCost, reason);
-                      const userDiamonds = user.diamonds ?? 0;
+                      const freshU = (window as any).__dashUserRef?.current ?? userRef.current ?? user;
+                      const userDiamonds = typeof freshU.diamonds === 'number' ? freshU.diamonds : (user.diamonds ?? 0);
                       if (userDiamonds < diamondCost) {
                         setCoinGate(null);
                         onOpenStore?.();
                         return;
                       }
-                      const freshU = (window as any).__dashUserRef?.current ?? user;
                       const contentKey = pageInfo?.pageLabel || reason;
                       const updatedUnlocked = Array.from(new Set([...(freshU.unlockedContent || []), contentKey]));
                       const updatedU = {
                         ...freshU,
-                        diamonds: Math.max(0, (freshU.diamonds ?? 0) - diamondCost),
+                        diamonds: Math.max(0, userDiamonds - diamondCost),
                         unlockedContent: updatedUnlocked,
                       };
                       handleUserUpdate(updatedU);
-                      saveUserToLive(updatedU);
                       setCoinGate(null);
                       activeAction();
                     }}
@@ -29170,18 +29332,18 @@ RULES:
 
               {/* RIGHT: credit + xp single row */}
               <div className="flex items-center gap-0 shrink-0">
-                {/* Credits */}
+                {/* Credits / Diamonds */}
                 <div className="flex items-center gap-[5px]">
                   <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11, fontWeight: 700, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                    {creditDeductToast.previous.toLocaleString('en-IN')}🪙
+                    {creditDeductToast.previous.toLocaleString('en-IN')}{creditDeductToast.currency === 'DIAMOND' ? '💎' : '🪙'}
                   </span>
                   <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 10 }}>→</span>
-                  <span style={{ color: deltaColor, fontSize: 12, fontWeight: 900, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                    {sign}{creditDeductToast.deducted} CR
+                  <span style={{ color: creditDeductToast.currency === 'DIAMOND' ? '#38bdf8' : deltaColor, fontSize: 12, fontWeight: 900, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                    {sign}{creditDeductToast.deducted} {creditDeductToast.currency === 'DIAMOND' ? '💎' : 'CR'}
                   </span>
                   <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 10 }}>=</span>
                   <span style={{ color: '#fff', fontSize: 12, fontWeight: 900, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                    {creditDeductToast.current.toLocaleString('en-IN')}🪙
+                    {creditDeductToast.current.toLocaleString('en-IN')}{creditDeductToast.currency === 'DIAMOND' ? '💎' : '🪙'}
                   </span>
                 </div>
                 {/* Divider + XP (only on ADD with xp data) */}

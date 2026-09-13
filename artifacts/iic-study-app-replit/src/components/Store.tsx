@@ -2643,8 +2643,16 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
                     return;
                   }
                   const res = exchangeDiamondsForCredits(user, exchangeDiamondsCount);
-                  if (res && await saveUserToLive(res.updatedUser)) {
+                  if (res) {
                     onUserUpdate(res.updatedUser);
+                    try {
+                      localStorage.setItem("nst_current_user", JSON.stringify(res.updatedUser));
+                      if (res.updatedUser?.id) {
+                        localStorage.setItem(`nst_user_profile_${res.updatedUser.id}`, JSON.stringify(res.updatedUser));
+                        localStorage.setItem("nst_user_profile", JSON.stringify(res.updatedUser));
+                      }
+                    } catch (_) {}
+                    saveUserToLive(res.updatedUser, { immediate: true });
                     setExchangeMsg(`✅ Badhai! +${res.creditsEarned} 🪙 Credits mil gaye!`);
                     setTimeout(() => setExchangeMsg(null), 5000);
                   }
