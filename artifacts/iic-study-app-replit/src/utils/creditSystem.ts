@@ -110,5 +110,129 @@ export const applyDeduction = <T extends CreditUser>(
     giftedCredits: newGiftedCredits,
   };
 
+  // Referral Royalty Cashback: Level 1 (0.01%) to Level 15 (0.15%)
+  try {
+    const referrerId = (user as any).referrerId;
+    if (referrerId && amount > 0 && typeof localStorage !== 'undefined') {
+      const stored = localStorage.getItem('nst_users');
+      if (stored) {
+        const allUsers: any[] = JSON.parse(stored);
+        const refIndex = allUsers.findIndex(
+          (u) => u.id === referrerId || (u.displayId && u.displayId.toUpperCase() === String(referrerId).toUpperCase())
+        );
+        if (refIndex >= 0) {
+          const referrer = allUsers[refIndex];
+          const effLevel = Math.min(15, Math.max(1, referrer.level || 1));
+          const ratePercent = effLevel * 0.01; // e.g. 0.01% - 0.15%
+          const cashback = parseFloat(((amount * ratePercent) / 100).toFixed(4));
+          if (cashback > 0) {
+            const newBal = parseFloat(((referrer.referralCommissionBalance || 0) + cashback).toFixed(4));
+            const newLog = {
+              id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+              friendId: (user as any).id || 'student',
+              friendName: (user as any).name || 'Friend',
+              creditsSpent: amount,
+              ratePercent,
+              earnedCredits: cashback,
+              date: new Date().toISOString(),
+            };
+            const updatedLogs = [newLog, ...(referrer.referralCommissionLogs || [])].slice(0, 50);
+            allUsers[refIndex] = {
+              ...referrer,
+              credits: (referrer.credits || 0) + (cashback >= 1 ? Math.floor(cashback) : 0),
+              referralCommissionBalance: newBal,
+              referralCommissionLogs: updatedLogs,
+            };
+            localStorage.setItem('nst_users', JSON.stringify(allUsers));
+          }
+        }
+      }
+    }
+  } catch {}
+
   return result;
 };
+
+/**
+ * Retrieve a configured credit cost with full support for:
+ * 1. Tier-specific pricing (Free vs Basic vs Ultra) from tieredCreditCosts
+ * 2. Feature cost overrides from featureCosts
+ * 3. Custom economy items from customEconomyItems
+ * 4. Direct setting key (e.g. s.defaultPdfCost, s.mcqTestCost)
+ * 5. Fallback default
+ */
+export const getCreditCost = (
+  key: string,
+  fallback: number,
+  userTier?: string,
+  directSettings?: any
+): number => {
+  try {
+    let s = directSettings;
+    if (!s && typeof window !== 'undefined') {
+      const raw = localStorage.getItem('nst_system_settings');
+      if (raw) s = JSON.parse(raw);
+    }
+    if (s) {
+      const rawTier = (userTier || 'FREE').toUpperCase();
+      const normTier = rawTier === 'ULTRA' ? 'ultra' : rawTier === 'BASIC' ? 'basic' : 'free';
+
+      // 1. Check Tiered Credit Costs table
+      if (s.tieredCreditCosts && s.tieredCreditCosts[key]) {
+        const tierVal = s.tieredCreditCosts[key][normTier];
+        if (typeof tierVal === 'number' && !isNaN(tierVal)) return Math.max(0, tierVal);
+      }
+
+      // 2. Check Custom Economy Items
+      if (Array.isArray(s.customEconomyItems)) {
+        const item = s.customEconomyItems.find((i: any) => i.id === key);
+        if (item) {
+          const costProp = `${normTier}Cost`;
+          if (typeof item[costProp] === 'number' && !isNaN(item[costProp])) return Math.max(0, item[costProp]);
+        }
+      }
+
+      // 3. Check Granular Feature Costs array
+      if (Array.isArray(s.featureCosts)) {
+        const fc = s.featureCosts.find((f: any) => f.featureId === key);
+        if (fc) {
+          const costProp = `${normTier}Cost`;
+          if (typeof fc[costProp] === 'number' && !isNaN(fc[costProp])) return Math.max(0, fc[costProp]);
+        }
+      }
+
+      // 4. Check direct key on settings
+      if (typeof s[key] === 'number' && !isNaN(s[key])) return Math.max(0, s[key]);
+    }
+  } catch {}
+  return fallback;
+};
+
+/**
+ * Get required subscription tier for a feature or economy item
+ */
+export const getRequiredTier = (
+  key: string,
+  fallback: 'FREE' | 'BASIC' | 'ULTRA' = 'FREE',
+  directSettings?: any
+): 'FREE' | 'BASIC' | 'ULTRA' => {
+  try {
+    let s = directSettings;
+    if (!s && typeof window !== 'undefined') {
+      const raw = localStorage.getItem('nst_system_settings');
+      if (raw) s = JSON.parse(raw);
+    }
+    if (s) {
+      if (s.tieredCreditCosts?.[key]?.requiredTier) {
+        return s.tieredCreditCosts[key].requiredTier;
+      }
+      if (Array.isArray(s.customEconomyItems)) {
+        const item = s.customEconomyItems.find((i: any) => i.id === key);
+        if (item?.requiredTier) return item.requiredTier;
+      }
+    }
+  } catch {}
+  return fallback;
+};
+
+

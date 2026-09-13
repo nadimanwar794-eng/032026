@@ -101,9 +101,14 @@ export const GroupStudyModal: React.FC<GroupStudyModalProps> = ({
   onNavigateToContent,
 }) => {
   // ── Plan & Tier Permissions ───────────────────────────────────────────────
-  const userTier = (user?.subscriptionLevel || 'FREE').toUpperCase();
+  const userTier = (user?.subscriptionLevel || 'FREE')?.toUpperCase();
   const isAdmin = user?.role === 'ADMIN' || user?.isAdmin;
   const config = settings?.groupStudyConfig || {};
+  const isCreateRoomGloballyHidden =
+    settings?.hideCreateStudyRoom === true ||
+    settings?.isGroupStudyEnabled === false ||
+    (settings?.hiddenFeatures || []).includes('GROUP_STUDY') ||
+    (settings?.hiddenHomeButtons || []).includes('GROUP_STUDY');
 
   const dailyLimit = isAdmin ? 9999 : (
     userTier === 'ULTRA' ? (config.dailySessionsUltra ?? 9999) :
@@ -111,10 +116,12 @@ export const GroupStudyModal: React.FC<GroupStudyModalProps> = ({
     (config.dailySessionsFree ?? 2)
   );
 
-  const canCreateRoom = isAdmin || (
-    userTier === 'ULTRA' ? (config.canCreateRoomsUltra !== false) :
-    userTier === 'BASIC' ? (config.canCreateRoomsBasic !== false) :
-    (config.canCreateRoomsFree !== false)
+  const canCreateRoom = !isCreateRoomGloballyHidden && (
+    isAdmin || (
+      userTier === 'ULTRA' ? (config.canCreateRoomsUltra !== false) :
+      userTier === 'BASIC' ? (config.canCreateRoomsBasic !== false) :
+      (config.canCreateRoomsFree !== false)
+    )
   );
 
   const canHostMcqBattle = isAdmin || (
@@ -351,6 +358,10 @@ export const GroupStudyModal: React.FC<GroupStudyModalProps> = ({
 
   // ── Action Handlers ────────────────────────────────────────────────────────
   const handleOpenCreateModal = () => {
+    if (isCreateRoomGloballyHidden) {
+      alert('Naya Study Room create karne ka option admin dwara band kiya gaya hai.');
+      return;
+    }
     if (!canCreateRoom) {
       setUpgradePromptReason('CREATE_ROOM');
       return;
@@ -361,6 +372,11 @@ export const GroupStudyModal: React.FC<GroupStudyModalProps> = ({
   const handleCreateRoom = async (e: React.FormEvent) => {
     e.preventDefault();
     const effectiveRoomName = newRoomName.trim() || `${user?.name || 'Live'} Study Session`;
+    if (isCreateRoomGloballyHidden) {
+      setShowCreateModal(false);
+      alert('Naya Study Room create karne ka option admin dwara band kiya gaya hai.');
+      return;
+    }
     if (!canCreateRoom) {
       setShowCreateModal(false);
       setUpgradePromptReason('CREATE_ROOM');
@@ -464,7 +480,7 @@ export const GroupStudyModal: React.FC<GroupStudyModalProps> = ({
 
   const handleJoinByCode = async (e: React.FormEvent) => {
     e.preventDefault();
-    const code = joinCodeInput.trim().toUpperCase();
+    const code = joinCodeInput.trim()?.toUpperCase();
     if (!code) return;
 
     setJoinCodeError('');
@@ -743,13 +759,15 @@ export const GroupStudyModal: React.FC<GroupStudyModalProps> = ({
                 </p>
 
                 <div className="flex flex-wrap items-center gap-3">
-                  <button
-                    onClick={handleOpenCreateModal}
-                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white font-bold text-sm shadow-lg active:scale-95 transition cursor-pointer"
-                    style={{ background: brandColor }}
-                  >
-                    <Plus size={16} /> Apna Study Room Banayein
-                  </button>
+                  {!isCreateRoomGloballyHidden && (
+                    <button
+                      onClick={handleOpenCreateModal}
+                      className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-white font-bold text-sm shadow-lg active:scale-95 transition cursor-pointer"
+                      style={{ background: brandColor }}
+                    >
+                      <Plus size={16} /> Apna Study Room Banayein
+                    </button>
+                  )}
 
                   <div className="flex items-center gap-1.5 bg-slate-950/60 border border-slate-700 rounded-xl px-2 py-1">
                     <input
@@ -832,7 +850,7 @@ export const GroupStudyModal: React.FC<GroupStudyModalProps> = ({
 
                         <div className="flex items-center gap-2 mb-4">
                           <div className="w-6 h-6 rounded-full bg-slate-700 flex items-center justify-center text-[10px] font-bold text-slate-300">
-                            {room.hostName.charAt(0).toUpperCase()}
+                            {room.hostName.charAt(0)?.toUpperCase()}
                           </div>
                           <span className="text-xs text-slate-400">Host: {room.hostName}</span>
                           {room.isPrivate && (
@@ -867,13 +885,19 @@ export const GroupStudyModal: React.FC<GroupStudyModalProps> = ({
                 <p className="text-xs text-slate-400 max-w-sm mx-auto mb-4">
                   Aap pehla Study Room banakar apne doston ko room code bhej sakte hain aur sath me study shuru kar sakte hain!
                 </p>
-                <button
-                  onClick={handleOpenCreateModal}
-                  className="px-5 py-2.5 rounded-xl text-white font-bold text-xs shadow-lg active:scale-95 transition inline-flex items-center gap-2 cursor-pointer"
-                  style={{ background: brandColor }}
-                >
-                  <Plus size={14} /> Pehla Study Room Banayein
-                </button>
+                {!isCreateRoomGloballyHidden ? (
+                  <button
+                    onClick={handleOpenCreateModal}
+                    className="px-5 py-2.5 rounded-xl text-white font-bold text-xs shadow-lg active:scale-95 transition inline-flex items-center gap-2 cursor-pointer"
+                    style={{ background: brandColor }}
+                  >
+                    <Plus size={14} /> Pehla Study Room Banayein
+                  </button>
+                ) : (
+                  <p className="text-xs text-slate-500 italic mt-2">
+                    Study Room banane ka option admin dwara abhi band hai. Aap upar 6-digit code enter karke kisi active room ko join kar sakte hain.
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -1611,7 +1635,7 @@ export const GroupStudyModal: React.FC<GroupStudyModalProps> = ({
                       >
                         <div className="flex items-center gap-2.5">
                           <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center font-bold text-xs text-white">
-                            {m.name.charAt(0).toUpperCase()}
+                            {m.name.charAt(0)?.toUpperCase()}
                           </div>
                           <div>
                             <div className="flex items-center gap-1.5">

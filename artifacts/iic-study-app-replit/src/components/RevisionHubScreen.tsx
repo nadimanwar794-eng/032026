@@ -105,7 +105,13 @@ export const RevisionHubScreen: React.FC<Props> = ({
   const [showFeedback, setShowFeedback]     = useState(false);
   const [sessionMcqs, setSessionMcqs]       = useState<any[]>([]);
   const [showSessionNavigator, setShowSessionNavigator] = useState(false);
-  const [coinModal, setCoinModal] = useState<{ title: string; cost: number; onConfirm: () => void } | null>(null);
+  const [coinModal, setCoinModal] = useState<{
+    title: string;
+    cost: number;
+    diamondCost: number;
+    onConfirmCredits: () => void;
+    onConfirmDiamonds: () => void;
+  } | null>(null);
   const [pendingLesson, setPendingLesson] = useState<any | null>(null);
 
   // Subscribe to mcq_lessons from Firebase
@@ -207,6 +213,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
 
   const MCQ_START_COST = 40;
   const LESSON_OPEN_COST = 100;
+  const LESSON_OPEN_DIAMOND_COST = 10;
 
   function doStartSession() {
     // ── Session tracking: App.tsx ko batao session shuru hua ─────────────
@@ -273,9 +280,22 @@ export const RevisionHubScreen: React.FC<Props> = ({
     setCoinModal({
       title: '📖 Lesson MCQ Access',
       cost: LESSON_OPEN_COST,
-      onConfirm: () => {
+      diamondCost: LESSON_OPEN_DIAMOND_COST,
+      onConfirmCredits: () => {
         const updated = applyDeduction(user, LESSON_OPEN_COST);
         if (updated) { onUpdateUser(updated); saveUserToLive(updated); }
+        setCoinModal(null);
+        setMcqSelectedLesson(lesson);
+        setPendingLesson(null);
+      },
+      onConfirmDiamonds: () => {
+        const curDiamonds = user.diamonds || 0;
+        const updated: User = {
+          ...user,
+          diamonds: Math.max(0, curDiamonds - LESSON_OPEN_DIAMOND_COST),
+        };
+        onUpdateUser(updated);
+        saveUserToLive(updated);
         setCoinModal(null);
         setMcqSelectedLesson(lesson);
         setPendingLesson(null);
@@ -1131,7 +1151,10 @@ export const RevisionHubScreen: React.FC<Props> = ({
           title={coinModal.title}
           cost={coinModal.cost}
           userCredits={getTotalCredits(user)}
-          onConfirm={() => coinModal.onConfirm()}
+          diamondCost={coinModal.diamondCost}
+          userDiamonds={user.diamonds || 0}
+          onConfirm={() => coinModal.onConfirmCredits()}
+          onConfirmDiamonds={() => coinModal.onConfirmDiamonds()}
           onCancel={() => { setCoinModal(null); setPendingLesson(null); }}
           isAutoEnabledInitial={false}
         />

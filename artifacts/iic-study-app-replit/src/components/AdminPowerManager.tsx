@@ -1,9 +1,11 @@
 // @ts-nocheck
 import React, { useState } from 'react';
-import { SystemSettings, FeatureCategory } from '../types';
-import { DollarSign, Eye, EyeOff, Save, Search, Settings, Lock, Package, Trash2, Edit3, X, Plus, Crown, LayoutGrid, List, CheckSquare, Gamepad2, BrainCircuit, Activity, BarChart3, Star, Zap, PenTool, Banknote, Layers, Bell, Ticket, Flame, Video, GraduationCap, ShoppingBag, Home as HomeIcon, Navigation, TrendingUp } from 'lucide-react';
+import { SystemSettings } from '../types';
+import {
+    Eye, EyeOff, Bell, Crown, Navigation, Star, CheckCircle2, X, Flame, Zap, Ticket,
+    GraduationCap, BrainCircuit, Video, ShoppingBag, Home as HomeIcon
+} from 'lucide-react';
 import { ALL_FEATURES } from '../utils/featureRegistry';
-import { getLevelDailyLimits, LEVEL_INFO, MAX_LEVEL } from '../utils/levelSystem';
 
 interface Props {
     settings: SystemSettings;
@@ -11,9 +13,14 @@ interface Props {
 }
 
 export const AdminPowerManager: React.FC<Props> = ({ settings, onUpdate }) => {
-    const [activeTab, setActiveTab] = useState<'PRICING' | 'DAILY_LIMITS' | 'LEVEL_LIMITS' | 'VISIBILITY' | 'TOPBAR' | 'BOTTOMNAV' | 'HOMEGRID' | 'SCORE_THRESHOLDS'>('PRICING');
-    const [selectedLevel, setSelectedLevel] = useState<number>(1);
+    const [activeTab, setActiveTab] = useState<'VISIBILITY' | 'TOPBAR' | 'BOTTOMNAV' | 'HOMEGRID' | 'SCORE_THRESHOLDS'>('VISIBILITY');
     const [localSettings, setLocalSettings] = useState<SystemSettings>(settings);
+    const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
+
+    const showSavedNotification = (msg: string) => {
+        setSaveFeedback(msg);
+        setTimeout(() => setSaveFeedback(null), 3000);
+    };
 
     const updateSetting = (key: keyof SystemSettings, value: any) => {
         const newSettings = { ...localSettings, [key]: value };
@@ -52,14 +59,18 @@ export const AdminPowerManager: React.FC<Props> = ({ settings, onUpdate }) => {
 
     return (
         <div className="p-6 bg-white min-h-[500px]">
+            {saveFeedback && (
+                <div className="mb-4 bg-emerald-600 text-white px-4 py-2.5 rounded-xl text-xs font-bold flex items-center justify-between shadow-lg animate-in slide-in-from-top duration-200">
+                    <span className="flex items-center gap-2"><CheckCircle2 size={16} /> {saveFeedback}</span>
+                    <button onClick={() => setSaveFeedback(null)} className="text-white/80 hover:text-white"><X size={14} /></button>
+                </div>
+            )}
+
             {/* TABS */}
             <div className="flex flex-wrap gap-2 mb-6 bg-slate-100 p-1.5 rounded-xl">
                 {[
-                    { id: 'PRICING', icon: DollarSign, label: 'Pricing & Costs' },
-                    { id: 'DAILY_LIMITS', icon: BarChart3, label: 'Daily Limits' },
-                    { id: 'LEVEL_LIMITS', icon: TrendingUp, label: 'Level Limits' },
                     { id: 'VISIBILITY', icon: Eye, label: 'Modules' },
-                    { id: 'TOPBAR', icon: Crown, label: 'Top Bar' },
+                    { id: 'TOPBAR', icon: Bell, label: 'Top Bar' },
                     { id: 'BOTTOMNAV', icon: Navigation, label: 'Bottom Nav' },
                     { id: 'HOMEGRID', icon: HomeIcon, label: 'Home Grid' },
                     { id: 'SCORE_THRESHOLDS', icon: Star, label: 'Score Thresholds' },
@@ -74,343 +85,7 @@ export const AdminPowerManager: React.FC<Props> = ({ settings, onUpdate }) => {
                 ))}
             </div>
 
-            {/* TAB 1: PRICING */}
-            {activeTab === 'PRICING' && (
-                <div className="space-y-6">
-                    {/* GLOBAL COSTS */}
-                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                        <h4 className="font-bold text-slate-800 text-sm mb-4 flex items-center gap-2"><DollarSign size={16} /> Content Credit Costs (0 = Free)</h4>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                             {[
-                                { key: 'defaultPdfCost', label: 'PDF Access', default: 5 },
-                                { key: 'defaultVideoCost', label: 'Video Access', default: 5 },
-                                { key: 'mcqTestCost', label: 'MCQ Test Entry', default: 2 },
-                                { key: 'mcqAnalysisCost', label: 'MCQ Analysis', default: 5 },
-                                { key: 'mcqAnalysisCostUltra', label: 'Ultra Analysis', default: 20 },
-                                { key: 'mcqHistoryCost', label: 'History View', default: 1 },
-                                { key: 'chatCost', label: 'AI Chat Msg', default: 1 },
-                                { key: 'gameCost', label: 'Spin Wheel', default: 0 },
-                            ].map((item) => (
-                                <div key={item.key} className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
-                                    <label className="text-[10px] font-bold text-slate-600 uppercase block mb-1">{item.label}</label>
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-xs">🪙</span>
-                                        <input
-                                            type="number"
-                                            // @ts-ignore
-                                            value={localSettings[item.key] !== undefined ? localSettings[item.key] : item.default}
-                                            onChange={(e) => updateSetting(item.key as keyof SystemSettings, Number(e.target.value))}
-                                            className="w-full p-1.5 border rounded font-bold text-sm"
-                                            min="0"
-                                        />
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* TAB: DAILY LIMITS */}
-            {activeTab === 'DAILY_LIMITS' && (
-                <div className="space-y-5">
-                    <p className="text-[11px] text-slate-500 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 font-medium">
-                        ⚠️ Changes here take effect on all students immediately. Don't forget to save.
-                    </p>
-
-                    {/* WRITE MODE LIMITS */}
-                    <div className="bg-teal-50 border border-teal-200 rounded-xl p-4">
-                        <h4 className="font-black text-teal-800 text-sm mb-1 flex items-center gap-2">✍️ Write Mode (HTML Notes)</h4>
-                        <p className="text-[10px] text-teal-600 mb-3">Free views/day per plan and credit system config</p>
-                        <div className="grid grid-cols-3 gap-3 mb-3">
-                            <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
-                                <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Free (0 free)</label>
-                                <p className="text-[10px] text-slate-500">Always credits-only</p>
-                            </div>
-                            <div className="bg-white p-3 rounded-lg border border-sky-200 shadow-sm">
-                                <label className="text-[9px] font-black text-sky-600 uppercase block mb-1">Basic Free/Day</label>
-                                <input type="number" min="0"
-                                    value={localSettings.basicHtmlDailyLimit ?? 5}
-                                    onChange={e => updateSetting('basicHtmlDailyLimit', Number(e.target.value))}
-                                    className="w-full p-1.5 border rounded font-bold text-sm" />
-                            </div>
-                            <div className="bg-white p-3 rounded-lg border border-violet-200 shadow-sm">
-                                <label className="text-[9px] font-black text-violet-600 uppercase block mb-1">Ultra Free/Day</label>
-                                <input type="number" min="0"
-                                    value={localSettings.ultraHtmlDailyLimit ?? 10}
-                                    onChange={e => updateSetting('ultraHtmlDailyLimit', Number(e.target.value))}
-                                    className="w-full p-1.5 border rounded font-bold text-sm" />
-                            </div>
-                        </div>
-                        <div className="grid grid-cols-3 gap-3">
-                            <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
-                                <label className="text-[9px] font-black text-slate-500 uppercase block mb-1">Credit Cost (Free user)</label>
-                                <input type="number" min="1"
-                                    value={localSettings.htmlUnlockCost ?? 5}
-                                    onChange={e => updateSetting('htmlUnlockCost', Number(e.target.value))}
-                                    className="w-full p-1.5 border rounded font-bold text-sm" />
-                            </div>
-                            <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
-                                <label className="text-[9px] font-black text-slate-500 uppercase block mb-1">Credit Cost (Paid, after free)</label>
-                                <input type="number" min="1"
-                                    value={(localSettings as any).writeModeCreditPaid ?? 10}
-                                    onChange={e => updateSetting('writeModeCreditPaid' as any, Number(e.target.value))}
-                                    className="w-full p-1.5 border rounded font-bold text-sm" />
-                            </div>
-                            <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
-                                <label className="text-[9px] font-black text-slate-500 uppercase block mb-1">Max Credit Unlocks/Day</label>
-                                <input type="number" min="1"
-                                    value={(localSettings as any).writeModeMaxLimit ?? 100}
-                                    onChange={e => updateSetting('writeModeMaxLimit' as any, Number(e.target.value))}
-                                    className="w-full p-1.5 border rounded font-bold text-sm" />
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* MCQ LIMITS */}
-                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-                        <h4 className="font-black text-amber-800 text-sm mb-1 flex items-center gap-2">📝 MCQ Practice (Daily Limit)</h4>
-                        <p className="text-[10px] text-amber-600 mb-3">Daily MCQ questions limit per plan</p>
-                        <div className="grid grid-cols-3 gap-3">
-                            <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
-                                <label className="text-[9px] font-black text-slate-500 uppercase block mb-1">Free/Day</label>
-                                <input type="number" min="1"
-                                    value={localSettings.mcqLimitFree ?? 50}
-                                    onChange={e => updateSetting('mcqLimitFree', Number(e.target.value))}
-                                    className="w-full p-1.5 border rounded font-bold text-sm" />
-                            </div>
-                            <div className="bg-white p-3 rounded-lg border border-sky-200 shadow-sm">
-                                <label className="text-[9px] font-black text-sky-600 uppercase block mb-1">Basic/Day</label>
-                                <input type="number" min="1"
-                                    value={localSettings.mcqLimitBasic ?? 70}
-                                    onChange={e => updateSetting('mcqLimitBasic', Number(e.target.value))}
-                                    className="w-full p-1.5 border rounded font-bold text-sm" />
-                            </div>
-                            <div className="bg-white p-3 rounded-lg border border-violet-200 shadow-sm">
-                                <label className="text-[9px] font-black text-violet-600 uppercase block mb-1">Ultra/Day</label>
-                                <input type="number" min="1"
-                                    value={localSettings.mcqLimitUltra ?? 100}
-                                    onChange={e => updateSetting('mcqLimitUltra', Number(e.target.value))}
-                                    className="w-full p-1.5 border rounded font-bold text-sm" />
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* HTML DOWNLOADS LIMITS */}
-                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-                        <h4 className="font-black text-blue-800 text-sm mb-1 flex items-center gap-2">📥 HTML Downloads (Daily Limit)</h4>
-                        <p className="text-[10px] text-blue-600 mb-3">Notes download limit per plan per day</p>
-                        <div className="grid grid-cols-3 gap-3">
-                            <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
-                                <label className="text-[9px] font-black text-slate-500 uppercase block mb-1">Free/Day</label>
-                                <input type="number" min="0"
-                                    value={(localSettings as any).htmlDownloadLimitFree ?? 2}
-                                    onChange={e => updateSetting('htmlDownloadLimitFree' as any, Number(e.target.value))}
-                                    className="w-full p-1.5 border rounded font-bold text-sm" />
-                            </div>
-                            <div className="bg-white p-3 rounded-lg border border-sky-200 shadow-sm">
-                                <label className="text-[9px] font-black text-sky-600 uppercase block mb-1">Basic/Day</label>
-                                <input type="number" min="0"
-                                    value={(localSettings as any).htmlDownloadLimitBasic ?? 5}
-                                    onChange={e => updateSetting('htmlDownloadLimitBasic' as any, Number(e.target.value))}
-                                    className="w-full p-1.5 border rounded font-bold text-sm" />
-                            </div>
-                            <div className="bg-white p-3 rounded-lg border border-violet-200 shadow-sm">
-                                <label className="text-[9px] font-black text-violet-600 uppercase block mb-1">Ultra/Day</label>
-                                <input type="number" min="0"
-                                    value={(localSettings as any).htmlDownloadLimitUltra ?? 10}
-                                    onChange={e => updateSetting('htmlDownloadLimitUltra' as any, Number(e.target.value))}
-                                    className="w-full p-1.5 border rounded font-bold text-sm" />
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* VIDEO LIMITS */}
-                    <div className="bg-rose-50 border border-rose-200 rounded-xl p-4">
-                        <h4 className="font-black text-rose-800 text-sm mb-1 flex items-center gap-2">🎬 Video Lectures</h4>
-                        <p className="text-[10px] text-rose-600 mb-3">Free videos/day (Basic & Ultra). Free users always pay coins.</p>
-                        <div className="grid grid-cols-2 gap-3">
-                            <div className="bg-white p-3 rounded-lg border border-sky-200 shadow-sm">
-                                <label className="text-[9px] font-black text-sky-600 uppercase block mb-1">Basic Free/Day</label>
-                                <input type="number" min="0"
-                                    value={localSettings.videoFreeLimitBasic ?? 5}
-                                    onChange={e => updateSetting('videoFreeLimitBasic', Number(e.target.value))}
-                                    className="w-full p-1.5 border rounded font-bold text-sm" />
-                            </div>
-                            <div className="bg-white p-3 rounded-lg border border-violet-200 shadow-sm">
-                                <label className="text-[9px] font-black text-violet-600 uppercase block mb-1">Ultra Free/Day</label>
-                                <input type="number" min="0"
-                                    value={(localSettings as any).videoFreeLimitUltra ?? 10}
-                                    onChange={e => updateSetting('videoFreeLimitUltra' as any, Number(e.target.value))}
-                                    className="w-full p-1.5 border rounded font-bold text-sm" />
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* PDF LIMITS */}
-                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
-                        <h4 className="font-black text-emerald-800 text-sm mb-1 flex items-center gap-2">📄 PDF / Notes Access</h4>
-                        <p className="text-[10px] text-emerald-600 mb-3">Free PDF accesses/day (Basic & Ultra). Free users always pay coins.</p>
-                        <div className="grid grid-cols-2 gap-3">
-                            <div className="bg-white p-3 rounded-lg border border-sky-200 shadow-sm">
-                                <label className="text-[9px] font-black text-sky-600 uppercase block mb-1">Basic Free/Day</label>
-                                <input type="number" min="0"
-                                    value={localSettings.pdfFreeLimitBasic ?? 5}
-                                    onChange={e => updateSetting('pdfFreeLimitBasic', Number(e.target.value))}
-                                    className="w-full p-1.5 border rounded font-bold text-sm" />
-                            </div>
-                            <div className="bg-white p-3 rounded-lg border border-violet-200 shadow-sm">
-                                <label className="text-[9px] font-black text-violet-600 uppercase block mb-1">Ultra Free/Day</label>
-                                <input type="number" min="0"
-                                    value={(localSettings as any).pdfFreeLimitUltra ?? 10}
-                                    onChange={e => updateSetting('pdfFreeLimitUltra' as any, Number(e.target.value))}
-                                    className="w-full p-1.5 border rounded font-bold text-sm" />
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* TAB: LEVEL LIMITS */}
-            {activeTab === 'LEVEL_LIMITS' && (() => {
-                const lvlOverride = (localSettings.levelLimitsOverride || {}) as Record<string, any>;
-                const baseLD = getLevelDailyLimits(selectedLevel);
-                const ov = lvlOverride[String(selectedLevel)] || {};
-
-                const getVal = (feature: string, tier: 'free' | 'basic' | 'ultra'): number => {
-                    const ovFeature = ov[feature];
-                    if (ovFeature && ovFeature[tier] !== undefined) return ovFeature[tier];
-                    return (baseLD as any)[feature]?.[tier] ?? 0;
-                };
-                const getSingle = (key: string): number => {
-                    if (ov[key] !== undefined) return ov[key];
-                    return (baseLD as any)[key] ?? 0;
-                };
-
-                const updateLevelVal = (feature: string, tier: string, value: number) => {
-                    const newOv = { ...lvlOverride };
-                    if (!newOv[String(selectedLevel)]) newOv[String(selectedLevel)] = {};
-                    if (!newOv[String(selectedLevel)][feature]) newOv[String(selectedLevel)][feature] = {};
-                    newOv[String(selectedLevel)][feature][tier] = value;
-                    updateSetting('levelLimitsOverride', newOv);
-                };
-                const updateLevelSingle = (key: string, value: number) => {
-                    const newOv = { ...lvlOverride };
-                    if (!newOv[String(selectedLevel)]) newOv[String(selectedLevel)] = {};
-                    newOv[String(selectedLevel)][key] = value;
-                    updateSetting('levelLimitsOverride', newOv);
-                };
-                const resetLevel = () => {
-                    const newOv = { ...lvlOverride };
-                    delete newOv[String(selectedLevel)];
-                    updateSetting('levelLimitsOverride', newOv);
-                };
-                const hasOverride = !!lvlOverride[String(selectedLevel)];
-
-                const currentLvlInfo = LEVEL_INFO.find(l => l.level === selectedLevel)!;
-
-                type FeatureRow = { key: string; label: string; icon: string; hasTiers: boolean; tiers?: ('free'|'basic'|'ultra')[]; singleKey?: string; singleLabel?: string };
-                const featureRows: FeatureRow[] = [
-                    { key: 'mcq',   label: 'MCQ Practice',       icon: '❓', hasTiers: true,  tiers: ['free', 'basic', 'ultra'] },
-                    { key: 'dl',    label: 'HTML Downloads',      icon: '📥', hasTiers: true,  tiers: ['free', 'basic', 'ultra'] },
-                    { key: 'pdf',   label: 'PDF / Notes',         icon: '📄', hasTiers: true,  tiers: ['free', 'basic', 'ultra'] },
-                    { key: 'video', label: 'Video Lectures',      icon: '🎬', hasTiers: true,  tiers: ['free', 'basic', 'ultra'] },
-                    { key: 'notes', label: 'Notes Reading',       icon: '📖', hasTiers: true,  tiers: ['free', 'basic', 'ultra'] },
-                    { key: 'tts',   label: 'Audio / TTS',         icon: '🔊', hasTiers: true,  tiers: ['free', 'basic', 'ultra'] },
-                    { key: 'write', label: 'Write Mode (Free)',   icon: '✍️', hasTiers: true,  tiers: ['free', 'basic', 'ultra'] },
-                    { key: 'bonusLoginCredits', label: 'Daily Login Bonus CR',     icon: '💰', hasTiers: false, singleKey: 'bonusLoginCredits', singleLabel: 'Bonus CR' },
-                ];
-
-                const tierColors = { free: 'border-slate-300 text-slate-600', basic: 'border-sky-300 text-sky-600', ultra: 'border-violet-300 text-violet-600' };
-                const tierLabels = { free: '🆓 Free', basic: '🔵 Basic', ultra: '⚡ Ultra' };
-
-                return (
-                    <div className="space-y-4">
-                        <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3">
-                            <p className="text-[11px] font-black text-indigo-800 mb-1">📊 Level-wise Daily Limits Override</p>
-                            <p className="text-[10px] text-indigo-600">Set separate daily limits for each level and subscription tier. Default values come from the level system.</p>
-                        </div>
-
-                        {/* Level selector */}
-                        <div className="flex flex-wrap gap-2">
-                            {LEVEL_INFO.map(li => (
-                                <button key={li.level} onClick={() => setSelectedLevel(li.level)}
-                                    className={`px-3 py-1.5 rounded-xl text-xs font-black border-2 transition-all ${selectedLevel === li.level ? 'shadow-md text-white border-transparent' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'}`}
-                                    style={selectedLevel === li.level ? { background: li.color, borderColor: li.color } : {}}>
-                                    {li.emoji} L{li.level}
-                                    {lvlOverride[String(li.level)] && <span className="ml-1 text-[8px]">✏️</span>}
-                                </button>
-                            ))}
-                        </div>
-
-                        {/* Selected level header */}
-                        <div className="flex items-center justify-between p-3 rounded-xl border-2"
-                            style={{ borderColor: `${currentLvlInfo.color}60`, background: `${currentLvlInfo.color}10` }}>
-                            <div className="flex items-center gap-2">
-                                <span className="text-2xl">{currentLvlInfo.emoji}</span>
-                                <div>
-                                    <p className="text-sm font-black" style={{ color: currentLvlInfo.color }}>Level {selectedLevel} · {currentLvlInfo.label}</p>
-                                    <p className="text-[10px] text-slate-500">Min Score: {currentLvlInfo.minScore.toLocaleString('en-IN')} pts</p>
-                                </div>
-                            </div>
-                            {hasOverride && (
-                                <button onClick={resetLevel} className="text-[10px] font-black text-red-500 border border-red-200 bg-red-50 px-2 py-1 rounded-lg hover:bg-red-100">
-                                    ↩ Reset to Default
-                                </button>
-                            )}
-                        </div>
-
-                        {/* Feature rows */}
-                        <div className="space-y-3">
-                            {featureRows.map(row => (
-                                <div key={row.key} className="bg-slate-50 border border-slate-200 rounded-xl p-3">
-                                    <div className="flex items-center gap-2 mb-2">
-                                        <span className="text-base">{row.icon}</span>
-                                        <p className="text-xs font-black text-slate-700">{row.label}</p>
-                                        {row.hasTiers && (
-                                            <span className="text-[8px] text-slate-400 font-medium ml-auto">
-                                                Default: {row.tiers!.map(t => `${t[0].toUpperCase()}=${(baseLD as any)[row.key]?.[t] ?? '—'}`).join(' / ')}
-                                            </span>
-                                        )}
-                                        {!row.hasTiers && (
-                                            <span className="text-[8px] text-slate-400 font-medium ml-auto">Default: {(baseLD as any)[row.singleKey!] ?? '—'}</span>
-                                        )}
-                                    </div>
-                                    {row.hasTiers ? (
-                                        <div className="grid grid-cols-3 gap-2">
-                                            {row.tiers!.map(tier => (
-                                                <div key={tier} className={`bg-white p-2 rounded-lg border ${tierColors[tier]} shadow-sm`}>
-                                                    <label className={`text-[9px] font-black uppercase block mb-1 ${tierColors[tier].split(' ')[1]}`}>{tierLabels[tier]}</label>
-                                                    <input type="number" min="0" max="9999"
-                                                        value={getVal(row.key, tier)}
-                                                        onChange={e => updateLevelVal(row.key, tier, Number(e.target.value))}
-                                                        className="w-full p-1.5 border border-slate-200 rounded font-bold text-sm text-center" />
-                                                    <p className="text-[7px] text-slate-400 text-center mt-0.5">9999 = Unlimited</p>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    ) : (
-                                        <div className="max-w-[140px]">
-                                            <label className="text-[9px] font-black text-slate-500 uppercase block mb-1">{row.singleLabel}</label>
-                                            <input type="number" min="0"
-                                                value={getSingle(row.singleKey!)}
-                                                onChange={e => updateLevelSingle(row.singleKey!, Number(e.target.value))}
-                                                className="w-full p-1.5 border border-slate-200 rounded font-bold text-sm text-center" />
-                                        </div>
-                                    )}
-                                </div>
-                            ))}
-                        </div>
-
-                        {/* Copy from level */}
-                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
-                            <p className="text-[10px] font-black text-amber-800">💡 Tip: Enter 9999 = Unlimited. Changes save instantly. Select another level after updating one.</p>
-                        </div>
-                    </div>
-                );
-            })()}
-
-            {/* TAB 2: VISIBILITY */}
+            {/* TAB 1: VISIBILITY */}
             {activeTab === 'VISIBILITY' && (
                 <div className="space-y-6">
                      <div className="p-4 border rounded-xl bg-slate-50 col-span-1 md:col-span-2">
@@ -426,7 +101,6 @@ export const AdminPowerManager: React.FC<Props> = ({ settings, onUpdate }) => {
                                  <label key={mod.key} className="flex items-center gap-2 bg-white px-3 py-2 rounded-lg border shadow-sm cursor-pointer hover:bg-slate-50">
                                      <input
                                         type="checkbox"
-                                        // @ts-ignore
                                         checked={localSettings[mod.key] !== false}
                                         onChange={e => updateSetting(mod.key as keyof SystemSettings, e.target.checked)}
                                         className="accent-green-600 w-4 h-4"
@@ -453,6 +127,29 @@ export const AdminPowerManager: React.FC<Props> = ({ settings, onUpdate }) => {
                                  {localSettings.isGroupStudyEnabled !== false ? 'ACTIVE & VISIBLE' : 'HIDDEN FROM STUDENTS & STORE'}
                              </span>
                          </div>
+
+                        {/* GLOBAL STUDY ROOM CREATION TOGGLE (Reading, Writing, MCQ, PDF) */}
+                        <div className="mb-4 p-3.5 rounded-xl bg-white border border-indigo-200 shadow-sm flex items-center justify-between gap-3">
+                            <div>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-xs font-black text-slate-800 uppercase">🚫 Hide Study Room Creation Everywhere</span>
+                                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${localSettings.hideCreateStudyRoom ? 'bg-rose-100 text-rose-700 border border-rose-300' : 'bg-emerald-100 text-emerald-700 border border-emerald-300'}`}>
+                                        {localSettings.hideCreateStudyRoom ? 'HIDDEN' : 'VISIBLE (ACTIVE)'}
+                                    </span>
+                                </div>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                    Reading mode, Writing mode, MCQ mode aur baki sabhi jagah se "Live" aur "Apna Study Room Banayein" buttons ko hide karein.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => updateSetting('hideCreateStudyRoom' as any, !localSettings.hideCreateStudyRoom)}
+                                className={`w-12 h-6 rounded-full transition-colors relative shrink-0 p-0.5 ${!localSettings.hideCreateStudyRoom ? 'bg-indigo-600' : 'bg-slate-300'}`}
+                                title={!localSettings.hideCreateStudyRoom ? 'Click to Hide Study Room Creation' : 'Click to Show Study Room Creation'}
+                            >
+                                <div className={`w-5 h-5 rounded-full bg-white shadow-md transition-transform ${!localSettings.hideCreateStudyRoom ? 'translate-x-6' : 'translate-x-0'}`} />
+                            </button>
+                        </div>
 
                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                              {/* FREE TIER USAGE */}
@@ -623,7 +320,7 @@ export const AdminPowerManager: React.FC<Props> = ({ settings, onUpdate }) => {
                 </div>
             )}
 
-            {/* TAB 3: TOP BAR — per-button hide/unhide */}
+            {/* TAB 2: TOP BAR — per-button hide/unhide */}
             {activeTab === 'TOPBAR' && (
                 <div className="space-y-3">
                     <div className="p-4 rounded-xl bg-gradient-to-br from-amber-50 to-white border border-amber-200">
@@ -660,7 +357,7 @@ export const AdminPowerManager: React.FC<Props> = ({ settings, onUpdate }) => {
                 </div>
             )}
 
-            {/* TAB 4: BOTTOM NAV — per-slot hide/unhide */}
+            {/* TAB 3: BOTTOM NAV — per-slot hide/unhide */}
             {activeTab === 'BOTTOMNAV' && (
                 <div className="space-y-3">
                     <div className="p-4 rounded-xl bg-gradient-to-br from-blue-50 to-white border border-blue-200">
@@ -698,7 +395,7 @@ export const AdminPowerManager: React.FC<Props> = ({ settings, onUpdate }) => {
                 </div>
             )}
 
-            {/* TAB 5: HOME GRID — feature buttons on home page */}
+            {/* TAB 4: HOME GRID — feature buttons on home page */}
             {activeTab === 'HOMEGRID' && (
                 <div className="space-y-3">
                     <div className="p-4 rounded-xl bg-gradient-to-br from-emerald-50 to-white border border-emerald-200">
@@ -738,7 +435,7 @@ export const AdminPowerManager: React.FC<Props> = ({ settings, onUpdate }) => {
                 </div>
             )}
 
-            {/* TAB: SCORE THRESHOLDS */}
+            {/* TAB 5: SCORE THRESHOLDS */}
             {activeTab === 'SCORE_THRESHOLDS' && (
                 <div className="space-y-3">
                     <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-5 rounded-2xl border border-amber-200 space-y-4">

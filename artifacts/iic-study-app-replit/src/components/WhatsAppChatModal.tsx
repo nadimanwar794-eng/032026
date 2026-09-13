@@ -38,6 +38,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   Coins,
+  Gem,
   TrendingUp,
   Reply,
   Loader2,
@@ -125,10 +126,37 @@ export const getStudentSubscriptionTier = (student: ChatContact): 'ULTRA' | 'BAS
   return 'FREE';
 };
 
+// Daily message limit: Free -> 50, Basic -> 200, Ultra -> Unlimited (Infinity)
+export const getBaseDailyMessageLimit = (tier: 'FREE' | 'BASIC' | 'ULTRA'): number => {
+  switch (tier) {
+    case 'ULTRA':
+      return Infinity;
+    case 'BASIC':
+      return 200;
+    case 'FREE':
+    default:
+      return 50;
+  }
+};
+
+// Friend limit: Free -> 10, Basic -> 20, Ultra -> 40
+export const getBaseFriendLimit = (tier: 'FREE' | 'BASIC' | 'ULTRA'): number => {
+  switch (tier) {
+    case 'ULTRA':
+      return 40;
+    case 'BASIC':
+      return 20;
+    case 'FREE':
+    default:
+      return 10;
+  }
+};
+
+// Block limit: Free -> 10, Basic -> 20, Ultra -> 40
 export const getBaseBlockLimit = (tier: 'FREE' | 'BASIC' | 'ULTRA'): number => {
   switch (tier) {
     case 'ULTRA':
-      return 30;
+      return 40;
     case 'BASIC':
       return 20;
     case 'FREE':
@@ -138,12 +166,7 @@ export const getBaseBlockLimit = (tier: 'FREE' | 'BASIC' | 'ULTRA'): number => {
 };
 
 export const getNextExpansionCost = (expansionsCount: number): number => {
-  // 1st time (+10): 100 coins
-  // 2nd time (+10): 200 coins
-  // 3rd time (+10): 400 coins
-  // 4th time (+10): 800 coins
-  // Formula: 100 * 2^expansions (coins 2x hote jayenge)
-  return 100 * Math.pow(2, Math.max(0, expansionsCount));
+  return 100;
 };
 
 interface Props {
@@ -191,7 +214,10 @@ export const WhatsAppChatModal: React.FC<Props> = ({
 
   const effectiveUserId = String(user?.id || (user as any)?.uid || currentUser?.id || (currentUser as any)?.uid || '').trim();
 
-  // Purchased +10 block limit expansions count
+  const currentBlockTier = getUserBlockTier(currentUser);
+  const currentTier = currentBlockTier;
+
+  // 1. Purchased +10 block limit expansions count
   const [blockExpansions, setBlockExpansions] = useState<number>(() => {
     if (typeof user.blockLimitExpansions === 'number') return user.blockLimitExpansions;
     try {
@@ -202,12 +228,51 @@ export const WhatsAppChatModal: React.FC<Props> = ({
     }
   });
 
-  const currentBlockTier = getUserBlockTier(currentUser);
   const baseBlockLimit = getBaseBlockLimit(currentBlockTier);
   const extraBlockSlots = blockExpansions * 10;
   const totalBlockLimit = baseBlockLimit + extraBlockSlots;
   const nextExpansionCost = getNextExpansionCost(blockExpansions);
   const userCoins = getTotalCredits(currentUser);
+  const userDiamonds = currentUser.diamonds || 0;
+
+  // 2. Purchased +10 friend limit expansions count (Free: 10, Basic: 20, Ultra: 40)
+  const [friendExpansions, setFriendExpansions] = useState<number>(() => {
+    if (typeof (user as any).friendLimitExpansions === 'number') return (user as any).friendLimitExpansions;
+    try {
+      const saved = localStorage.getItem(`nsta_friend_expansions_${user.id}`);
+      return saved ? parseInt(saved, 10) || 0 : 0;
+    } catch {
+      return 0;
+    }
+  });
+  const baseFriendLimit = getBaseFriendLimit(currentTier);
+  const totalFriendLimit = baseFriendLimit + friendExpansions * 10;
+  const [showFriendLimitModal, setShowFriendLimitModal] = useState(false);
+
+  // 3. Daily message tracking & expansions (Free: 50, Basic: 200, Ultra: Unlimited)
+  const getTodayStr = () => new Date().toISOString().slice(0, 10);
+  const [dailyMessagesSent, setDailyMessagesSent] = useState<number>(() => {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const saved = localStorage.getItem(`nsta_daily_msg_${user.id}_${today}`);
+      return saved ? parseInt(saved, 10) || 0 : 0;
+    } catch {
+      return 0;
+    }
+  });
+  const [dailyMsgExpansions, setDailyMsgExpansions] = useState<number>(() => {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const saved = localStorage.getItem(`nsta_msg_expansions_${user.id}_${today}`);
+      return saved ? parseInt(saved, 10) || 0 : 0;
+    } catch {
+      return 0;
+    }
+  });
+  const baseDailyMsgLimit = getBaseDailyMessageLimit(currentTier);
+  const totalDailyMsgLimit = baseDailyMsgLimit === Infinity ? Infinity : baseDailyMsgLimit + dailyMsgExpansions * 10;
+  const isDailyMsgLimitReached = totalDailyMsgLimit !== Infinity && dailyMessagesSent >= totalDailyMsgLimit;
+  const [showMessageLimitModal, setShowMessageLimitModal] = useState(false);
 
   // Expansion loading state & limit reached modal state
   const [isExpandingLimit, setIsExpandingLimit] = useState(false);
@@ -326,71 +391,122 @@ export const WhatsAppChatModal: React.FC<Props> = ({
     setTimeout(() => setBannerNotice(null), 3500);
   };
 
-  // Handle +10 Block Limit Expansion with Coins (2x progression: 100, 200, 400, 800...)
-  const handleExpandBlockLimit = async (): Promise<boolean> => {
-    const cost = nextExpansionCost;
-    if (userCoins < cost) {
-      showToast(`⚠️ Paryapt coins nahi hain! Zaroorat: ${cost} 🪙, Aapke paas: ${userCoins} 🪙.`);
-      return false;
+  // Unified Limit Expansion with 100 Credits OR 10 Diamonds (+10 limit)
+  const handleExpandLimit = async (
+    type: 'MESSAGE' | 'FRIEND' | 'BLOCK',
+    currency: 'CREDITS' | 'DIAMONDS'
+  ): Promise<boolean> => {
+    const costCredits = 100;
+    const costDiamonds = 10;
+    const curCredits = getTotalCredits(currentUser);
+    const curDiamonds = currentUser.diamonds || 0;
+
+    if (currency === 'CREDITS') {
+      if (curCredits < costCredits) {
+        showToast(`⚠️ Credits kam hain! Zaroorat: ${costCredits} 🪙, Aapke paas: ${curCredits} 🪙.`);
+        return false;
+      }
+    } else {
+      if (curDiamonds < costDiamonds) {
+        showToast(`⚠️ Diamonds kam hain! Zaroorat: ${costDiamonds} 💎, Aapke paas: ${curDiamonds} 💎.`);
+        return false;
+      }
     }
 
     setIsExpandingLimit(true);
     try {
-      const updated = applyDeduction(currentUser, cost);
-      if (!updated) {
-        showToast(`⚠️ Paryapt coins nahi hain! Zaroorat: ${cost} 🪙.`);
+      const baseDeducted: User | null =
+        currency === 'CREDITS'
+          ? applyDeduction(currentUser, costCredits)
+          : {
+              ...currentUser,
+              diamonds: Math.max(0, curDiamonds - costDiamonds),
+            };
+
+      if (!baseDeducted) {
+        showToast('Payment poora nahi ho saka. Kripya punah koshish karein.');
         return false;
       }
 
-      const nextExpansions = blockExpansions + 1;
-      const fullUpdated: User = {
-        ...updated,
-        blockLimitExpansions: nextExpansions,
-      };
+      let updated: User = { ...baseDeducted };
 
-      setBlockExpansions(nextExpansions);
-      setCurrentUser(fullUpdated);
-
-      try {
-        localStorage.setItem(`nsta_block_expansions_${user.id}`, String(nextExpansions));
-        localStorage.setItem('nst_current_user', JSON.stringify(fullUpdated));
-        window.dispatchEvent(new CustomEvent('user-updated', { detail: fullUpdated }));
-        window.dispatchEvent(new Event('storage'));
-      } catch {}
-
-      await saveUserToLive(fullUpdated).catch((err) => {
-        console.warn('[Nsta Messenger] saveUserToLive notice:', err);
-      });
-
-      if (onUpdateUser) {
-        onUpdateUser(fullUpdated);
-      }
-
-      const newLimit = baseBlockLimit + nextExpansions * 10;
-      const nextCost = getNextExpansionCost(nextExpansions);
-      showToast(`🎉 Badhaai ho! +10 Block limit unlock ho gaya! Naya limit: ${newLimit} users (Agla: ${nextCost} coins).`);
-
-      if (showLimitReachedModal) {
+      if (type === 'MESSAGE') {
+        const today = getTodayStr();
+        const nextExp = dailyMsgExpansions + 1;
+        setDailyMsgExpansions(nextExp);
+        updated = {
+          ...updated,
+          dailyMessageLimitExpansions: nextExp,
+        };
+        try {
+          localStorage.setItem(`nsta_msg_expansions_${user.id}_${today}`, String(nextExp));
+        } catch {}
+        showToast(`🎉 +10 Daily Messages unlock ho gaye! Aaj ka naya limit: ${baseDailyMsgLimit + nextExp * 10} msgs.`);
+        setShowMessageLimitModal(false);
+      } else if (type === 'FRIEND') {
+        const nextExp = friendExpansions + 1;
+        setFriendExpansions(nextExp);
+        updated = {
+          ...updated,
+          friendLimitExpansions: nextExp,
+        };
+        try {
+          localStorage.setItem(`nsta_friend_expansions_${user.id}`, String(nextExp));
+        } catch {}
+        showToast(`🎉 +10 Friends limit unlock ho gaya! Naya limit: ${baseFriendLimit + nextExp * 10} friends.`);
+        setShowFriendLimitModal(false);
+      } else if (type === 'BLOCK') {
+        const nextExp = blockExpansions + 1;
+        setBlockExpansions(nextExp);
+        updated = {
+          ...updated,
+          blockLimitExpansions: nextExp,
+        };
+        try {
+          localStorage.setItem(`nsta_block_expansions_${user.id}`, String(nextExp));
+        } catch {}
+        showToast(`🎉 +10 Block slots unlock ho gaye! Naya limit: ${baseBlockLimit + nextExp * 10} slots.`);
         setShowLimitReachedModal(false);
         if (attemptingBlockUser) {
           setConfirmDialog({
             type: 'BLOCK',
             title: 'User Block Karein',
-            description: `Kya aap sach me ${attemptingBlockUser.name} ko block karna chahte hain? Block karne ke baad na wo aapko message bhej sakenge na aap unhe (${blockedUsers.length + 1}/${newLimit} slots).`,
+            description: `Limit badh gayi hai! Kya aap sach me ${attemptingBlockUser.name} ko block karna chahte hain?`,
             targetId: attemptingBlockUser.id,
             targetName: attemptingBlockUser.name,
           });
           setAttemptingBlockUser(null);
         }
       }
+
+      const finalUser: User = updated;
+      setCurrentUser(finalUser);
+      try {
+        localStorage.setItem('nst_current_user', JSON.stringify(finalUser));
+        window.dispatchEvent(new CustomEvent('user-updated', { detail: finalUser }));
+        window.dispatchEvent(new Event('storage'));
+      } catch {}
+
+      await saveUserToLive(finalUser).catch((err) => {
+        console.warn('[Nsta Messenger] saveUserToLive notice:', err);
+      });
+
+      if (onUpdateUser) {
+        onUpdateUser(finalUser);
+      }
       return true;
     } catch (err) {
-      console.error('Failed to expand block limit:', err);
-      showToast('Limit badhane me samasya aayi. Kripya punah koshish karein.');
+      console.error('Failed to expand limit:', err);
+      showToast('Limit badhane me samasya aayi.');
       return false;
     } finally {
       setIsExpandingLimit(false);
     }
+  };
+
+  // Handle +10 Block Limit Expansion with Coins (Backward compatible wrapper)
+  const handleExpandBlockLimit = async (): Promise<boolean> => {
+    return handleExpandLimit('BLOCK', 'CREDITS');
   };
 
   // Safe Block Initiator (checks limit and prompts coin expansion if quota is full)
@@ -749,6 +865,10 @@ export const WhatsAppChatModal: React.FC<Props> = ({
   // Handle Send Friend Request
   const handleSendFriendRequest = async (targetStudent: ChatContact) => {
     if (!targetStudent || targetStudent.id === user.id || sendingReqIds.has(targetStudent.id)) return;
+    if (friends.length >= totalFriendLimit) {
+      setShowFriendLimitModal(true);
+      return;
+    }
     setSendingReqIds((prev) => new Set(prev).add(targetStudent.id));
     try {
       const newReq = await sendFriendRequest(
@@ -789,6 +909,10 @@ export const WhatsAppChatModal: React.FC<Props> = ({
 
   // Handle Accept Friend Request
   const handleAcceptRequest = async (req: FriendRequest) => {
+    if (friends.length >= totalFriendLimit) {
+      setShowFriendLimitModal(true);
+      return;
+    }
     await acceptFriendRequest(
       {
         id: user.id,
@@ -824,6 +948,10 @@ export const WhatsAppChatModal: React.FC<Props> = ({
   // Handle Send Text Message (Optimistic update with reply support)
   const handleSendMessage = async () => {
     if (!inputText.trim()) return;
+    if (totalDailyMsgLimit !== Infinity && dailyMessagesSent >= totalDailyMsgLimit) {
+      setShowMessageLimitModal(true);
+      return;
+    }
     const textToSend = inputText;
     const currentReply = replyingTo
       ? {
@@ -837,6 +965,15 @@ export const WhatsAppChatModal: React.FC<Props> = ({
     setReplyingTo(null);
     setShowEmojiPicker(false);
     setShowAttachmentMenu(false);
+
+    if (totalDailyMsgLimit !== Infinity) {
+      const today = getTodayStr();
+      const nextSent = dailyMessagesSent + 1;
+      setDailyMessagesSent(nextSent);
+      try {
+        localStorage.setItem(`nsta_daily_msg_${user.id}_${today}`, String(nextSent));
+      } catch {}
+    }
 
     const userPhoto = user.photoURL || (user as any).avatarUrl;
 
@@ -915,6 +1052,15 @@ export const WhatsAppChatModal: React.FC<Props> = ({
       const duration = Math.max(2, recordingSeconds);
       setRecordingSeconds(0);
 
+      if (totalDailyMsgLimit !== Infinity) {
+        const today = getTodayStr();
+        const nextSent = dailyMessagesSent + 1;
+        setDailyMessagesSent(nextSent);
+        try {
+          localStorage.setItem(`nsta_daily_msg_${user.id}_${today}`, String(nextSent));
+        } catch {}
+      }
+
       const voiceText = `🎙️ Voice Note (${duration}s)`;
       if (selectedContact) {
         sendPrivateMessage(
@@ -938,6 +1084,10 @@ export const WhatsAppChatModal: React.FC<Props> = ({
         );
       }
     } else {
+      if (totalDailyMsgLimit !== Infinity && dailyMessagesSent >= totalDailyMsgLimit) {
+        setShowMessageLimitModal(true);
+        return;
+      }
       setIsRecordingVoice(true);
       setRecordingSeconds(0);
       recordingTimerRef.current = setInterval(() => {
@@ -948,7 +1098,21 @@ export const WhatsAppChatModal: React.FC<Props> = ({
 
   // Handle Quick Attachment
   const handleSendQuickAttachment = (type: 'DOUBT' | 'NOTE' | 'MCQ', content: string) => {
+    if (totalDailyMsgLimit !== Infinity && dailyMessagesSent >= totalDailyMsgLimit) {
+      setShowMessageLimitModal(true);
+      return;
+    }
     setShowAttachmentMenu(false);
+
+    if (totalDailyMsgLimit !== Infinity) {
+      const today = getTodayStr();
+      const nextSent = dailyMessagesSent + 1;
+      setDailyMessagesSent(nextSent);
+      try {
+        localStorage.setItem(`nsta_daily_msg_${user.id}_${today}`, String(nextSent));
+      } catch {}
+    }
+
     const userPhoto = user.photoURL || (user as any).avatarUrl;
     if (selectedContact) {
       sendPrivateMessage(
@@ -2158,6 +2322,36 @@ export const WhatsAppChatModal: React.FC<Props> = ({
             {/* TAB 1: CONFIRMED CHATS (FRIENDS ONLY) */}
             {activeTab === 'CHATS' && (
               <div className="relative min-h-full pb-20">
+                {/* Friend Quota Status Strip */}
+                <div className="mx-4 mt-2.5 p-2.5 bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-950/40 dark:to-slate-900 border border-purple-200 dark:border-purple-800/60 rounded-xl flex items-center justify-between shadow-xs">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-purple-600 text-white flex items-center justify-center text-xs font-black shadow-xs">
+                      🤝
+                    </div>
+                    <div>
+                      <div className="text-[11px] font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                        <span>Friends Quota:</span>
+                        <span className="text-purple-700 dark:text-purple-300 font-black">
+                          {friends.length} / {totalFriendLimit}
+                        </span>
+                        <span className="text-[9px] font-semibold px-1.5 py-0.2 bg-purple-200/60 dark:bg-purple-900/60 text-purple-800 dark:text-purple-200 rounded">
+                          {currentTier}
+                        </span>
+                      </div>
+                      <p className="text-[9px] text-slate-500 dark:text-slate-400">
+                        Free: 10 · Basic: 20 · Ultra: 40 friends
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowFriendLimitModal(true)}
+                    className="px-2.5 py-1 bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-bold rounded-lg shadow-sm active:scale-95 transition-all flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus size={11} />
+                    <span>+10 Friends</span>
+                  </button>
+                </div>
                 {/* Blocked Users Notice Bar */}
                 {blockedUsers.length > 0 && (
                   <div className="mx-4 mt-2.5 p-2 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-between">
@@ -3316,6 +3510,34 @@ export const WhatsAppChatModal: React.FC<Props> = ({
 
             {/* Bottom Input Controls */}
             <div className="p-2 md:p-3 bg-white dark:bg-slate-900 border-t border-purple-500/20 z-20">
+              {/* Daily Message Quota Status */}
+              {totalDailyMsgLimit !== Infinity ? (
+                <div className="flex items-center justify-between pb-2 mb-1 px-1 text-[11px] border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
+                    <span>💬 Daily Quota:</span>
+                    <span className={dailyMessagesSent >= totalDailyMsgLimit ? 'text-rose-600 font-black' : 'text-purple-700 dark:text-purple-300 font-bold'}>
+                      {dailyMessagesSent} / {totalDailyMsgLimit} msgs
+                    </span>
+                    <span className="text-[9px] px-1.5 py-0.2 bg-purple-100 dark:bg-purple-900/60 text-purple-700 dark:text-purple-300 rounded font-semibold">
+                      {currentTier}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowMessageLimitModal(true)}
+                    className="text-purple-700 dark:text-purple-300 hover:text-purple-900 dark:hover:text-purple-100 text-[10px] font-bold flex items-center gap-1 hover:underline cursor-pointer"
+                  >
+                    <span>+10 Limit (100 🪙 / 10 💎)</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between pb-1.5 mb-1 px-1 text-[10px] border-b border-amber-500/20 text-amber-600 dark:text-amber-400 font-bold">
+                  <span className="flex items-center gap-1">
+                    <Crown size={12} className="text-amber-500" />
+                    <span>Ultra Plan · Unlimited Daily Messages</span>
+                  </span>
+                </div>
+              )}
               {selectedContact && isUserBlocked(selectedContact.id) ? (
                 <div className="flex items-center justify-between p-3 bg-rose-50 dark:bg-rose-950/40 rounded-2xl border border-rose-200 dark:border-rose-900/60">
                   <div className="flex items-center gap-2.5">
@@ -4014,7 +4236,191 @@ export const WhatsAppChatModal: React.FC<Props> = ({
           </div>
         )}
 
-        {/* ─── MODAL: BLOCK LIMIT REACHED / EXPAND WITH COINS ─────────── */}
+        {/* ─── MODAL: DAILY MESSAGE LIMIT REACHED / EXPAND (+10) ─────────── */}
+        {showMessageLimitModal && (
+          <div className="fixed inset-0 z-[385] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+            <div className="w-full max-w-sm bg-white dark:bg-slate-900 rounded-3xl p-6 text-center shadow-2xl border border-purple-300 dark:border-purple-900/60 space-y-4">
+              <div className="w-16 h-16 rounded-full mx-auto flex items-center justify-center bg-purple-100 dark:bg-purple-950/70 text-purple-600 shadow-inner">
+                <MessageCircle size={30} />
+              </div>
+
+              <div>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-100 dark:bg-purple-900/60 text-purple-600 dark:text-purple-300">
+                  Daily Limit Reached
+                </span>
+                <h3 className="font-black text-base text-slate-900 dark:text-white mt-1.5">
+                  Daily Messages Limit Poori Ho Gayi!
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                  Aapne aaj ki <strong>{totalDailyMsgLimit} messages</strong> ki limit poori kar li hai ({currentTier} plan).
+                </p>
+                <div className="mt-2 text-[10px] text-slate-400 bg-slate-100 dark:bg-slate-800/60 py-1.5 px-2 rounded-xl">
+                  Free: 50/day · Basic: 200/day · Ultra: Unlimited
+                </div>
+              </div>
+
+              {/* Expansion Deal Box */}
+              <div className="bg-gradient-to-br from-purple-50 to-indigo-50 dark:from-purple-950/40 dark:to-slate-900 border border-purple-200 dark:border-purple-800/60 rounded-2xl p-4 text-left space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 font-black text-xs text-purple-900 dark:text-purple-200 uppercase tracking-wide">
+                    <Zap size={14} className="text-amber-500" />
+                    <span>+10 Daily Messages Unlock Karein</span>
+                  </div>
+                  <span className="text-[10px] font-black px-1.5 py-0.5 bg-purple-500/20 text-purple-700 dark:text-purple-300 rounded-md">
+                    Instant
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between pt-1 border-t border-purple-200 dark:border-purple-800/60 text-xs font-bold">
+                  <span className="text-slate-600 dark:text-slate-300">Aapke Credits:</span>
+                  <span className={userCoins >= 100 ? 'text-emerald-600 dark:text-emerald-400 font-black' : 'text-rose-600 dark:text-rose-400 font-black'}>
+                    🪙 {userCoins} Credits
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs font-bold">
+                  <span className="text-slate-600 dark:text-slate-300">Aapke Diamonds:</span>
+                  <span className={userDiamonds >= 10 ? 'text-cyan-600 dark:text-cyan-400 font-black' : 'text-rose-600 dark:text-rose-400 font-black'}>
+                    💎 {userDiamonds} Diamonds
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-2 pt-1">
+                {/* Option 1: 100 Credits */}
+                <button
+                  type="button"
+                  onClick={() => handleExpandLimit('MESSAGE', 'CREDITS')}
+                  disabled={isExpandingLimit || userCoins < 100}
+                  className={`w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                    userCoins >= 100
+                      ? 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 cursor-pointer'
+                      : 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-300 dark:border-slate-700'
+                  }`}
+                >
+                  <Coins size={14} />
+                  <span>100 Credits se Unlock Karein (+10 Messages)</span>
+                </button>
+
+                {/* Option 2: 10 Diamonds */}
+                <button
+                  type="button"
+                  onClick={() => handleExpandLimit('MESSAGE', 'DIAMONDS')}
+                  disabled={isExpandingLimit || userDiamonds < 10}
+                  className={`w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                    userDiamonds >= 10
+                      ? 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 text-white cursor-pointer'
+                      : 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-300 dark:border-slate-700'
+                  }`}
+                >
+                  <Gem size={14} />
+                  <span>10 Diamonds se Unlock Karein (+10 Messages)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowMessageLimitModal(false)}
+                  className="w-full py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Band Karein
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ─── MODAL: FRIEND LIMIT REACHED / EXPAND (+10) ─────────── */}
+        {showFriendLimitModal && (
+          <div className="fixed inset-0 z-[385] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+            <div className="w-full max-w-sm bg-white dark:bg-slate-900 rounded-3xl p-6 text-center shadow-2xl border border-indigo-300 dark:border-indigo-900/60 space-y-4">
+              <div className="w-16 h-16 rounded-full mx-auto flex items-center justify-center bg-indigo-100 dark:bg-indigo-950/70 text-indigo-600 shadow-inner">
+                <UserCheck size={30} />
+              </div>
+
+              <div>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-indigo-100 dark:bg-indigo-900/60 text-indigo-600 dark:text-indigo-300">
+                  Friend Limit Reached
+                </span>
+                <h3 className="font-black text-base text-slate-900 dark:text-white mt-1.5">
+                  Friend List Full Ho Gayi Hai!
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                  Aapki <strong>{totalFriendLimit} friends</strong> ki limit poori ho chuki hai ({currentTier} plan).
+                </p>
+                <div className="mt-2 text-[10px] text-slate-400 bg-slate-100 dark:bg-slate-800/60 py-1.5 px-2 rounded-xl">
+                  Free: 10 friends · Basic: 20 friends · Ultra: 40 friends
+                </div>
+              </div>
+
+              {/* Expansion Deal Box */}
+              <div className="bg-gradient-to-br from-indigo-50 to-purple-50 dark:from-indigo-950/40 dark:to-slate-900 border border-indigo-200 dark:border-indigo-800/60 rounded-2xl p-4 text-left space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 font-black text-xs text-indigo-900 dark:text-indigo-200 uppercase tracking-wide">
+                    <UserPlus size={14} className="text-indigo-600" />
+                    <span>+10 Friend Slots Unlock Karein</span>
+                  </div>
+                  <span className="text-[10px] font-black px-1.5 py-0.5 bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 rounded-md">
+                    Permanent
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between pt-1 border-t border-indigo-200 dark:border-indigo-800/60 text-xs font-bold">
+                  <span className="text-slate-600 dark:text-slate-300">Aapke Credits:</span>
+                  <span className={userCoins >= 100 ? 'text-emerald-600 dark:text-emerald-400 font-black' : 'text-rose-600 dark:text-rose-400 font-black'}>
+                    🪙 {userCoins} Credits
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs font-bold">
+                  <span className="text-slate-600 dark:text-slate-300">Aapke Diamonds:</span>
+                  <span className={userDiamonds >= 10 ? 'text-cyan-600 dark:text-cyan-400 font-black' : 'text-rose-600 dark:text-rose-400 font-black'}>
+                    💎 {userDiamonds} Diamonds
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-2 pt-1">
+                {/* Option 1: 100 Credits */}
+                <button
+                  type="button"
+                  onClick={() => handleExpandLimit('FRIEND', 'CREDITS')}
+                  disabled={isExpandingLimit || userCoins < 100}
+                  className={`w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                    userCoins >= 100
+                      ? 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 cursor-pointer'
+                      : 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-300 dark:border-slate-700'
+                  }`}
+                >
+                  <Coins size={14} />
+                  <span>100 Credits se Unlock Karein (+10 Friends)</span>
+                </button>
+
+                {/* Option 2: 10 Diamonds */}
+                <button
+                  type="button"
+                  onClick={() => handleExpandLimit('FRIEND', 'DIAMONDS')}
+                  disabled={isExpandingLimit || userDiamonds < 10}
+                  className={`w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                    userDiamonds >= 10
+                      ? 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 text-white cursor-pointer'
+                      : 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-300 dark:border-slate-700'
+                  }`}
+                >
+                  <Gem size={14} />
+                  <span>10 Diamonds se Unlock Karein (+10 Friends)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowFriendLimitModal(false)}
+                  className="w-full py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Band Karein
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ─── MODAL: BLOCK LIMIT REACHED / EXPAND (100 CREDITS OR 10 DIAMONDS) ─────────── */}
         {showLimitReachedModal && (
           <div className="fixed inset-0 z-[385] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
             <div className="w-full max-w-sm bg-white dark:bg-slate-900 rounded-3xl p-6 text-center shadow-2xl border border-rose-300 dark:border-rose-900/60 space-y-4">
@@ -4040,91 +4446,86 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                     </>
                   )}
                 </p>
+                <div className="mt-2 text-[10px] text-slate-400 bg-slate-100 dark:bg-slate-800/60 py-1.5 px-2 rounded-xl">
+                  Free: 10 · Basic: 20 · Ultra: 40 block slots
+                </div>
               </div>
 
               {/* Expansion Deal Box */}
               <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700/60 rounded-2xl p-4 text-left space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5 font-black text-xs text-amber-900 dark:text-amber-200 uppercase tracking-wide">
-                    <span>🪙</span>
+                    <span>🛡️</span>
                     <span>+10 Block Slots Unlock Karein</span>
                   </div>
                   <span className="text-[10px] font-black px-1.5 py-0.5 bg-amber-500/20 text-amber-700 dark:text-amber-300 rounded-md">
-                    2x Rule
+                    Permanent
                   </span>
                 </div>
 
-                <p className="text-[11px] text-amber-800 dark:text-amber-300 leading-snug">
-                  10 nayi block slots unlock karein. Agli baar badhane ke liye double ({nextExpansionCost * 2}) coins lagenge.
-                </p>
-
                 <div className="flex items-center justify-between pt-1 border-t border-amber-200 dark:border-amber-800 text-xs font-bold">
-                  <span className="text-slate-600 dark:text-slate-300">Cost:</span>
-                  <span className="text-amber-700 dark:text-amber-300 font-black">
-                    🪙 {nextExpansionCost} Coins
+                  <span className="text-slate-600 dark:text-slate-300">Aapke Credits:</span>
+                  <span className={userCoins >= 100 ? 'text-emerald-600 dark:text-emerald-400 font-black' : 'text-rose-600 dark:text-rose-400 font-black'}>
+                    🪙 {userCoins} Credits
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-xs font-bold">
-                  <span className="text-slate-600 dark:text-slate-300">Aapke Coins:</span>
-                  <span className={userCoins >= nextExpansionCost ? 'text-emerald-600 dark:text-emerald-400 font-black' : 'text-rose-600 dark:text-rose-400 font-black'}>
-                    🪙 {userCoins} Coins
+                  <span className="text-slate-600 dark:text-slate-300">Aapke Diamonds:</span>
+                  <span className={userDiamonds >= 10 ? 'text-cyan-600 dark:text-cyan-400 font-black' : 'text-rose-600 dark:text-rose-400 font-black'}>
+                    💎 {userDiamonds} Diamonds
                   </span>
                 </div>
               </div>
 
               <div className="space-y-2 pt-1">
+                {/* Option 1: 100 Credits */}
                 <button
-                  onClick={async () => {
-                    const success = await handleExpandBlockLimit();
-                    if (success && attemptingBlockUser) {
-                      setShowLimitReachedModal(false);
-                      setConfirmDialog({
-                        type: 'BLOCK',
-                        title: 'User Block Karein',
-                        description: `Limit badh gayi hai! Kya aap sach me ${attemptingBlockUser.name} ko block karna chahte hain?`,
-                        targetId: attemptingBlockUser.id,
-                        targetName: attemptingBlockUser.name,
-                      });
-                    }
-                  }}
-                  disabled={isExpandingLimit || userCoins < nextExpansionCost}
+                  type="button"
+                  onClick={() => handleExpandLimit('BLOCK', 'CREDITS')}
+                  disabled={isExpandingLimit || userCoins < 100}
                   className={`w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
-                    userCoins >= nextExpansionCost
+                    userCoins >= 100
                       ? 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 cursor-pointer'
                       : 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-300 dark:border-slate-700'
                   }`}
                 >
-                  {isExpandingLimit ? (
-                    <span>Expanding limit... ⏳</span>
-                  ) : userCoins >= nextExpansionCost ? (
-                    <>
-                      <Plus size={14} />
-                      <span>Unlock +10 Slots ({nextExpansionCost} 🪙)</span>
-                    </>
-                  ) : (
-                    <>
-                      <Coins size={14} />
-                      <span>Coins Kam Hain ({userCoins}/{nextExpansionCost} 🪙)</span>
-                    </>
-                  )}
+                  <Coins size={14} />
+                  <span>100 Credits se Unlock Karein (+10 Slots)</span>
+                </button>
+
+                {/* Option 2: 10 Diamonds */}
+                <button
+                  type="button"
+                  onClick={() => handleExpandLimit('BLOCK', 'DIAMONDS')}
+                  disabled={isExpandingLimit || userDiamonds < 10}
+                  className={`w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                    userDiamonds >= 10
+                      ? 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 text-white cursor-pointer'
+                      : 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-300 dark:border-slate-700'
+                  }`}
+                >
+                  <Gem size={14} />
+                  <span>10 Diamonds se Unlock Karein (+10 Slots)</span>
                 </button>
 
                 <div className="grid grid-cols-2 gap-2">
                   <button
+                    type="button"
                     onClick={() => {
                       setShowLimitReachedModal(false);
                       setActiveTab('BLOCKED');
                     }}
-                    className="w-full py-2 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/60 rounded-xl text-xs font-bold transition-colors"
+                    className="w-full py-2 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/60 rounded-xl text-xs font-bold transition-colors cursor-pointer"
                   >
                     Manage Block List
                   </button>
                   <button
+                    type="button"
                     onClick={() => {
                       setShowLimitReachedModal(false);
                       setAttemptingBlockUser(null);
                     }}
-                    className="w-full py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition-colors"
+                    className="w-full py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition-colors cursor-pointer"
                   >
                     Cancel
                   </button>

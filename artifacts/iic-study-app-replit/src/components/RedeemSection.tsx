@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Gift, ArrowRight, AlertCircle, CheckCircle, Map, ExternalLink, X } from 'lucide-react';
 import { User, SystemSettings, SubscriptionHistoryEntry } from '../types';
 import { SUBSCRIPTION_BONUS } from '../utils/levelSystem';
+import { activateDiamondSub } from '../utils/diamondUtils';
 import { ref, get, update, runTransaction } from "firebase/database";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { rtdb, db, saveUserToLive } from "../firebase";
@@ -168,7 +169,7 @@ export const RedeemSection: React.FC<Props> = ({ user, onSuccess }) => {
         }
 
         // 3. APPLY REWARD TO USER
-        let updatedUser = { 
+        let updatedUser: User = { 
             ...user, 
             redeemedCodes: [...(user.redeemedCodes || []), targetCode.code],
             totalScore: (user.totalScore || 0) + 5  // +5 score for any redeem code
@@ -299,6 +300,17 @@ export const RedeemSection: React.FC<Props> = ({ user, onSuccess }) => {
             (updatedUser as any).scoreLimitBoostExpiry = expiry;
             const timeLabel = durationHrs >= 24 ? `${Math.round(durationHrs / 24)} din` : `${durationHrs} ghante`;
             successMessage = `📈 Daily Limit Boost Active! +${limitBoostPct}% zyada score limit ${timeLabel} ke liye! Expiry ke baad default limit pe wapis aa jayegi.`;
+        } else if (targetCode.type === 'DIAMONDS') {
+            // Handle Diamonds Redeem Code
+            const diaAmount = Number(targetCode.diamondAmount || targetCode.amount || 50);
+            updatedUser.diamonds = (updatedUser.diamonds || 0) + diaAmount;
+            successMessage = `💎 Shandaar! +${diaAmount} Diamonds aapke account mein add ho gaye!`;
+        } else if (targetCode.type === 'DIAMOND_SUBSCRIPTION') {
+            // Handle Diamond Subscription Pass Redeem Code
+            const planId = targetCode.diamondSubPlanId || '7_DAYS_PASS';
+            updatedUser = activateDiamondSub(updatedUser, planId);
+            const planName = planId === '30_DAYS_PASS' ? 'Monthly Diamond Pass (25💎/day)' : '7-Day Diamond Pass (10💎/day)';
+            successMessage = `💎 Mubarak ho! ${planName} Activate ho gaya! Store se roz apne diamonds claim karein!`;
         } else if (targetCode.type === 'THEME_COLOR') {
             // Handle Temporary App Theme Color
             const color = (targetCode as any).themeColor || '#3b82f6';
@@ -368,6 +380,23 @@ export const RedeemSection: React.FC<Props> = ({ user, onSuccess }) => {
                 startDate: new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
                 endDate: updatedUser.subscriptionEndDate ? new Date(updatedUser.subscriptionEndDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Lifetime',
                 isSubscription: true
+            });
+            setShowUnlockPopup(true);
+        } else if (targetCode.type === 'DIAMONDS') {
+            setUnlockedDetails({
+                type: 'Diamonds Added',
+                amount: Number(targetCode.diamondAmount || targetCode.amount || 50),
+                isDiamond: true
+            });
+            setShowUnlockPopup(true);
+        } else if (targetCode.type === 'DIAMOND_SUBSCRIPTION') {
+            const planId = targetCode.diamondSubPlanId || '7_DAYS_PASS';
+            setUnlockedDetails({
+                type: 'Diamond Pass Active',
+                planName: planId === '30_DAYS_PASS' ? 'Monthly Diamond Pass (25💎/day)' : '7-Day Diamond Pass (10💎/day)',
+                dailyDiamonds: planId === '30_DAYS_PASS' ? 25 : 10,
+                totalDays: planId === '30_DAYS_PASS' ? 30 : 7,
+                isDiamondPass: true
             });
             setShowUnlockPopup(true);
         }
@@ -455,7 +484,31 @@ export const RedeemSection: React.FC<Props> = ({ user, onSuccess }) => {
                                 <span className="text-xs font-bold text-purple-600 uppercase tracking-wider">Content Type</span>
                                 <span className="text-sm font-black text-slate-800">{unlockedDetails.type}</span>
                             </div>
-                            {unlockedDetails.isSubscription ? (
+                            {unlockedDetails.isDiamond ? (
+                                <div className="text-center py-4">
+                                    <div className="text-4xl mb-2">💎</div>
+                                    <div className="text-2xl font-black text-sky-600">+{unlockedDetails.amount} Diamonds</div>
+                                    <p className="text-xs text-slate-500 mt-1 font-medium">Aapke diamond wallet balance mein add ho gaye hain!</p>
+                                </div>
+                            ) : unlockedDetails.isDiamondPass ? (
+                                <div>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="text-xs font-bold text-sky-600 uppercase tracking-wider">Pass</span>
+                                        <span className="text-sm font-black text-slate-800">{unlockedDetails.planName}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="text-xs font-bold text-sky-600 uppercase tracking-wider">Daily Drop</span>
+                                        <span className="text-sm font-bold text-sky-700 font-mono">+{unlockedDetails.dailyDiamonds} 💎 / Day</span>
+                                    </div>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="text-xs font-bold text-sky-600 uppercase tracking-wider">Duration</span>
+                                        <span className="text-sm font-bold text-slate-700">{unlockedDetails.totalDays} Days</span>
+                                    </div>
+                                    <p className="text-[11px] text-sky-700 bg-sky-50 p-2.5 rounded-xl border border-sky-200 mt-3 font-medium">
+                                        ✨ Store tab mein jakar roz subah apne 💎 Diamonds claim karein!
+                                    </p>
+                                </div>
+                            ) : unlockedDetails.isSubscription ? (
                                 <>
                                     <div className="flex justify-between items-center mb-2">
                                         <span className="text-xs font-bold text-purple-600 uppercase tracking-wider">Plan</span>
@@ -483,7 +536,7 @@ export const RedeemSection: React.FC<Props> = ({ user, onSuccess }) => {
                             )}
                         </div>
 
-                        {!unlockedDetails.isSubscription && (
+                        {!unlockedDetails.isSubscription && !unlockedDetails.isDiamond && !unlockedDetails.isDiamondPass && (
                             <div className="space-y-3">
                                 <h4 className="text-xs font-black text-slate-600 uppercase tracking-widest flex items-center gap-2">
                                     <Map size={14} className="text-slate-500" /> How to Access

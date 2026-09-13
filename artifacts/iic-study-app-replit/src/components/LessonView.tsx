@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import { LessonContent, Subject, ClassLevel, Chapter, MCQItem, ContentType, User, SystemSettings } from '../types';
-import { ArrowLeft, Clock, AlertTriangle, ExternalLink, CheckCircle, XCircle, Trophy, BookOpen, Play, Lock, ChevronRight, ChevronLeft, Save, X, Maximize, Minimize2, Volume2, Square, Zap, StopCircle, Globe, Lightbulb, FileText, BrainCircuit, Grip, CheckSquare, List, Download, BarChart3, RotateCcw, Monitor, CloudOff, MoreVertical, EyeOff, Eye, LayoutGrid, Pencil, Send, Plus, Tv } from 'lucide-react';
+import { ArrowLeft, Clock, AlertTriangle, ExternalLink, CheckCircle, XCircle, Trophy, BookOpen, Play, Lock, ChevronRight, ChevronLeft, Save, X, Maximize, Minimize2, Volume2, Square, Zap, StopCircle, Globe, Lightbulb, FileText, BrainCircuit, Grip, CheckSquare, List, Download, BarChart3, RotateCcw, Monitor, CloudOff, MoreVertical, EyeOff, Eye, LayoutGrid, Pencil, Send, Plus, Tv, SkipForward } from 'lucide-react';
 import { CustomConfirm, CustomAlert } from './CustomDialogs';
 import { CreditConfirmationModal } from './CreditConfirmationModal';
 import { CustomPlayer } from './CustomPlayer';
@@ -293,7 +293,6 @@ export const LessonView: React.FC<Props> = ({
     if (pendingSessionCreditsRef.current > 0) {
       onSessionCreditsEarned?.(pendingSessionCreditsRef.current);
       pendingSessionCreditsRef.current = 0;
-      setPendingCreditDisplay(0);
     }
     // ── Routine Firebase: mark credits given after first session ──────────────
     // If this was a first-time session and the user actually earned credits/pts,
@@ -911,7 +910,7 @@ export const LessonView: React.FC<Props> = ({
           >
             {isImmersive ? '↩ Exit Focus' : '🎯 Focus Mode'}
           </button>
-          {isAdmin && displayData && displayData.length > 0 && (
+          {isAdmin && (localMcqData.length > 0 || (content?.mcqData && content.mcqData.length > 0)) && (
             <button
               onClick={() => { setProjectorQIndex(0); setProjectorReveal(false); setProjectorSelections({}); setProjectorSkipped(new Set()); setProjectorNavigatorOpen(false); setProjectorShowReview(false); setIsProjectorMode(true); setFabOpen(false); }}
               style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#d97706', color: '#fff', border: 'none', borderRadius: '24px', padding: '8px 14px', fontSize: '12px', fontWeight: 900, boxShadow: '0 4px 16px rgba(0,0,0,0.25)', cursor: 'pointer', whiteSpace: 'nowrap' }}
@@ -1209,7 +1208,7 @@ export const LessonView: React.FC<Props> = ({
                           preferChunkMode
                           hideTopBar={isImmersive}
                           hideFix={schoolMode}
-                          hideDesktopToggle={schoolMode}
+                          hideDesktopToggle={true}
                           suppressStickyControls={schoolMode}
                           triggerControlsRef={schoolControlsRef}
                           onMoreOptions={schoolMode && onSchoolModeSwitch ? onSchoolModeSwitch : undefined}
@@ -1404,11 +1403,6 @@ export const LessonView: React.FC<Props> = ({
                                               className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 font-semibold transition-colors">
                                               <RotateCcw size={15} className="text-slate-400 shrink-0" /> Screen Rotate
                                           </button>
-                                          <button onClick={() => { toggleDesktopMode(); setShowMoreMenu(false); }}
-                                              className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold transition-colors hover:bg-slate-50 ${isDesktopMode ? 'text-indigo-600' : 'text-slate-700'}`}>
-                                              <Monitor size={15} className={`shrink-0 ${isDesktopMode ? 'text-indigo-500' : 'text-slate-400'}`} />
-                                              Desktop Mode{isDesktopMode ? ' (ON)' : ''}
-                                          </button>
                                           <button onClick={() => { toggleFullScreen(); setShowMoreMenu(false); }}
                                               className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 font-semibold transition-colors">
                                               <Maximize size={15} className="text-slate-400 shrink-0" /> Fullscreen
@@ -1466,18 +1460,7 @@ export const LessonView: React.FC<Props> = ({
                                       <Globe size={14} /> {language === 'English' ? 'हिंदी में बदलें' : 'Switch to English'}
                                   </button>
                               </div>}
-                              {/* Desktop Mode */}
-                              {!schoolMode && <div className="mt-1">
-                                  <div className="flex gap-2">
-                                      <button
-                                          onClick={toggleDesktopMode}
-                                          className={`flex-1 flex items-center justify-center gap-1 py-2 rounded-xl text-xs font-bold border transition-all ${isDesktopMode ? 'bg-indigo-100 text-indigo-600 border-indigo-200' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}
-                                          title={isDesktopMode ? 'Desktop Mode ON' : 'Desktop Mode'}
-                                      >
-                                          <Monitor size={14} /> {isDesktopMode ? 'Desktop' : 'Desktop'}
-                                      </button>
-                                  </div>
-                              </div>}
+                              
                           </div>
                           {/* Right panel: notes content */}
                           <div className="flex-1 overflow-y-auto px-4 py-3 min-w-0">
@@ -1723,11 +1706,6 @@ export const LessonView: React.FC<Props> = ({
                                           className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 font-semibold transition-colors">
                                           <RotateCcw size={15} className="text-slate-400 shrink-0" /> Screen Rotate
                                       </button>
-                                      <button onClick={() => { toggleDesktopMode(); setShowMoreMenu(false); }}
-                                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold transition-colors hover:bg-slate-50 ${isDesktopMode ? 'text-indigo-600' : 'text-slate-700'}`}>
-                                          <Monitor size={15} className={`shrink-0 ${isDesktopMode ? 'text-indigo-500' : 'text-slate-400'}`} />
-                                          Desktop Mode{isDesktopMode ? ' (ON)' : ''}
-                                      </button>
                                       <button onClick={() => { toggleFullScreen(); setShowMoreMenu(false); }}
                                           className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 font-semibold transition-colors">
                                           <Maximize size={15} className="text-slate-400 shrink-0" /> Fullscreen
@@ -1756,7 +1734,7 @@ export const LessonView: React.FC<Props> = ({
                           preferChunkMode
                           hideTopBar={schoolMode ? isImmersive : true}
                           hideFix={schoolMode}
-                          hideDesktopToggle={schoolMode}
+                          hideDesktopToggle={true}
                           suppressStickyControls={schoolMode}
                           triggerControlsRef={schoolMode ? schoolControlsRef : writeControlsRef}
                           onMoreOptions={schoolMode && onSchoolModeSwitch ? onSchoolModeSwitch : undefined}
@@ -2830,13 +2808,7 @@ export const LessonView: React.FC<Props> = ({
                                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 font-semibold transition-colors">
                                    <RotateCcw size={15} className="text-slate-400 shrink-0" /> Screen Rotate
                                </button>
-                               {!schoolMode && (
-                                   <button onClick={() => { toggleDesktopMode(); setShowMoreMenu(false); }}
-                                       className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold transition-colors hover:bg-slate-50 ${isDesktopMode ? 'text-indigo-600' : 'text-slate-700'}`}>
-                                       <Monitor size={15} className={`shrink-0 ${isDesktopMode ? 'text-indigo-500' : 'text-slate-400'}`} />
-                                       Desktop Mode{isDesktopMode ? ' (ON)' : ''}
-                                   </button>
-                               )}
+                               
                                <button onClick={() => { toggleFullScreen(); setShowMoreMenu(false); }}
                                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 font-semibold transition-colors">
                                    <Maximize size={15} className="text-slate-400 shrink-0" /> Fullscreen

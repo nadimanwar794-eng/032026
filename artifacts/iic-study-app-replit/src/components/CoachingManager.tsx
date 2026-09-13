@@ -836,7 +836,7 @@ const TestsTab: React.FC<{
     const test = tests.find(t => t.id === testId)!;
     const bStudents = batchStudents(test.batchId);
     const results: CoachingTestResult[] = bStudents.map(s => {
-      const val = (marksDraft[s.id] || '').trim().toUpperCase();
+      const val = (marksDraft[s.id] || '').trim()?.toUpperCase();
       if (val === 'A' || val === 'AB' || val === 'ABSENT') return { studentId: s.id, marks: null, absent: true };
       const marks = val === '' ? null : Number(val);
       return { studentId: s.id, marks: isNaN(marks as any) ? null : marks };
@@ -923,7 +923,7 @@ const TestsTab: React.FC<{
               <tbody>
                 {batchStudents(activeTest.batchId).map((s, i) => {
                   const raw = marksDraft[s.id] || '';
-                  const isAbsent = raw.trim().toUpperCase() === 'A' || raw.trim().toUpperCase() === 'AB' || raw.trim().toUpperCase() === 'ABSENT';
+                  const isAbsent = raw.trim()?.toUpperCase() === 'A' || raw.trim()?.toUpperCase() === 'AB' || raw.trim()?.toUpperCase() === 'ABSENT';
                   const marks = raw.trim() === '' ? null : (isAbsent ? null : Number(raw));
                   const g = isAbsent ? 'AB' : grade(marks, activeTest.maxMarks);
                   const pct = (!isAbsent && marks !== null) ? ((marks / activeTest.maxMarks) * 100).toFixed(1) : '—';

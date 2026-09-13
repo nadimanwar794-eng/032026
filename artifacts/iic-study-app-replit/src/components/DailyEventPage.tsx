@@ -8,6 +8,7 @@ import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import {
   ArrowLeft, BookOpen, BrainCircuit, CalendarCheck,
   Clock, Target, ChevronRight, Zap, CheckCircle, Lock, Rocket,
+  Search, Filter, X, ChevronDown, ChevronUp, Layers, ListFilter, Sparkles, Check
 } from 'lucide-react';
 import { loadRoutineData, getUserSubTier, getDailyClaimAmount } from '../utils/routineStorage';
 import { getLevelInfo } from '../utils/levelSystem';
@@ -23,6 +24,122 @@ import { tryEarnScore, getDailyScoreEarned } from '../utils/scoreSystem';
 import type { User, SystemSettings, Challenge20 } from '../types';
 import type { MistakeEntry } from '../utils/mistakeBank';
 import { getChallengeDateKey, isDailyChallenge20 } from '../utils/challengeGenerator';
+
+// ── 3-Tier Hierarchy Data Models for Revision ──────────────────────────────────
+export interface ChapterGroup {
+  chapterId: string;
+  chapterTitle: string;
+  subjectId: string;
+  subjectName: string;
+  buckets: WeakBucket[];
+  dueNotes: WeakBucket[];
+  dueMcq: WeakBucket[];
+  totalTopicsCount: number;
+  completedTopicsCount: number;
+}
+
+export interface SubjectGroup {
+  subjectId: string;
+  subjectName: string;
+  icon: string;
+  chapters: ChapterGroup[];
+  totalDue: number;
+  notesCount: number;
+  mcqCount: number;
+  dueNotes: WeakBucket[];
+  dueMcq: WeakBucket[];
+  weakCount: number;
+  avgCount: number;
+  routineCount: number;
+}
+
+function getSubjectIcon(name: string): string {
+  const s = (name || '').toLowerCase();
+  if (s.includes('physic') || s.includes('bhautik')) return '⚛️';
+  if (s.includes('chem') || s.includes('rasayan')) return '🧪';
+  if (s.includes('bio') || s.includes('jeev')) return '🧬';
+  if (s.includes('math') || s.includes('ganit')) return '📐';
+  if (s.includes('hist') || s.includes('itihaas')) return '📜';
+  if (s.includes('geo') || s.includes('bhugol')) return '🌍';
+  if (s.includes('pol') || s.includes('civic') || s.includes('rajniti') || s.includes('samvidhan')) return '⚖️';
+  if (s.includes('eco') || s.includes('arthashastra')) return '📊';
+  if (s.includes('eng')) return '📚';
+  if (s.includes('hind')) return '📖';
+  return '📘';
+}
+
+function groupBySubjectChapter(items: WeakBucket[], allTracked: WeakBucket[] = []): SubjectGroup[] {
+  const map: Record<string, SubjectGroup> = {};
+
+  const chapterTotalMap: Record<string, { total: number; done: number }> = {};
+  for (const b of allTracked) {
+    const k = `${b.subjectId}::${b.chapterId}`;
+    if (!chapterTotalMap[k]) chapterTotalMap[k] = { total: 0, done: 0 };
+    chapterTotalMap[k].total += 1;
+    if (b.lastTier === 'mastered' || b.lastTier === 'strong') {
+      chapterTotalMap[k].done += 1;
+    }
+  }
+
+  for (const b of items) {
+    const sid = b.subjectId || 'general';
+    const sname = b.subjectName || sid;
+    if (!map[sid]) {
+      map[sid] = {
+        subjectId: sid,
+        subjectName: sname,
+        icon: getSubjectIcon(sname),
+        chapters: [],
+        totalDue: 0,
+        notesCount: 0,
+        mcqCount: 0,
+        dueNotes: [],
+        dueMcq: [],
+        weakCount: 0,
+        avgCount: 0,
+        routineCount: 0,
+      };
+    }
+    const sg = map[sid];
+    sg.totalDue += 1;
+    const isNotes = !b.stage || b.stage === 'NOTES';
+    if (isNotes) {
+      sg.notesCount += 1;
+      sg.dueNotes.push(b);
+    } else {
+      sg.mcqCount += 1;
+      sg.dueMcq.push(b);
+    }
+
+    const hasWrong = (b.wrongQuestions && b.wrongQuestions.length > 0);
+    const isWeak = hasWrong || b.stage === 'RETRY' || (b.score !== undefined && b.score < 50);
+    const isAvg = !isWeak && ((b.score !== undefined && b.score < 80) || b.stage === 'STAGE_2');
+    if (isWeak) sg.weakCount += 1;
+    else if (isAvg) sg.avgCount += 1;
+    else sg.routineCount += 1;
+
+    let cg = sg.chapters.find(c => c.chapterId === b.chapterId);
+    if (!cg) {
+      const stats = chapterTotalMap[`${b.subjectId}::${b.chapterId}`] || { total: 0, done: 0 };
+      cg = {
+        chapterId: b.chapterId,
+        chapterTitle: b.chapterTitle || b.chapterId,
+        subjectId: sid,
+        subjectName: sname,
+        buckets: [],
+        dueNotes: [],
+        dueMcq: [],
+        totalTopicsCount: stats.total,
+        completedTopicsCount: stats.done,
+      };
+      sg.chapters.push(cg);
+    }
+    cg.buckets.push(b);
+    if (isNotes) cg.dueNotes.push(b); else cg.dueMcq.push(b);
+  }
+
+  return Object.values(map);
+}
 
 interface Props {
   user: User;
@@ -123,6 +240,14 @@ export const DailyEventPage: React.FC<Props> = ({
   const [challengeTick, setChallengeTick] = useState(0);
   const [claimingChallengeId, setClaimingChallengeId] = useState<string | null>(null);
 
+  // 3-Tier Hierarchy & Subject-Wise state for Revision Hub
+  const [selectedRevisionSubjectId, setSelectedRevisionSubjectId] = useState<string>('ALL');
+  const [revisionSearchQuery, setRevisionSearchQuery] = useState('');
+  const [revisionViewMode, setRevisionViewMode] = useState<'SUBJECT' | 'HIERARCHY' | 'FOCUS' | 'LIST'>('SUBJECT');
+  const [expandedRevisionSubs, setExpandedRevisionSubs] = useState<Record<string, boolean>>({});
+  const [expandedRevisionChapters, setExpandedRevisionChapters] = useState<Record<string, boolean>>({});
+  const [selectedModalNotes, setSelectedModalNotes] = useState<WeakBucket[] | null>(null);
+
   const reloadRevision = useCallback(() => setRefreshTick(t => t + 1), []);
 
   useEffect(() => {
@@ -204,31 +329,65 @@ export const DailyEventPage: React.FC<Props> = ({
   });
   const [claimSuccess, setClaimSuccess] = useState(false);
 
-  // ── Task Completion Reward (100 pts per completed task, claim once per day) ──
-  const TASK_PTS = 100;
+  // ── Task Completion Reward (25 pts per lesson: Notes me bhi aur MCQ me bhi) ──
+  const LESSON_NOTES_PTS = 25;
+  const LESSON_MCQ_PTS = 25;
+  const TASK_PTS = 50; // Total 50 pts per lesson (25 Notes + 25 MCQ)
   const TASK_CLAIMED_KEY = `iic_task_pts_claimed_${user.id}_${todayStr}`;
+  const TASK_NOTES_CLAIMED_KEY = `iic_task_notes_pts_claimed_${user.id}_${todayStr}`;
+  const TASK_MCQ_CLAIMED_KEY = `iic_task_mcq_pts_claimed_${user.id}_${todayStr}`;
 
-  const [claimedTasks, setClaimedTasks] = useState<Set<string>>(() => {
+  const [claimedNotesTasks, setClaimedNotesTasks] = useState<Set<string>>(() => {
     try {
-      const arr = JSON.parse(localStorage.getItem(TASK_CLAIMED_KEY) || '[]') as string[];
-      return new Set(arr);
+      const arr = JSON.parse(localStorage.getItem(TASK_NOTES_CLAIMED_KEY) || '[]') as string[];
+      const legacy = JSON.parse(localStorage.getItem(TASK_CLAIMED_KEY) || '[]') as string[];
+      return new Set([...arr, ...legacy]);
     } catch { return new Set(); }
   });
-  const [lastClaimedTask, setLastClaimedTask] = useState<string | null>(null);
 
-  const handleClaimTaskPts = useCallback((lessonId: string) => {
+  const [claimedMcqTasks, setClaimedMcqTasks] = useState<Set<string>>(() => {
+    try {
+      const arr = JSON.parse(localStorage.getItem(TASK_MCQ_CLAIMED_KEY) || '[]') as string[];
+      const legacy = JSON.parse(localStorage.getItem(TASK_CLAIMED_KEY) || '[]') as string[];
+      return new Set([...arr, ...legacy]);
+    } catch { return new Set(); }
+  });
+
+  const [lastClaimedNotesTask, setLastClaimedNotesTask] = useState<string | null>(null);
+  const [lastClaimedMcqTask, setLastClaimedMcqTask] = useState<string | null>(null);
+
+  const handleClaimNotesPts = useCallback((lessonId: string, lessonTitle?: string) => {
     try {
       const tier = user.subscriptionLevel || user.subscriptionTier || 'FREE';
       const isPrem = !!(user.isPremium || (user.subscriptionTier && user.subscriptionTier !== 'FREE'));
-      const earned = tryEarnScore(user.id, TASK_PTS, tier, isPrem, 0, 'DAILY_TASK_COMPLETE', undefined, undefined, `Daily Task Complete`);
-      const next = new Set(claimedTasks).add(lessonId);
-      localStorage.setItem(TASK_CLAIMED_KEY, JSON.stringify([...next]));
-      setClaimedTasks(next);
-      setLastClaimedTask(lessonId);
-      setTimeout(() => setLastClaimedTask(null), 2500);
+      const earned = tryEarnScore(user.id, LESSON_NOTES_PTS, tier, isPrem, 0, 'DAILY_TASK_NOTES_COMPLETE', undefined, undefined, `Notes Read: ${lessonTitle || lessonId}`);
+      const next = new Set(claimedNotesTasks).add(lessonId);
+      localStorage.setItem(TASK_NOTES_CLAIMED_KEY, JSON.stringify([...next]));
+      setClaimedNotesTasks(next);
+      setLastClaimedNotesTask(lessonId);
+      setTimeout(() => setLastClaimedNotesTask(null), 2500);
       showClaimOverlay(earned);
-    } catch (e) { console.error('Task pts claim failed', e); }
-  }, [user.id, user.subscriptionLevel, user.subscriptionTier, user.isPremium, claimedTasks, TASK_CLAIMED_KEY, showClaimOverlay]);
+    } catch (e) { console.error('Notes pts claim failed', e); }
+  }, [user.id, user.subscriptionLevel, user.subscriptionTier, user.isPremium, claimedNotesTasks, TASK_NOTES_CLAIMED_KEY, showClaimOverlay]);
+
+  const handleClaimMcqPts = useCallback((lessonId: string, lessonTitle?: string) => {
+    try {
+      const tier = user.subscriptionLevel || user.subscriptionTier || 'FREE';
+      const isPrem = !!(user.isPremium || (user.subscriptionTier && user.subscriptionTier !== 'FREE'));
+      const earned = tryEarnScore(user.id, LESSON_MCQ_PTS, tier, isPrem, 0, 'DAILY_TASK_MCQ_COMPLETE', undefined, undefined, `MCQ Complete: ${lessonTitle || lessonId}`);
+      const next = new Set(claimedMcqTasks).add(lessonId);
+      localStorage.setItem(TASK_MCQ_CLAIMED_KEY, JSON.stringify([...next]));
+      setClaimedMcqTasks(next);
+      setLastClaimedMcqTask(lessonId);
+      setTimeout(() => setLastClaimedMcqTask(null), 2500);
+      showClaimOverlay(earned);
+    } catch (e) { console.error('MCQ pts claim failed', e); }
+  }, [user.id, user.subscriptionLevel, user.subscriptionTier, user.isPremium, claimedMcqTasks, TASK_MCQ_CLAIMED_KEY, showClaimOverlay]);
+
+  const handleClaimTaskPts = useCallback((lessonId: string, lessonTitle?: string) => {
+    if (!claimedNotesTasks.has(lessonId)) handleClaimNotesPts(lessonId, lessonTitle);
+    if (!claimedMcqTasks.has(lessonId)) handleClaimMcqPts(lessonId, lessonTitle);
+  }, [claimedNotesTasks, claimedMcqTasks, handleClaimNotesPts, handleClaimMcqPts]);
 
   // ── Routine ───────────────────────────────────────────────────────────────
   const routineData = useMemo(() => {
@@ -361,6 +520,118 @@ export const DailyEventPage: React.FC<Props> = ({
   const dueNotes = dueItems.filter((b: any) => !b.stage || b.stage === 'NOTES');
   const dueMcq   = dueItems.filter((b: any) => b.stage === 'MCQ');
 
+  const allTrackedBuckets = useMemo(() => {
+    try { return getAllBuckets(); } catch { return []; }
+  }, [refreshTick]);
+
+  const subjectGroups = useMemo(() => {
+    return groupBySubjectChapter(dueItems, allTrackedBuckets);
+  }, [dueItems, allTrackedBuckets]);
+
+  const filteredSubjectGroups = useMemo(() => {
+    let list = subjectGroups;
+    if (selectedRevisionSubjectId !== 'ALL') {
+      list = list.filter(sg => sg.subjectId === selectedRevisionSubjectId);
+    }
+    const q = revisionSearchQuery.trim().toLowerCase();
+    if (!q) return list;
+
+    return list.map(sg => {
+      const filteredChapters = sg.chapters.map(cg => {
+        const chapterMatches = (cg.chapterTitle || '').toLowerCase().includes(q) || (cg.subjectName || '').toLowerCase().includes(q);
+        const filteredBuckets = cg.buckets.filter(b => 
+          (b.topic || '').toLowerCase().includes(q) || 
+          (b.chapterTitle || '').toLowerCase().includes(q) || 
+          (b.subjectName || '').toLowerCase().includes(q)
+        );
+        if (chapterMatches) return cg;
+        if (filteredBuckets.length > 0) {
+          return {
+            ...cg,
+            buckets: filteredBuckets,
+            dueNotes: filteredBuckets.filter(b => !b.stage || b.stage === 'NOTES'),
+            dueMcq: filteredBuckets.filter(b => b.stage === 'MCQ'),
+          };
+        }
+        return null;
+      }).filter(Boolean) as ChapterGroup[];
+
+      if (filteredChapters.length === 0) return null;
+      return {
+        ...sg,
+        chapters: filteredChapters,
+        totalDue: filteredChapters.reduce((acc, c) => acc + c.buckets.length, 0),
+        notesCount: filteredChapters.reduce((acc, c) => acc + c.dueNotes.length, 0),
+        mcqCount: filteredChapters.reduce((acc, c) => acc + c.dueMcq.length, 0),
+      };
+    }).filter(Boolean) as SubjectGroup[];
+  }, [subjectGroups, selectedRevisionSubjectId, revisionSearchQuery]);
+
+  const focus15Items = useMemo(() => {
+    return [...dueItems]
+      .sort((a, b) => {
+        const wA = a.wrongQuestions?.length || 0;
+        const wB = b.wrongQuestions?.length || 0;
+        if (wA !== wB) return wB - wA;
+        return (a.cycleCount || 0) - (b.cycleCount || 0);
+      })
+      .slice(0, 15);
+  }, [dueItems]);
+
+  const handleStartPractice = useCallback((topicsToPractice?: WeakBucket[]) => {
+    const list = topicsToPractice || dueMcq;
+    if (!list || list.length === 0) {
+      toast.info("Koi MCQ practice questions baki nahi hain!");
+      return;
+    }
+    const topics: TopicItem[] = list.map(b => ({
+      id: `${b.chapterId}_${b.topic}`,
+      chapterId: b.chapterId,
+      chapterName: b.chapterTitle || b.chapterId,
+      name: b.topic,
+      score: 0,
+      lastAttempt: '',
+      status: 'WEAK' as any,
+      nextRevision: null,
+      mcqDueDate: null,
+      subjectId: b.subjectId,
+      subjectName: b.subjectName,
+      isSubTopic: true,
+    }));
+    setRevMcqTopics(topics);
+    setRevMcqSessionActive(true);
+  }, [dueMcq]);
+
+  const handleOpenNotes = useCallback((notesList?: WeakBucket[]) => {
+    setSelectedModalNotes(notesList || dueNotes);
+    setShowAllNotesModal(true);
+  }, [dueNotes]);
+
+  const handlePracticeSlotMcq = useCallback((slot: any) => {
+    const lesson = lucentNotes.find((n: any) => n.id === slot.lessonId);
+    const pages = lesson?.pages || [];
+    if (pages.length > 0) {
+      const topics: TopicItem[] = pages.map((p: any, idx: number) => ({
+        id: `${slot.lessonId}_p${idx}`,
+        chapterId: slot.lessonId,
+        chapterName: slot.lessonTitle || slot.lessonId,
+        name: p.topic || `Topic ${idx + 1}`,
+        score: 0,
+        lastAttempt: '',
+        status: 'WEAK' as any,
+        nextRevision: null,
+        mcqDueDate: null,
+        subjectId: slot.subject,
+        subjectName: slot.subject,
+        isSubTopic: true,
+      }));
+      setRevMcqTopics(topics);
+      setRevMcqSessionActive(true);
+    } else {
+      onOpenLesson?.(slot.lessonId);
+    }
+  }, [lucentNotes, onOpenLesson]);
+
   // Detect how many Notes/MCQ were completed today using updatedAt timestamp
   const { notesReviewedToday, mcqDoneToday } = useMemo(() => {
     try {
@@ -489,35 +760,44 @@ export const DailyEventPage: React.FC<Props> = ({
     } catch (e) { console.error('Milestone claim failed', e); }
   }, [user.id, user.subscriptionLevel, user.subscriptionTier, user.isPremium, claimedMilestones, unclaimedMilestones, MILESTONE_KEY, showClaimOverlay]);
 
-  // ── Revision Hub 100 pts Claim ────────────────────────────────────────────
-  const REV_NOTES_CLAIMED_KEY = `iic_rev_notes_pts_claimed_${user.id}_${todayStr}`;
-  const REV_MCQ_CLAIMED_KEY   = `iic_rev_mcq_pts_claimed_${user.id}_${todayStr}`;
-  const REV_PTS = 100;
+  // ── Revision Hub 25 pts Claim per lesson ──────────────────────────────────
+  const REV_NOTES_CLAIMED_KEY = `iic_rev_notes_pts_claimed_cnt_${user.id}_${todayStr}`;
+  const REV_MCQ_CLAIMED_KEY   = `iic_rev_mcq_pts_claimed_cnt_${user.id}_${todayStr}`;
+  const REV_PTS = 25; // 25 pts har lesson ke liye (Notes me bhi aur MCQ me bhi)
 
-  const [revNotesClaimed, setRevNotesClaimed] = useState<boolean>(() => {
-    try { return localStorage.getItem(REV_NOTES_CLAIMED_KEY) === '1'; } catch { return false; }
+  const [claimedRevNotesCount, setClaimedRevNotesCount] = useState<number>(() => {
+    try { return parseInt(localStorage.getItem(REV_NOTES_CLAIMED_KEY) || '0', 10) || 0; } catch { return 0; }
   });
-  const [revMcqClaimed, setRevMcqClaimed] = useState<boolean>(() => {
-    try { return localStorage.getItem(REV_MCQ_CLAIMED_KEY) === '1'; } catch { return false; }
+  const [claimedRevMcqCount, setClaimedRevMcqCount] = useState<number>(() => {
+    try { return parseInt(localStorage.getItem(REV_MCQ_CLAIMED_KEY) || '0', 10) || 0; } catch { return 0; }
   });
+
+  const unclaimedRevNotes = Math.max(0, notesReviewedToday - claimedRevNotesCount);
+  const unclaimedRevMcq = Math.max(0, mcqDoneToday - claimedRevMcqCount);
 
   const handleClaimRevisionPts = useCallback((type: 'notes' | 'mcq') => {
     try {
       const tier = user.subscriptionLevel || user.subscriptionTier || 'FREE';
       const isPrem = !!(user.isPremium || (user.subscriptionTier && user.subscriptionTier !== 'FREE'));
-      const label = type === 'notes' ? 'Revision Hub Notes Complete' : 'Revision Hub MCQ Complete';
+      const countToClaim = type === 'notes' ? Math.max(1, unclaimedRevNotes) : Math.max(1, unclaimedRevMcq);
+      const ptsToEarn = countToClaim * REV_PTS;
+      const label = type === 'notes'
+        ? `Revision Hub Notes (${countToClaim} lesson${countToClaim > 1 ? 's' : ''} complete)`
+        : `Revision Hub MCQ (${countToClaim} lesson${countToClaim > 1 ? 's' : ''} complete)`;
       const activity = type === 'notes' ? 'REVISION_NOTES_COMPLETE' : 'REVISION_MCQ_COMPLETE';
-      const earned = tryEarnScore(user.id, REV_PTS, tier, isPrem, 0, activity, undefined, undefined, label);
+      const earned = tryEarnScore(user.id, ptsToEarn, tier, isPrem, 0, activity, undefined, undefined, label);
       if (type === 'notes') {
-        localStorage.setItem(REV_NOTES_CLAIMED_KEY, '1');
-        setRevNotesClaimed(true);
+        const nextCnt = Math.max(notesReviewedToday, claimedRevNotesCount + countToClaim);
+        localStorage.setItem(REV_NOTES_CLAIMED_KEY, String(nextCnt));
+        setClaimedRevNotesCount(nextCnt);
       } else {
-        localStorage.setItem(REV_MCQ_CLAIMED_KEY, '1');
-        setRevMcqClaimed(true);
+        const nextCnt = Math.max(mcqDoneToday, claimedRevMcqCount + countToClaim);
+        localStorage.setItem(REV_MCQ_CLAIMED_KEY, String(nextCnt));
+        setClaimedRevMcqCount(nextCnt);
       }
       showClaimOverlay(earned);
     } catch (e) { console.error('Revision pts claim failed', e); }
-  }, [user.id, user.subscriptionLevel, user.subscriptionTier, user.isPremium, REV_NOTES_CLAIMED_KEY, REV_MCQ_CLAIMED_KEY, showClaimOverlay]);
+  }, [user.id, user.subscriptionLevel, user.subscriptionTier, user.isPremium, unclaimedRevNotes, unclaimedRevMcq, notesReviewedToday, mcqDoneToday, claimedRevNotesCount, claimedRevMcqCount, REV_NOTES_CLAIMED_KEY, REV_MCQ_CLAIMED_KEY, showClaimOverlay]);
 
   // ── Lesson Tracker ────────────────────────────────────────────────────────
   // Primary source: routineAutoTrack timings (what actually tracks reading time)
@@ -705,19 +985,31 @@ export const DailyEventPage: React.FC<Props> = ({
                     </div>
                   </div>
 
-                  {/* Start Studying Button */}
-                  {!slot.done && (
+                  {/* Start Studying / Practice Buttons (Notes & MCQ) */}
+                  <div className="grid grid-cols-2 gap-2 mb-3">
                     <button
                       onClick={() => onOpenLesson?.(slot.lessonId)}
-                      className="w-full mb-3 py-2 rounded-xl bg-[#20313f] text-white flex items-center justify-between px-4 transition-all active:scale-95"
+                      className={`py-2 px-3 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 active:scale-95 transition shadow-sm ${
+                        slot.readingDone
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          : 'bg-[#20313f] hover:bg-[#1a2834] text-white'
+                      }`}
                     >
-                      <div className="flex items-center gap-2">
-                        <BookOpen size={14} className="text-white" />
-                        <span className="text-[12px] font-black tracking-wide">पढ़ना शुरू करें</span>
-                      </div>
-                      <ChevronRight size={14} className="text-white" />
+                      <BookOpen size={13} />
+                      <span>{slot.readingDone ? '✓ Notes Done' : '📖 Notes Padhein'}</span>
                     </button>
-                  )}
+                    <button
+                      onClick={() => handlePracticeSlotMcq(slot)}
+                      className={`py-2 px-3 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 active:scale-95 transition shadow-sm ${
+                        slot.mcqDone
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          : 'bg-violet-600 hover:bg-violet-700 text-white'
+                      }`}
+                    >
+                      <Target size={13} />
+                      <span>{slot.mcqDone ? '✓ MCQ Done' : '🧠 Practice MCQ'}</span>
+                    </button>
+                  </div>
 
                   {/* Reading progress */}
                   <div className="mb-1.5">
@@ -768,32 +1060,80 @@ export const DailyEventPage: React.FC<Props> = ({
                     </div>
                   </div>
 
-                  {/* ── 100 pts + coin Claim button ── */}
-                  {slot.done && (
-                    <div className="mt-2">
-                      {claimedTasks.has(slot.lessonId) ? (
-                        <div className="flex items-center justify-center gap-1.5 py-1.5 rounded-xl bg-emerald-100 border border-emerald-300">
-                          <span className="text-[11px] font-black text-emerald-700">✅ +{TASK_PTS} pts{coinPerTask > 0 ? ` + ${coinPerTask} 🪙` : ''} Claim Ho Gaye!</span>
+                  {/* ── Per-Lesson Rewards (25 pts Notes + 25 pts MCQ) ── */}
+                  <div className="mt-2.5 pt-2 border-t border-slate-200/70 space-y-1.5">
+                    {/* Notes Claim Button / Status */}
+                    {slot.readingDone ? (
+                      claimedNotesTasks.has(slot.lessonId) ? (
+                        <div className="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200">
+                          <span className="text-[10px] font-black text-emerald-700 flex items-center gap-1">📖 Notes Completed</span>
+                          <span className="text-[10px] font-black text-emerald-700">✅ +{LESSON_NOTES_PTS} pts Claimed</span>
                         </div>
-                      ) : lastClaimedTask === slot.lessonId ? (
+                      ) : lastClaimedNotesTask === slot.lessonId ? (
                         <div className="flex items-center justify-center gap-1.5 py-1.5 rounded-xl bg-emerald-100 border border-emerald-300">
-                          <span className="text-[11px] font-black text-emerald-700">✅ +{TASK_PTS} pts{coinPerTask > 0 ? ` + ${coinPerTask} 🪙` : ''} Mil Gaye!</span>
+                          <span className="text-[11px] font-black text-emerald-700">✅ +{LESSON_NOTES_PTS} pts Notes Mil Gaye!</span>
                         </div>
                       ) : (
                         <button
-                          onClick={() => handleClaimTaskPts(slot.lessonId)}
-                          className="w-full py-2 rounded-xl font-black text-[12px] flex items-center justify-center gap-2 transition-all active:scale-95 bg-gradient-to-r from-amber-400 to-orange-500 text-white shadow-sm shadow-orange-200"
+                          onClick={() => handleClaimNotesPts(slot.lessonId, slot.lessonTitle)}
+                          className="w-full py-2 rounded-xl font-black text-[11px] flex items-center justify-center gap-2 transition-all active:scale-95 bg-gradient-to-r from-amber-400 to-orange-500 text-white shadow-xs"
                         >
-                          🎁 Claim +{TASK_PTS} ⭐pts
+                          🎁 Claim +{LESSON_NOTES_PTS} ⭐pts (Notes Done)
                           {coinPerTask > 0 && (
-                            <span className="text-[10px] bg-white/30 px-2 py-0.5 rounded-full font-black">
-                              +{coinPerTask} 🪙
+                            <span className="text-[9px] bg-white/30 px-1.5 py-0.5 rounded-full font-black">
+                              +{Math.ceil(coinPerTask / 2)} 🪙
                             </span>
                           )}
                         </button>
-                      )}
-                    </div>
-                  )}
+                      )
+                    ) : null}
+
+                    {/* MCQ Claim Button / Status */}
+                    {slot.mcqDone ? (
+                      claimedMcqTasks.has(slot.lessonId) ? (
+                        <div className="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-violet-50 border border-violet-200">
+                          <span className="text-[10px] font-black text-violet-700 flex items-center gap-1">🧠 MCQ Completed</span>
+                          <span className="text-[10px] font-black text-violet-700">✅ +{LESSON_MCQ_PTS} pts Claimed</span>
+                        </div>
+                      ) : lastClaimedMcqTask === slot.lessonId ? (
+                        <div className="flex items-center justify-center gap-1.5 py-1.5 rounded-xl bg-emerald-100 border border-emerald-300">
+                          <span className="text-[11px] font-black text-emerald-700">✅ +{LESSON_MCQ_PTS} pts MCQ Mil Gaye!</span>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => handleClaimMcqPts(slot.lessonId, slot.lessonTitle)}
+                          className="w-full py-2 rounded-xl font-black text-[11px] flex items-center justify-center gap-2 transition-all active:scale-95 bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-xs"
+                        >
+                          🎁 Claim +{LESSON_MCQ_PTS} ⭐pts (MCQ Done)
+                          {coinPerTask > 0 && (
+                            <span className="text-[9px] bg-white/30 px-1.5 py-0.5 rounded-full font-black">
+                              +{Math.floor(coinPerTask / 2)} 🪙
+                            </span>
+                          )}
+                        </button>
+                      )
+                    ) : null}
+
+                    {/* If neither notes nor mcq is done yet, show encouraging badge */}
+                    {!slot.readingDone && !slot.mcqDone && (
+                      <div className="flex items-center justify-between px-2.5 py-1 rounded-xl bg-slate-100 text-[10px] text-slate-500 font-bold">
+                        <span>🎯 Har Lesson Reward:</span>
+                        <span className="text-slate-700 font-black">📖 +{LESSON_NOTES_PTS} pts Notes · 🧠 +{LESSON_MCQ_PTS} pts MCQ</span>
+                      </div>
+                    )}
+
+                    {/* Motivating hints when one part is done */}
+                    {slot.readingDone && !slot.mcqDone && (
+                      <p className="text-[9px] text-slate-400 font-bold text-center">
+                        🧠 MCQ practice karke +{LESSON_MCQ_PTS} pts aur paayein!
+                      </p>
+                    )}
+                    {!slot.readingDone && slot.mcqDone && (
+                      <p className="text-[9px] text-slate-400 font-bold text-center">
+                        📖 Notes reading karke +{LESSON_NOTES_PTS} pts aur paayein!
+                      </p>
+                    )}
+                  </div>
 
                   {/* ── Revision Hub button — locked until lesson is complete ── */}
                   {slot.done || isLessonRewarded(slot.lessonId) ? (
@@ -891,175 +1231,619 @@ export const DailyEventPage: React.FC<Props> = ({
             )}
 
 
-            {/* Notes due today */}
-            {dueNotes.length > 0 ? (
-              <div className="bg-white rounded-2xl border border-indigo-200 shadow-sm overflow-hidden mb-3">
-                <div className="flex items-center gap-2 px-3 py-2 bg-indigo-50 border-b border-indigo-100">
-                  <div className="w-6 h-6 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center"><BookOpen size={13} /></div>
-                  <p className="text-[12px] font-black text-indigo-800">Notes To Read Today</p>
-                  <span className="ml-auto text-[10px] font-bold bg-indigo-200 text-indigo-700 rounded-full px-2 py-0.5">{dueNotes.length}</span>
-                </div>
-                <div className="divide-y divide-slate-100 max-h-[200px] overflow-y-auto">
-                  {dueNotes.map((b: WeakBucket) => (
-                    <div key={`${b.subjectId}::${b.chapterId}::${b.pageKey}::${b.topic}`} className="flex items-center gap-3 px-3 py-2">
-                      <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0" />
-                      <p className="text-[11px] font-bold text-slate-700 flex-1 min-w-0 truncate">{b.topic}</p>
-                      {b.subjectName && (
-                        <span className="text-[9px] text-slate-400 shrink-0 truncate max-w-[70px]">{b.subjectName}</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                <button
-                  onClick={() => setShowAllNotesModal(true)}
-                  className="w-full py-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[11px] font-black flex items-center justify-center gap-1.5 transition-colors border-t border-indigo-100"
-                >
-                  <BookOpen size={13} /> Read Notes
-                </button>
-              </div>
-            ) : (
-              /* Original Notes Slot logic for when total == 0 or done */
-              (() => {
+            {/* ── Status & Claim Cards (Notes & MCQ) ────────────────────── */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+              {/* Notes Card */}
+              {(() => {
                 const total = dueNotes.length + notesReviewedToday;
-                const done  = notesReviewedToday;
-                const pct   = total > 0 ? Math.round((done / total) * 100) : 100;
+                const done = notesReviewedToday;
+                const pct = total > 0 ? Math.round((done / total) * 100) : 100;
                 const isDone = done === total && total > 0;
                 return (
-                  <div className={`rounded-xl px-3 py-2.5 border ${isDone ? 'bg-emerald-50 border-emerald-200' : 'bg-indigo-50 border-indigo-200'} mb-3`}>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm">{isDone ? '✅' : '📖'}</span>
-                        <div>
-                          <p className={`text-[11px] font-black ${isDone ? 'text-emerald-700' : 'text-indigo-800'}`}>
-                            Notes
-                          </p>
-                          <p className="text-[9px] text-slate-400">
-                            {total === 0 ? 'Aaj koi notes due nahi' : `${done}/${total} reviewed`}
-                          </p>
+                  <div className={`rounded-2xl p-3 border ${isDone ? 'bg-emerald-50/80 border-emerald-200' : 'bg-white border-indigo-200'} shadow-sm flex flex-col justify-between`}>
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs ${isDone ? 'bg-emerald-100 text-emerald-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                            {isDone ? '✅' : '📖'}
+                          </div>
+                          <div>
+                            <p className="text-[12px] font-black text-slate-800">Reading Revision</p>
+                            <p className="text-[9px] text-slate-500">
+                              {total === 0 ? 'Aaj koi notes due nahi' : `${dueNotes.length} baki · ${done}/${total} complete`}
+                            </p>
+                          </div>
                         </div>
+                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${isDone ? 'bg-emerald-100 text-emerald-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                          {total === 0 ? 'Done' : `${pct}%`}
+                        </span>
                       </div>
-                      <p className={`text-[10px] font-black ${isDone ? 'text-emerald-600' : 'text-indigo-600'}`}>
-                        {total === 0 ? '—' : `${pct}%`}
-                      </p>
+                      {total > 0 && (
+                        <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden mt-1 mb-2">
+                          <div
+                            className={`h-full rounded-full transition-all ${isDone ? 'bg-emerald-500' : 'bg-indigo-500'}`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      )}
                     </div>
-                    {total > 0 && (
-                      <div className="h-1.5 bg-indigo-200 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all ${isDone ? 'bg-emerald-500' : 'bg-indigo-500'}`}
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                    )}
-                    {/* ── Notes 100 pts claim ── */}
-                    <div className="mt-2">
-                      {revNotesClaimed ? (
-                        <div className="flex items-center justify-center gap-1.5 py-1.5 rounded-xl bg-emerald-100 border border-emerald-300">
-                          <span className="text-[11px] font-black text-emerald-700">✅ +{REV_PTS}⭐ pts Claim Ho Gaye!</span>
-                        </div>
-                      ) : isDone ? (
+                    <div>
+                      {unclaimedRevNotes > 0 ? (
                         <button
                           onClick={() => handleClaimRevisionPts('notes')}
-                          className="w-full py-2 rounded-xl font-black text-[12px] flex items-center justify-center gap-2 transition-all active:scale-95 bg-gradient-to-r from-indigo-500 to-violet-600 text-white shadow-sm shadow-indigo-200"
+                          className="w-full py-2 rounded-xl font-black text-[11px] flex items-center justify-center gap-1.5 transition-all active:scale-95 bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-sm"
                         >
-                          🎁 Claim +{REV_PTS}⭐ pts — Notes Done!
+                          🎁 Claim +{unclaimedRevNotes * REV_PTS}⭐ pts ({unclaimedRevNotes} Lesson{unclaimedRevNotes > 1 ? 's' : ''})
                         </button>
+                      ) : claimedRevNotesCount > 0 ? (
+                        <div className="flex items-center justify-center gap-1 py-1.5 rounded-xl bg-emerald-100 border border-emerald-300">
+                          <span className="text-[10px] font-black text-emerald-700">✅ +{claimedRevNotesCount * REV_PTS}⭐ pts Claimed ({claimedRevNotesCount} Lesson{claimedRevNotesCount > 1 ? 's' : ''})</span>
+                        </div>
                       ) : (
-                        <div className="w-full py-2 rounded-xl font-black text-[12px] flex items-center justify-center gap-2 bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed">
-                          🔒 +{REV_PTS}⭐ pts — Notes 100% Complete Karo
+                        <div className="w-full py-1.5 rounded-xl font-black text-[10px] flex items-center justify-center gap-1 bg-slate-100 text-slate-500 border border-slate-200">
+                          🔒 Har lesson pe +{REV_PTS}⭐ pts unlock
                         </div>
                       )}
                     </div>
                   </div>
                 );
-              })()
-            )}
+              })()}
 
-            {/* MCQ due today */}
-            {dueMcq.length > 0 ? (
-              <div className="bg-white rounded-2xl border border-emerald-200 shadow-sm overflow-hidden mb-3">
-                <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 border-b border-emerald-100">
-                  <div className="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center"><Target size={13} /></div>
-                  <p className="text-[12px] font-black text-emerald-800">MCQ Practice For Today</p>
-                  <span className="ml-auto text-[10px] font-bold bg-emerald-200 text-emerald-700 rounded-full px-2 py-0.5">{dueMcq.length}</span>
-                </div>
-                <div className="divide-y divide-slate-100 max-h-[200px] overflow-y-auto">
-                  {dueMcq.map((b: WeakBucket) => (
-                    <div key={`${b.subjectId}::${b.chapterId}::${b.pageKey}::${b.topic}`} className="flex items-center gap-3 px-3 py-2">
-                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[11px] font-bold text-slate-700 truncate">{b.topic}</p>
-                        <p className="text-[9px] text-slate-400 truncate">{b.subjectName} · {b.chapterTitle || b.chapterId}</p>
-                      </div>
-                      {b.wrongQuestions && b.wrongQuestions.length > 0 && (
-                        <span className="text-[9px] font-black text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded-md shrink-0">
-                          {b.wrongQuestions.length} Qs
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                <button
-                  onClick={() => onOpenRevisionHub(undefined, undefined, true)}
-                  className="w-full py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[11px] font-black flex items-center justify-center gap-1.5 transition-colors border-t border-emerald-100"
-                >
-                  <Target size={13} /> Practice MCQ
-                </button>
-              </div>
-            ) : (
-              /* Original MCQ Slot logic */
-              (() => {
+              {/* MCQ Practice Card */}
+              {(() => {
                 const total = dueMcq.length + mcqDoneToday;
-                const done  = mcqDoneToday;
-                const pct   = total > 0 ? Math.round((done / total) * 100) : 100;
+                const done = mcqDoneToday;
+                const pct = total > 0 ? Math.round((done / total) * 100) : 100;
                 const isDone = done === total && total > 0;
                 return (
-                  <div className={`rounded-xl px-3 py-2.5 border ${isDone ? 'bg-emerald-50 border-emerald-200' : 'bg-violet-50 border-violet-200'}`}>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm">{isDone ? '✅' : '🧠'}</span>
-                        <div>
-                          <p className={`text-[11px] font-black ${isDone ? 'text-emerald-700' : 'text-violet-800'}`}>
-                            MCQ Practice
-                          </p>
-                          <p className="text-[9px] text-slate-400">
-                            {total === 0 ? 'Aaj koi MCQ due nahi' : `${done}/${total} complete`}
-                          </p>
+                  <div className={`rounded-2xl p-3 border ${isDone ? 'bg-emerald-50/80 border-emerald-200' : 'bg-white border-violet-200'} shadow-sm flex flex-col justify-between`}>
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs ${isDone ? 'bg-emerald-100 text-emerald-700' : 'bg-violet-100 text-violet-700'}`}>
+                            {isDone ? '✅' : '🧠'}
+                          </div>
+                          <div>
+                            <p className="text-[12px] font-black text-slate-800">MCQ Practice</p>
+                            <p className="text-[9px] text-slate-500">
+                              {total === 0 ? 'Aaj koi MCQ due nahi' : `${dueMcq.length} baki · ${done}/${total} complete`}
+                            </p>
+                          </div>
                         </div>
+                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${isDone ? 'bg-emerald-100 text-emerald-700' : 'bg-violet-100 text-violet-700'}`}>
+                          {total === 0 ? 'Done' : `${pct}%`}
+                        </span>
                       </div>
-                      <p className={`text-[10px] font-black ${isDone ? 'text-emerald-600' : 'text-violet-600'}`}>
-                        {total === 0 ? '—' : `${pct}%`}
-                      </p>
+                      {total > 0 && (
+                        <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden mt-1 mb-2">
+                          <div
+                            className={`h-full rounded-full transition-all ${isDone ? 'bg-emerald-500' : 'bg-violet-500'}`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      )}
                     </div>
-                    {total > 0 && (
-                      <div className="h-1.5 bg-violet-200 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all ${isDone ? 'bg-emerald-500' : 'bg-violet-500'}`}
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                    )}
-                    {/* ── MCQ 100 pts claim ── */}
-                    <div className="mt-2">
-                      {revMcqClaimed ? (
-                        <div className="flex items-center justify-center gap-1.5 py-1.5 rounded-xl bg-emerald-100 border border-emerald-300">
-                          <span className="text-[11px] font-black text-emerald-700">✅ +{REV_PTS}⭐ pts Claim Ho Gaye!</span>
-                        </div>
-                      ) : isDone ? (
+                    <div>
+                      {unclaimedRevMcq > 0 ? (
                         <button
                           onClick={() => handleClaimRevisionPts('mcq')}
-                          className="w-full py-2 rounded-xl font-black text-[12px] flex items-center justify-center gap-2 transition-all active:scale-95 bg-gradient-to-r from-violet-500 to-purple-600 text-white shadow-sm shadow-violet-200"
+                          className="w-full py-2 rounded-xl font-black text-[11px] flex items-center justify-center gap-1.5 transition-all active:scale-95 bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-sm"
                         >
-                          🎁 Claim +{REV_PTS}⭐ pts — MCQ Done!
+                          🎁 Claim +{unclaimedRevMcq * REV_PTS}⭐ pts ({unclaimedRevMcq} Lesson{unclaimedRevMcq > 1 ? 's' : ''})
                         </button>
+                      ) : claimedRevMcqCount > 0 ? (
+                        <div className="flex items-center justify-center gap-1 py-1.5 rounded-xl bg-emerald-100 border border-emerald-300">
+                          <span className="text-[10px] font-black text-emerald-700">✅ +{claimedRevMcqCount * REV_PTS}⭐ pts Claimed ({claimedRevMcqCount} Lesson{claimedRevMcqCount > 1 ? 's' : ''})</span>
+                        </div>
                       ) : (
-                        <div className="w-full py-2 rounded-xl font-black text-[12px] flex items-center justify-center gap-2 bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed">
-                          🔒 +{REV_PTS}⭐ pts — MCQ 100% Complete Karo
+                        <div className="w-full py-1.5 rounded-xl font-black text-[10px] flex items-center justify-center gap-1 bg-slate-100 text-slate-500 border border-slate-200">
+                          🔒 Har lesson pe +{REV_PTS}⭐ pts unlock
                         </div>
                       )}
                     </div>
                   </div>
                 );
-              })()
+              })()}
+            </div>
+
+            {/* ── If there are due revision items, show 3-Tier Hierarchy ── */}
+            {dueItems.length > 0 ? (
+              <div className="space-y-3">
+                {/* 1-Tap Global Quick Action Bar */}
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => handleOpenNotes()}
+                    disabled={dueNotes.length === 0}
+                    className="py-2.5 px-3 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 text-white text-xs font-black flex items-center justify-center gap-2 shadow-sm active:scale-98 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <BookOpen size={14} />
+                    <span>Read Notes ({dueNotes.length})</span>
+                  </button>
+                  <button
+                    onClick={() => handleStartPractice()}
+                    disabled={dueMcq.length === 0}
+                    className="py-2.5 px-3 rounded-xl bg-gradient-to-r from-violet-600 to-emerald-600 text-white text-xs font-black flex items-center justify-center gap-2 shadow-sm active:scale-98 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Target size={14} />
+                    <span>Practice MCQ ({dueMcq.length})</span>
+                  </button>
+                </div>
+
+                {/* Search & Mode Bar */}
+                <div className="bg-white rounded-2xl border border-slate-200 p-2.5 shadow-sm space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="text"
+                        value={revisionSearchQuery}
+                        onChange={(e) => setRevisionSearchQuery(e.target.value)}
+                        placeholder="Search in 200+ lessons & topics..."
+                        className="w-full pl-8 pr-7 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-violet-400"
+                      />
+                      {revisionSearchQuery && (
+                        <button
+                          onClick={() => setRevisionSearchQuery('')}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* View mode switcher */}
+                    <div className="flex bg-slate-100 p-0.5 rounded-xl shrink-0 text-[10px] font-black">
+                      <button
+                        onClick={() => setRevisionViewMode('SUBJECT')}
+                        className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${revisionViewMode === 'SUBJECT' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}
+                      >
+                        <BookOpen size={11} /> Subject
+                      </button>
+                      <button
+                        onClick={() => setRevisionViewMode('HIERARCHY')}
+                        className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${revisionViewMode === 'HIERARCHY' ? 'bg-white text-violet-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}
+                      >
+                        <Layers size={11} /> 3-Tier
+                      </button>
+                      <button
+                        onClick={() => setRevisionViewMode('FOCUS')}
+                        className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${revisionViewMode === 'FOCUS' ? 'bg-white text-rose-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}
+                      >
+                        <Zap size={11} /> Focus
+                      </button>
+                      <button
+                        onClick={() => setRevisionViewMode('LIST')}
+                        className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${revisionViewMode === 'LIST' ? 'bg-white text-slate-800 shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}
+                      >
+                        <ListFilter size={11} /> List
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Subject Filter Carousel */}
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar pt-1 border-t border-slate-100">
+                    <button
+                      onClick={() => setSelectedRevisionSubjectId('ALL')}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-black whitespace-nowrap transition-all shrink-0 ${selectedRevisionSubjectId === 'ALL' ? 'bg-violet-600 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                    >
+                      🌟 Sabhi ({dueItems.length})
+                    </button>
+                    {subjectGroups.map(sg => (
+                      <button
+                        key={sg.subjectId}
+                        onClick={() => setSelectedRevisionSubjectId(sg.subjectId)}
+                        className={`px-2.5 py-1 rounded-lg text-[10px] font-black whitespace-nowrap transition-all shrink-0 flex items-center gap-1 ${selectedRevisionSubjectId === sg.subjectId ? 'bg-violet-600 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                      >
+                        <span>{sg.icon}</span>
+                        <span>{sg.subjectName}</span>
+                        <span className="opacity-70">({sg.totalDue})</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* No search results */}
+                {filteredSubjectGroups.length === 0 && (
+                  <div className="bg-white rounded-2xl border border-slate-200 p-6 text-center">
+                    <p className="text-xs font-bold text-slate-500 mb-1">Koi topic ya lesson nahi mila</p>
+                    <button
+                      onClick={() => { setRevisionSearchQuery(''); setSelectedRevisionSubjectId('ALL'); }}
+                      className="text-[11px] text-violet-600 font-black hover:underline"
+                    >
+                      Filter clear karein
+                    </button>
+                  </div>
+                )}
+
+                {/* MODE 0: SUBJECT-WISE SMART CARDS (Primary Consolidated View) */}
+                {revisionViewMode === 'SUBJECT' && filteredSubjectGroups.map((sg) => {
+                  const isDetailsOpen = !!expandedRevisionSubs[sg.subjectId];
+                  return (
+                    <div key={sg.subjectId} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden p-3.5 space-y-3">
+                      {/* Top Row: Icon + Subject Title + Badges */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="w-10 h-10 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center text-xl shrink-0 shadow-2xs">
+                            {sg.icon}
+                          </div>
+                          <div className="min-w-0">
+                            <h4 className="font-black text-slate-800 text-sm truncate leading-tight">{sg.subjectName}</h4>
+                            <p className="text-[10px] text-slate-500 font-medium truncate mt-0.5">
+                              {sg.chapters.length} Lessons · {sg.totalDue} Total Due Topics
+                            </p>
+                          </div>
+                        </div>
+                        <span className="text-[11px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200 px-2.5 py-1 rounded-full shrink-0">
+                          {sg.totalDue} Due
+                        </span>
+                      </div>
+
+                      {/* Smart 3-Tier Distribution: ⚡ Weak (mistakes/retry) · ⏳ Average · 📅 Routine */}
+                      <div className="grid grid-cols-3 gap-1.5">
+                        <div className="bg-rose-50 border border-rose-200 rounded-xl p-2 text-center">
+                          <div className="flex items-center justify-center gap-1 text-rose-700 font-black text-xs">
+                            <span>⚡</span> {sg.weakCount}
+                          </div>
+                          <p className="text-[8px] font-black text-rose-500 uppercase tracking-wider mt-0.5">Weak / Retry</p>
+                        </div>
+                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center">
+                          <div className="flex items-center justify-center gap-1 text-amber-700 font-black text-xs">
+                            <span>⏳</span> {sg.avgCount}
+                          </div>
+                          <p className="text-[8px] font-black text-amber-600 uppercase tracking-wider mt-0.5">Average</p>
+                        </div>
+                        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2 text-center">
+                          <div className="flex items-center justify-center gap-1 text-emerald-700 font-black text-xs">
+                            <span>📅</span> {sg.routineCount}
+                          </div>
+                          <p className="text-[8px] font-black text-emerald-600 uppercase tracking-wider mt-0.5">Routine</p>
+                        </div>
+                      </div>
+
+                      {/* 1-Tap Consolidated Revision Action Buttons */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          onClick={() => handleOpenNotes(sg.dueNotes)}
+                          disabled={sg.notesCount === 0}
+                          className="py-2.5 px-3 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-700 font-black text-xs flex items-center justify-center gap-1.5 active:scale-95 transition disabled:opacity-40 disabled:cursor-not-allowed hover:bg-indigo-100 shadow-2xs"
+                        >
+                          <BookOpen size={13} />
+                          <span>📖 Notes ({sg.notesCount})</span>
+                        </button>
+                        <button
+                          onClick={() => handleStartPractice(sg.dueMcq)}
+                          disabled={sg.mcqCount === 0}
+                          className="py-2.5 px-3 rounded-xl bg-violet-600 text-white font-black text-xs flex items-center justify-center gap-1.5 active:scale-95 transition disabled:opacity-40 disabled:cursor-not-allowed hover:bg-violet-700 shadow-sm"
+                        >
+                          <Target size={13} />
+                          <span>🧠 MCQ ({sg.mcqCount})</span>
+                        </button>
+                      </div>
+
+                      {/* Optional Chapter Breakdown Toggle */}
+                      <div className="border-t border-slate-100 pt-2">
+                        <button
+                          onClick={() => setExpandedRevisionSubs(prev => ({ ...prev, [sg.subjectId]: !isDetailsOpen }))}
+                          className="w-full flex items-center justify-between text-[11px] font-bold text-slate-500 hover:text-slate-700 py-1"
+                        >
+                          <span className="flex items-center gap-1">
+                            <span>🔍 Chapter Breakdown Dekhein ({sg.chapters.length} Lessons)</span>
+                          </span>
+                          {isDetailsOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                        </button>
+
+                        {isDetailsOpen && (
+                          <div className="mt-2 space-y-2 pt-1 border-t border-slate-100">
+                            {sg.chapters.map(cg => (
+                              <div key={cg.chapterId} className="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
+                                <div className="flex items-center justify-between mb-1.5">
+                                  <p className="text-xs font-black text-slate-800 truncate flex-1">{cg.chapterTitle}</p>
+                                  <span className="text-[10px] font-bold text-slate-500 shrink-0 ml-2">
+                                    {cg.buckets.length} due topics
+                                  </span>
+                                </div>
+                                <div className="flex items-center justify-between gap-2 text-[10px]">
+                                  <div className="flex items-center gap-2">
+                                    {cg.dueNotes.length > 0 && (
+                                      <button
+                                        onClick={() => handleOpenNotes(cg.dueNotes)}
+                                        className="text-indigo-600 font-bold hover:underline flex items-center gap-0.5"
+                                      >
+                                        <BookOpen size={10} /> {cg.dueNotes.length} Notes
+                                      </button>
+                                    )}
+                                    {cg.dueMcq.length > 0 && (
+                                      <button
+                                        onClick={() => handleStartPractice(cg.dueMcq)}
+                                        className="text-violet-600 font-bold hover:underline flex items-center gap-0.5"
+                                      >
+                                        <Target size={10} /> {cg.dueMcq.length} MCQ
+                                      </button>
+                                    )}
+                                  </div>
+                                  {cg.totalTopicsCount > 0 && (
+                                    <span className="text-emerald-600 font-bold">
+                                      {cg.completedTopicsCount}/{cg.totalTopicsCount} Mastered
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* MODE 1: 3-TIER HIERARCHY (Subject ➔ Lesson ➔ 30 Topics) */}
+                {revisionViewMode === 'HIERARCHY' && filteredSubjectGroups.map((sg) => {
+                  const isSubExpanded = expandedRevisionSubs[sg.subjectId] !== false; // Default expanded
+                  return (
+                    <div key={sg.subjectId} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                      {/* Subject Header */}
+                      <div
+                        onClick={() => setExpandedRevisionSubs(prev => ({ ...prev, [sg.subjectId]: !isSubExpanded }))}
+                        className="flex items-center justify-between p-3 bg-gradient-to-r from-slate-50 to-indigo-50/40 cursor-pointer select-none border-b border-slate-100 hover:bg-indigo-50/60 transition"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-base shadow-xs">
+                            {sg.icon}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-black text-slate-800 text-xs">{sg.subjectName}</h4>
+                              <span className="text-[10px] font-black bg-violet-100 text-violet-700 px-2 py-0.2 rounded-full">
+                                {sg.chapters.length} Lessons · {sg.totalDue} Due
+                              </span>
+                            </div>
+                            <p className="text-[9px] text-slate-400 mt-0.5">
+                              📖 {sg.notesCount} Notes · 🧠 {sg.mcqCount} MCQ Practice
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {sg.dueNotes.length > 0 && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleOpenNotes(sg.dueNotes); }}
+                              className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-black text-[10px] rounded-lg border border-indigo-200 flex items-center gap-1 transition active:scale-95"
+                              title="Revise all notes for this subject"
+                            >
+                              <BookOpen size={11} /> Notes ({sg.dueNotes.length})
+                            </button>
+                          )}
+                          {sg.dueMcq.length > 0 && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleStartPractice(sg.dueMcq); }}
+                              className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-black text-[10px] rounded-lg border border-emerald-200 flex items-center gap-1 transition active:scale-95"
+                              title="Revise all MCQ for this subject"
+                            >
+                              <Target size={11} /> MCQ ({sg.dueMcq.length})
+                            </button>
+                          )}
+                          <div className="text-slate-400 p-1">
+                            {isSubExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Chapters / Lessons inside Subject */}
+                      {isSubExpanded && (
+                        <div className="p-2.5 space-y-2.5 bg-slate-50/50">
+                          {sg.chapters.map((cg) => {
+                            const isChapExpanded = expandedRevisionChapters[cg.chapterId] !== false;
+                            return (
+                              <div key={cg.chapterId} className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-2xs">
+                                {/* Chapter / Lesson Title Row */}
+                                <div className="p-2.5 flex items-center justify-between gap-2">
+                                  <div
+                                    onClick={() => setExpandedRevisionChapters(prev => ({ ...prev, [cg.chapterId]: !isChapExpanded }))}
+                                    className="flex-1 min-w-0 cursor-pointer select-none"
+                                  >
+                                    <div className="flex items-center gap-1.5">
+                                      <p className="font-black text-slate-800 text-xs truncate">{cg.chapterTitle}</p>
+                                      <span className="text-[9px] font-black bg-amber-100 text-amber-800 px-1.5 py-0.2 rounded-md shrink-0">
+                                        {cg.buckets.length} Topics
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-[9px] text-slate-400 mt-0.5">
+                                      <span>📖 {cg.dueNotes.length} Notes</span>
+                                      <span>·</span>
+                                      <span>🧠 {cg.dueMcq.length} MCQ</span>
+                                      {cg.totalTopicsCount > 0 && (
+                                        <>
+                                          <span>·</span>
+                                          <span className="text-emerald-600 font-bold">
+                                            {cg.completedTopicsCount}/{cg.totalTopicsCount} Mastered
+                                          </span>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Quick Chapter Action Buttons */}
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    {cg.dueNotes.length > 0 && (
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); handleOpenNotes(cg.dueNotes); }}
+                                        className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-black text-[10px] rounded-lg border border-indigo-200 flex items-center gap-1 transition active:scale-95"
+                                      >
+                                        <BookOpen size={11} /> Read ({cg.dueNotes.length})
+                                      </button>
+                                    )}
+                                    {cg.dueMcq.length > 0 && (
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); handleStartPractice(cg.dueMcq); }}
+                                        className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-black text-[10px] rounded-lg border border-emerald-200 flex items-center gap-1 transition active:scale-95"
+                                      >
+                                        <Target size={11} /> MCQ ({cg.dueMcq.length})
+                                      </button>
+                                    )}
+                                    <button
+                                      onClick={() => setExpandedRevisionChapters(prev => ({ ...prev, [cg.chapterId]: !isChapExpanded }))}
+                                      className="p-1 text-slate-400 hover:text-slate-600"
+                                      title="Toggle topic matrix"
+                                    >
+                                      {isChapExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {/* 30-Topic Matrix */}
+                                {isChapExpanded && (
+                                  <div className="border-t border-slate-100 p-2 bg-slate-50/80">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                      {cg.buckets.map((b, topicIdx) => {
+                                        const isNotes = !b.stage || b.stage === 'NOTES';
+                                        const wrongCount = b.wrongQuestions?.length || 0;
+                                        return (
+                                          <div
+                                            key={`${b.chapterId}::${b.topic}::${topicIdx}`}
+                                            className="flex items-center justify-between p-2 bg-white rounded-lg border border-slate-100 hover:border-slate-200 transition text-xs shadow-2xs"
+                                          >
+                                            <div className="flex items-center gap-2 min-w-0 mr-1.5">
+                                              <span className="text-[9px] font-black text-slate-400 w-4 text-center shrink-0">
+                                                #{topicIdx + 1}
+                                              </span>
+                                              <div className="min-w-0">
+                                                <p className="font-bold text-slate-800 text-[11px] truncate leading-tight">
+                                                  {b.topic}
+                                                </p>
+                                                <div className="flex items-center gap-1 mt-0.5">
+                                                  {isNotes ? (
+                                                    <span className="text-[8px] font-black bg-indigo-50 text-indigo-600 px-1 py-0.2 rounded">
+                                                      📖 Notes Due
+                                                    </span>
+                                                  ) : wrongCount > 0 ? (
+                                                    <span className="text-[8px] font-black bg-rose-50 text-rose-600 px-1 py-0.2 rounded">
+                                                      ⚡ {wrongCount}Q Wrong
+                                                    </span>
+                                                  ) : (
+                                                    <span className="text-[8px] font-black bg-violet-50 text-violet-600 px-1 py-0.2 rounded">
+                                                      🧠 Routine MCQ
+                                                    </span>
+                                                  )}
+                                                </div>
+                                              </div>
+                                            </div>
+
+                                            <button
+                                              onClick={() => isNotes ? handleOpenNotes([b]) : handleStartPractice([b])}
+                                              className={`px-2 py-1 rounded-md text-[10px] font-black shrink-0 transition active:scale-95 ${isNotes ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
+                                            >
+                                              {isNotes ? 'Padho' : 'Practice'}
+                                            </button>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* MODE 2: FOCUS 15 (Top Urgent Topics) */}
+                {revisionViewMode === 'FOCUS' && (
+                  <div className="bg-white rounded-2xl border border-rose-200 p-3 shadow-sm space-y-2">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">⚡</span>
+                        <div>
+                          <h4 className="text-xs font-black text-rose-900">Focus 15 — Most Urgent Topics</h4>
+                          <p className="text-[9px] text-slate-500">Pehle in topics ko complete karein</p>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-black bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full">
+                        {focus15Items.length} Topics
+                      </span>
+                    </div>
+
+                    <div className="divide-y divide-slate-100">
+                      {focus15Items.map((b, idx) => {
+                        const isNotes = !b.stage || b.stage === 'NOTES';
+                        const wrongCount = b.wrongQuestions?.length || 0;
+                        return (
+                          <div key={idx} className="py-2 flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                              <span className="w-5 h-5 rounded-full bg-rose-50 text-rose-600 text-[10px] font-black flex items-center justify-center shrink-0">
+                                {idx + 1}
+                              </span>
+                              <div className="min-w-0">
+                                <p className="text-xs font-black text-slate-800 truncate">{b.topic}</p>
+                                <p className="text-[9px] text-slate-400 truncate">
+                                  {b.subjectName} · {b.chapterTitle || b.chapterId}
+                                  {wrongCount > 0 && <span className="text-rose-600 font-bold ml-1">({wrongCount} Qs Wrong)</span>}
+                                </p>
+                              </div>
+                            </div>
+
+                            <button
+                              onClick={() => isNotes ? handleOpenNotes([b]) : handleStartPractice([b])}
+                              className={`px-3 py-1 rounded-lg text-[10px] font-black shrink-0 transition active:scale-95 ${isNotes ? 'bg-indigo-600 text-white' : 'bg-emerald-600 text-white'}`}
+                            >
+                              {isNotes ? '📖 Padho' : '⚡ Practice'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* MODE 3: COMPACT LIST */}
+                {revisionViewMode === 'LIST' && (
+                  <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                    <div className="p-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between text-[11px] font-black text-slate-600">
+                      <span>Topic & Lesson</span>
+                      <span>Action</span>
+                    </div>
+                    <div className="divide-y divide-slate-100 max-h-[360px] overflow-y-auto">
+                      {dueItems
+                        .filter(b => {
+                          if (selectedRevisionSubjectId !== 'ALL' && b.subjectId !== selectedRevisionSubjectId) return false;
+                          if (revisionSearchQuery) {
+                            const q = revisionSearchQuery.toLowerCase();
+                            return (b.topic || '').toLowerCase().includes(q) || (b.chapterTitle || '').toLowerCase().includes(q) || (b.subjectName || '').toLowerCase().includes(q);
+                          }
+                          return true;
+                        })
+                        .map((b, idx) => {
+                          const isNotes = !b.stage || b.stage === 'NOTES';
+                          return (
+                            <div key={idx} className="p-2.5 flex items-center justify-between gap-2 hover:bg-slate-50 transition">
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs font-bold text-slate-800 truncate">{b.topic}</p>
+                                <p className="text-[9px] text-slate-400 truncate">
+                                  {b.subjectName} · {b.chapterTitle || b.chapterId}
+                                </p>
+                              </div>
+                              <button
+                                onClick={() => isNotes ? handleOpenNotes([b]) : handleStartPractice([b])}
+                                className={`px-2.5 py-1 rounded-lg text-[10px] font-black shrink-0 ${isNotes ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}
+                              >
+                                {isNotes ? '📖 Read' : '⚡ Practice'}
+                              </button>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="bg-white rounded-2xl border border-emerald-200 p-4 text-center shadow-xs">
+                <span className="text-2xl mb-1 block">🎉</span>
+                <p className="text-xs font-black text-emerald-800">Aaj ka Revision 100% Up-to-Date Hai!</p>
+                <p className="text-[10px] text-slate-500 mt-0.5">
+                  Koi bhi pending notes ya MCQ questions baki nahi hain. Shabash!
+                </p>
+              </div>
             )}
 
 
@@ -1339,9 +2123,12 @@ export const DailyEventPage: React.FC<Props> = ({
       {/* ── Modals from Revision Hub ────────────────────────────────────── */}
       {showAllNotesModal && (
         <TodayAllNotesModal
-          dueNotes={dueNotes}
+          dueNotes={selectedModalNotes || dueNotes}
           user={user}
-          onClose={() => setShowAllNotesModal(false)}
+          onClose={() => {
+            setShowAllNotesModal(false);
+            setSelectedModalNotes(null);
+          }}
           onTopicsMarked={(markedBuckets) => {
             try {
               markedBuckets.forEach(b => {
@@ -1366,6 +2153,7 @@ export const DailyEventPage: React.FC<Props> = ({
               console.error("Error marking topics as read:", err);
             } finally {
               setShowAllNotesModal(false);
+              setSelectedModalNotes(null);
               reloadRevision();
             }
           }}

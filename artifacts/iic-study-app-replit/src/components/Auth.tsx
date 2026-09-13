@@ -189,7 +189,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
   };
 
   const generateUserId = () => {
-    const prefix = (appSettings?.appShortName || settings?.appShortName || 'NSTA').toUpperCase().replace(/[^A-Z0-9]/g, '') || 'NSTA';
+    const prefix = (appSettings?.appShortName || settings?.appShortName || 'NSTA')?.toUpperCase().replace(/[^A-Z0-9]/g, '') || 'NSTA';
     const randomPart = String(Math.floor(100000 + Math.random() * 900000));
     return `${prefix}-${randomPart}`;
   };
@@ -619,7 +619,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
           ...raw,
           id: validId,
           uid: validId,
-          displayId: raw.displayId || recoveryUserObj.displayId || validId.slice(0, 8).toUpperCase(),
+          displayId: raw.displayId || recoveryUserObj.displayId || validId.slice(0, 8)?.toUpperCase(),
           name: raw.name || recoveryUserObj.name || "Student",
           email: raw.email || recoveryUserObj.email || "",
           mobile: raw.mobile || recoveryUserObj.mobile || "",

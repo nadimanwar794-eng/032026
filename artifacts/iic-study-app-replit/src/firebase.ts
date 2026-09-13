@@ -2667,6 +2667,7 @@ export const updateUserStatus = async (userId: string, time?: number, activity?:
 
         const payload: any = { lastActiveTime: nowIso };
         if (activity) payload.currentActivity = activity;
+        if (typeof time === "number") payload.dailyStudySeconds = time;
 
         // Update RTDB for real-time listeners
         update(userRef, payload).catch(() => {});

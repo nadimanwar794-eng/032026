@@ -444,3 +444,16 @@
   from { width: 100%; }
   to   { width: 0%;   }
 }
+
+@keyframes gift-wiggle {
+  0% { transform: rotate(0deg) scale(1); }
+  25% { transform: rotate(-15deg) scale(1.15); }
+  50% { transform: rotate(15deg) scale(1.15); }
+  75% { transform: rotate(-15deg) scale(1.15); }
+  100% { transform: rotate(0deg) scale(1); }
+}
+.animate-gift-wiggle {
+  animation: gift-wiggle 1.5s ease-in-out infinite;
+  display: inline-block;
+  transform-origin: center;
+}

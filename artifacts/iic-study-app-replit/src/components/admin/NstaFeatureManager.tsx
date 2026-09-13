@@ -195,7 +195,7 @@ export const NstaFeatureManager: React.FC<Props> = ({ settings, onUpdateSettings
     const handleAddFeature = () => {
         if (!newFeature.id || !newFeature.label) return alert("ID and Label required!");
         const newItem = {
-            id: newFeature.id.toUpperCase().replace(/\s+/g, '_'),
+            id: newFeature.id?.toUpperCase().replace(/\s+/g, '_'),
             label: newFeature.label,
             category: newFeature.category,
             visible: true,
@@ -423,7 +423,7 @@ export const NstaFeatureManager: React.FC<Props> = ({ settings, onUpdateSettings
                                                         <div className="flex items-center gap-3">
                                                             <div className="relative">
                                                                 <div className="w-9 h-9 rounded-xl bg-violet-100 text-violet-800 font-black flex items-center justify-center text-xs">
-                                                                    {(u.name || 'U').charAt(0).toUpperCase()}
+                                                                    {(u.name || 'U').charAt(0)?.toUpperCase()}
                                                                 </div>
                                                                 {online && (
                                                                     <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 border-2 border-white rounded-full"></span>
@@ -495,7 +495,7 @@ export const NstaFeatureManager: React.FC<Props> = ({ settings, onUpdateSettings
                                                                 u.subscriptionTier === 'basic' ? 'bg-blue-100 text-blue-800 border border-blue-200' :
                                                                 'bg-slate-100 text-slate-700'
                                                             }`}>
-                                                                {(u.subscriptionTier || 'FREE').toUpperCase()}
+                                                                {(u.subscriptionTier || 'FREE')?.toUpperCase()}
                                                             </span>
                                                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                                                                 u.role === 'ADMIN' ? 'bg-purple-100 text-purple-700 font-black' : 'bg-slate-50 text-slate-500'
@@ -740,7 +740,7 @@ export const NstaFeatureManager: React.FC<Props> = ({ settings, onUpdateSettings
                             <div className="grid grid-cols-4 gap-2">
                                 {/* Limits */}
                                 {['Free', 'Basic', 'Ultra'].map(tier => {
-                                    const isAllowed = (feature.allowedTiers || ['FREE', 'BASIC', 'ULTRA']).includes(tier.toUpperCase());
+                                    const isAllowed = (feature.allowedTiers || ['FREE', 'BASIC', 'ULTRA']).includes(tier?.toUpperCase());
                                     const limitVal = feature.limits?.[tier.toLowerCase()] ?? '';
 
                                     return (

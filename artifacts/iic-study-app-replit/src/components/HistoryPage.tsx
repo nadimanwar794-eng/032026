@@ -31,6 +31,7 @@ import { Layers, Clock } from 'lucide-react';
 import { getLoginHistory, getActivityHistory, formatLoginTime, formatDuration as formatLoginDuration, type LoginSession, type ActivityEntry } from '../utils/loginHistory';
 import { getLevelInfo } from '../utils/levelSystem';
 import { getCreditHistory, clearCreditHistory, type CreditTxEntry } from '../utils/creditHistory';
+import { subscribeToTopNoteStars, type NoteStarEntry } from '../services/noteStars';
 
 interface Props {
     user: User;
@@ -201,6 +202,8 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
   // STARRED NOTES STATE — unified storage (nst_starred_notes_v1)
   type StarEntry = { id: string; noteKey: string; topicText: string; savedAt: string };
   const [starredNotes, setStarredNotes] = useState<StarEntry[]>([]);
+  const [globalStars, setGlobalStars] = useState<NoteStarEntry[]>([]);
+  const [starTab, setStarTab] = useState<'MY' | 'GLOBAL'>('MY');
   const [starSearch, setStarSearch] = useState('');
   const debouncedStarSearch = useDebounce(starSearch, 300);
 
@@ -270,6 +273,14 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
       setStarredNotes(updated);
     } catch {}
   };
+
+  useEffect(() => {
+    const unsub = subscribeToTopNoteStars(100, (entries) => {
+      const sorted = Object.values(entries).sort((a, b) => b.count - a.count);
+      setGlobalStars(sorted);
+    });
+    return () => unsub();
+  }, []);
 
   useEffect(() => {
     if (activeTab === 'STARRED') {
@@ -586,33 +597,62 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
         )}
 
         {activeTab === 'STARRED' && (() => {
-            const filtered = starredNotes.filter(n =>
-                n.topicText?.toLowerCase().includes(debouncedStarSearch.toLowerCase())
-            );
+            const isMyStars = starTab === 'MY';
+            const rawFiltered = isMyStars
+              ? starredNotes.filter(n => n.topicText?.toLowerCase().includes(debouncedStarSearch.toLowerCase()))
+              : globalStars.filter(n => n.label?.toLowerCase().includes(debouncedStarSearch.toLowerCase()));
+            
+            // Map global stars to same shape as my stars for rendering
+            const filtered = isMyStars
+              ? rawFiltered
+              : rawFiltered.map(n => ({ id: n.hash, noteKey: n.noteKey, topicText: n.label, savedAt: n.lastUpdated ? new Date(n.lastUpdated).toISOString() : '', globalCount: n.count }));
+            
+            const totalCount = isMyStars ? starredNotes.length : globalStars.length;
+
             return (
             <div className="animate-in fade-in duration-300 space-y-3">
                 {/* Header row */}
-                <div className="flex items-center gap-2 mb-1">
-                    <Star size={16} className="text-amber-500" fill="currentColor" />
-                    <h4 className="text-sm font-black text-slate-700">Important Notes</h4>
-                    <span className="ml-2 text-xs font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
-                        {starSearch ? `${filtered.length}/${starredNotes.length}` : starredNotes.length}
-                    </span>
-                    {filtered.length > 0 && (
+                <div className="flex flex-col gap-3 mb-1">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <Star size={16} className="text-amber-500" fill="currentColor" />
+                            <h4 className="text-sm font-black text-slate-700">Important Notes</h4>
+                            <span className="ml-2 text-xs font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+                                {starSearch ? `${filtered.length}/${totalCount}` : totalCount}
+                            </span>
+                        </div>
+                        {filtered.length > 0 && (
+                            <button
+                                onClick={() => isReadingStars ? stopStarRead() : startStarRead(filtered as any)}
+                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black transition-all active:scale-95 ${
+                                    isReadingStars
+                                        ? 'bg-red-100 text-red-600 border border-red-200 hover:bg-red-200'
+                                        : 'bg-amber-500 text-white hover:bg-amber-600 shadow-sm'
+                                }`}
+                            >
+                                {isReadingStars
+                                    ? <><Square size={11} fill="currentColor" /> Stop</>
+                                    : <><Volume2 size={12} /> Read All</>
+                                }
+                            </button>
+                        )}
+                    </div>
+                    
+                    {/* Tab Switcher */}
+                    <div className="flex bg-slate-100 p-1 rounded-xl">
                         <button
-                            onClick={() => isReadingStars ? stopStarRead() : startStarRead(filtered)}
-                            className={`ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black transition-all active:scale-95 ${
-                                isReadingStars
-                                    ? 'bg-red-100 text-red-600 border border-red-200 hover:bg-red-200'
-                                    : 'bg-amber-500 text-white hover:bg-amber-600 shadow-sm'
-                            }`}
+                            onClick={() => { setStarTab('MY'); setStarSearch(''); stopStarRead(); }}
+                            className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${isMyStars ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                         >
-                            {isReadingStars
-                                ? <><Square size={11} fill="currentColor" /> Stop</>
-                                : <><Volume2 size={12} /> Read All</>
-                            }
+                            My Notes
                         </button>
-                    )}
+                        <button
+                            onClick={() => { setStarTab('GLOBAL'); setStarSearch(''); stopStarRead(); }}
+                            className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${!isMyStars ? 'bg-white text-amber-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                        >
+                            Global Trending
+                        </button>
+                    </div>
                 </div>
 
                 {/* Reading progress bar */}
@@ -634,7 +674,7 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
                     </div>
                 )}
 
-                {starredNotes.length > 0 && (
+                {totalCount > 0 && (
                     <div className="relative">
                         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-400 pointer-events-none" />
                         <input
@@ -655,11 +695,11 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
                     </div>
                 )}
 
-                {starredNotes.length === 0 ? (
+                {totalCount === 0 ? (
                     <div className="text-center py-14 bg-amber-50 rounded-2xl border border-amber-100">
                         <Star size={40} className="text-amber-300 mx-auto mb-3" />
-                        <p className="font-bold text-slate-600 text-sm">No important notes saved yet.</p>
-                        <p className="text-xs text-slate-400 mt-1">Tap ⭐ while reading a note — it will appear here.</p>
+                        <p className="font-bold text-slate-600 text-sm">{isMyStars ? "No important notes saved yet." : "No global notes yet."}</p>
+                        <p className="text-xs text-slate-400 mt-1">{isMyStars ? "Tap ⭐ while reading a note — it will appear here." : "Wait for students to start studying!"}</p>
                     </div>
                 ) : filtered.length === 0 ? (
                     <div className="text-center py-10 bg-amber-50 rounded-2xl border border-amber-100">
@@ -668,7 +708,7 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
                         <p className="text-xs text-slate-400 mt-1">Try a different word.</p>
                     </div>
                 ) : (
-                    filtered.map((note, idx) => {
+                    filtered.map((note: any, idx) => {
                         const isCurrentlyReading = isReadingStars && readingStarIdx === idx;
                         return (
                         <div
@@ -680,7 +720,7 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
                             }`}
                         >
                             <button
-                                onClick={() => { if (isCurrentlyReading) stopStarRead(); else startStarRead(filtered.slice(idx)); }}
+                                onClick={() => { if (isCurrentlyReading) stopStarRead(); else startStarRead(filtered.slice(idx) as any); }}
                                 className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 mt-0.5 transition-all ${
                                     isCurrentlyReading
                                         ? 'bg-amber-400 text-white animate-pulse'
@@ -694,17 +734,26 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
                             </button>
                             <div className="flex-1 min-w-0">
                                 <p className={`font-bold text-sm leading-snug ${isCurrentlyReading ? 'text-amber-800' : 'text-slate-800'}`}>{note.topicText}</p>
-                                <p className="text-[10px] text-amber-500 font-bold mt-1">
-                                    {note.savedAt ? new Date(note.savedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
-                                </p>
+                                <div className="flex items-center gap-3 mt-1">
+                                    <p className="text-[10px] text-amber-500 font-bold">
+                                        {note.savedAt ? new Date(note.savedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
+                                    </p>
+                                    {!isMyStars && note.globalCount && (
+                                        <span className="flex items-center gap-1 text-[10px] font-black bg-amber-100 text-amber-600 px-1.5 py-0.5 rounded">
+                                            <Star size={10} fill="currentColor" /> {note.globalCount} Saves
+                                        </span>
+                                    )}
+                                </div>
                             </div>
-                            <button
-                                onClick={() => removeStarEntry(note.id)}
-                                className="p-1.5 rounded-full text-amber-400 hover:text-red-400 hover:bg-red-50 transition-colors shrink-0 mt-0.5"
-                                title="Remove"
-                            >
-                                <XIcon size={14} />
-                            </button>
+                            {isMyStars && (
+                                <button
+                                    onClick={() => removeStarEntry(note.id)}
+                                    className="p-1.5 rounded-full text-amber-400 hover:text-red-400 hover:bg-red-50 transition-colors shrink-0 mt-0.5"
+                                    title="Remove"
+                                >
+                                    <XIcon size={14} />
+                                </button>
+                            )}
                         </div>
                         );
                     })

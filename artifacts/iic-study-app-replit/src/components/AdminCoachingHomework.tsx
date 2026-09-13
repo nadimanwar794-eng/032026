@@ -235,13 +235,13 @@ function parseBulkMcq(text: string): CoachingMcq[] {
 
       // Ans: / Answer: / सही उत्तर: B or B) or B) text
       const ansMatch = line.match(/^(?:Ans|Answer|सही\s*उत्तर)\s*[:.]\s*\*?\s*([A-Da-d])/i);
-      if (ansMatch) { ansLetter = ansMatch[1].toUpperCase(); collectingExp = false; continue; }
+      if (ansMatch) { ansLetter = ansMatch[1]?.toUpperCase(); collectingExp = false; continue; }
 
       // Options: *A: text OR *A) text OR A: text OR A) text
       const optMatch = line.match(/^(\*?)\s*([A-Da-d])[:.)\s]\s*(.+)/);
       if (optMatch) {
         const isCorrect = optMatch[1] === '*';
-        const idx = optMatch[2].toUpperCase().charCodeAt(0) - 65;
+        const idx = optMatch[2]?.toUpperCase().charCodeAt(0) - 65;
         if (idx >= 0 && idx < 4) {
           options[idx] = optMatch[3].trim();
           if (isCorrect) correctAnswers.push(idx);

@@ -121,6 +121,7 @@ export interface User {
   teacherExpiryDate?: string; // The code used to register as a teacher
   createdAt: string;
   credits: number; // Premium Credits
+  diamonds?: number; // Rare Premium Currency (💎)
   streak: number; // Consecutive days
   longestStreak?: number; // All-time highest streak
   topBarEffectColor?: string; // Custom shimmer color gifted via redeem code
@@ -148,6 +149,13 @@ export interface User {
   redeemedCodes: string[]; // List of redeemed code IDs
   redeemedReferralCode?: string; // NEW: Code used by this user
   referralCount?: number; // NEW: Number of users referred by this user
+  referrerId?: string; // ID of the user who referred this student
+  referralStudySeconds?: number; // Cumulative study seconds towards 60-min unlock (needs 3600s)
+  referralRewardClaimed?: boolean; // True once invitee received their 100 Credits welcome gift after 1h
+  referredUsersList?: ReferredUserRecord[]; // Full list of referred students with active/dead status
+  claimedReferralMilestones?: number[]; // Milestone targets already claimed (e.g. [1, 3, 5, 10, 100, ...])
+  referralCommissionBalance?: number; // Accumulated cashback from friends spending credits
+  referralCommissionLogs?: ReferralCommissionLog[]; // History of royalty earnings
   
   // Soft Delete / Ban Logic
   isArchived?: boolean; // Acts as Soft Delete / Recycle Bin
@@ -191,7 +199,9 @@ export interface User {
   
   // Chat & Premium Features
   isPremium?: boolean;
-  blockLimitExpansions?: number; // Number of +10 block limit expansions purchased with coins
+  blockLimitExpansions?: number; // Number of +10 block limit expansions purchased with coins or diamonds
+  friendLimitExpansions?: number; // Number of +10 friend limit expansions purchased with coins or diamonds
+  dailyMessageLimitExpansions?: number; // Number of +10 daily message limit expansions purchased
   lastChatTime?: string; // ISO String for cooldown
   lastSpinTime?: string; // ISO String (Legacy)
   dailySpinDate?: string; // YYYY-MM-DD for resetting daily count
@@ -260,6 +270,43 @@ export interface User {
   dailyRoutine?: DailyRoutine;
   subjectFreeLesson?: Record<string, string>; // subjectId → chapterId (first free lesson per subject)
   creditSubscription?: UserCreditSubscription; // Daily Credits Subscription (Pure daily credits, no premium features)
+  diamondSubscription?: UserDiamondSubscription; // Daily Diamonds Subscription (💎 Pass: 7 Days / 30 Days)
+}
+
+export interface ReferredUserRecord {
+  userId: string;
+  userName: string;
+  userPhoto?: string;
+  joinedAt: string; // ISO string
+  activeMinutes: number; // study/usage minutes (needs 60 min to unlock reward)
+  isCompleted: boolean; // reached 60 minutes study time -> counted in milestones
+  lastActiveAt: string; // ISO string of last app usage
+  isDead: boolean; // inactive for > 7 days
+  totalCreditsSpent?: number; // total credits this friend spent
+  commissionEarned?: number; // royalty earned by referrer
+}
+
+export interface ReferralCommissionLog {
+  id: string;
+  friendId: string;
+  friendName: string;
+  creditsSpent: number;
+  ratePercent: number; // e.g. 0.01% - 0.15%
+  earnedCredits: number;
+  date: string;
+}
+
+export interface ReferralMilestone {
+  target: number; // 1, 3, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000
+  title: string;
+  rewardDescription: string;
+  rewardType: 'CURRENCY' | 'SUBSCRIPTION';
+  credits?: number;
+  diamonds?: number;
+  subTier?: 'WEEKLY' | 'MONTHLY' | '3_MONTHLY' | 'YEARLY' | 'CUSTOM';
+  subLevel?: 'BASIC' | 'ULTRA';
+  subDurationDays?: number;
+  badgeLabel?: string;
 }
 
 export interface ActiveSubscription {
@@ -275,6 +322,16 @@ export interface CreditSubDiscountEvent {
   enabled: boolean;
   eventName: string; // e.g., "Credits Mega Dhamaka", "Coin Store Flash Sale"
   discountPercent: number; // e.g. 20, 30, 50%
+  startsAt?: string; // ISO Date for countdown / auto-start
+  endsAt?: string; // ISO Date for sale duration
+  showToFreeUsers?: boolean;
+  showToPremiumUsers?: boolean;
+}
+
+export interface DiamondSubDiscountEvent {
+  enabled: boolean;
+  eventName: string; // e.g., "Diamond Pass Mega Sale", "Diamond Store Flash Sale"
+  discountPercent: number; // e.g. 10, 20, 30%
   startsAt?: string; // ISO Date for countdown / auto-start
   endsAt?: string; // ISO Date for sale duration
   showToFreeUsers?: boolean;
@@ -347,6 +404,39 @@ export interface UserCreditSubscription {
   pricePaid?: number;
   status?: 'ACTIVE' | 'EXPIRED';
   scoreMultiplier?: number; // Active XP Multiplier (e.g. 1.1, 1.2, 1.3, 1.5)
+}
+
+export interface UserDiamondSubscription {
+  planId: string;
+  planName: string;
+  dailyDiamonds: number;
+  totalDays: number;
+  startDate: string; // ISO string
+  endDate: string;   // ISO string
+  lastClaimDate?: string; // YYYY-MM-DD
+  totalClaimedDays?: number;
+  totalDiamondsClaimed?: number;
+  pricePaid?: number;
+  status?: 'ACTIVE' | 'EXPIRED';
+}
+
+export interface DiamondPack {
+  id: string;
+  name: string;
+  price: number;
+  diamonds: number;
+  bonusDiamonds?: number;
+  popular?: boolean;
+}
+
+export interface DiamondSubscriptionPlan {
+  id: string;
+  name: string;
+  price: number;
+  dailyDiamonds: number;
+  durationDays: number;
+  totalDiamonds: number;
+  badge?: string;
 }
 
 export interface SubscriptionPlan {
@@ -484,7 +574,7 @@ export interface LoginBonusConfig {
 export interface BroadcastRedeemCode {
     id: string;
     code: string;
-    type: 'CREDITS' | 'CREDIT_SUBSCRIPTION' | 'SUBSCRIPTION' | 'DISCOUNT' | 'CONTENT_UNLOCK' | 'TOPBAR_EFFECT_COLOR' | 'TOPBAR_EFFECT_ID' | 'SCORE' | 'SCORE_BOOST' | 'SCORE_LIMIT_BOOST';
+    type: 'CREDITS' | 'CREDIT_SUBSCRIPTION' | 'DIAMONDS' | 'DIAMOND_SUBSCRIPTION' | 'SUBSCRIPTION' | 'DISCOUNT' | 'CONTENT_UNLOCK' | 'TOPBAR_EFFECT_COLOR' | 'TOPBAR_EFFECT_ID' | 'SCORE' | 'SCORE_BOOST' | 'SCORE_LIMIT_BOOST';
     scoreBoostPercent?: number; // For SCORE_BOOST type — how much % to boost score by
     scoreBoostDurationHours?: number; // How long the boost lasts
     scoreLimitBoostPercent?: number; // For SCORE_LIMIT_BOOST type — temporary daily limit increase %
@@ -492,6 +582,8 @@ export interface BroadcastRedeemCode {
     message: string;
     title?: string;
     amount?: number;
+    diamondAmount?: number; // For DIAMONDS type
+    diamondSubPlanId?: string; // For DIAMOND_SUBSCRIPTION type
     scoreAmount?: number; // For SCORE type — how many score points to add
     creditPlanId?: string; // For CREDIT_SUBSCRIPTION type
     creditPlanName?: string; // For CREDIT_SUBSCRIPTION type
@@ -749,6 +841,8 @@ export interface SystemSettings {
   // When true, Profile is always in the drawer; when false, Profile only moves to drawer if Revision Hub V2 is enabled.
   profileInMenuForced?: boolean;
   hideLockedForFreeAndBasic?: boolean; // When ON, locked content & features are hidden for Free & Basic users. When OFF, shown with lock icons.
+  hideNstaMessenger?: boolean; // When true, Nsta Messenger floating button is hidden on student dashboard
+  hideCreateStudyRoom?: boolean; // When true, the option to create study rooms ("Apna Study Room Banayein" / "Live Study Room") is hidden for students
   officialAppUrl?: string; // NEW: Play Store Link
   enable3DModels?: boolean; // NEW: 3D Models in Notes
   showMcqMakerCard?: boolean; // NEW: Show MCQ Maker card on student home page
@@ -981,6 +1075,39 @@ export interface SystemSettings {
   nameChangeCost?: number;
   defaultVideoCost?: number;
   defaultPdfCost?: number; // NEW
+  themeCost?: number; // Custom theme unlock cost (default 20)
+  animationCost?: number; // Custom animation unlock cost (default 20)
+  marksheetCost?: number; // Official marksheet download/share cost (default 20)
+  revisionHubUnlockCost?: number; // Revision Hub lesson unlock cost (default 100)
+  flashcardMcqCost?: number; // Flashcard extra session cost (default 5)
+  whatsappChatCost?: number; // WhatsApp / teacher help message expansion cost (default 2)
+  externalAppUnlockCost?: number; // External App Store app unlock cost (default 10)
+  mcqLimitExceededCost?: number; // MCQ practice cost when daily limit exceeded (default 5)
+  groupStudyHostCost?: number; // Group study room host cost (default 10)
+  projectorPdfCost?: number; // Projector mode / PDF export cost (default 5)
+  contentRequestCost?: number; // Content request submission cost (default 2)
+  correctionModeCost?: number; // Question correction submit cost (default 0)
+  dailyRoutineSlotCost?: number; // Routine extra slot unlock cost (default 5)
+
+  // Plan perks and tier benefits configuration
+  freeFeatures?: string[];
+  basicFeatures?: string[];
+  ultraFeatures?: string[];
+  xpMultiplierFree?: number; // e.g. 1.0
+  xpMultiplierBasic?: number; // e.g. 1.5
+  xpMultiplierUltra?: number; // e.g. 2.0
+  xpCapFree?: number; // Daily XP cap (default 500)
+  xpCapBasic?: number; // Daily XP cap (default 1500)
+  xpCapUltra?: number; // Daily XP cap (default 3000)
+  storeDiscountFree?: number; // Store discount % (default 0)
+  storeDiscountBasic?: number; // Store discount % (default 20)
+  storeDiscountUltra?: number; // Store discount % (default 40)
+  htmlDownloadLimitFree?: number;
+  htmlDownloadLimitBasic?: number;
+  htmlDownloadLimitUltra?: number;
+  routineSlotsFree?: number; // Routine target slots per day for Free (default 2)
+  routineSlotsBasic?: number; // Routine target slots per day for Basic (default 4)
+  routineSlotsUltra?: number; // Routine target slots per day for Ultra (default 6)
   videoFreeLimitBasic?: number; // Free videos/day for Basic (default 5)
   videoFreeLimitUltra?: number; // Free videos/day for Ultra (default 10)
   pdfFreeLimitBasic?: number; // Free PDFs/day for Basic (default 5)
@@ -992,6 +1119,19 @@ export interface SystemSettings {
   writeModeMaxLimit?: number; // After this many uses, cost becomes 20 for all (default 20)
   deepDiveCost?: number; // NEW
   audioSlideCost?: number; // NEW
+  // Master Economy Control Settings
+  tieredCreditCosts?: Record<string, { free: number; basic: number; ultra: number; requiredTier?: 'FREE' | 'BASIC' | 'ULTRA' }>;
+  customEconomyItems?: Array<{
+    id: string;
+    label: string;
+    category: string;
+    icon?: string;
+    desc?: string;
+    requiredTier: 'FREE' | 'BASIC' | 'ULTRA';
+    freeCost: number;
+    basicCost: number;
+    ultraCost: number;
+  }>;
   enableMcqUnlockRestriction?: boolean; // NEW
   lessonUnlockPolicy?: 'SEQUENTIAL_100_MCQ' | 'ALL_OPEN'; // NEW
   externalApps?: ExternalApp[]; // NEW
@@ -1155,6 +1295,7 @@ export interface SystemSettings {
     showToPremiumUsers?: boolean;
   };
   creditSubDiscountEvent?: CreditSubDiscountEvent; // Discount event for credit store subscriptions
+  diamondSubDiscountEvent?: DiamondSubDiscountEvent; // Discount event for diamond pass subscriptions
   
   // NEW: App Modes (Global Control)
   appMode?: {
@@ -1198,7 +1339,7 @@ export interface SystemSettings {
   };
   areTopicNotesHiddenGlobally?: boolean; // NEW: Global Topic Notes Toggle
   featureBadges?: Record<string, 'NEW' | 'UPGRADE' | 'NORMAL'>; // NEW: Feature Badges
-  storeFeatures?: { basic: string[], ultra: string[] }; // NEW: Dynamic Store Features
+  storeFeatures?: { free?: string[]; basic: string[]; ultra: string[] }; // NEW: Dynamic Store Features
   isAutoTtsEnabled?: boolean; // NEW: Global Auto TTS Toggle
   cacheClearDays?: number; // NEW: Admin controlled cache cleanup interval
   planComparison?: FeatureCategory[]; // NEW: Admin Configurable Feature Matrix
@@ -1349,12 +1490,14 @@ export interface MCQRewardRule {
 export interface GiftCode {
   id: string;
   code: string;
-  type: 'CREDITS' | 'CREDIT_SUBSCRIPTION' | 'SUBSCRIPTION' | 'DISCOUNT' | 'CONTENT_UNLOCK' | 'TOPBAR_EFFECT_COLOR' | 'TOPBAR_EFFECT_ID' | 'SCORE' | 'SCORE_BOOST' | 'SCORE_LIMIT_BOOST' | 'THEME_COLOR'; // New: Type of code
+  type: 'CREDITS' | 'CREDIT_SUBSCRIPTION' | 'DIAMONDS' | 'DIAMOND_SUBSCRIPTION' | 'SUBSCRIPTION' | 'DISCOUNT' | 'CONTENT_UNLOCK' | 'TOPBAR_EFFECT_COLOR' | 'TOPBAR_EFFECT_ID' | 'SCORE' | 'SCORE_BOOST' | 'SCORE_LIMIT_BOOST' | 'THEME_COLOR'; // New: Type of code
   scoreBoostPercent?: number; // For SCORE_BOOST type
   scoreBoostDurationHours?: number; // Hours the boost lasts
   scoreLimitBoostPercent?: number; // For SCORE_LIMIT_BOOST type — temporary daily limit increase %
   scoreLimitBoostDurationHours?: number; // How long the daily limit boost lasts (hours)
-  amount?: number; // For Credits
+  amount?: number; // For Credits / Diamonds
+  diamondAmount?: number; // For DIAMONDS type
+  diamondSubPlanId?: string; // For DIAMOND_SUBSCRIPTION type
   creditPlanId?: string; // For CREDIT_SUBSCRIPTION type
   creditPlanName?: string; // For CREDIT_SUBSCRIPTION type
   creditDailyAmount?: number; // For CREDIT_SUBSCRIPTION type

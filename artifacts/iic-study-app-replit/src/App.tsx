@@ -62,6 +62,7 @@ import { HomeStatsToast } from './components/HomeStatsToast';
 import { DailyChallengeRankCard } from './components/DailyChallengeRankCard';
 import { DailyChallengePopup } from './components/DailyChallengePopup';
 import { recordCreditTx } from './utils/creditHistory';
+import { getCreditCost, getRequiredTier } from './utils/creditSystem';
 import { generateDailyChallengeQuestions, getChallengeDateKey, getChallengeWeekKey, isDailyChallenge20 } from './utils/challengeGenerator';
 import { BrainCircuit, Globe, LogOut, LayoutDashboard, BookOpen, Headphones, HelpCircle, Newspaper, KeyRound, Lock, X, ShieldCheck, FileText, UserPlus, EyeOff, WifiOff, Cloud, ArrowLeft, ExternalLink } from 'lucide-react'; // eslint-disable-line @typescript-eslint/no-unused-vars
 import { SUPPORT_EMAIL, APP_VERSION } from './constants';
@@ -547,7 +548,7 @@ const App: React.FC = () => {
         recordCreditTx(
           user.id,
           sess.coinsEarned || 0,
-          `EARN_SESSION_${(sess.activityType || sess.type || 'MCQ').toUpperCase()}`,
+          `EARN_SESSION_${(sess.activityType || sess.type || 'MCQ')?.toUpperCase()}`,
           [actLabel, sess.chapter].filter(Boolean).join(' · ') || 'Study Session',
           user.credits,
           sess.sessionScore,
@@ -1632,7 +1633,74 @@ const App: React.FC = () => {
                     });
                 }
 
-                if (next % 10 === 0) updateUserStatus(state.user!.id, next, 'Studying'); 
+                if (next % 10 === 0) {
+                  updateUserStatus(state.user!.id, next, 'Studying');
+
+                  // Referral 1-Hour Study Unlock Check
+                  if (state.user && state.user.redeemedReferralCode) {
+                    const currentSec = (state.user.referralStudySeconds || 0) + 10;
+                    state.user.referralStudySeconds = currentSec;
+
+                    // Sync active status and progress to referrer's referredUsersList
+                    try {
+                      const stored = localStorage.getItem('nst_users');
+                      if (stored) {
+                        const allUsers = JSON.parse(stored);
+                        const referrerId = state.user.referrerId;
+                        const refIdx = allUsers.findIndex(
+                          (u: any) =>
+                            u.id === referrerId ||
+                            (u.displayId && u.displayId?.toUpperCase() === String(referrerId)?.toUpperCase())
+                        );
+                        if (refIdx >= 0) {
+                          const referrer = allUsers[refIdx];
+                          const rList = referrer.referredUsersList || [];
+                          const itemIdx = rList.findIndex((r: any) => r.userId === state.user!.id);
+                          const activeMins = Math.floor(currentSec / 60);
+                          const isNowCompleted = activeMins >= 60;
+                          if (itemIdx >= 0) {
+                            rList[itemIdx].activeMinutes = activeMins;
+                            rList[itemIdx].lastActiveAt = new Date().toISOString();
+                            rList[itemIdx].isDead = false;
+                            if (isNowCompleted) rList[itemIdx].isCompleted = true;
+                          } else {
+                            rList.unshift({
+                              userId: state.user!.id,
+                              userName: state.user!.name || 'Student',
+                              userPhoto: state.user!.photoURL,
+                              joinedAt: new Date().toISOString(),
+                              activeMinutes: activeMins,
+                              isCompleted: isNowCompleted,
+                              lastActiveAt: new Date().toISOString(),
+                              isDead: false,
+                            });
+                          }
+                          referrer.referredUsersList = rList;
+                          referrer.referralCount = rList.filter((r: any) => r.isCompleted).length;
+                          allUsers[refIdx] = referrer;
+                          localStorage.setItem('nst_users', JSON.stringify(allUsers));
+                        }
+                      }
+                    } catch {}
+
+                    // Check if 1-Hour completed (3600 seconds) and welcome gift not yet claimed
+                    if (currentSec >= 3600 && !state.user.referralRewardClaimed) {
+                      state.user.referralRewardClaimed = true;
+                      state.user.credits = (state.user.credits || 0) + 100;
+                      setActiveReward({
+                        id: `ref_welcome_${Date.now()}`,
+                        type: 'CREDITS',
+                        amount: 100,
+                        label: 'Referral Welcome Gift (1 Hour Study Bonus! 🎁)',
+                        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+                      } as any);
+                      try {
+                        localStorage.setItem('nst_current_user', JSON.stringify(state.user));
+                      } catch {}
+                      saveUserToLive(state.user).catch(() => {});
+                    }
+                  }
+                } 
                 return next;
             });
         }, 1000);
@@ -2282,24 +2350,23 @@ const App: React.FC = () => {
 
     if (specificContent) {
         let cost = 0;
+        const econKey = type === 'VIDEO_LECTURE' ? 'defaultVideoCost' : 'defaultPdfCost';
+        const userTier = (state.user?.subscriptionLevel || state.user?.subscriptionTier || 'FREE')?.toUpperCase();
+
+        // Check required tier first
+        const reqTier = getRequiredTier(econKey, 'FREE', state.settings);
+        if (state.user.role !== 'ADMIN' && !state.originalAdmin) {
+            if (reqTier === 'ULTRA' && userTier !== 'ULTRA') {
+                setAlertConfig({ isOpen: true, message: `Yeh content sirf Ultra Tier students ke liye unlocked hai! Kripya Ultra plan upgrade karein.` });
+                return;
+            } else if (reqTier === 'BASIC' && userTier === 'FREE') {
+                setAlertConfig({ isOpen: true, message: `Yeh content Basic ya Ultra plan mein available hai! Kripya plan upgrade karein.` });
+                return;
+            }
+        }
+
         if (specificContent.isPremium) {
-             cost = 5;
-             if (type === 'VIDEO_LECTURE') cost = state.settings.defaultVideoCost || 5;
-             if (type === 'NOTES_PREMIUM' || type === 'NOTES_HTML_PREMIUM') cost = state.settings.defaultPdfCost || 5;
-
-             if (state.settings.featureCosts) {
-                 let featId = '';
-                 if (type === 'VIDEO_LECTURE') featId = 'video_view';
-                 else if (type.startsWith('NOTES') || type.startsWith('PDF')) featId = 'pdf_view';
-
-                 if (featId) {
-                     const costConfig = state.settings.featureCosts.find(f => f.featureId === featId);
-                     if (costConfig) {
-                         const tier = state.user.subscriptionTier === 'FREE' ? 'free' : state.user.subscriptionLevel === 'BASIC' ? 'basic' : 'ultra';
-                         cost = costConfig[`${tier}Cost`];
-                     }
-                 }
-             }
+             cost = getCreditCost(econKey, type === 'VIDEO_LECTURE' ? 10 : 5, userTier as any, state.settings);
         }
 
         if (state.settings.isCreditFreeEvent || state.settings.isGlobalFreeMode) cost = 0;
@@ -2331,11 +2398,15 @@ const App: React.FC = () => {
                  return;
              }}
              const updatedUser = applyDeduction(state.user, cost) ?? state.user;
+             const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+             const cId = specificContent?.id || tempSelectedChapter.id;
+             const updatedTimed = [...((updatedUser as any).timedUnlocks || []).filter((t: any) => t.contentId !== cId), { contentId: cId, expiresAt }];
+             const finalUser = { ...updatedUser, timedUnlocks: updatedTimed };
              if (!state.originalAdmin) {
-                 localStorage.setItem('nst_current_user', JSON.stringify(updatedUser));
-                 saveUserToLive(updatedUser);
+                 localStorage.setItem('nst_current_user', JSON.stringify(finalUser));
+                 saveUserToLive(finalUser);
              }
-             setState(prev => ({...prev, user: updatedUser}));
+             setState(prev => ({...prev, user: finalUser}));
         }
 
         const lessonContent: LessonContent = {
@@ -2402,6 +2473,14 @@ const App: React.FC = () => {
             return;
         }
 
+        const _timedUnlocks2 = (state.user as any).timedUnlocks || [];
+        const _isTimedValid2 = (id: string | undefined) => id ? _timedUnlocks2.some((u: any) => u.contentId === id && new Date(u.expiresAt) > new Date()) : false;
+        if (state.user.unlockedContent && (state.user.unlockedContent.includes(tempSelectedChapter.id) || state.user.unlockedContent.includes(mainKey))) {
+            cost = 0;
+        } else if (_isTimedValid2(tempSelectedChapter.id) || _isTimedValid2(mainKey)) {
+            cost = 0;
+        }
+
          if (state.user.role !== 'ADMIN' && !state.originalAdmin && cost > 0) {
              if (getTotalCredits(state.user) < cost) {
                  setAlertConfig({isOpen: true, message: `Insufficient Credits! You need ${cost} Credits.`});
@@ -2423,11 +2502,14 @@ const App: React.FC = () => {
              }}
 
              const updatedUser = applyDeduction(state.user, cost) ?? state.user;
+             const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+             const updatedTimed = [...((updatedUser as any).timedUnlocks || []).filter((t: any) => t.contentId !== mainKey && t.contentId !== tempSelectedChapter.id), { contentId: mainKey, expiresAt }];
+             const finalUser = { ...updatedUser, timedUnlocks: updatedTimed };
              if (!state.originalAdmin) {
-                 localStorage.setItem('nst_current_user', JSON.stringify(updatedUser));
-                 saveUserToLive(updatedUser);
+                 localStorage.setItem('nst_current_user', JSON.stringify(finalUser));
+                 saveUserToLive(finalUser);
              }
-             setState(prev => ({...prev, user: updatedUser}));
+             setState(prev => ({...prev, user: finalUser}));
         }
 
         if (type === 'NOTES_IMAGE_AI') {

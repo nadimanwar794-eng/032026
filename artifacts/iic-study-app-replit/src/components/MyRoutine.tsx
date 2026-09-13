@@ -6,7 +6,7 @@ import {
   FlaskConical, Landmark, BarChart3, Plus, Minus,
   Check, ChevronDown, ChevronUp, Sparkles, RefreshCw,
   ListChecks, LayoutGrid, HelpCircle, X, CheckCircle2, XCircle,
-  Lock, Trash2, Settings,
+  Lock, Trash2, Settings, Search, Layers, ListFilter,
 } from 'lucide-react';
 import {
   loadRoutineData, saveRoutineData, checkAndResetDaily,
@@ -36,7 +36,7 @@ import { tryEarnScore, getActiveBoost } from '../utils/scoreSystem';
 import { DailyEventPage } from './DailyEventPage';
 import { useAppTheme } from '../utils/themeContext';
 
-const TASK_COMPLETE_PTS = 100; // pts awarded per routine task completion
+const TASK_COMPLETE_PTS = 50; // (25 pts Notes + 25 pts MCQ per lesson)
 
 
 
@@ -439,11 +439,12 @@ function LessonDetailRow({ lesson, idx, isCurrent, mcqHistory }: {
 
 // ── Category Subject Card (Subjects tab) ──────────────────────────────────────
 function CatSubjectCard({
-  catId, sub, lessons, mcqHistory, coins, onChangeStart, onCoinFlash,
+  catId, sub, lessons, mcqHistory, coins, onChangeStart, onCoinFlash, onOpenLesson,
 }: {
   catId: string; sub: RoutineCategorySubject; lessons: LucentEntry[]; mcqHistory: any[];
   coins: number; onChangeStart: (catId: string, subjectId: string, idx: number) => void;
   onCoinFlash: (msg: string) => void;
+  onOpenLesson?: (id: string) => void;
 }) {
   const [targetStart, setTargetStart] = useState(sub.currentLessonIndex);
 
@@ -479,9 +480,24 @@ function CatSubjectCard({
             <Minus size={14} className="text-slate-600" />
           </button>
 
-          <div className="flex-1 text-center bg-slate-50 rounded-xl border border-slate-100 py-2 px-2">
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider leading-none mb-0.5">Lesson {targetStart + 1}</p>
-            <p className="text-[13px] font-bold text-slate-800 leading-tight truncate">
+          <div className="flex-1 text-center bg-slate-50 rounded-xl border border-slate-100 py-1.5 px-2 relative group hover:border-blue-200 transition">
+            <select
+              value={targetStart}
+              onChange={(e) => setTargetStart(Number(e.target.value))}
+              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+              title="Click to jump to any lesson"
+            >
+              {lessons.map((l, idx) => (
+                <option key={l.id || idx} value={idx}>
+                  L{idx + 1}: {l.lessonTitle || `Lesson ${idx + 1}`} ({l.pages?.length || 0} pgs)
+                </option>
+              ))}
+            </select>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider leading-none mb-0.5 flex items-center justify-center gap-1">
+              <span>Lesson {targetStart + 1} of {lessons.length}</span>
+              <span className="text-[8px] text-blue-500 font-bold">▾</span>
+            </p>
+            <p className="text-[12px] font-bold text-slate-800 leading-tight truncate">
               {lessons[targetStart]?.lessonTitle || `Lesson ${targetStart + 1}`}
             </p>
             {skipCost > 0 && <p className="text-[9px] text-amber-600 font-black mt-0.5">−{skipCost}🪙</p>}
@@ -498,6 +514,26 @@ function CatSubjectCard({
             <Plus size={14} className="text-slate-600" />
           </button>
         </div>
+
+        {/* 1-Tap Notes and MCQ Buttons for Current Lesson */}
+        {lessons[sub.currentLessonIndex] && onOpenLesson && (
+          <div className="grid grid-cols-2 gap-2 mt-2.5">
+            <button
+              onClick={() => onOpenLesson(lessons[sub.currentLessonIndex].id)}
+              className="py-1.5 px-2 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-700 text-[11px] font-black flex items-center justify-center gap-1 active:scale-95 transition hover:bg-indigo-100"
+            >
+              <BookOpen size={12} />
+              <span>📖 Read Notes</span>
+            </button>
+            <button
+              onClick={() => onOpenLesson(lessons[sub.currentLessonIndex].id)}
+              className="py-1.5 px-2 rounded-xl bg-violet-600 text-white text-[11px] font-black flex items-center justify-center gap-1 active:scale-95 transition hover:bg-violet-700 shadow-xs"
+            >
+              <Target size={12} />
+              <span>🧠 Practice MCQ</span>
+            </button>
+          </div>
+        )}
 
         {targetStart !== sub.currentLessonIndex && (
           <button
@@ -518,11 +554,12 @@ function CatSubjectCard({
 
 // ── Subject Card (Subjects tab) — simplified ──────────────────────────────────
 function SubjectCard({
-  sub, lessons, mcqHistory, coins, onToggleApply, onChangeStart, onCoinFlash,
+  sub, lessons, mcqHistory, coins, onToggleApply, onChangeStart, onCoinFlash, onOpenLesson,
 }: {
   sub: RoutineSubjectConfig; lessons: LucentEntry[]; mcqHistory: any[];
   coins: number; onToggleApply: () => void; onChangeStart: (idx: number) => void;
   onCoinFlash: (msg: string) => void;
+  onOpenLesson?: (id: string) => void;
 }) {
   const [targetStart, setTargetStart] = useState(sub.startLessonIndex);
   const meta     = SUBJECT_META[sub.id] || DEFAULT_META;
@@ -580,9 +617,24 @@ function SubjectCard({
             <Minus size={14} className="text-slate-600" />
           </button>
 
-          <div className="flex-1 text-center bg-slate-50 rounded-xl border border-slate-100 py-2 px-2">
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider leading-none mb-0.5">Lesson {targetStart + 1}</p>
-            <p className="text-[13px] font-bold text-slate-800 leading-tight truncate">
+          <div className="flex-1 text-center bg-slate-50 rounded-xl border border-slate-100 py-1.5 px-2 relative group hover:border-blue-200 transition">
+            <select
+              value={targetStart}
+              onChange={(e) => setTargetStart(Number(e.target.value))}
+              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+              title="Click to jump to any lesson"
+            >
+              {lessons.map((l, idx) => (
+                <option key={l.id || idx} value={idx}>
+                  L{idx + 1}: {l.lessonTitle || `Lesson ${idx + 1}`} ({l.pages?.length || 0} pgs)
+                </option>
+              ))}
+            </select>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider leading-none mb-0.5 flex items-center justify-center gap-1">
+              <span>Lesson {targetStart + 1} of {lessons.length}</span>
+              <span className="text-[8px] text-blue-500 font-bold">▾</span>
+            </p>
+            <p className="text-[12px] font-bold text-slate-800 leading-tight truncate">
               {lessons[targetStart]?.lessonTitle || `Lesson ${targetStart + 1}`}
             </p>
             {skipCost > 0 && <p className="text-[9px] text-amber-600 font-black mt-0.5">−{skipCost}🪙</p>}
@@ -599,6 +651,26 @@ function SubjectCard({
             <Plus size={14} className="text-slate-600" />
           </button>
         </div>
+
+        {/* 1-Tap Notes and MCQ Buttons for Current Lesson */}
+        {lessons[sub.startLessonIndex] && onOpenLesson && (
+          <div className="grid grid-cols-2 gap-2 mt-2.5">
+            <button
+              onClick={() => onOpenLesson(lessons[sub.startLessonIndex].id)}
+              className="py-1.5 px-2 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-700 text-[11px] font-black flex items-center justify-center gap-1 active:scale-95 transition hover:bg-indigo-100"
+            >
+              <BookOpen size={12} />
+              <span>📖 Read Notes</span>
+            </button>
+            <button
+              onClick={() => onOpenLesson(lessons[sub.startLessonIndex].id)}
+              className="py-1.5 px-2 rounded-xl bg-violet-600 text-white text-[11px] font-black flex items-center justify-center gap-1 active:scale-95 transition hover:bg-violet-700 shadow-xs"
+            >
+              <Target size={12} />
+              <span>🧠 Practice MCQ</span>
+            </button>
+          </div>
+        )}
 
         {targetStart !== sub.startLessonIndex && (
           <button
@@ -618,14 +690,21 @@ function SubjectCard({
 }
 
 // ── Full Tracking view: book → subject → lesson → pages ──────────────────────
-function TrackingView({ subjectGroups, subjects, mcqHistory }: {
+function TrackingView({ subjectGroups, subjects, mcqHistory, onOpenLesson }: {
   subjectGroups: Record<string, LucentEntry[]>;
   subjects: RoutineSubjectConfig[];
   mcqHistory: any[];
+  onOpenLesson?: (id: string) => void;
 }) {
   const [expandedSubs, setExpandedSubs] = useState<Record<string, boolean>>({});
   const [expandedLessons, setExpandedLessons] = useState<Record<string, boolean>>({});
+  const [trackingSearch, setTrackingSearch] = useState('');
+  const [selectedSubFilter, setSelectedSubFilter] = useState<string>('ALL');
+  const [subjectBatch, setSubjectBatch] = useState<Record<string, number>>({});
+  const [showAllLessons, setShowAllLessons] = useState<Record<string, boolean>>({});
   const snapshot = getAutoTrackSnapshot();
+
+  const BATCH_SIZE = 15;
 
   // Sort subjects: SCIENCE first, then SOCIAL_SCIENCE, then OTHER
   const sortedSubs = [...subjects].sort((a, b) => {
@@ -649,12 +728,29 @@ function TrackingView({ subjectGroups, subjects, mcqHistory }: {
   const mcqPct = totalPages > 0 ? Math.round((totalMcqDone / totalPages) * 100) : 0;
   const syllabusMasteryPct = totalPages > 0 ? Math.round((readPct + mcqPct) / 2) : 0;
 
+  // Filter subjects by selectedSubFilter
+  const displaySubs = sortedSubs.filter(sub => {
+    if (selectedSubFilter !== 'ALL' && sub.id !== selectedSubFilter) return false;
+    const lessons = subjectGroups[sub.id] || [];
+    if (lessons.length === 0) return false;
+    if (trackingSearch) {
+      const q = trackingSearch.toLowerCase();
+      const subNameMatch = sub.name.toLowerCase().includes(q);
+      const anyLessonMatch = lessons.some(l => 
+        (l.lessonTitle || '').toLowerCase().includes(q) ||
+        (l.pages || []).some(p => (p.topic || '').toLowerCase().includes(q))
+      );
+      return subNameMatch || anyLessonMatch;
+    }
+    return true;
+  });
+
   return (
     <div className="space-y-4">
       {/* Overall stats card */}
       <div className="bg-gradient-to-br from-indigo-700 via-purple-700 to-blue-700 rounded-2xl p-4 text-white shadow-lg">
         <div className="flex items-center justify-between mb-2">
-          <p className="text-[10px] font-black uppercase tracking-widest text-indigo-200">📖 My Syllabus Mastery</p>
+          <p className="text-[10px] font-black uppercase tracking-widest text-indigo-200">📖 My Syllabus Mastery (3-Tier)</p>
           <span className="text-xs font-black bg-white/20 px-2 py-0.5 rounded-full">{syllabusMasteryPct}% Mastered</span>
         </div>
         <div className="grid grid-cols-4 gap-2 mb-3">
@@ -684,25 +780,93 @@ function TrackingView({ subjectGroups, subjects, mcqHistory }: {
         </div>
       </div>
 
+      {/* 3-Tier Search and Subject Filter Bar */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-2.5 shadow-sm space-y-2">
+        <div className="relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            value={trackingSearch}
+            onChange={(e) => setTrackingSearch(e.target.value)}
+            placeholder="Search in 200+ lessons & topics..."
+            className="w-full pl-8 pr-7 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+          />
+          {trackingSearch && (
+            <button
+              onClick={() => setTrackingSearch('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
+
+        {/* Subject Filter Carousel */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar pt-1 border-t border-slate-100">
+          <button
+            onClick={() => setSelectedSubFilter('ALL')}
+            className={`px-2.5 py-1 rounded-lg text-[10px] font-black whitespace-nowrap transition-all shrink-0 ${selectedSubFilter === 'ALL' ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+          >
+            🌟 Sabhi ({allLessons.length} Lessons)
+          </button>
+          {sortedSubs.map(sub => {
+            const lCount = (subjectGroups[sub.id] || []).length;
+            if (lCount === 0) return null;
+            const meta = SUBJECT_META[sub.id] || DEFAULT_META;
+            return (
+              <button
+                key={sub.id}
+                onClick={() => setSelectedSubFilter(sub.id)}
+                className={`px-2.5 py-1 rounded-lg text-[10px] font-black whitespace-nowrap transition-all shrink-0 flex items-center gap-1 ${selectedSubFilter === sub.id ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                <span>{meta.icon}</span>
+                <span>{sub.name}</span>
+                <span className="opacity-70">({lCount})</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {displaySubs.length === 0 && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-6 text-center">
+          <p className="text-xs font-bold text-slate-500 mb-1">Koi subject ya lesson nahi mila</p>
+          <button
+            onClick={() => { setTrackingSearch(''); setSelectedSubFilter('ALL'); }}
+            className="text-[11px] text-indigo-600 font-black hover:underline"
+          >
+            Filter clear karein
+          </button>
+        </div>
+      )}
+
       {/* Per-subject breakdown */}
-      {sortedSubs.map(sub => {
-        const lessons = subjectGroups[sub.id] || [];
+      {displaySubs.map(sub => {
+        let lessons = subjectGroups[sub.id] || [];
         if (lessons.length === 0) return null;
         const meta = SUBJECT_META[sub.id] || DEFAULT_META;
 
-        // Subject-level stats
-        const subTotalPages = lessons.reduce((s, l) => s + (l.pages?.length || 0), 0);
-        const subReadPages  = lessons.reduce((s, l) => {
+        // Apply search filter to lessons
+        if (trackingSearch) {
+          const q = trackingSearch.toLowerCase();
+          lessons = lessons.filter(l => 
+            (l.lessonTitle || '').toLowerCase().includes(q) ||
+            (l.pages || []).some(p => (p.topic || '').toLowerCase().includes(q))
+          );
+        }
+
+        // Subject-level stats (calculated from all lessons in subject)
+        const allSubLessons = subjectGroups[sub.id] || [];
+        const subTotalPages = allSubLessons.reduce((s, l) => s + (l.pages?.length || 0), 0);
+        const subReadPages  = allSubLessons.reduce((s, l) => {
           const tp = l.pages?.length || 0;
           return s + Array.from({ length: tp }, (_, i) => snapshot.pageReads[`${l.id}__${i}`] ? 1 : 0).reduce((a, b) => a + b, 0);
         }, 0);
-        // Per-page MCQ done count for subject
-        const subMcqDone    = lessons.reduce((s, l) => {
+        const subMcqDone    = allSubLessons.reduce((s, l) => {
           const tp = l.pages?.length || 0;
           return s + Array.from({ length: tp }, (_, i) => !!snapshot.pageMcqDone?.[`${l.id}__${i}`] ? 1 : 0).reduce((a, b) => a + b, 0);
         }, 0);
-        const subTotalPagesWithAny = lessons.reduce((s, l) => s + (l.pages?.length || 0), 0);
-        const subCompletedLessons = lessons.filter(l => {
+        const subCompletedLessons = allSubLessons.filter(l => {
           const tp = l.pages?.length || 0;
           if (tp === 0) return false;
           return Array.from({ length: tp }, (_, i) => {
@@ -712,13 +876,19 @@ function TrackingView({ subjectGroups, subjects, mcqHistory }: {
           }).every(Boolean);
         }).length;
         const subPct = subTotalPages > 0 ? Math.round((subReadPages / subTotalPages) * 100) : 0;
-        const isExpanded = !!expandedSubs[sub.id];
+        const isExpanded = expandedSubs[sub.id] ?? (selectedSubFilter === sub.id || !!trackingSearch);
+
+        // Pagination / batching for large number of lessons (e.g. 50-200)
+        const isShowAll = !!showAllLessons[sub.id];
+        const currentBatch = subjectBatch[sub.id] || 0;
+        const totalBatches = Math.ceil(lessons.length / BATCH_SIZE);
+        const visibleLessons = isShowAll ? lessons : lessons.slice(currentBatch * BATCH_SIZE, (currentBatch + 1) * BATCH_SIZE);
 
         return (
           <div key={sub.id} className={`rounded-2xl border overflow-hidden ${sub.routineApplied ? meta.border : 'border-slate-200'} bg-white`}>
             {/* Subject header */}
             <div className="flex items-center gap-3 p-3.5 cursor-pointer active:bg-slate-50"
-              onClick={() => setExpandedSubs(prev => ({ ...prev, [sub.id]: !prev[sub.id] }))}>
+              onClick={() => setExpandedSubs(prev => ({ ...prev, [sub.id]: !isExpanded }))}>
               <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${meta.bg} ${meta.color}`}>
                 {meta.icon}
               </div>
@@ -728,6 +898,9 @@ function TrackingView({ subjectGroups, subjects, mcqHistory }: {
                   {sub.routineApplied && (
                     <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${meta.bg} ${meta.color}`}>Routine</span>
                   )}
+                  <span className="text-[10px] font-black bg-slate-100 text-slate-600 px-2 py-0.2 rounded-full ml-auto">
+                    {lessons.length} Lessons
+                  </span>
                 </div>
                 <div className="flex items-center gap-2 mt-1">
                   <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
@@ -741,29 +914,68 @@ function TrackingView({ subjectGroups, subjects, mcqHistory }: {
             </div>
 
             {/* Subject stats strip */}
-            <div className="flex border-t border-slate-100 divide-x divide-slate-100">
+            <div className="flex border-t border-slate-100 divide-x divide-slate-100 bg-slate-50/50">
               <div className="flex-1 py-2 text-center">
-                <p className="text-[9px] text-slate-400">Lessons</p>
-                <p className="text-xs font-black text-slate-700">{lessons.length}</p>
+                <p className="text-[9px] text-slate-400">Total Lessons</p>
+                <p className="text-xs font-black text-slate-700">{allSubLessons.length}</p>
               </div>
               <div className="flex-1 py-2 text-center">
                 <p className="text-[9px] text-slate-400">Complete</p>
                 <p className="text-xs font-black text-emerald-600">{subCompletedLessons}</p>
               </div>
               <div className="flex-1 py-2 text-center">
-                <p className="text-[9px] text-slate-400">Pages</p>
+                <p className="text-[9px] text-slate-400">Pages Read</p>
                 <p className="text-xs font-black text-blue-600">{subReadPages}/{subTotalPages}</p>
               </div>
               <div className="flex-1 py-2 text-center">
-                <p className="text-[9px] text-slate-400">MCQ ✅</p>
-                <p className="text-xs font-black text-purple-600">{subMcqDone}/{subTotalPagesWithAny}</p>
+                <p className="text-[9px] text-slate-400">MCQ Done</p>
+                <p className="text-xs font-black text-purple-600">{subMcqDone}/{subTotalPages}</p>
               </div>
             </div>
 
             {/* Lesson list */}
             {isExpanded && (
               <div className="border-t border-slate-100 px-3 pb-3 pt-2.5 space-y-1.5">
-                {lessons.map((lesson, lidx) => {
+                {/* Batching controls if lessons count is large */}
+                {lessons.length > BATCH_SIZE && (
+                  <div className="flex items-center justify-between p-2 bg-slate-50 rounded-xl border border-slate-200 mb-2 text-[10px] font-bold text-slate-600">
+                    <span>
+                      {isShowAll 
+                        ? `Sabhi ${lessons.length} lessons dikh rahe hain`
+                        : `Showing ${currentBatch * BATCH_SIZE + 1}–${Math.min((currentBatch + 1) * BATCH_SIZE, lessons.length)} of ${lessons.length} lessons`
+                      }
+                    </span>
+                    <div className="flex items-center gap-1">
+                      {!isShowAll && totalBatches > 1 && (
+                        <>
+                          <button
+                            disabled={currentBatch === 0}
+                            onClick={() => setSubjectBatch(prev => ({ ...prev, [sub.id]: Math.max(0, (prev[sub.id] || 0) - 1) }))}
+                            className="px-2 py-0.5 bg-white border border-slate-200 rounded text-slate-700 disabled:opacity-30 disabled:cursor-not-allowed"
+                          >
+                            ← Pehle 15
+                          </button>
+                          <button
+                            disabled={currentBatch >= totalBatches - 1}
+                            onClick={() => setSubjectBatch(prev => ({ ...prev, [sub.id]: Math.min(totalBatches - 1, (prev[sub.id] || 0) + 1) }))}
+                            className="px-2 py-0.5 bg-white border border-slate-200 rounded text-slate-700 disabled:opacity-30 disabled:cursor-not-allowed"
+                          >
+                            Agale 15 →
+                          </button>
+                        </>
+                      )}
+                      <button
+                        onClick={() => setShowAllLessons(prev => ({ ...prev, [sub.id]: !isShowAll }))}
+                        className="px-2 py-0.5 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded font-black hover:bg-indigo-100"
+                      >
+                        {isShowAll ? '15 per page' : 'Sabhi Dekhein'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {visibleLessons.map((lesson, lidx) => {
+                  const globalIdx = isShowAll ? lidx : (currentBatch * BATCH_SIZE) + lidx;
                   const tp      = lesson.pages?.length || 0;
                   const lMcq       = isRoutineMcqDone(lesson.id); // lesson-level (any MCQ done)
                   const lScore     = getRoutineMcqScore(lesson.id);
@@ -776,15 +988,14 @@ function TrackingView({ subjectGroups, subjects, mcqHistory }: {
                   const lRead   = lPages.filter(s => s !== 'none').length;
                   const lDone   = lPages.filter(s => s === 'done').length;
                   const lMcqPagesCount = Array.from({ length: tp }, (_, i) => !!snapshot.pageMcqDone?.[`${lesson.id}__${i}`]).filter(Boolean).length;
-                  // Pages that actually have MCQ content (use as denominator to avoid "incomplete" illusion)
                   const lPagesWithMcq = (lesson.pages || []).filter(p => (p as any).mcqs?.length > 0).length;
-                  const lMcqDenom = lPagesWithMcq > 0 ? lPagesWithMcq : tp; // fallback to totalPages if no mcq metadata
+                  const lMcqDenom = lPagesWithMcq > 0 ? lPagesWithMcq : tp;
                   const lComplete = lDone === tp && tp > 0;
                   const lExpanded = !!expandedLessons[lesson.id];
 
-                  // ── Lesson % computation ──────────────────────────────────────
-                  const pageAvgPct  = getLessonPageAvgPercent(lesson.id, tp);   // current avg
-                  const bestAvgPct  = getLessonBestPageAvgPercent(lesson.id, tp); // best avg
+                  // Lesson % computation
+                  const pageAvgPct  = getLessonPageAvgPercent(lesson.id, tp);
+                  const bestAvgPct  = getLessonBestPageAvgPercent(lesson.id, tp);
                   const lessonPct: number | null = pageAvgPct;
 
                   const pctColor = (p: number) =>
@@ -807,15 +1018,20 @@ function TrackingView({ subjectGroups, subjects, mcqHistory }: {
                           lMcq ? 'bg-orange-400 text-white' :
                           'bg-slate-100 text-slate-500'
                         }`}>
-                          {lComplete ? <Check size={11} /> : lidx + 1}
+                          {lComplete ? <Check size={11} /> : globalIdx + 1}
                         </div>
 
                         {/* Title */}
-                        <p className={`flex-1 text-[11px] font-bold truncate ${
-                          lComplete ? 'text-emerald-700' : lMcq ? 'text-orange-700' : 'text-slate-700'
-                        }`}>
-                          {lesson.lessonTitle || `Lesson ${lidx + 1}`}
-                        </p>
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-[11px] font-bold truncate ${
+                            lComplete ? 'text-emerald-700' : lMcq ? 'text-orange-700' : 'text-slate-700'
+                          }`}>
+                            {lesson.lessonTitle || `Lesson ${globalIdx + 1}`}
+                          </p>
+                          <p className="text-[9px] text-slate-400 mt-0.2">
+                            {tp} Topics/Pages · {lRead}/{tp} Read · {lMcqPagesCount}/{lMcqDenom} MCQ
+                          </p>
+                        </div>
 
                         {/* Lesson % badge */}
                         {lessonPct !== null ? (
@@ -835,12 +1051,32 @@ function TrackingView({ subjectGroups, subjects, mcqHistory }: {
                         {lExpanded ? <ChevronUp size={11} className="text-slate-300 shrink-0" /> : <ChevronDown size={11} className="text-slate-300 shrink-0" />}
                       </div>
 
-                      {/* Expanded pages */}
+                      {/* Expanded pages / 30 Topics */}
                       {lExpanded && (
                         <div className="px-3 pb-3 border-t border-slate-100 pt-2.5 space-y-3">
+                          {/* Quick Study / Practice buttons for this lesson */}
+                          {onOpenLesson && (
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                onClick={() => onOpenLesson(lesson.id)}
+                                className="py-2 px-3 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-black flex items-center justify-center gap-1.5 active:scale-95 transition hover:bg-indigo-100"
+                              >
+                                <BookOpen size={13} />
+                                <span>📖 Read Notes ({tp} pgs)</span>
+                              </button>
+                              <button
+                                onClick={() => onOpenLesson(lesson.id)}
+                                className="py-2 px-3 rounded-xl bg-violet-600 text-white text-xs font-black flex items-center justify-center gap-1.5 active:scale-95 transition hover:bg-violet-700 shadow-xs"
+                              >
+                                <Target size={13} />
+                                <span>🧠 Practice MCQ</span>
+                              </button>
+                            </div>
+                          )}
+
                           {tp > 0 ? (
                             <>
-                              {/* ── Lesson mastery card ── */}
+                              {/* Lesson mastery card */}
                               {lessonPct !== null && (
                                 <div className={`rounded-xl border p-3 ${pctBg(lessonPct)}`}>
                                   <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2">📊 Lesson Mastery</p>
@@ -871,22 +1107,25 @@ function TrackingView({ subjectGroups, subjects, mcqHistory }: {
                                 </div>
                               )}
 
-                              {/* ── Per-page grid ── */}
+                              {/* Per-page / topic grid */}
                               <div>
-                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Pages ({tp} total)</p>
+                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Topics & Pages ({tp} total)</p>
                                 <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${Math.min(tp, 6)}, minmax(0, 1fr))` }}>
                                   {Array.from({ length: tp }, (_, pi) => {
                                     const st      = lPages[pi];
                                     const curPct  = getPageMcqPercent(lesson.id, pi);
                                     const bestPct = getPageMcqBestPercent(lesson.id, pi);
                                     const pageSec = getPageTime(lesson.id, pi);
+                                    const pageTopic = lesson.pages?.[pi]?.topic;
                                     const dotColor = st === 'done' ? 'bg-emerald-500' : st === 'read' ? 'bg-orange-400' : 'bg-slate-200';
                                     return (
                                       <div key={pi} className={`rounded-lg border text-center py-1.5 px-1 ${
                                         st === 'done' ? 'border-emerald-200 bg-emerald-50' :
                                         st === 'read' ? 'border-orange-200 bg-orange-50' :
                                         'border-slate-100 bg-slate-50'
-                                      }`}>
+                                      }`}
+                                      title={pageTopic ? `Topic: ${pageTopic}` : `Page ${pi + 1}`}
+                                      >
                                         <div className={`w-4 h-4 rounded-full mx-auto mb-0.5 flex items-center justify-center text-[8px] font-black text-white ${dotColor}`}>
                                           {pi + 1}
                                         </div>
@@ -912,7 +1151,7 @@ function TrackingView({ subjectGroups, subjects, mcqHistory }: {
                                 </div>
                               </div>
 
-                              {/* ── Summary strip ── */}
+                              {/* Summary strip */}
                               <div className="flex flex-wrap gap-2 bg-white rounded-xl border border-slate-100 px-3 py-2">
                                 <div>
                                   <p className="text-[9px] text-slate-400">Pages padhe</p>
@@ -1944,6 +2183,7 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
       });
     } catch { /* ignore — revision scheduling is non-critical */ }
     import('../utils/sessionNotify').then(({ fireSessionComplete }) => {
+      const ptsEarned = 25; // 25 pts per lesson (notes or mcq)
       const noteContentType = (note as any)?.contentType as string | undefined;
       const activityType = noteContentType === 'NOTES'
         ? 'Reading'
@@ -2380,6 +2620,7 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
                       coins={userCredits}
                       onChangeStart={handleCatChangeStart}
                       onCoinFlash={(msg) => showToast(msg, msg.includes('kam') ? 'error' : msg.includes('−') ? 'coin' : 'success')}
+                      onOpenLesson={onOpenLesson}
                     />
                   ))}
                 </div>
@@ -2391,7 +2632,12 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
         {/* TRACKING */}
         {activeView === 'tracking' && (
           <div className="mx-4 mt-4">
-            <TrackingView subjectGroups={subjectGroups} subjects={subjects} mcqHistory={mcqHistory} />
+            <TrackingView
+              subjectGroups={subjectGroups}
+              subjects={subjects}
+              mcqHistory={mcqHistory}
+              onOpenLesson={onOpenLesson}
+            />
           </div>
         )}
 

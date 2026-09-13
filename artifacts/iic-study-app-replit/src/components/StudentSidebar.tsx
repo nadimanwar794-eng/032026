@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Gift, Gamepad2, CreditCard, Crown, History, BrainCircuit, Award, Trophy, Mail, User, ChevronRight, LogOut, FileClock, Download, Palette, Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
+import { X, Gift, Gamepad2, CreditCard, Crown, History, BrainCircuit, Award, Trophy, Mail, User, ChevronRight, LogOut, FileClock, Download, Palette, Sparkles, ChevronDown, ChevronUp, Users } from 'lucide-react';
 import { StudentTab, User as UserType, SystemSettings } from '../types';
 import { FeatureTipsList } from './FeatureHints';
 
@@ -25,6 +25,7 @@ export const StudentSidebar: React.FC<Props> = ({ isOpen, onClose, onNavigate, u
 
         // --- PREMIUM & REWARDS ---
         { id: 'STORE', icon: Crown, label: 'Premium Store', color: 'text-yellow-600', featureId: 'f12', category: 'PREMIUM' },
+        { id: 'REFERRAL' as any, icon: Users, label: 'Refer & Earn (VIP)', color: 'text-emerald-600', category: 'PREMIUM' },
         { id: 'SUB_HISTORY' as any, icon: CreditCard, label: 'My Plan', color: 'text-blue-600', featureId: 'f11', category: 'PREMIUM' },
         { id: 'REDEEM', icon: Gift, label: 'Redeem Code', color: 'text-pink-600', category: 'PREMIUM' },
 

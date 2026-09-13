@@ -792,7 +792,7 @@ export const ALL_FEATURES: Feature[] = [
     },
     {
         id: 'ADMIN_POWER',
-        label: 'Advanced Settings',
+        label: '🪙 Credit Costs & Plan Perks',
         group: 'ADVANCED',
         surfaceLevel: 3,
         adminVisible: true,
@@ -869,7 +869,7 @@ export const ALL_FEATURES: Feature[] = [
     },
     {
         id: 'ADMIN_NSTA_CONTROL',
-        label: 'NSTA Control',
+        label: 'Nsta',
         group: 'GAME',
         surfaceLevel: 3,
         adminVisible: true,
