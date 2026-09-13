@@ -126,13 +126,13 @@ export const getStudentSubscriptionTier = (student: ChatContact): 'ULTRA' | 'BAS
   return 'FREE';
 };
 
-// Daily message limit: Free -> 50, Basic -> 200, Ultra -> Unlimited (Infinity)
+// Daily message limit: Free -> 50, Basic -> 100, Ultra -> 300
 export const getBaseDailyMessageLimit = (tier: 'FREE' | 'BASIC' | 'ULTRA'): number => {
   switch (tier) {
     case 'ULTRA':
-      return Infinity;
+      return 300;
     case 'BASIC':
-      return 200;
+      return 100;
     case 'FREE':
     default:
       return 50;
@@ -270,7 +270,7 @@ export const WhatsAppChatModal: React.FC<Props> = ({
     }
   });
   const baseDailyMsgLimit = getBaseDailyMessageLimit(currentTier);
-  const totalDailyMsgLimit = baseDailyMsgLimit === Infinity ? Infinity : baseDailyMsgLimit + dailyMsgExpansions * 10;
+  const totalDailyMsgLimit = baseDailyMsgLimit === Infinity ? Infinity : baseDailyMsgLimit + dailyMsgExpansions * 50;
   const isDailyMsgLimitReached = totalDailyMsgLimit !== Infinity && dailyMessagesSent >= totalDailyMsgLimit;
   const [showMessageLimitModal, setShowMessageLimitModal] = useState(false);
 
@@ -391,13 +391,13 @@ export const WhatsAppChatModal: React.FC<Props> = ({
     setTimeout(() => setBannerNotice(null), 3500);
   };
 
-  // Unified Limit Expansion with 100 Credits OR 10 Diamonds (+10 limit)
+  // Unified Limit Expansion: 100 Credits OR 20 Diamonds for Messages (+50 limit), 100 Credits OR 10 Diamonds for Friends/Blocks (+10)
   const handleExpandLimit = async (
     type: 'MESSAGE' | 'FRIEND' | 'BLOCK',
     currency: 'CREDITS' | 'DIAMONDS'
   ): Promise<boolean> => {
     const costCredits = 100;
-    const costDiamonds = 10;
+    const costDiamonds = type === 'MESSAGE' ? 20 : 10;
     const curCredits = getTotalCredits(currentUser);
     const curDiamonds = currentUser.diamonds || 0;
 
@@ -441,7 +441,7 @@ export const WhatsAppChatModal: React.FC<Props> = ({
         try {
           localStorage.setItem(`nsta_msg_expansions_${user.id}_${today}`, String(nextExp));
         } catch {}
-        showToast(`🎉 +10 Daily Messages unlock ho gaye! Aaj ka naya limit: ${baseDailyMsgLimit + nextExp * 10} msgs.`);
+        showToast(`🎉 +50 Daily Messages unlock ho gaye! Aaj ka naya limit: ${baseDailyMsgLimit + nextExp * 50} msgs.`);
         setShowMessageLimitModal(false);
       } else if (type === 'FRIEND') {
         const nextExp = friendExpansions + 1;
@@ -4255,7 +4255,7 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                   Aapne aaj ki <strong>{totalDailyMsgLimit} messages</strong> ki limit poori kar li hai ({currentTier} plan).
                 </p>
                 <div className="mt-2 text-[10px] text-slate-400 bg-slate-100 dark:bg-slate-800/60 py-1.5 px-2 rounded-xl">
-                  Free: 50/day · Basic: 200/day · Ultra: Unlimited
+                  Free: 50/day · Basic: 100/day · Ultra: 300/day
                 </div>
               </div>
 
@@ -4264,7 +4264,7 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5 font-black text-xs text-purple-900 dark:text-purple-200 uppercase tracking-wide">
                     <Zap size={14} className="text-amber-500" />
-                    <span>+10 Daily Messages Unlock Karein</span>
+                    <span>+50 Daily Messages Unlock Karein</span>
                   </div>
                   <span className="text-[10px] font-black px-1.5 py-0.5 bg-purple-500/20 text-purple-700 dark:text-purple-300 rounded-md">
                     Instant
@@ -4279,7 +4279,7 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                 </div>
                 <div className="flex items-center justify-between text-xs font-bold">
                   <span className="text-slate-600 dark:text-slate-300">Aapke Diamonds:</span>
-                  <span className={userDiamonds >= 10 ? 'text-cyan-600 dark:text-cyan-400 font-black' : 'text-rose-600 dark:text-rose-400 font-black'}>
+                  <span className={userDiamonds >= 20 ? 'text-cyan-600 dark:text-cyan-400 font-black' : 'text-rose-600 dark:text-rose-400 font-black'}>
                     💎 {userDiamonds} Diamonds
                   </span>
                 </div>
@@ -4298,22 +4298,22 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                   }`}
                 >
                   <Coins size={14} />
-                  <span>100 Credits se Unlock Karein (+10 Messages)</span>
+                  <span>100 Credits se Unlock Karein (+50 Messages)</span>
                 </button>
 
-                {/* Option 2: 10 Diamonds */}
+                {/* Option 2: 20 Diamonds */}
                 <button
                   type="button"
                   onClick={() => handleExpandLimit('MESSAGE', 'DIAMONDS')}
-                  disabled={isExpandingLimit || userDiamonds < 10}
+                  disabled={isExpandingLimit || userDiamonds < 20}
                   className={`w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
-                    userDiamonds >= 10
+                    userDiamonds >= 20
                       ? 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 text-white cursor-pointer'
                       : 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-300 dark:border-slate-700'
                   }`}
                 >
                   <Gem size={14} />
-                  <span>10 Diamonds se Unlock Karein (+10 Messages)</span>
+                  <span>20 Diamonds se Unlock Karein (+50 Messages)</span>
                 </button>
 
                 <button

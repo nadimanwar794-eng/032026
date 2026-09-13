@@ -1258,19 +1258,25 @@ function getAvailableSubjectSlots(notes: LucentEntry[]): Array<{
 
 // ── Routine Setup Sheet (one-time: School/Competition → Class/Books, saved to data) ──
 
-function RoutineSetupSheet({ allNotes, currentMode, currentBoard, currentClass, currentBooks, onSave, onClose }: {
+function RoutineSetupSheet({ allNotes, currentMode, currentBoard, currentClass, currentBooks, isUltraUser, onSave, onClose }: {
   allNotes: LucentEntry[];
   currentMode: 'SCHOOL' | 'COMPETITION' | null;
   currentBoard: string | null;
   currentClass: string | null;
   currentBooks: string[];
+  isUltraUser?: boolean;
   onSave: (mode: 'SCHOOL' | 'COMPETITION', board: string | null, classLevel: string | null, books: string[]) => void;
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<'SCHOOL' | 'COMPETITION' | null>(currentMode);
   const [board, setBoard] = useState<string | null>(currentBoard);
   const [classLevel, setClassLevel] = useState(currentClass || '');
-  const [selectedBooks, setSelectedBooks] = useState<Set<string>>(new Set(currentBooks));
+  const [selectedBooks, setSelectedBooks] = useState<Set<string>>(() => {
+    if (!isUltraUser) {
+      return new Set(['Lucent']);
+    }
+    return new Set(currentBooks.length > 0 ? currentBooks : ['Lucent']);
+  });
 
   const availableClasses = useMemo(() => {
     const s = new Set<string>();
@@ -1371,29 +1377,60 @@ function RoutineSetupSheet({ allNotes, currentMode, currentBoard, currentClass, 
 
           {mode === 'COMPETITION' && (
             <div className="block">
-              <span className="block text-xs font-black text-slate-600 mb-1.5">Select Books (Multiple possible)</span>
+              <span className="block text-xs font-black text-slate-600 mb-1.5">
+                Select Books {!isUltraUser ? '(Lucent Default · Multiple books Ultra only)' : '(Multiple possible)'}
+              </span>
+              {!isUltraUser && (
+                <div className="mb-2 p-2.5 rounded-xl bg-purple-50 border border-purple-200 flex items-center gap-2">
+                  <span className="text-xs">👑</span>
+                  <p className="text-[11px] font-semibold text-purple-700">Free aur Basic users ke liye default Lucent book routine mein rehti hai. Multiple books add karne ke liye Ultra plan chahiye.</p>
+                </div>
+              )}
               <div className="flex flex-col gap-2 max-h-48 overflow-y-auto p-1">
-                {availableBooks.map(book => (
-                  <label key={book} className="flex items-center gap-3 p-3 rounded-xl border border-orange-100 bg-orange-50/50 cursor-pointer active:bg-orange-100 transition-colors">
-                    <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 ${selectedBooks.has(book) ? 'border-orange-500 bg-orange-500' : 'border-slate-300 bg-white'}`}>
-                      {selectedBooks.has(book) && <span className="text-white text-xs font-bold">✓</span>}
-                    </div>
-                    <span className="text-sm font-black text-orange-800 flex-1">{book}</span>
-                    <input
-                      type="checkbox"
-                      className="hidden"
-                      checked={selectedBooks.has(book)}
-                      onChange={(e) => {
-                        setSelectedBooks(prev => {
-                          const next = new Set(prev);
-                          if (e.target.checked) next.add(book);
-                          else next.delete(book);
-                          return next;
-                        });
+                {availableBooks.map(book => {
+                  const isLockedForNonUltra = !isUltraUser && book.toLowerCase() !== 'lucent';
+                  return (
+                    <label
+                      key={book}
+                      className={`flex items-center gap-3 p-3 rounded-xl border transition-colors ${
+                        isLockedForNonUltra
+                          ? 'border-slate-200 bg-slate-50 opacity-60 cursor-not-allowed'
+                          : 'border-orange-100 bg-orange-50/50 cursor-pointer active:bg-orange-100'
+                      }`}
+                      onClick={(e) => {
+                        if (isLockedForNonUltra) {
+                          e.preventDefault();
+                          alert('Multiple books routine mein add karne ke liye Ultra plan chahiye.');
+                        }
                       }}
-                    />
-                  </label>
-                ))}
+                    >
+                      <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 ${selectedBooks.has(book) ? 'border-orange-500 bg-orange-500' : 'border-slate-300 bg-white'}`}>
+                        {selectedBooks.has(book) && <span className="text-white text-xs font-bold">✓</span>}
+                      </div>
+                      <span className="text-sm font-black text-orange-800 flex-1">{book}</span>
+                      {isLockedForNonUltra && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 border border-purple-200">
+                          🔒 Ultra Only
+                        </span>
+                      )}
+                      <input
+                        type="checkbox"
+                        disabled={isLockedForNonUltra}
+                        className="hidden"
+                        checked={selectedBooks.has(book)}
+                        onChange={(e) => {
+                          if (isLockedForNonUltra) return;
+                          setSelectedBooks(prev => {
+                            const next = new Set(prev);
+                            if (e.target.checked) next.add(book);
+                            else next.delete(book);
+                            return next;
+                          });
+                        }}
+                      />
+                    </label>
+                  );
+                })}
               </div>
               {availableBooks.length === 0 && (
                 <span className="block text-xs text-slate-400 font-medium mt-2">Koi book notes nahi mili — pehle notes add karo.</span>
@@ -2274,6 +2311,7 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
           currentBoard={data.selectedBoard ?? null}
           currentClass={data.selectedClass}
           currentBooks={data.selectedBooks || []}
+          isUltraUser={subTier === 'MAX_PRO'}
           onSave={(mode, board, classLevel, books) => {
             setData(prev => {
               // Build storage key for the current (old) class/book context

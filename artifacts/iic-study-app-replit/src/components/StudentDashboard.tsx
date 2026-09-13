@@ -12,6 +12,7 @@ import { StudentProgressDashboard } from "./StudentProgressDashboard";
 import { SuggestionsPanel } from "./SuggestionsPanel";
 import { applyDeduction, getTotalCredits, getCreditCost } from "../utils/creditSystem";
 import { fireCreditNotify } from "../utils/creditNotify";
+import { getDiamondUnlockCost, UNLOCK_COSTS } from "../utils/limits";
 import { LevelLeaderboard } from "./LevelLeaderboard";
 import { StudentLevelPage } from "./StudentLevelPage";
 import { TopBarRow2XpBar } from "./TopBarRow2XpBar";
@@ -1194,6 +1195,27 @@ export const StudentDashboard: React.FC<Props> = ({
     setCoinGate({ cost, originalCost: baseCost, discountPct, reason, action, onCancel, bulkOption: _bulkOption, pageInfo });
   };
 
+  // Show diamond-only unlock gate for Ultra/exclusive features (Flashcard, Video, PDF for free)
+  const showDiamondOnlyGate = (
+    diamonds: number,
+    featureName: string,
+    action: () => void,
+    onCancel?: () => void
+  ) => {
+    const _isAdm = user.role === 'ADMIN' || user.role === 'SUB_ADMIN';
+    if (_isAdm) { action(); return; }
+    setCoinGate({
+      cost: 0,
+      originalCost: 0,
+      discountPct: 0,
+      reason: featureName,
+      action,
+      onCancel,
+      diamondOnly: true,
+      costDiamonds: diamonds,
+    });
+  };
+
   // Per-page / per-session unlock localStorage helpers
   const _pgReadUnlockKey   = (lid: string, pi: number) => `nst_pg_r_${user.id}_${lid}_${pi}`;
   const _pgWriteUnlockKey  = (lid: string, pi: number) => `nst_pg_w_${user.id}_${lid}_${pi}`;
@@ -2041,6 +2063,8 @@ export const StudentDashboard: React.FC<Props> = ({
     action: () => void;
     onCancel?: () => void;
     selectedBulk?: boolean;
+    diamondOnly?: boolean;
+    costDiamonds?: number;
     bulkOption?: { count: number; totalCost: number; originalTotal: number; action: () => void; pages: Array<{ name: string; cost: number }> };
     // New: page-mode panel (shows all modes for current page with tier locks)
     pageInfo?: {
@@ -5800,18 +5824,39 @@ export const StudentDashboard: React.FC<Props> = ({
       if (isQaPageUnlocked(_lid, 0)) { doOpen(); return; }
       showCoinGate(20, 'Q&A Mode', () => { markQaPageUnlocked(_lid, 0); doOpen(); }, undefined, undefined, _pgInfo);
     } else if (mode === 'FLASHCARD') {
-      if (!_isUltraUser) { showAlert('🔒 Flashcard ke liye ULTRA subscription chahiye! Store se upgrade karein.', 'INFO'); return; }
-      if (isFcPageUnlocked(_lid, 0)) { doOpen(); return; }
-      showCoinGate(20, 'Flashcard', () => { markFcPageUnlocked(_lid, 0); doOpen(); }, undefined, undefined, _pgInfo);
+      if (_isUltraUser || _isAdminUser) {
+        if (isFcPageUnlocked(_lid, 0)) { doOpen(); return; }
+        showCoinGate(20, 'Flashcard', () => { markFcPageUnlocked(_lid, 0); doOpen(); }, undefined, undefined, _pgInfo);
+      } else {
+        if (isFcPageUnlocked(_lid, 0)) { doOpen(); return; }
+        showDiamondOnlyGate(5, 'Flashcard (Ultra Exclusive)', () => { markFcPageUnlocked(_lid, 0); doOpen(); });
+        return;
+      }
     } else if (mode === 'PROJECTOR') {
       if (isProjectorUnlocked(_lid, 0)) { doOpen(); return; }
       showCoinGate(20, 'Projector Mode', () => { markProjectorUnlocked(_lid, 0); doOpen(); }, undefined, undefined, _pgInfo);
     } else if (mode === 'PDF') {
-      if (!_isBasicUser && !_isUltraUser) { showAlert('🔒 PDF ke liye BASIC subscription chahiye! Store se upgrade karein.', 'INFO'); return; }
-      doOpen();
+      if (_isBasicUser || _isUltraUser || _isAdminUser) {
+        doOpen();
+      } else {
+        const _pdfKey = `nst_pdf_unlocked_${user.id}_${_lid}`;
+        if (localStorage.getItem(_pdfKey) === '1') { doOpen(); return; }
+        showDiamondOnlyGate(5, 'PDF Document', () => {
+          try { localStorage.setItem(_pdfKey, '1'); } catch {}
+          doOpen();
+        });
+      }
     } else if (mode === 'VIDEO') {
-      if (!_isUltraUser) { showAlert('🔒 Video ke liye ULTRA subscription chahiye! Store se upgrade karein.', 'INFO'); return; }
-      doOpen();
+      if (_isUltraUser || _isAdminUser) {
+        doOpen();
+      } else {
+        const _vidKey = `nst_video_unlocked_${user.id}_${_lid}`;
+        if (localStorage.getItem(_vidKey) === '1') { doOpen(); return; }
+        showDiamondOnlyGate(5, 'Video Lesson (Ultra Exclusive)', () => {
+          try { localStorage.setItem(_vidKey, '1'); } catch {}
+          doOpen();
+        });
+      }
     } else if (mode === 'AUDIO') {
       if (!_isUltraUser) { showAlert('🔒 Audio ke liye ULTRA subscription chahiye! Store se upgrade karein.', 'INFO'); return; }
       doOpen();
@@ -8931,31 +8976,38 @@ export const StudentDashboard: React.FC<Props> = ({
                           style={_hwTabStyle}
                           className={_hwTabCls(false, 'bg-amber-500', 'text-white') + (_fcLocked ? ' opacity-60' : '')}
                           onClick={() => {
+                            const _openFc = () => {
+                              stopSpeech();
+                              setFlashcardMcqs({
+                                items: _hwMcqs,
+                                title: activeHw.title || 'Competition Flashcards',
+                                subtitle: `${_hwMcqs.length} Cards`,
+                                subject: activeHw.subject || '',
+                                sourceKey: getStudyActivityKey(activeHw.id, 0),
+                                startInProjectorMode: false,
+                                fromLesson: {
+                                  hasMcq: true,
+                                  isAdmin: _isAdminUser,
+                                  activeMode: 'flashcard',
+                                  hasPdf,
+                                  hasVideo,
+                                  hasAudio,
+                                  isCompetition: true,
+                                  returnMode: effectiveMode,
+                                  unlockId: activeHw.id,
+                                  unlockPageIndex: 0,
+                                },
+                              });
+                            };
                             if (_fcLocked) {
-                              showAlert('🔒 Flashcard ke liye ULTRA subscription chahiye! Store se upgrade karein.', 'INFO');
+                              if (isFcPageUnlocked(activeHw.id, 0)) { _openFc(); return; }
+                              showDiamondOnlyGate(5, 'Flashcard (Ultra Exclusive)', () => {
+                                markFcPageUnlocked(activeHw.id, 0);
+                                _openFc();
+                              });
                               return;
                             }
-                            stopSpeech();
-                            setFlashcardMcqs({
-                              items: _hwMcqs,
-                              title: activeHw.title || 'Competition Flashcards',
-                              subtitle: `${_hwMcqs.length} Cards`,
-                              subject: activeHw.subject || '',
-                              sourceKey: getStudyActivityKey(activeHw.id, 0),
-                              startInProjectorMode: false,
-                              fromLesson: {
-                                hasMcq: true,
-                                isAdmin: _isAdminUser,
-                                activeMode: 'flashcard',
-                                hasPdf,
-                                hasVideo,
-                                hasAudio,
-                                isCompetition: true,
-                                returnMode: effectiveMode,
-                                unlockId: activeHw.id,
-                                unlockPageIndex: 0,
-                              },
-                            });
+                            _openFc();
                           }}
                         >
                           {_fcLocked ? '🔒' : '🃏'} Flashcard{_fcLocked ? ' · ULTRA' : ''}
@@ -8968,7 +9020,17 @@ export const StudentDashboard: React.FC<Props> = ({
                         <button
                           data-tab-active={String(effectiveMode === 'pdf')}
                           onClick={() => {
-                            if (_pdfLocked) { showAlert('🔒 PDF ke liye BASIC subscription chahiye! Store se upgrade karein.', 'INFO'); return; }
+                            if (_pdfLocked) {
+                              const _pdfKey = `nst_pdf_unlocked_${user.id}_${activeHw.id}`;
+                              if (localStorage.getItem(_pdfKey) === '1') {
+                                stopSpeech(); setHwViewMode('pdf'); _hwSave('pdf'); return;
+                              }
+                              showDiamondOnlyGate(5, 'PDF Document', () => {
+                                try { localStorage.setItem(_pdfKey, '1'); } catch {}
+                                stopSpeech(); setHwViewMode('pdf'); _hwSave('pdf');
+                              });
+                              return;
+                            }
                             stopSpeech(); setHwViewMode('pdf'); _hwSave('pdf');
                           }}
                           style={_hwTabStyle}
@@ -8984,7 +9046,17 @@ export const StudentDashboard: React.FC<Props> = ({
                         <button
                           data-tab-active={String(effectiveMode === 'video')}
                           onClick={() => {
-                            if (_vidLocked) { showAlert('🔒 Video ke liye ULTRA subscription chahiye! Store se upgrade karein.', 'INFO'); return; }
+                            if (_vidLocked) {
+                              const _vidKey = `nst_video_unlocked_${user.id}_${activeHw.id}`;
+                              if (localStorage.getItem(_vidKey) === '1') {
+                                stopSpeech(); setHwViewMode('video'); _hwSave('video'); return;
+                              }
+                              showDiamondOnlyGate(5, 'Video Lesson (Ultra Exclusive)', () => {
+                                try { localStorage.setItem(_vidKey, '1'); } catch {}
+                                stopSpeech(); setHwViewMode('video'); _hwSave('video');
+                              });
+                              return;
+                            }
                             stopSpeech(); setHwViewMode('video'); _hwSave('video');
                           }}
                           style={_hwTabStyle}
@@ -22595,13 +22667,13 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                   if (isQaPageUnlocked(entry.id, safeIndex)) { _doSwitch(); return; }
                   showCoinGate(20, 'Q&A Mode', () => { markQaPageUnlocked(entry.id, safeIndex); _doSwitch(); }, undefined, undefined, _pgInfo);
                 } else if (tab === 'FLASHCARD') {
-                  // Tier gate: Flashcard requires ULTRA subscription
-                  if (!_isUltraUser) {
-                    showAlert('🔒 Flashcard ke liye ULTRA subscription chahiye! Store se upgrade karein.', 'INFO');
-                    return;
+                  if (_isUltraUser || _isAdm) {
+                    if (isFcPageUnlocked(entry.id, safeIndex)) { _doSwitch(); return; }
+                    showCoinGate(20, 'Flashcard', () => { markFcPageUnlocked(entry.id, safeIndex); _doSwitch(); }, undefined, undefined, _pgInfo);
+                  } else {
+                    if (isFcPageUnlocked(entry.id, safeIndex)) { _doSwitch(); return; }
+                    showDiamondOnlyGate(5, 'Flashcard (Ultra Exclusive)', () => { markFcPageUnlocked(entry.id, safeIndex); _doSwitch(); });
                   }
-                  if (isFcPageUnlocked(entry.id, safeIndex)) { _doSwitch(); return; }
-                  showCoinGate(20, 'Flashcard', () => { markFcPageUnlocked(entry.id, safeIndex); _doSwitch(); }, undefined, undefined, _pgInfo);
                 }
               };
               return (
@@ -22660,7 +22732,17 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                         <button
                           data-tab-active={String(lucentActiveTab === 'PDF')}
                           onClick={() => {
-                            if (_pdfLocked) { showAlert('🔒 PDF ke liye BASIC subscription chahiye! Store se upgrade karein.', 'INFO'); return; }
+                            if (_pdfLocked) {
+                              const _pdfKey = `nst_pdf_unlocked_${user.id}_${entry.id}_${safeIndex}`;
+                              if (localStorage.getItem(_pdfKey) === '1') {
+                                stopSpeech(); setLucentActiveTab('PDF'); _save('PDF'); return;
+                              }
+                              showDiamondOnlyGate(5, 'PDF Document', () => {
+                                try { localStorage.setItem(_pdfKey, '1'); } catch {}
+                                stopSpeech(); setLucentActiveTab('PDF'); _save('PDF');
+                              });
+                              return;
+                            }
                             stopSpeech(); setLucentActiveTab('PDF'); _save('PDF');
                           }}
                           style={_tabStyle}
@@ -22676,7 +22758,17 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                         <button
                           data-tab-active={String(lucentActiveTab === 'VIDEO')}
                           onClick={() => {
-                            if (_vidLocked) { showAlert('🔒 Video ke liye ULTRA subscription chahiye! Store se upgrade karein.', 'INFO'); return; }
+                            if (_vidLocked) {
+                              const _vidKey = `nst_video_unlocked_${user.id}_${entry.id}_${safeIndex}`;
+                              if (localStorage.getItem(_vidKey) === '1') {
+                                stopSpeech(); setLucentActiveTab('VIDEO'); _save('VIDEO'); return;
+                              }
+                              showDiamondOnlyGate(5, 'Video Lesson (Ultra Exclusive)', () => {
+                                try { localStorage.setItem(_vidKey, '1'); } catch {}
+                                stopSpeech(); setLucentActiveTab('VIDEO'); _save('VIDEO');
+                              });
+                              return;
+                            }
                             stopSpeech(); setLucentActiveTab('VIDEO'); _save('VIDEO');
                           }}
                           style={_tabStyle}
@@ -25532,15 +25624,21 @@ RULES:
                   ref={el => { if (el && fl.activeMode === 'flashcard' && !el.dataset.scrolled) { el.dataset.scrolled = '1'; el.scrollIntoView({ behavior: 'instant' as ScrollBehavior, inline: 'center', block: 'nearest' }); } }}
                   className={_tcls(fl.activeMode === 'flashcard', 'bg-amber-500') + (!_isUltraUser && !_isAdminUser && !fl?.isCompetition ? ' opacity-60' : '')}
                   onClick={() => {
-                    if (!_isUltraUser && !_isAdminUser && !fl?.isCompetition) { showAlert('🔒 Flashcard ke liye ULTRA subscription chahiye!', 'INFO'); return; }
-                     if (fl.activeMode !== 'flashcard') {
-                       stopSpeech();
-                       setFlashcardMcqs(prev => prev ? {
-                         ...prev,
-                         startInProjectorMode: false,
-                         fromLesson: prev.fromLesson ? { ...prev.fromLesson, activeMode: 'flashcard' } : prev.fromLesson,
-                       } : null);
-                     }
+                    const _doFc = () => {
+                      stopSpeech();
+                      setFlashcardMcqs(prev => prev ? {
+                        ...prev,
+                        startInProjectorMode: false,
+                        fromLesson: prev.fromLesson ? { ...prev.fromLesson, activeMode: 'flashcard' } : prev.fromLesson,
+                      } : null);
+                    };
+                    if (!_isUltraUser && !_isAdminUser && !fl?.isCompetition) {
+                      showDiamondOnlyGate(5, 'Flashcard (Ultra Exclusive)', _doFc);
+                      return;
+                    }
+                    if (fl.activeMode !== 'flashcard') {
+                      _doFc();
+                    }
                   }}>
                   {!_isUltraUser && !_isAdminUser && !fl?.isCompetition ? '🔒' : '🃏'} Flashcard
                 </button>
@@ -25549,10 +25647,16 @@ RULES:
                 <button style={_ts}
                   className={_tcls(false, 'bg-blue-600') + (!_isBasicUser && !_isUltraUser && !_isAdminUser && !fl?.isCompetition ? ' opacity-60' : '')}
                   onClick={() => {
-                    if (!_isBasicUser && !_isUltraUser && !_isAdminUser && !fl?.isCompetition) { showAlert('🔒 PDF ke liye BASIC subscription chahiye!', 'INFO'); return; }
-                    stopSpeech();
-                    setFlashcardMcqs(null);
-                    if (fl.isCompetition) { setHwViewMode('pdf'); } else { setLucentActiveTab('PDF'); }
+                    const _doPdf = () => {
+                      stopSpeech();
+                      setFlashcardMcqs(null);
+                      if (fl.isCompetition) { setHwViewMode('pdf'); } else { setLucentActiveTab('PDF'); }
+                    };
+                    if (!_isBasicUser && !_isUltraUser && !_isAdminUser && !fl?.isCompetition) {
+                      showDiamondOnlyGate(5, 'PDF Document', _doPdf);
+                      return;
+                    }
+                    _doPdf();
                   }}>
                   {!_isBasicUser && !_isUltraUser && !_isAdminUser && !fl?.isCompetition ? '🔒' : ''} PDF
                 </button>
@@ -25561,10 +25665,16 @@ RULES:
                 <button style={_ts}
                   className={_tcls(false, 'bg-rose-600') + (!_isUltraUser && !_isAdminUser && !fl?.isCompetition ? ' opacity-60' : '')}
                   onClick={() => {
-                    if (!_isUltraUser && !_isAdminUser && !fl?.isCompetition) { showAlert('🔒 Video ke liye ULTRA subscription chahiye!', 'INFO'); return; }
-                    stopSpeech();
-                    setFlashcardMcqs(null);
-                    if (fl.isCompetition) { setHwViewMode('video'); } else { setLucentActiveTab('VIDEO'); }
+                    const _doVid = () => {
+                      stopSpeech();
+                      setFlashcardMcqs(null);
+                      if (fl.isCompetition) { setHwViewMode('video'); } else { setLucentActiveTab('VIDEO'); }
+                    };
+                    if (!_isUltraUser && !_isAdminUser && !fl?.isCompetition) {
+                      showDiamondOnlyGate(5, 'Video Lesson (Ultra Exclusive)', _doVid);
+                      return;
+                    }
+                    _doVid();
                   }}>
                   {!_isUltraUser && !_isAdminUser && !fl?.isCompetition ? '🔒' : ''} Video
                 </button>
@@ -28399,13 +28509,15 @@ RULES:
       {/* ── COIN GATE POPUP ── Premium full-screen confirm ── */}
       {coinGate && (() => {
         const balance = getTotalCredits(user);
-        const { cost, originalCost, discountPct, reason, action, onCancel, selectedBulk, bulkOption, pageInfo } = coinGate;
+        const { cost, originalCost, discountPct, reason, action, onCancel, selectedBulk, bulkOption, pageInfo, diamondOnly, costDiamonds } = coinGate;
+        const isDiamondOnly = !!diamondOnly;
+        const diamondCostOnly = costDiamonds || 5;
         const isPermanentlyUnlocked = !!(
           (user.unlockedContent || []).includes(reason) ||
           (pageInfo?.pageLabel && (user.unlockedContent || []).includes(pageInfo.pageLabel))
         );
-        const isFree = cost === 0 || isPermanentlyUnlocked;
-        const hasPageInfo = !!pageInfo;
+        const isFree = !isDiamondOnly && (cost === 0 || isPermanentlyUnlocked);
+        const hasPageInfo = !isDiamondOnly && !!pageInfo;
         const isDisc50 = discountPct === 50;
         const isDisc25 = discountPct === 25;
         const discMult = isDisc50 ? 0.5 : isDisc25 ? 0.75 : 1;
@@ -28470,11 +28582,11 @@ RULES:
               <div className="relative w-[60px] h-[60px] rounded-2xl mx-auto mb-4 flex items-center justify-center z-10"
                 style={{ background: 'rgba(255,255,255,0.14)', border: '1.5px solid rgba(255,255,255,0.28)', backdropFilter: 'blur(8px)' }}
               >
-                <span className="text-[28px] leading-none">{isFree ? '🎁' : emoji}</span>
+                <span className="text-[28px] leading-none">{isDiamondOnly ? '💎' : isFree ? '🎁' : emoji}</span>
               </div>
               <h2 className="relative z-10 text-white font-black text-[22px] tracking-tight leading-tight">{reason}</h2>
               <p className="relative z-10 text-white/60 text-[11px] mt-1.5 font-semibold uppercase tracking-[0.12em]">
-                {isFree ? 'First Time Free!' : 'Premium Content Unlock'}
+                {isDiamondOnly ? 'Diamond Exclusive Unlock' : isFree ? 'First Time Free!' : 'Premium Content Unlock'}
               </p>
               {hasPageInfo && pageInfo!.pageLabel && (
                 <p className="relative z-10 text-white/45 text-[10px] mt-1 font-semibold">{pageInfo!.pageLabel}</p>
@@ -28483,6 +28595,82 @@ RULES:
 
             {/* ── Body ── */}
             <div className="bg-white px-5 pt-5 pb-6">
+
+              {/* DIAMOND ONLY UNLOCK */}
+              {isDiamondOnly && (
+                <div>
+                  <div className="bg-sky-50 border-2 border-sky-200 rounded-2xl p-4 text-center mb-4">
+                    <p className="text-[10px] font-black text-sky-600 uppercase tracking-widest mb-1">Premium Exclusive</p>
+                    <div className="flex items-center justify-center gap-2 mb-1.5">
+                      <span className="text-3xl font-black text-sky-900 leading-none">{diamondCostOnly}</span>
+                      <span className="text-base font-black text-sky-600">💎 Diamonds</span>
+                    </div>
+                    <p className="text-[11px] font-semibold text-sky-800 leading-relaxed">
+                      Ye exclusive feature sirf Diamonds se unlock hoga (Credits use nahi honge).
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-between px-4 py-2.5 bg-sky-50/70 border border-sky-100 rounded-xl mb-4">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] font-black text-sky-600 uppercase tracking-wider">Aapke Diamonds</span>
+                      <span className="text-[9px] px-1.5 py-0.2 rounded bg-sky-100 text-sky-700 font-bold">Balance</span>
+                    </div>
+                    <span className="text-xs font-black text-sky-700">
+                      💎 {(user.diamonds ?? 0).toLocaleString('en-IN')}
+                    </span>
+                  </div>
+
+                  <div className="flex gap-2.5">
+                    <button
+                      onClick={dismissGate}
+                      className="flex-1 py-3.5 rounded-2xl font-black text-sm text-slate-500 border-2 border-slate-200 bg-white active:scale-95 transition-all"
+                    >
+                      Nahi
+                    </button>
+                    <button
+                      onClick={() => {
+                        const userDiamonds = user.diamonds ?? 0;
+                        if (userDiamonds < diamondCostOnly) {
+                          setCoinGate(null);
+                          onOpenStore?.();
+                          return;
+                        }
+                        const freshU = (window as any).__dashUserRef?.current ?? user;
+                        const contentKey = pageInfo?.pageLabel || reason;
+                        const updatedUnlocked = Array.from(new Set([...(freshU.unlockedContent || []), contentKey]));
+                        const updatedU = {
+                          ...freshU,
+                          diamonds: Math.max(0, (freshU.diamonds ?? 0) - diamondCostOnly),
+                          unlockedContent: updatedUnlocked,
+                        };
+                        handleUserUpdate(updatedU);
+                        saveUserToLive(updatedU);
+                        setCoinGate(null);
+                        action();
+                      }}
+                      className="flex-[2] py-3.5 rounded-2xl font-black text-sm text-white active:scale-95 transition-all flex items-center justify-center gap-2"
+                      style={{
+                        background: (user.diamonds ?? 0) >= diamondCostOnly
+                          ? 'linear-gradient(135deg, #0284c7, #0369a1)'
+                          : '#94a3b8',
+                        boxShadow: (user.diamonds ?? 0) >= diamondCostOnly
+                          ? '0 10px 28px -6px rgba(2,132,199,0.5)'
+                          : 'none',
+                      }}
+                    >
+                      <span>💎</span>
+                      <span>
+                        {(user.diamonds ?? 0) >= diamondCostOnly
+                          ? `${diamondCostOnly} Diamonds se Kholo`
+                          : `Store se Diamonds Lein`}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!isDiamondOnly && (
+                <>
 
               {/* FREE */}
               {isFree && (
@@ -28719,7 +28907,7 @@ RULES:
                   <button
                     type="button"
                     onClick={() => {
-                      const diamondCost = Math.max(1, Math.ceil(activeCost / 20));
+                      const diamondCost = getDiamondUnlockCost(activeCost, reason);
                       const userDiamonds = user.diamonds ?? 0;
                       if (userDiamonds < diamondCost) {
                         setCoinGate(null);
@@ -28743,13 +28931,15 @@ RULES:
                   >
                     <span>💎</span>
                     <span>
-                      {(user.diamonds ?? 0) >= Math.max(1, Math.ceil(activeCost / 20))
-                        ? `💎 ${Math.max(1, Math.ceil(activeCost / 20))} Diamonds Se Permanent Unlock`
-                        : `💎 Store se Diamonds Lein (Need ${Math.max(1, Math.ceil(activeCost / 20))} 💎)`}
+                      {(user.diamonds ?? 0) >= getDiamondUnlockCost(activeCost, reason)
+                        ? `💎 ${getDiamondUnlockCost(activeCost, reason)} Diamonds Se Permanent Unlock`
+                        : `💎 Store se Diamonds Lein (Need ${getDiamondUnlockCost(activeCost, reason)} 💎)`}
                     </span>
                   </button>
                 )}
-              </div>
+                </div>
+                </>
+              )}
             </div>
           </div>
         </div>

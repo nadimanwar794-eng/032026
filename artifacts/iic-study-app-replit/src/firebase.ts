@@ -1,5 +1,5 @@
-import { initializeApp } from "firebase/app";
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, setLogLevel, doc, setDoc, getDoc, getDocFromServer, collection, updateDoc, deleteDoc, onSnapshot, getDocs, query, where, limitToLast, orderBy, increment, arrayUnion, limit, startAfter, QueryDocumentSnapshot } from "firebase/firestore";
+import { getApp, getApps, initializeApp } from "firebase/app";
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, setLogLevel, doc, setDoc, getDoc, getDocFromServer, collection, updateDoc, deleteDoc, onSnapshot, getDocs, query, where, limitToLast, orderBy, increment, arrayUnion, limit, startAfter, QueryDocumentSnapshot } from "firebase/firestore";
 import { getDatabase, ref, set, get, onValue, update, remove, query as rtdbQuery, limitToLast as rtdbLimitToLast, orderByChild as rtdbOrderByChild, equalTo as rtdbEqualTo, runTransaction } from "firebase/database";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
 import { storage } from "./utils/storage";
@@ -7,13 +7,13 @@ import { storage } from "./utils/storage";
 // --- FIREBASE CONFIGURATION ---
 
 const firebaseConfig = {
-apiKey: "AIzaSyC7N3IOa7GRETNRBo8P-QKVFzg2bLqoEco",
-authDomain: "students-app-deae5.firebaseapp.com",
-databaseURL: "https://students-app-deae5-default-rtdb.asia-southeast1.firebasedatabase.app",
-projectId: "students-app-deae5",
-storageBucket: "students-app-deae5.firebasestorage.app",
-messagingSenderId: "128267767708",
-appId: "1:128267767708:web:08ed73b1563b2f3eb60259"
+apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyC7N3IOa7GRETNRBo8P-QKVFzg2bLqoEco",
+authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "students-app-deae5.firebaseapp.com",
+databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL || "https://students-app-deae5-default-rtdb.asia-southeast1.firebasedatabase.app",
+projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "students-app-deae5",
+storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "students-app-deae5.firebasestorage.app",
+messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "128267767708",
+appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:128267767708:web:08ed73b1563b2f3eb60259"
 };
 // ── Stale IndexedDB guard ──────────────────────────────────────────────────
 // When the Firebase project changes the old Firestore IndexedDB cache causes
@@ -79,16 +79,25 @@ if (typeof window !== 'undefined') {
 }
 
 // Initialize Firebase
-const app = initializeApp(firebaseConfig);
 const analytics: any = null;
 export { analytics };
-// Use new persistentLocalCache API (replaces deprecated enableMultiTabIndexedDbPersistence)
+
+let app;
+let db: any;
+
 try {
   setLogLevel('error');
 } catch {}
-const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
-});
+
+if (!getApps().length) {
+  app = initializeApp(firebaseConfig);
+  db = initializeFirestore(app, {
+    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+  });
+} else {
+  app = getApp();
+  db = getFirestore(app);
+}
 const rtdb = getDatabase(app);
 const auth = getAuth(app);
 

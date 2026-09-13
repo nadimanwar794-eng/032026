@@ -193,6 +193,38 @@ export const LevelLeaderboard: React.FC<Props> = ({ user, settings, onBack }) =>
     return u.name;
   };
 
+  const isBasicOrUltra = user.role === 'ADMIN' || user.role === 'SUB_ADMIN' || user.isPremium || user.subscriptionLevel === 'BASIC' || user.subscriptionLevel === 'ULTRA';
+  const userLevel = user.level || getLevelProgress(user.score || 0).currentLevel || 1;
+  const isLeaderboardUnlocked = isBasicOrUltra || userLevel >= 2;
+
+  if (!isLeaderboardUnlocked) {
+    return (
+      <div className="min-h-screen bg-[#0a0a1a] text-white p-6 flex flex-col items-center justify-center text-center">
+        <div className="w-20 h-20 rounded-3xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mb-6 shadow-2xl">
+          <Trophy size={40} />
+        </div>
+        <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-black mb-3">
+          🔒 Level 2 Required
+        </div>
+        <h2 className="text-2xl font-black text-white mb-2">Leaderboard Locked</h2>
+        <p className="text-slate-400 text-xs max-w-xs mb-6 leading-relaxed">
+          Free users ke liye Leaderboard <span className="text-amber-400 font-bold">Level 2</span> par unlock hota hai.
+          Aap abhi <span className="text-indigo-400 font-bold">Level {userLevel}</span> par hain.
+          <br /><br />
+          Study karke XP badhayein ya <span className="text-indigo-400 font-bold">Basic / Ultra</span> subscription lein jisme Level 1 se hi Leaderboard unlocked rehta hai!
+        </p>
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="px-6 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-white font-bold text-xs transition-all active:scale-95"
+          >
+            Wapas Jayein
+          </button>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white animate-in fade-in duration-300 pb-20">
       {/* Header */}
