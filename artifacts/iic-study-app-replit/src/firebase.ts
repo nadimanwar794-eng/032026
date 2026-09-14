@@ -6,14 +6,14 @@ import { storage } from "./utils/storage";
 
 // --- FIREBASE CONFIGURATION ---
 const firebaseConfig = {
-apiKey: "AIzaSyBEDKZVPgwOPCccjWdKSShfvSqC3REDa0c",
-authDomain: "iic-nst.firebaseapp.com",
-databaseURL: "https://iic-nst-default-rtdb.firebaseio.com",
-projectId: "iic-nst",
-storageBucket: "iic-nst.firebasestorage.app",
-messagingSenderId: "984309241322",
-appId: "1:984309241322:web:4dae35987732d630e64e93",
-measurementId: "G-QX0XT7RSQX"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyBEDKZVPgwOPCccjWdKSShfvSqC3REDa0c",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "iic-nst.firebaseapp.com",
+  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL || "https://iic-nst-default-rtdb.firebaseio.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "iic-nst",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "iic-nst.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "984309241322",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:984309241322:web:4dae35987732d630e64e93",
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-QX0XT7RSQX"
 };
 
 // ── Stale IndexedDB guard ──────────────────────────────────────────────────
