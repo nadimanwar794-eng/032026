@@ -1565,6 +1565,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   const [editSubscriptionMinutes, setEditSubscriptionMinutes] = useState(0);
   const [selectedUserCreditSubPlanId, setSelectedUserCreditSubPlanId] = useState<string>('');
   const [selectedUserCreditSubDuration, setSelectedUserCreditSubDuration] = useState<number>(30);
+  const [selectedUserDiamondSubDuration, setSelectedUserDiamondSubDuration] = useState<number>(30);
   const [editSubscriptionSeconds, setEditSubscriptionSeconds] = useState(0);
   const [editSubscriptionPrice, setEditSubscriptionPrice] = useState(0);
   const [editCustomSubName, setEditCustomSubName] = useState('');
@@ -19412,6 +19413,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           <span className="text-[10px] font-bold text-slate-500 uppercase w-16">Validity:</span>
                                           <div className="flex-1 grid grid-cols-5 gap-1">
                                               {[
+                                                  { label: '1W', days: 7 },
                                                   { label: '1M', days: 30 },
                                                   { label: '3M', days: 90 },
                                                   { label: '6M', days: 180 },
@@ -19422,6 +19424,26 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                       type="button"
                                                       onClick={() => setSelectedUserCreditSubDuration(opt.days)}
                                                       className={`py-1.5 rounded font-bold text-[11px] border ${selectedUserCreditSubDuration === opt.days ? 'bg-slate-800 border-slate-900 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                                                      {opt.label}
+                                                  </button>
+                                              ))}
+                                          </div>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                          <span className="text-[10px] font-bold text-slate-500 uppercase w-16">Validity:</span>
+                                          <div className="flex-1 grid grid-cols-5 gap-1">
+                                              {[
+                                                  { label: '1W', days: 7 },
+                                                  { label: '1M', days: 30 },
+                                                  { label: '3M', days: 90 },
+                                                  { label: '6M', days: 180 },
+                                                  { label: '1Y', days: 365 }
+                                              ].map(opt => (
+                                                  <button 
+                                                      key={opt.days}
+                                                      type="button"
+                                                      onClick={() => setSelectedUserDiamondSubDuration(opt.days)}
+                                                      className={`py-1.5 rounded font-bold text-[11px] border ${selectedUserDiamondSubDuration === opt.days ? 'bg-sky-800 border-sky-900 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
                                                       {opt.label}
                                                   </button>
                                               ))}
@@ -19512,9 +19534,29 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                   onClick={() => setSelectedUserDiamondSubPlanId(p.id)}
                                                   className={`p-2 rounded font-bold text-[11px] border leading-tight ${selectedUserDiamondSubPlanId === p.id ? 'bg-sky-100 border-sky-400 text-sky-900 shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
                                                   <div className="text-sky-600 truncate">{p.name.replace('Diamond Pass', 'Pass')}</div>
-                                                  <div className="opacity-80 font-normal">+{p.dailyDiamonds}💎/d · {p.durationDays}d</div>
+                                                  <div className="opacity-80 font-normal">+{p.dailyDiamonds}💎/d</div>
                                               </button>
                                           ))}
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                          <span className="text-[10px] font-bold text-slate-500 uppercase w-16">Validity:</span>
+                                          <div className="flex-1 grid grid-cols-5 gap-1">
+                                              {[
+                                                  { label: '1W', days: 7 },
+                                                  { label: '1M', days: 30 },
+                                                  { label: '3M', days: 90 },
+                                                  { label: '6M', days: 180 },
+                                                  { label: '1Y', days: 365 }
+                                              ].map(opt => (
+                                                  <button 
+                                                      key={opt.days}
+                                                      type="button"
+                                                      onClick={() => setSelectedUserDiamondSubDuration(opt.days)}
+                                                      className={`py-1.5 rounded font-bold text-[11px] border ${selectedUserDiamondSubDuration === opt.days ? 'bg-sky-800 border-sky-900 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                                                      {opt.label}
+                                                  </button>
+                                              ))}
+                                          </div>
                                       </div>
                                       <button
                                           type="button"
@@ -19531,7 +19573,8 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
     { id: 'elite_diamond', name: 'Elite Diamond Pass', icon: '👑', dailyDiamonds: 50, features: [] }
 ])[0];
                                               if (!confirm(`Kya aap ${editingUser.name} ko "${plan.name}" Diamond Pass grant karna chahte hain?`)) return;
-                                              const updated = activateDiamondSub(editingUser, plan.id);
+                                              const durDays = selectedUserDiamondSubDuration || 30;
+                                              const updated = activateDiamondSub(editingUser, plan.id, durDays);
                                               const ok = await saveUserToLive(updated);
                                               if (ok) {
                                                   setEditingUser(updated);
