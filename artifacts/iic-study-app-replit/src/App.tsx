@@ -94,6 +94,18 @@ const App: React.FC = () => {
     }
   }, [isAppLoading]);
 
+  // A loading animation must never be able to hide an already-authenticated
+  // dashboard forever. This also covers interrupted timers after a tab restore
+  // or a browser throttles the animation loop.
+  useEffect(() => {
+    if (!isAppLoading || isLoadingPreview) return;
+    const failSafe = window.setTimeout(() => {
+      console.warn('[IIC] Splash screen fail-safe completed the app load.');
+      setIsAppLoading(false);
+    }, 12000);
+    return () => window.clearTimeout(failSafe);
+  }, [isAppLoading, isLoadingPreview]);
+
   // Profile se loading-screen preview request aaye to sirf animation dikhayein,
   // phir user ko usi page par wapas laayein.
   useEffect(() => {
