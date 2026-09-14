@@ -68,40 +68,40 @@ export const DIAMOND_PACKS: DiamondPack[] = [
  */
 export const DIAMOND_SUBSCRIPTION_PLANS: DiamondSubscriptionPlan[] = [
   {
-    id: '7_DAYS_PASS',
-    name: 'Weekly Diamond Pass',
-    price: 100,
+    id: 'starter_diamond',
+    name: 'Starter Diamond Pass',
+    price: 450, // Base 1 Month price
     dailyDiamonds: 10,
-    durationDays: 7,
-    totalDiamonds: 70,
-    badge: 'Popular Pass',
-  },
-  {
-    id: '30_DAYS_PASS',
-    name: 'Monthly Diamond Pass',
-    price: 1000,
-    dailyDiamonds: 25,
     durationDays: 30,
-    totalDiamonds: 750,
-    badge: 'Mega Value Pass (750 💎)',
+    totalDiamonds: 300,
+    badge: 'STARTER',
   },
   {
-    id: '90_DAYS_PASS',
-    name: '3 Months Diamond Pass',
-    price: 2500,
+    id: 'active_diamond',
+    name: 'Active Diamond Pass',
+    price: 900, // Base 1 Month price
+    dailyDiamonds: 20,
+    durationDays: 30,
+    totalDiamonds: 600,
+    badge: 'POPULAR',
+  },
+  {
+    id: 'premium_diamond',
+    name: 'Premium Diamond Pass',
+    price: 1350, // Base 1 Month price
     dailyDiamonds: 30,
-    durationDays: 90,
-    totalDiamonds: 2700,
-    badge: 'Super Value (2700 💎)',
+    durationDays: 30,
+    totalDiamonds: 900,
+    badge: 'PREMIUM',
   },
   {
-    id: '365_DAYS_PASS',
-    name: 'Yearly Diamond Pass',
-    price: 8000,
-    dailyDiamonds: 40,
-    durationDays: 365,
-    totalDiamonds: 14600,
-    badge: 'Ultimate Value (14600 💎)',
+    id: 'elite_diamond',
+    name: 'Elite Diamond Pass',
+    price: 2250, // Base 1 Month price
+    dailyDiamonds: 50,
+    durationDays: 30,
+    totalDiamonds: 1500,
+    badge: 'ELITE',
   },
 ];
 
@@ -229,17 +229,21 @@ export function claimDailyDiamonds(
  */
 export function activateDiamondSub(
   user: User,
-  planId: string
+  planId: string,
+  customDurationDays?: number,
+  customPlanName?: string
 ): User {
   const plan = DIAMOND_SUBSCRIPTION_PLANS.find(p => p.id === planId) || DIAMOND_SUBSCRIPTION_PLANS[0];
+  const duration = customDurationDays || plan.durationDays;
+  const nameToUse = customPlanName || plan.name;
   const startDate = new Date();
-  const endDate = new Date(startDate.getTime() + plan.durationDays * 24 * 60 * 60 * 1000);
+  const endDate = new Date(startDate.getTime() + duration * 24 * 60 * 60 * 1000);
 
   const newSub: UserDiamondSubscription = {
     planId: plan.id,
-    planName: plan.name,
+    planName: nameToUse,
     dailyDiamonds: plan.dailyDiamonds,
-    totalDays: plan.durationDays,
+    totalDays: duration,
     startDate: startDate.toISOString(),
     endDate: endDate.toISOString(),
     totalClaimedDays: 0,

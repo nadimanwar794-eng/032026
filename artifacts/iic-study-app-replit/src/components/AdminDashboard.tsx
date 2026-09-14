@@ -1983,7 +1983,10 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   // --- GIFT CODE STATE ---
   const [newCodeType, setNewCodeType] = useState<'CREDITS' | 'CREDIT_SUBSCRIPTION' | 'DIAMONDS' | 'DIAMOND_SUBSCRIPTION' | 'SUBSCRIPTION' | 'DISCOUNT' | 'CONTENT_UNLOCK' | 'TOPBAR_EFFECT_COLOR' | 'TOPBAR_EFFECT_ID' | 'SCORE' | 'SCORE_BOOST' | 'SCORE_LIMIT_BOOST' | 'THEME_COLOR'>('CREDITS');
   const [newCodeDiamonds, setNewCodeDiamonds] = useState<number>(50);
-  const [newCodeDiamondSubPlan, setNewCodeDiamondSubPlan] = useState<string>('7_DAYS_PASS');
+  const [newCodeDiamondSubPlan, setNewCodeDiamondSubPlan] = useState<string>('starter_diamond');
+  const [newCodeDiamondSubDays, setNewCodeDiamondSubDays] = useState<number>(30);
+  const [newCodeDiamondSubDaily, setNewCodeDiamondSubDaily] = useState<number>(10);
+  const [newCodeDiamondSubName, setNewCodeDiamondSubName] = useState<string>('Starter Diamond Pass');
   const [newCodeCreditPlanId, setNewCodeCreditPlanId] = useState<string>('');
   const [newCodeCreditDaily, setNewCodeCreditDaily] = useState<number>(100);
   const [newCodeCreditDays, setNewCodeCreditDays] = useState<number>(30);
@@ -2017,7 +2020,10 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   // --- BROADCAST REDEEM CODE STATE ---
   const [broadcastType, setBroadcastType] = useState<BroadcastRedeemCode['type']>('CREDITS');
   const [broadcastDiamondAmount, setBroadcastDiamondAmount] = useState<number>(50);
-  const [broadcastDiamondSubPlan, setBroadcastDiamondSubPlan] = useState<string>('7_DAYS_PASS');
+  const [broadcastDiamondSubPlan, setBroadcastDiamondSubPlan] = useState<string>('starter_diamond');
+  const [broadcastDiamondSubDays, setBroadcastDiamondSubDays] = useState<number>(30);
+  const [broadcastDiamondSubDaily, setBroadcastDiamondSubDaily] = useState<number>(10);
+  const [broadcastDiamondSubName, setBroadcastDiamondSubName] = useState<string>('Starter Diamond Pass');
   const [broadcastCreditPlanId, setBroadcastCreditPlanId] = useState<string>('');
   const [broadcastCreditDaily, setBroadcastCreditDaily] = useState<number>(100);
   const [broadcastCreditDays, setBroadcastCreditDays] = useState<number>(30);
@@ -3172,7 +3178,12 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                   type: newCodeType || 'CREDITS',
                   ...(newCodeType === 'CREDITS' ? { amount: newCodeAmount || 10 } : {}),
                   ...(newCodeType === 'DIAMONDS' ? { diamondAmount: newCodeDiamonds || 50, amount: newCodeDiamonds || 50 } : {}),
-                  ...(newCodeType === 'DIAMOND_SUBSCRIPTION' ? { diamondSubPlanId: newCodeDiamondSubPlan || '7_DAYS_PASS' } : {}),
+                  ...(newCodeType === 'DIAMOND_SUBSCRIPTION' ? { 
+                      diamondSubPlanId: newCodeDiamondSubPlan || 'starter_diamond',
+                      diamondSubPlanName: newCodeDiamondSubName,
+                      diamondSubDailyAmount: newCodeDiamondSubDaily,
+                      diamondSubDurationDays: newCodeDiamondSubDays,
+                  } : {}),
                   ...(newCodeType === 'CREDIT_SUBSCRIPTION' ? {
                       creditPlanId: newCodeCreditPlanId || `csp-redeem-${Date.now()}`,
                       creditPlanName: newCodeCreditPlanName || `${newCodeCreditDaily} Daily Credits Pass`,
@@ -3260,6 +3271,9 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
               amount: broadcastType === 'CREDITS' ? broadcastAmount : undefined,
               diamondAmount: broadcastType === 'DIAMONDS' ? broadcastDiamondAmount : undefined,
               diamondSubPlanId: broadcastType === 'DIAMOND_SUBSCRIPTION' ? broadcastDiamondSubPlan : undefined,
+              diamondSubPlanName: broadcastType === 'DIAMOND_SUBSCRIPTION' ? broadcastDiamondSubName : undefined,
+              diamondSubDailyAmount: broadcastType === 'DIAMOND_SUBSCRIPTION' ? broadcastDiamondSubDaily : undefined,
+              diamondSubDurationDays: broadcastType === 'DIAMOND_SUBSCRIPTION' ? broadcastDiamondSubDays : undefined,
               scoreAmount: broadcastType === 'SCORE' ? broadcastScoreAmount : undefined,
               scoreBoostPercent: broadcastType === 'SCORE_BOOST' ? broadcastScoreBoostPercent : undefined,
               scoreBoostDurationHours: broadcastType === 'SCORE_BOOST' ? broadcastScoreBoostHours : undefined,
@@ -17590,54 +17604,86 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                           </div>
                       )}
                       {broadcastType === 'DIAMOND_SUBSCRIPTION' && (
-                          <div className="flex flex-col gap-2 p-3 bg-sky-50/70 rounded-xl border border-sky-200 col-span-full">
-                              <label className="text-[10px] font-bold text-sky-800 uppercase block mb-1">💎 Diamond Subscription Plan</label>
-                              <select
-                                  value={broadcastDiamondSubPlan}
-                                  onChange={e => setBroadcastDiamondSubPlan(e.target.value)}
-                                  className="w-full p-2.5 rounded-xl border border-sky-300 bg-white font-bold text-sm text-sky-900"
-                              >
-                                  <option value="7_DAYS_PASS">7 Days Pass (+10 💎 / day = 70 total)</option>
-                                  <option value="30_DAYS_PASS">Monthly Pass (+25 💎 / day = 750 total)</option>
-                              </select>
-                              <p className="text-[10px] text-sky-700">Subscribers ko daily diamonds claim karne ka pass milega.</p>
+                          <div className="flex flex-col gap-3 p-3 bg-sky-50/70 rounded-xl border border-sky-200 col-span-full">
+                              <label className="text-[10px] font-bold text-sky-800 uppercase block">💎 Diamond Subscription Plan</label>
+                              <div className="grid grid-cols-2 gap-2">
+                                  {DIAMOND_SUBSCRIPTION_PLANS.map(p => (
+                                      <button 
+                                          key={p.id}
+                                          type="button"
+                                          onClick={() => {
+                                              setBroadcastDiamondSubPlan(p.id);
+                                              setBroadcastDiamondSubDaily(p.dailyDiamonds);
+                                              setBroadcastDiamondSubName(p.name);
+                                          }}
+                                          className={`p-2 rounded font-bold text-[11px] border leading-tight ${broadcastDiamondSubPlan === p.id ? 'bg-sky-100 border-sky-400 text-sky-900 shadow-sm' : 'bg-white border-sky-100 text-sky-600 hover:bg-sky-50'}`}>
+                                          <div className="text-sky-700 truncate">{p.name.replace('Diamond Pass', 'Pass')}</div>
+                                          <div className="opacity-80 font-normal">+{p.dailyDiamonds} 💎/d</div>
+                                      </button>
+                                  ))}
+                              </div>
+                              <div className="flex items-center gap-2 mt-1">
+                                  <span className="text-[10px] font-bold text-sky-600 uppercase w-16">Validity:</span>
+                                  <div className="flex-1 grid grid-cols-5 gap-1">
+                                      {[
+                                          { label: '7D', days: 7 },
+                                          { label: '1M', days: 30 },
+                                          { label: '3M', days: 90 },
+                                          { label: '6M', days: 180 },
+                                          { label: '1Y', days: 365 }
+                                      ].map(opt => (
+                                          <button 
+                                              key={opt.days}
+                                              type="button"
+                                              onClick={() => setBroadcastDiamondSubDays(opt.days)}
+                                              className={`py-1.5 rounded font-bold text-[10px] border ${broadcastDiamondSubDays === opt.days ? 'bg-sky-700 border-sky-800 text-white shadow-sm' : 'bg-white border-sky-200 text-sky-600 hover:bg-sky-50'}`}>
+                                              {opt.label}
+                                          </button>
+                                      ))}
+                                  </div>
+                              </div>
+                              <p className="text-[9px] text-sky-700 mt-1">💎 Redeemer ko har din +{broadcastDiamondSubDaily} diamonds milenge ({broadcastDiamondSubDays} din tak).</p>
                           </div>
                       )}
                       {broadcastType === 'CREDIT_SUBSCRIPTION' && (
-                          <div className="flex flex-col gap-2 p-3 bg-indigo-50/60 rounded-xl border border-indigo-200 col-span-full">
-                              <div>
-                                  <label className="text-[10px] font-bold text-indigo-700 uppercase block mb-1">Select Credit Plan or Custom</label>
-                                  <select
-                                      value={broadcastCreditPlanId}
-                                      onChange={e => {
-                                          const val = e.target.value;
-                                          setBroadcastCreditPlanId(val);
-                                          const found = (localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS).find(p => p.id === val);
-                                          if (found) {
-                                              setBroadcastCreditDaily(found.dailyCredits);
-                                              setBroadcastCreditDays(found.durationDays);
-                                              setBroadcastCreditPlanName(found.name);
-                                          }
-                                      }}
-                                      className="w-full p-2.5 rounded-xl border border-indigo-200 bg-white font-bold text-sm"
-                                  >
-                                      <option value="">Custom Daily Pass</option>
-                                      {(localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS).map(p => (
-                                          <option key={p.id} value={p.id}>{p.name} — +{p.dailyCredits} CR/d ({p.durationDays} Days)</option>
-                                      ))}
-                                  </select>
-                              </div>
+                          <div className="flex flex-col gap-3 p-3 bg-indigo-50/60 rounded-xl border border-indigo-200 col-span-full">
+                              <label className="text-[10px] font-bold text-indigo-700 uppercase block">⚡ Select Credit Plan</label>
                               <div className="grid grid-cols-2 gap-2">
-                                  <div>
-                                      <label className="text-[10px] font-bold text-indigo-700 uppercase block mb-1">🪙 Daily Credits</label>
-                                      <input type="number" min={1} value={broadcastCreditDaily} onChange={e => setBroadcastCreditDaily(Number(e.target.value))} className="w-full p-2.5 rounded-xl border border-indigo-200 font-bold bg-white text-sm" />
-                                  </div>
-                                  <div>
-                                      <label className="text-[10px] font-bold text-indigo-700 uppercase block mb-1">📅 Duration (Days)</label>
-                                      <input type="number" min={1} value={broadcastCreditDays} onChange={e => setBroadcastCreditDays(Number(e.target.value))} className="w-full p-2.5 rounded-xl border border-indigo-200 font-bold bg-white text-sm" />
+                                  {(localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS).map(p => (
+                                      <button 
+                                          key={p.id}
+                                          type="button"
+                                          onClick={() => {
+                                              setBroadcastCreditPlanId(p.id);
+                                              setBroadcastCreditDaily(p.dailyCredits);
+                                              setBroadcastCreditPlanName(p.name);
+                                          }}
+                                          className={`p-2 rounded font-bold text-[11px] border leading-tight ${broadcastCreditPlanId === p.id ? 'bg-indigo-100 border-indigo-400 text-indigo-900 shadow-sm' : 'bg-white border-indigo-100 text-indigo-600 hover:bg-indigo-50'}`}>
+                                          <div className="text-indigo-700 truncate">{p.name.replace('Credit Pass', 'Pass')}</div>
+                                          <div className="opacity-80 font-normal">+{p.dailyCredits} CR/d</div>
+                                      </button>
+                                  ))}
+                              </div>
+                              <div className="flex items-center gap-2 mt-1">
+                                  <span className="text-[10px] font-bold text-indigo-600 uppercase w-16">Validity:</span>
+                                  <div className="flex-1 grid grid-cols-4 gap-1">
+                                      {[
+                                          { label: '1M', days: 30 },
+                                          { label: '3M', days: 90 },
+                                          { label: '6M', days: 180 },
+                                          { label: '1Y', days: 365 }
+                                      ].map(opt => (
+                                          <button 
+                                              key={opt.days}
+                                              type="button"
+                                              onClick={() => setBroadcastCreditDays(opt.days)}
+                                              className={`py-1.5 rounded font-bold text-[11px] border ${broadcastCreditDays === opt.days ? 'bg-indigo-700 border-indigo-800 text-white shadow-sm' : 'bg-white border-indigo-200 text-indigo-600 hover:bg-indigo-50'}`}>
+                                              {opt.label}
+                                          </button>
+                                      ))}
                                   </div>
                               </div>
-                              <p className="text-[9px] text-indigo-700 font-medium">⚡ Saare recipients ko roz +{broadcastCreditDaily} credits milenge ({broadcastCreditDays} din tak Store me claim karne ke liye).</p>
+                              <p className="text-[9px] text-indigo-700 font-medium mt-1">⚡ Redeemer ko har din +{broadcastCreditDaily} credits milenge ({broadcastCreditDays} din tak).</p>
                           </div>
                       )}
                       {broadcastType === 'SCORE' && (
@@ -17911,40 +17957,44 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                               <p className="text-[10px] text-slate-500 mt-1">Student ko redeem karne par yeh animation permanently milegi top bar + profile card pe.</p>
                           </div>
                       ) : newCodeType === 'CREDIT_SUBSCRIPTION' ? (
-                          <div className="flex flex-col gap-2 p-3 bg-white rounded-xl border border-pink-200">
-                              <div>
-                                  <label className="text-xs font-bold text-pink-700 uppercase block mb-1">Select Credit Plan or Custom</label>
-                                  <select
-                                      value={newCodeCreditPlanId}
-                                      onChange={e => {
-                                          const val = e.target.value;
-                                          setNewCodeCreditPlanId(val);
-                                          const found = (localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS).find(p => p.id === val);
-                                          if (found) {
-                                              setNewCodeCreditDaily(found.dailyCredits);
-                                              setNewCodeCreditDays(found.durationDays);
-                                              setNewCodeCreditPlanName(found.name);
-                                          }
-                                      }}
-                                      className="p-3 rounded-xl border border-pink-200 bg-white font-bold text-sm w-full"
-                                  >
-                                      <option value="">Custom Daily Pass</option>
-                                      {(localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS).map(p => (
-                                          <option key={p.id} value={p.id}>{p.name} — +{p.dailyCredits} CR/d ({p.durationDays} Days)</option>
+                          <div className="flex flex-col gap-3 p-3 bg-white rounded-xl border border-pink-200">
+                              <label className="text-xs font-bold text-pink-700 uppercase block">⚡ Select Credit Plan</label>
+                              <div className="grid grid-cols-2 gap-2">
+                                  {(localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS).map(p => (
+                                      <button 
+                                          key={p.id}
+                                          type="button"
+                                          onClick={() => {
+                                              setNewCodeCreditPlanId(p.id);
+                                              setNewCodeCreditDaily(p.dailyCredits);
+                                              setNewCodeCreditPlanName(p.name);
+                                          }}
+                                          className={`p-2 rounded font-bold text-[11px] border leading-tight ${newCodeCreditPlanId === p.id ? 'bg-pink-50 border-pink-400 text-pink-900 shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                                          <div className="text-pink-600 truncate">{p.name.replace('Credit Pass', 'Pass')}</div>
+                                          <div className="opacity-80 font-normal">+{p.dailyCredits} CR/d</div>
+                                      </button>
+                                  ))}
+                              </div>
+                              <div className="flex items-center gap-2 mt-1">
+                                  <span className="text-[10px] font-bold text-slate-500 uppercase w-16">Validity:</span>
+                                  <div className="flex-1 grid grid-cols-4 gap-1">
+                                      {[
+                                          { label: '1M', days: 30 },
+                                          { label: '3M', days: 90 },
+                                          { label: '6M', days: 180 },
+                                          { label: '1Y', days: 365 }
+                                      ].map(opt => (
+                                          <button 
+                                              key={opt.days}
+                                              type="button"
+                                              onClick={() => setNewCodeCreditDays(opt.days)}
+                                              className={`py-1.5 rounded font-bold text-[11px] border ${newCodeCreditDays === opt.days ? 'bg-pink-600 border-pink-700 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                                              {opt.label}
+                                          </button>
                                       ))}
-                                  </select>
-                              </div>
-                              <div className="flex gap-2">
-                                  <div>
-                                      <label className="text-[10px] font-bold text-pink-700 uppercase block mb-1">🪙 Daily Credits</label>
-                                      <input type="number" min={1} value={newCodeCreditDaily} onChange={e => setNewCodeCreditDaily(Number(e.target.value))} className="p-2.5 rounded-xl border border-pink-200 w-28 font-bold text-sm" />
-                                  </div>
-                                  <div>
-                                      <label className="text-[10px] font-bold text-pink-700 uppercase block mb-1">📅 Days</label>
-                                      <input type="number" min={1} value={newCodeCreditDays} onChange={e => setNewCodeCreditDays(Number(e.target.value))} className="p-2.5 rounded-xl border border-pink-200 w-24 font-bold text-sm" />
                                   </div>
                               </div>
-                              <p className="text-[10px] text-pink-700 font-semibold">⚡ Redeemer ko har din +{newCodeCreditDaily} Credits milenge Store se claim karne ke liye {newCodeCreditDays} dino tak.</p>
+                              <p className="text-[10px] text-pink-700 font-semibold mt-1">⚡ Redeemer ko har din +{newCodeCreditDaily} credits milenge ({newCodeCreditDays} din tak).</p>
                           </div>
                       ) : newCodeType === 'CREDITS' ? (
                           <div>
@@ -17958,17 +18008,45 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                               <p className="text-[10px] text-sky-600 mt-1">Instant Diamonds milenge redeem karne par.</p>
                           </div>
                       ) : newCodeType === 'DIAMOND_SUBSCRIPTION' ? (
-                          <div className="flex flex-col gap-2">
-                              <label className="text-xs font-bold text-sky-700 uppercase block mb-1">💎 Diamond Subscription Plan</label>
-                              <select 
-                                  value={newCodeDiamondSubPlan} 
-                                  onChange={e => setNewCodeDiamondSubPlan(e.target.value)} 
-                                  className="p-3 rounded-xl border border-sky-300 font-bold text-sky-900 bg-white"
-                              >
-                                  <option value="7_DAYS_PASS">7 Days Pass (+10 💎 / day = 70 total)</option>
-                                  <option value="30_DAYS_PASS">Monthly Pass (+25 💎 / day = 750 total)</option>
-                              </select>
-                              <p className="text-[10px] text-sky-600">Redeemer ko daily diamonds claim karne ka pass active hoga.</p>
+                          <div className="flex flex-col gap-3">
+                              <label className="text-xs font-bold text-sky-700 uppercase block">💎 Diamond Subscription Plan</label>
+                              <div className="grid grid-cols-2 gap-2">
+                                  {DIAMOND_SUBSCRIPTION_PLANS.map(p => (
+                                      <button 
+                                          key={p.id}
+                                          type="button"
+                                          onClick={() => {
+                                              setNewCodeDiamondSubPlan(p.id);
+                                              setNewCodeDiamondSubDaily(p.dailyDiamonds);
+                                              setNewCodeDiamondSubName(p.name);
+                                          }}
+                                          className={`p-2 rounded font-bold text-[11px] border leading-tight ${newCodeDiamondSubPlan === p.id ? 'bg-sky-50 border-sky-400 text-sky-900 shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                                          <div className="text-sky-600 truncate">{p.name.replace('Diamond Pass', 'Pass')}</div>
+                                          <div className="opacity-80 font-normal">+{p.dailyDiamonds} 💎/d</div>
+                                      </button>
+                                  ))}
+                              </div>
+                              <div className="flex items-center gap-2 mt-1">
+                                  <span className="text-[10px] font-bold text-slate-500 uppercase w-16">Validity:</span>
+                                  <div className="flex-1 grid grid-cols-5 gap-1">
+                                      {[
+                                          { label: '7D', days: 7 },
+                                          { label: '1M', days: 30 },
+                                          { label: '3M', days: 90 },
+                                          { label: '6M', days: 180 },
+                                          { label: '1Y', days: 365 }
+                                      ].map(opt => (
+                                          <button 
+                                              key={opt.days}
+                                              type="button"
+                                              onClick={() => setNewCodeDiamondSubDays(opt.days)}
+                                              className={`py-1.5 rounded font-bold text-[10px] border ${newCodeDiamondSubDays === opt.days ? 'bg-sky-600 border-sky-700 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                                              {opt.label}
+                                          </button>
+                                      ))}
+                                  </div>
+                              </div>
+                              <p className="text-[10px] text-sky-600">Redeemer ko har din +{newCodeDiamondSubDaily} diamonds milenge ({newCodeDiamondSubDays} din tak).</p>
                           </div>
                       ) : newCodeType === 'SCORE' ? (
                           <div>

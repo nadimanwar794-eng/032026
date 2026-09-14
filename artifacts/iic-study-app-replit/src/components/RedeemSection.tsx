@@ -307,9 +307,9 @@ export const RedeemSection: React.FC<Props> = ({ user, onSuccess }) => {
             successMessage = `💎 Shandaar! +${diaAmount} Diamonds aapke account mein add ho gaye!`;
         } else if (targetCode.type === 'DIAMOND_SUBSCRIPTION') {
             // Handle Diamond Subscription Pass Redeem Code
-            const planId = targetCode.diamondSubPlanId || '7_DAYS_PASS';
-            updatedUser = activateDiamondSub(updatedUser, planId);
-            const planName = planId === '30_DAYS_PASS' ? 'Monthly Diamond Pass (25💎/day)' : '7-Day Diamond Pass (10💎/day)';
+            const planId = targetCode.diamondSubPlanId || 'starter_diamond';
+            updatedUser = activateDiamondSub(updatedUser, planId, targetCode.diamondSubDurationDays, targetCode.diamondSubPlanName);
+            const planName = targetCode.diamondSubPlanName || 'Diamond Pass';
             successMessage = `💎 Mubarak ho! ${planName} Activate ho gaya! Store se roz apne diamonds claim karein!`;
         } else if (targetCode.type === 'THEME_COLOR') {
             // Handle Temporary App Theme Color
@@ -323,6 +323,24 @@ export const RedeemSection: React.FC<Props> = ({ user, onSuccess }) => {
                 ? `${Math.round(durationHours / 24)} din`
                 : `${durationHours} ghante`;
             successMessage = `🎨 App Theme Color Change! Aapka app ab ${color} color mein ${timeLabel} ke liye glow karega!`;
+        } else if (targetCode.type === 'CREDIT_SUBSCRIPTION') {
+            const planId = targetCode.creditPlanId || 'csp_100';
+            const daily = targetCode.creditDailyAmount || 100;
+            const days = targetCode.creditDurationDays || 30;
+            const pName = targetCode.creditPlanName || 'Credit Pass';
+            
+            updatedUser.creditSubscription = {
+                planId: planId,
+                planName: pName,
+                dailyCredits: daily,
+                
+                startDate: new Date().toISOString(),
+                endDate: new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString(),
+                totalClaimedDays: 0,
+                totalCreditsClaimed: 0,
+                status: 'ACTIVE',
+            };
+            successMessage = `⚡ Mubarak ho! ${pName} Activate ho gaya! Roz +${daily} Credits claim karein ${days} din tak.`;
         } else {
             // Handle Credits (Default)
             const amount = targetCode.amount || 0;
