@@ -443,7 +443,7 @@ export const ALL_FEATURES: Feature[] = [
     { id: 'REVISION_HUB_PREMIUM', label: 'Revision Hub (Premium)', group: 'SOUL', surfaceLevel: 2, adminVisible: true, description: 'Advanced revision features.' },
     { id: 'TOPIC_CONTENT', label: 'Topic Content', group: 'SOUL', surfaceLevel: 2, adminVisible: true, description: 'Control topic-specific content visibility.' },
     { id: 'REQUEST_CONTENT', label: 'Request Content', group: 'SOUL', surfaceLevel: 2, requiredSubscription: 'BASIC', adminVisible: true, description: 'Enable/Disable content requests.' },
-    { id: 'COMMUNITY_MCQ_SEND', label: 'Community MCQ Send', group: 'TOOLS', surfaceLevel: 2, requiredSubscription: 'BASIC', adminVisible: true, description: 'Send MCQs to community.' },
+    { id: 'COMMUNITY_MCQ_SEND', label: 'Community MCQ Send', group: 'TOOLS', surfaceLevel: 2, adminVisible: true, description: 'Free for all students; send MCQs to community.' },
     { id: 'SCORE_HISTORY', label: 'Score History Unlocked', group: 'ANALYSIS', surfaceLevel: 2, requiredSubscription: 'BASIC', adminVisible: true, description: 'View detailed score analytics and history.' },
     { id: 'TEXT_STYLE_CUSTOMIZATION', label: 'Text Style Customization', group: 'TOOLS', surfaceLevel: 2, requiredSubscription: 'BASIC', adminVisible: true, description: 'Customize reader fonts and typography.' },
     { id: 'TEXT_COLOR_CUSTOMIZATION', label: 'Text Color Customization', group: 'TOOLS', surfaceLevel: 2, requiredSubscription: 'BASIC', adminVisible: true, description: 'Customize reader text palette colors.' },

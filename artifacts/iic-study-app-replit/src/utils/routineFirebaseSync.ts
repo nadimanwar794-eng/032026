@@ -71,6 +71,7 @@ function toConfigPayload(data: RoutineData) {
     selectedBook:            data.selectedBook   ?? null,
     selectedBooks:           data.selectedBooks  ?? [],
     routineCategories:       data.routineCategories ?? [],
+    unlockedCompetitionBooks: data.unlockedCompetitionBooks ?? {},
     enabled:                 data.enabled        ?? false,
     unlockedTierSlot:        data.unlockedTierSlot ?? false,
 
@@ -200,6 +201,10 @@ export async function hydrateRoutineData(userId: string): Promise<void> {
           : (local.routineCategories?.length
               ? local.routineCategories
               : (cloud.routineCategories ?? [])),
+      unlockedCompetitionBooks: {
+        ...(cloud.unlockedCompetitionBooks ?? {}),
+        ...(local.unlockedCompetitionBooks ?? {}),
+      },
 
       enabled:         local.enabled         || cloud.enabled,
       unlockedTierSlot: local.unlockedTierSlot || cloud.unlockedTierSlot,

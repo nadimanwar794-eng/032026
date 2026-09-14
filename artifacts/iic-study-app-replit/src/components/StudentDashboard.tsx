@@ -2067,6 +2067,7 @@ export const StudentDashboard: React.FC<Props> = ({
     selectedBulk?: boolean;
     diamondOnly?: boolean;
     costDiamonds?: number;
+    diamondCostOverride?: number;
     bulkOption?: { count: number; totalCost: number; originalTotal: number; action: () => void; pages: Array<{ name: string; cost: number }> };
     // New: page-mode panel (shows all modes for current page with tier locks)
     pageInfo?: {
@@ -7896,16 +7897,21 @@ export const StudentDashboard: React.FC<Props> = ({
       return;
     }
 
-    if (app.creditCost > 0) {
-      if (getTotalCredits(user) < app.creditCost) {
-        showAlert(`Insufficient Credits! Need ${app.creditCost}.`, "ERROR");
-        return;
-      }
-      const _uDeducted = applyDeduction(user, app.creditCost);
-      if (!_uDeducted) return;
-      const u = { ..._uDeducted, totalScore: (user.totalScore || 0) + app.creditCost };
-      handleUserUpdate(u);
-      setActiveExternalApp(app.url);
+    const creditCost = Math.max(0, Number(app.creditCost || 0));
+    const diamondCost = Math.max(0, Number(app.diamondCost || 0));
+    const openApp = () => setActiveExternalApp(app.url);
+    if (creditCost === 0 && diamondCost > 0) {
+      showDiamondOnlyGate(diamondCost, app.name, openApp);
+    } else if (creditCost > 0 || diamondCost > 0) {
+      setCoinGate({
+        cost: creditCost,
+        originalCost: creditCost,
+        discountPct: 0,
+        reason: app.name,
+        action: openApp,
+        costDiamonds: diamondCost || undefined,
+        diamondCostOverride: diamondCost || undefined,
+      });
     } else {
       setActiveExternalApp(app.url);
     }
@@ -19760,7 +19766,7 @@ export const StudentDashboard: React.FC<Props> = ({
               user={user}
               onClose={() => setShowChat(false)}
               isAdmin={false}
-              allowStudentMcq={!!settings?.allowStudentCommunityMcq}
+              allowStudentMcq={settings?.allowStudentCommunityMcq !== false}
               hideGlobalTab={!!settings?.hideGlobalChat}
               onSpendCoins={handleSpendCoins}
               onSpendDiamonds={handleSpendDiamonds}
@@ -28673,7 +28679,7 @@ RULES:
       {/* ── COIN GATE POPUP ── Premium full-screen confirm ── */}
       {coinGate && (() => {
         const balance = getTotalCredits(user);
-        const { cost, originalCost, discountPct, reason, action, onCancel, selectedBulk, bulkOption, pageInfo, diamondOnly, costDiamonds } = coinGate;
+        const { cost, originalCost, discountPct, reason, action, onCancel, selectedBulk, bulkOption, pageInfo, diamondOnly, costDiamonds, diamondCostOverride } = coinGate;
         const isDiamondOnly = !!diamondOnly;
         const diamondCostOnly = costDiamonds || 5;
         const isPermanentlyUnlocked = !!(
@@ -29070,7 +29076,7 @@ RULES:
                   <button
                     type="button"
                     onClick={() => {
-                      const diamondCost = getDiamondUnlockCost(activeCost, reason);
+                       const diamondCost = diamondCostOverride || getDiamondUnlockCost(activeCost, reason);
                       const freshU = (window as any).__dashUserRef?.current ?? userRef.current ?? user;
                       const userDiamonds = typeof freshU.diamonds === 'number' ? freshU.diamonds : (user.diamonds ?? 0);
                       if (userDiamonds < diamondCost) {
@@ -29093,9 +29099,9 @@ RULES:
                   >
                     <span>💎</span>
                     <span>
-                      {(user.diamonds ?? 0) >= getDiamondUnlockCost(activeCost, reason)
-                        ? `💎 ${getDiamondUnlockCost(activeCost, reason)} Diamonds Se Permanent Unlock`
-                        : `💎 Store se Diamonds Lein (Need ${getDiamondUnlockCost(activeCost, reason)} 💎)`}
+                      {(user.diamonds ?? 0) >= (diamondCostOverride || getDiamondUnlockCost(activeCost, reason))
+                        ? `💎 ${diamondCostOverride || getDiamondUnlockCost(activeCost, reason)} Diamonds Se Permanent Unlock`
+                        : `💎 Store se Diamonds Lein (Need ${diamondCostOverride || getDiamondUnlockCost(activeCost, reason)} 💎)`}
                     </span>
                   </button>
                 )}

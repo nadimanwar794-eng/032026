@@ -118,6 +118,8 @@ export interface RoutineData {
   // Per-class/book category snapshots — keyed by "SCHOOL_<classLevel>" or "COMPETITION_<book1+book2>"
   // Saved automatically when user switches class/books so state is fully restored on switch-back.
   routineCategoriesByClass: Record<string, RoutineCategory[]>;
+  // Competition books unlocked by Free/Basic users with the one-time book fee.
+  unlockedCompetitionBooks: Record<string, boolean>;
   unlockedTierSlot: boolean;            // paid with coins (tier-price)
   unlockedLevel5Slot: boolean;          // legacy flag — level bonus now computed from level directly
   unlockedLevel8Slot: boolean;          // legacy flag — level bonus now computed from level directly
@@ -179,6 +181,7 @@ export function loadRoutineData(userId: string): RoutineData {
         routineSlots: slots,
         routineCategories: cats,
         routineCategoriesByClass: parsed.routineCategoriesByClass ?? {},
+        unlockedCompetitionBooks: parsed.unlockedCompetitionBooks ?? {},
         unlockedTierSlot: parsed.unlockedTierSlot ?? false,
         unlockedLevel5Slot: parsed.unlockedLevel5Slot ?? false,
         unlockedLevel8Slot: parsed.unlockedLevel8Slot ?? false,
@@ -204,6 +207,7 @@ export function loadRoutineData(userId: string): RoutineData {
     routineSlots: [],
     routineCategories: [],
     routineCategoriesByClass: {},
+    unlockedCompetitionBooks: {},
     unlockedTierSlot: false,
     unlockedLevel5Slot: false,
     unlockedLevel8Slot: false,
@@ -497,6 +501,8 @@ export function getBaseSlotCount(tier: UserSubTier): number {
 export function getTierSlotCost(_tier?: UserSubTier): number {
   return 100;
 }
+
+export const TIER_SLOT_DIAMOND_COST = 10;
 
 export function getActualMaxSlots(tier: UserSubTier, level: number, data: RoutineData): number {
   let max = getBaseSlotCount(tier);

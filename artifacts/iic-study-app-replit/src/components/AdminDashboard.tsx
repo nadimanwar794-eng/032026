@@ -9361,7 +9361,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                   {activeTab === 'CONFIG_EXTERNAL_APPS' && (
                       <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                           <h4 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Globe size={18} /> Manage External Apps</h4>
-                          <p className="text-xs text-slate-600 mb-4">Add up to 20 apps/websites. These will appear in the Student Dashboard.</p>
+                           <p className="text-xs text-slate-600 mb-4">Add up to 20 apps/websites. Students ko ye 3-dot menu ke Utilities section mein dikhenge. Unlock ke liye Credits aur Diamonds dono set kar sakte hain.</p>
                           
                           <div className="space-y-3 mb-6">
                               {(localSettings.externalApps || []).map((app, idx) => (
@@ -9386,8 +9386,8 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                   }} 
                                               /> Lock
                                           </label>
-                                          <div className="flex items-center gap-1 ml-auto">
-                                              <span className="font-bold text-slate-600">Price:</span>
+                                           <div className="flex items-center gap-1 ml-auto">
+                                               <span className="font-bold text-slate-600">CR:</span>
                                               <input 
                                                   type="number" 
                                                   value={app.creditCost} 
@@ -9397,6 +9397,17 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                   }} 
                                                   className="w-16 p-1 border rounded text-center font-bold"
                                               />
+                                               <span className="font-bold text-sky-600 ml-1">💎:</span>
+                                               <input
+                                                   type="number"
+                                                   min="0"
+                                                   value={app.diamondCost || 0}
+                                                   onChange={e => {
+                                                       const updated = localSettings.externalApps!.map((a, i) => i === idx ? { ...a, diamondCost: Number(e.target.value) } : a);
+                                                       setLocalSettings({...localSettings, externalApps: updated});
+                                                   }}
+                                                   className="w-16 p-1 border border-sky-200 rounded text-center font-bold text-sky-700"
+                                               />
                                           </div>
                                       </div>
                                   </div>
@@ -9411,7 +9422,8 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           name: 'New App',
                                           url: 'https://google.com',
                                           isLocked: false,
-                                          creditCost: 0
+                                           creditCost: 0,
+                                           diamondCost: 0,
                                       };
                                       setLocalSettings({...localSettings, externalApps: [...(localSettings.externalApps || []), newApp]});
                                   }}

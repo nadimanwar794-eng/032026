@@ -42,6 +42,7 @@ export interface ExternalApp {
   icon?: string; // Optional icon name or url
   isLocked: boolean;
   creditCost: number;
+  diamondCost?: number; // Optional one-time unlock cost in diamonds
 }
 
 // NEW: Download App for the in-app App Store page

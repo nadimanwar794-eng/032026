@@ -52,7 +52,9 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                 : 'rgba(14,165,233,0.28)',
           };
     const isUltraChatUser = (user.subscriptionLevel === 'ULTRA' && user.isPremium) || isAdmin;
-    const isSubscriber = isAdmin || !!(user.isPremium || (user.subscriptionTier && user.subscriptionTier !== 'FREE') || user.subscriptionLevel === 'BASIC' || user.subscriptionLevel === 'ULTRA');
+    // Community MCQ posting is intentionally free for every student. The admin
+    // setting still controls whether the feature is enabled for the app.
+    const isSubscriber = isAdmin || allowStudentMcq !== false;
     const [activeTab, setActiveTab] = useState<'GLOBAL' | 'SUPPORT' | 'MCQ'>(
         defaultTab || (hideGlobalTab ? 'MCQ' : 'GLOBAL')
     );
@@ -381,13 +383,6 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
         const { question, options, correctAnswer, explanation } = mcqDraft;
         if (!question.trim() || options.some(o => !o.trim())) {
             alert('Question aur sare 4 options fill karo'); return;
-        }
-        if (!isAdminOrSub && onSpendCoins) {
-            const ok = onSpendCoins(MCQ_COIN_COST);
-            if (!ok) {
-                alert(`MCQ bhejne ke liye ${MCQ_COIN_COST} coins chahiye. Aapke paas coins kam hain!`);
-                return;
-            }
         }
         const msg = buildBase({
             type: 'MCQ',
@@ -960,15 +955,15 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                                     </div>
                                     {/* Fixed send footer */}
                                     <div className="shrink-0 px-5 pt-4 pb-[calc(env(safe-area-inset-bottom,0px)+92px)] border-t border-slate-100 bg-white">
-                                        {!isAdminOrSub && onSpendCoins && (
-                                            <p className="text-[11px] text-amber-600 font-bold text-center mb-2 flex items-center justify-center gap-1">
-                                                <Crown size={11} /> MCQ bhejne par <span className="bg-amber-100 px-1.5 py-0.5 rounded-full">{MCQ_COIN_COST} coins</span> katenge
+                                        {!isAdminOrSub && isSubscriber && (
+                                            <p className="text-[11px] text-emerald-600 font-bold text-center mb-2">
+                                                ✓ Community MCQ posting free hai
                                             </p>
                                         )}
                                         <button
                                             onClick={() => {
                                                 if (!isSubscriber) {
-                                                    alert('🔒 Community MCQ Send feature Basic aur Ultra members ke liye hai! Upgrade your plan to participate.');
+                                                    alert('🔒 Community MCQ posting abhi admin ne disable ki hai.');
                                                     return;
                                                 }
                                                 handleSendMcq();
@@ -978,7 +973,7 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                                         >
                                             {!isSubscriber ? (
                                                 <>
-                                                    <Lock size={15} /> <span>Upgrade to Basic/Ultra to Send</span>
+                                                    <Lock size={15} /> <span>Community MCQ posting unavailable</span>
                                                 </>
                                             ) : (
                                                 <>
