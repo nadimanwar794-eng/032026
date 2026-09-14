@@ -7813,12 +7813,14 @@ export const StudentDashboard: React.FC<Props> = ({
   };
 
   const handleContentSubjectSelect = (subject: Subject) => {
+    /* Temporarily completely removed free mode block as per user instructions
     if (syllabusMode === 'COMPETITION' && subject.id !== 'lucent') {
       if (!_isBasicUser && !_isUltraUser && user.role !== 'ADMIN') {
         showAlert('🔒 Yeh Book Compilation Basic aur Ultra members ke liye hai. Free mode me Lucent Book available hai.', 'INFO');
         return;
       }
     }
+    */
     setSelectedSubject(subject);
     setHomeworkSubjectView(null);
     setLucentCategoryView(false);
@@ -12238,12 +12240,14 @@ export const StudentDashboard: React.FC<Props> = ({
                 setSelectedSubject(subject);
                 setHomeworkSubjectView(null);
                 setLucentCategoryView(false);
+                /* Temporarily completely removed free mode block as per user instructions
                 if (syllabusMode === 'COMPETITION' && subject.id !== 'lucent') {
                   if (!_isBasicUser && !_isUltraUser && user.role !== 'ADMIN') {
                     showAlert('🔒 Yeh Book Compilation Basic aur Ultra members ke liye hai. Free mode me Lucent Book available hai.', 'INFO');
                     return;
                   }
                 }
+                */
                 if (HOMEWORK_SUBJECTS.includes(subject.id)) {
                   setHomeworkSubjectView(subject.id);
                   setHwSubjectOpenedFrom('COURSES');
