@@ -85,6 +85,24 @@ export const DIAMOND_SUBSCRIPTION_PLANS: DiamondSubscriptionPlan[] = [
     totalDiamonds: 750,
     badge: 'Mega Value Pass (750 💎)',
   },
+  {
+    id: '90_DAYS_PASS',
+    name: '3 Months Diamond Pass',
+    price: 2500,
+    dailyDiamonds: 30,
+    durationDays: 90,
+    totalDiamonds: 2700,
+    badge: 'Super Value (2700 💎)',
+  },
+  {
+    id: '365_DAYS_PASS',
+    name: 'Yearly Diamond Pass',
+    price: 8000,
+    dailyDiamonds: 40,
+    durationDays: 365,
+    totalDiamonds: 14600,
+    badge: 'Ultimate Value (14600 💎)',
+  },
 ];
 
 /**
