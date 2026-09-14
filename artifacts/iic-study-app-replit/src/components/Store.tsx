@@ -391,6 +391,15 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
   /* Free Plan Side-by-Side Ad Modal State */
   const [showFreeAdModal, setShowFreeAdModal] = useState(false);
 
+  const DIAMOND_SUB_DURATIONS_LIST = settings?.diamondDurations && settings.diamondDurations.length > 0 
+    ? settings.diamondDurations 
+    : DEFAULT_DIAMOND_SUB_DURATIONS_LIST;
+
+  const diamondUnifiedTemplates = settings?.diamondTemplates && settings.diamondTemplates.length > 0 
+    ? settings.diamondTemplates 
+    : DEFAULT_diamondUnifiedTemplates;
+
+
   useEffect(() => {
     const key = `free_plan_ad_seen_${user.id}`;
     const alreadySeen = localStorage.getItem(key);
@@ -1870,12 +1879,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
         {tierType === 'CREDITS' && (() => {
           const rawCreditSubPlans = getCreditSubPlans(settings).filter(p => p.isActive !== false);
           
-          const creditSubPlans = rawCreditSubPlans.length > 0 ? rawCreditSubPlans : [
-            { id: 'starter_credit_pass', name: 'Starter Credit Pass', badge: 'STARTER PASS', dailyCredits: 50,  scoreMultiplier: 1.1, weeklyPrice: 40,  price: 150 },
-            { id: 'smart_credit_pass',   name: 'Smart Credit Pass',   badge: 'POPULAR PASS', dailyCredits: 100, scoreMultiplier: 1.2, weeklyPrice: 70,  price: 260 },
-            { id: 'super_credit_pass',   name: 'Super Credit Pass',   badge: 'VALUE PASS',   dailyCredits: 150, scoreMultiplier: 1.3, weeklyPrice: 100, price: 380 },
-            { id: 'mega_credit_pass',    name: 'Mega Credit Pass',    badge: 'MEGA PACK',    dailyCredits: 250, scoreMultiplier: 1.5, weeklyPrice: 150, price: 550 },
-          ];
+          const creditSubPlans = rawCreditSubPlans;
 
           const calculateCustomCreditPrice = (plan: any, durOpt: any, durDisc: number) => {
             let basePrice = 0;

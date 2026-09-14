@@ -17757,13 +17757,13 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                               <div className="flex items-center gap-2 mt-1">
                                   <span className="text-[10px] font-bold text-indigo-600 uppercase w-16">Validity:</span>
                                   <div className="flex-1 grid grid-cols-5 gap-1">
-                                      {[
+                                      {(localSettings.diamondDurations || [
                                           { label: '7D', days: 7 },
                                           { label: '1M', days: 30 },
                                           { label: '3M', days: 90 },
                                           { label: '6M', days: 180 },
                                           { label: '1Y', days: 365 }
-                                      ].map(opt => (
+                                      ]).map(opt => (
                                           <button 
                                               key={opt.days}
                                               type="button"
@@ -18069,13 +18069,13 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                               <div className="flex items-center gap-2 mt-1">
                                   <span className="text-[10px] font-bold text-slate-500 uppercase w-16">Validity:</span>
                                   <div className="flex-1 grid grid-cols-5 gap-1">
-                                      {[
+                                      {(localSettings.diamondDurations || [
                                           { label: '7D', days: 7 },
                                           { label: '1M', days: 30 },
                                           { label: '3M', days: 90 },
                                           { label: '6M', days: 180 },
                                           { label: '1Y', days: 365 }
-                                      ].map(opt => (
+                                      ]).map(opt => (
                                           <button 
                                               key={opt.days}
                                               type="button"
