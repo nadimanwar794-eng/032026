@@ -41,7 +41,10 @@ service cloud.firestore {
     // Users & Subcollections
     match /users/{userId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && (request.auth.uid == userId || isAdminOrSubAdmin());
+      allow create: if isSignedIn() && (
+        (request.auth.uid == userId && request.resource.data.get('role', '') != 'ADMIN' && request.resource.data.get('role', '') != 'SUB_ADMIN')
+        || isAdminOrSubAdmin()
+      );
 
       allow update: if isSignedIn() && (
         (request.auth.uid == userId && (
@@ -63,7 +66,17 @@ service cloud.firestore {
 
     match /user_coins/{userId} {
       allow read: if isSignedIn();
-      allow create, update: if isSignedIn() && (request.auth.uid == userId || isAdminOrSubAdmin());
+      allow create: if isSignedIn() && (
+        (request.auth.uid == userId && request.resource.data.get('coins', 0) <= 1000000)
+        || isAdminOrSubAdmin()
+      );
+      allow update: if isSignedIn() && (
+        (request.auth.uid == userId && (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['coins'])
+          || (request.resource.data.get('coins', 0) <= resource.data.get('coins', 0) + 1000000)
+        ))
+        || isAdminOrSubAdmin()
+      );
     }
 
     match /user_animations/{userId} {
