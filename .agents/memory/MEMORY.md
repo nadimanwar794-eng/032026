@@ -1,0 +1,1 @@
+- [Build and preview constraints](build-and-preview.md) — regenerate library declarations before checks and honor injected artifact workflow ports.

@@ -1280,7 +1280,10 @@ function RoutineSetupSheet({ allNotes, currentMode, currentBoard, currentClass, 
   const [classLevel, setClassLevel] = useState(currentClass || '');
   const [selectedBooks, setSelectedBooks] = useState<Set<string>>(() => {
     if (!isUltraUser) {
-      return new Set(['Lucent']);
+      const allowedSavedBooks = currentBooks.filter(book =>
+        book.toLowerCase() === 'lucent' || !!unlockedCompetitionBooks[book]
+      );
+      return new Set(allowedSavedBooks.length > 0 ? allowedSavedBooks : ['Lucent']);
     }
     return new Set(currentBooks.length > 0 ? currentBooks : ['Lucent']);
   });
@@ -1346,6 +1349,14 @@ function RoutineSetupSheet({ allNotes, currentMode, currentBoard, currentClass, 
                   onClick={() => {
                     setMode(opt.value);
                     if (opt.value === 'SCHOOL') setSelectedBooks(new Set());
+                    if (opt.value === 'COMPETITION' && !isUltraUser) {
+                      setSelectedBooks(prev => {
+                        const allowed = Array.from(prev).filter(book =>
+                          book.toLowerCase() === 'lucent' || !!unlockedCompetitionBooks[book]
+                        );
+                        return new Set(allowed.length > 0 ? allowed : ['Lucent']);
+                      });
+                    }
                     if (opt.value === 'COMPETITION') setClassLevel('');
                   }}
                   className={`w-full flex items-center gap-3 px-4 py-3.5 text-left active:bg-slate-50 transition-colors ${i < arr.length - 1 ? 'border-b border-slate-100' : ''}`}
@@ -1386,12 +1397,12 @@ function RoutineSetupSheet({ allNotes, currentMode, currentBoard, currentClass, 
           {mode === 'COMPETITION' && (
             <div className="block">
               <span className="block text-xs font-black text-slate-600 mb-1.5">
-                Select Books {!isUltraUser ? '(Lucent Default · Multiple books Ultra only)' : '(Multiple possible)'}
+                 Select Books {!isUltraUser ? '(Lucent Default · Extra books unlock with 20 CR / 5 💎)' : '(Multiple possible)'}
               </span>
               {!isUltraUser && (
                 <div className="mb-2 p-2.5 rounded-xl bg-purple-50 border border-purple-200 flex items-center gap-2">
                   <span className="text-xs">👑</span>
-                  <p className="text-[11px] font-semibold text-purple-700">Free aur Basic users ke liye default Lucent book routine mein rehti hai. Multiple books add karne ke liye Ultra plan chahiye.</p>
+                   <p className="text-[11px] font-semibold text-purple-700">Free aur Basic users ke liye Lucent default hai. Extra competition book 20 CR ya 5 💎 se unlock karke routine mein add kar sakte ho.</p>
                 </div>
               )}
               <div className="flex flex-col gap-2 max-h-48 overflow-y-auto p-1">

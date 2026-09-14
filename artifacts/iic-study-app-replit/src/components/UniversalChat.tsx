@@ -52,9 +52,15 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                 : 'rgba(14,165,233,0.28)',
           };
     const isUltraChatUser = (user.subscriptionLevel === 'ULTRA' && user.isPremium) || isAdmin;
-    // Community MCQ posting is intentionally free for every student. The admin
-    // setting still controls whether the feature is enabled for the app.
-    const isSubscriber = isAdmin || allowStudentMcq !== false;
+    // Community MCQ posting is free, but sending is available to Basic/Ultra.
+    // Free users can still open the MCQ tab and solve shared questions.
+    const isSubscriber = isAdmin
+        || (allowStudentMcq !== false && !!(
+            user.isPremium
+            || (user.subscriptionTier && user.subscriptionTier !== 'FREE')
+            || user.subscriptionLevel === 'BASIC'
+            || user.subscriptionLevel === 'ULTRA'
+        ));
     const [activeTab, setActiveTab] = useState<'GLOBAL' | 'SUPPORT' | 'MCQ'>(
         defaultTab || (hideGlobalTab ? 'MCQ' : 'GLOBAL')
     );
