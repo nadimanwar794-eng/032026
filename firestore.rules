@@ -132,7 +132,10 @@ service cloud.firestore {
     match /redeem_codes/{docId} {
       allow read: if isSignedIn();
       allow create, delete: if isAdminOrSubAdmin();
-      allow update: if isSignedIn();
+      allow update: if isSignedIn() && (
+        isAdminOrSubAdmin() ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usedCount', 'isRedeemed', 'redeemedBy', 'lastRedeemedAt'])
+      );
     }
 
     match /schoolPlanRequests/{id} {

@@ -65,16 +65,16 @@
         },
 
         "totalScore": {
-           ".validate": "newData.isNumber() && (!data.exists() || newData.val() <= data.val() + 1000000)"
+           ".validate": "!newData.exists() || (!data.exists() && newData.isNumber()) || (newData.isNumber() && data.isNumber() && (newData.val() <= data.val() + 1000000 || root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN'))"
         },
         "credits": {
-           ".validate": "newData.isNumber() && (!data.exists() || newData.val() <= data.val() + 1000000)"
+           ".validate": "!newData.exists() || (!data.exists() && newData.isNumber()) || (newData.isNumber() && data.isNumber() && (newData.val() <= data.val() + 1000000 || root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN'))"
         },
         "giftedCredits": {
-           ".validate": "newData.isNumber() && (!data.exists() || newData.val() <= data.val() + 1000000)"
+           ".validate": "!newData.exists() || (!data.exists() && newData.isNumber()) || (newData.isNumber() && data.isNumber() && (newData.val() <= data.val() + 1000000 || root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN'))"
         },
         "bonusCredits": {
-           ".validate": "newData.isNumber() && (!data.exists() || newData.val() <= data.val() + 1000000)"
+           ".validate": "!newData.exists() || (!data.exists() && newData.isNumber()) || (newData.isNumber() && data.isNumber() && (newData.val() <= data.val() + 1000000 || root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN'))"
         }
       }
     },
@@ -164,7 +164,10 @@
     },
     "redeem_codes": {
        ".read": "auth != null",
-       ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN')"
+       ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN')",
+       "$codeId": {
+         ".write": "auth != null && data.exists() && (!newData.exists() ? (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || root.child('users').child(auth.uid).child('role').val() === 'SUB_ADMIN') : (!newData.hasChild('amount') || newData.child('amount').val() === data.child('amount').val()) && (!newData.hasChild('type') || newData.child('type').val() === data.child('type').val()) && (!newData.hasChild('maxUses') || newData.child('maxUses').val() === data.child('maxUses').val()))"
+       }
     },
     "__backup__": {
        ".read": "auth != null",
