@@ -29,6 +29,12 @@ const DEFAULT_QUESTIONS = [
   "Aapka birth city / gaon kaunsa hai?"
 ];
 
+// Start persistence setup while the auth screen is rendering instead of
+// making the user wait for it after pressing Login or Create Account.
+const authPersistenceReady = setPersistence(auth, browserLocalPersistence).catch((error) => {
+  console.warn('[Auth] Could not enable persistent auth session:', error);
+});
+
 // ── FULLY SYNCHRONIZED HUSKY AVATAR ──
 const HuskyAvatar: React.FC<{
   trackingLength: number;
@@ -231,7 +237,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
 
-      await setPersistence(auth, browserLocalPersistence);
+      await authPersistenceReady;
       const result = await signInWithPopup(auth, provider);
       const firebaseUser = result.user;
       const userEmail = (firebaseUser.email || '').trim().toLowerCase();
@@ -259,7 +265,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
           credits: typeof appUser.credits === 'number' ? appUser.credits : 50
         };
 
-        if (!await saveUserToLive(appUser)) throw new Error('Account could not be saved to the backend.');
+        if (!await saveUserToLive(appUser, { immediate: true })) throw new Error('Account could not be saved to the backend.');
         localStorage.setItem('nst_current_user', JSON.stringify(appUser));
         localStorage.setItem('nst_last_user_id', uid);
 
@@ -308,7 +314,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
           ]
         };
 
-        if (!await saveUserToLive(newUser)) throw new Error('Account could not be saved to the backend.');
+        if (!await saveUserToLive(newUser, { immediate: true })) throw new Error('Account could not be saved to the backend.');
         localStorage.setItem('nst_current_user', JSON.stringify(newUser));
         localStorage.setItem('nst_last_user_id', uid);
 
@@ -339,7 +345,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
 
     setLoading(true);
     try {
-      await setPersistence(auth, browserLocalPersistence);
+      await authPersistenceReady;
 
       if (input.includes('@')) {
         try {
@@ -366,7 +372,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
             profileCompleted: true
           };
 
-          if (!await saveUserToLive(completeUser)) throw new Error('Account could not be saved to the backend.');
+          if (!await saveUserToLive(completeUser, { immediate: true })) throw new Error('Account could not be saved to the backend.');
           localStorage.setItem('nst_current_user', JSON.stringify(completeUser));
           localStorage.setItem('nst_last_user_id', uid);
 
@@ -430,7 +436,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
             profileCompleted: true
           };
 
-           if (!await saveUserToLive(finalUser)) throw new Error('Account could not be saved to the backend.');
+           if (!await saveUserToLive(finalUser, { immediate: true })) throw new Error('Account could not be saved to the backend.');
            localStorage.setItem('nst_current_user', JSON.stringify(finalUser));
            localStorage.setItem('nst_last_user_id', uid);
 
@@ -487,7 +493,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
 
     setLoading(true);
     try {
-      await setPersistence(auth, browserLocalPersistence);
+      await authPersistenceReady;
       const res = await createUserWithEmailAndPassword(auth, cleanEmail, cleanPassword);
       const uid = res.user.uid;
       const newId = generateUserId();
@@ -530,7 +536,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
         ]
       };
 
-      if (!await saveUserToLive(newStudentUser)) throw new Error('Account could not be saved to the backend.');
+      if (!await saveUserToLive(newStudentUser, { immediate: true })) throw new Error('Account could not be saved to the backend.');
       localStorage.setItem('nst_current_user', JSON.stringify(newStudentUser));
       localStorage.setItem('nst_last_user_id', uid);
       if (logActivity) logActivity("SIGNUP_EMAIL", "New Student Registered", newStudentUser);
@@ -635,7 +641,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
           provider: raw.provider || 'recovery'
         };
 
-        if (!await saveUserToLive(completeUser)) throw new Error('Account could not be saved to the backend.');
+        if (!await saveUserToLive(completeUser, { immediate: true })) throw new Error('Account could not be saved to the backend.');
         localStorage.setItem('nst_current_user', JSON.stringify(completeUser));
         localStorage.setItem('nst_last_user_id', validId);
 

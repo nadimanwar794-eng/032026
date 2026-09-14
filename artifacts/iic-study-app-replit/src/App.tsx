@@ -2019,26 +2019,13 @@ const App: React.FC = () => {
       return;
     }
 
-    const [schoolProfile, coachingProfile] = await Promise.all([
-      getSchoolUserProfile(activeUser.id).catch(() => null),
-      getCoachingUserProfile(activeUser.id).catch(() => null),
-    ]);
-
-    if (schoolProfile) {
-      setState(prev => ({ ...prev, user: activeUser, view: 'SCHOOL_ECOSYSTEM' as any }));
-      return;
-    }
-
-    if (coachingProfile) {
-      setState(prev => ({ ...prev, user: activeUser, view: 'COACHING_ECOSYSTEM' as any }));
-      return;
-    }
-
     if (activeUser.role === 'ADMIN' || activeUser.role === 'SUB_ADMIN') {
       setState(prev => ({ ...prev, user: activeUser, view: 'ADMIN_DASHBOARD' }));
       return;
     }
 
+    // Show the regular dashboard immediately. School/coaching membership is
+    // uncommon and can be detected in the background without blocking login.
     setState(prev => ({
       ...prev,
       user: activeUser,
@@ -2048,6 +2035,25 @@ const App: React.FC = () => {
       selectedStream: activeUser.stream || null,
       language: activeUser.board === 'BSEB' ? 'Hindi' : 'English',
     }));
+
+    void Promise.all([
+      getSchoolUserProfile(activeUser.id).catch(() => null),
+      getCoachingUserProfile(activeUser.id).catch(() => null),
+    ]).then(([schoolProfile, coachingProfile]) => {
+      if (schoolProfile) {
+        setState(prev => (
+          prev.user?.id === activeUser.id
+            ? { ...prev, view: 'SCHOOL_ECOSYSTEM' as any }
+            : prev
+        ));
+      } else if (coachingProfile) {
+        setState(prev => (
+          prev.user?.id === activeUser.id
+            ? { ...prev, view: 'COACHING_ECOSYSTEM' as any }
+            : prev
+        ));
+      }
+    });
   };
 
   const [logoutPending, setLogoutPending] = useState(false);
