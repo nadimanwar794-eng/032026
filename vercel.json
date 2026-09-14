@@ -1,0 +1,12 @@
+{
+  "buildCommand": "pnpm --filter @workspace/iic-study-app-replit run build",
+  "outputDirectory": "artifacts/iic-study-app-replit/dist/public",
+  "framework": "vite",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
