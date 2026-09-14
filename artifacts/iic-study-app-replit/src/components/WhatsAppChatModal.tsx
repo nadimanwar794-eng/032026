@@ -53,7 +53,7 @@ import {
   ChatMessage,
   ChatGroup,
   FriendRequest,
-  SEEDED_CONTACTS,
+  
   SEEDED_GROUPS,
   getDirectConversationId,
   sendPrivateMessage,
@@ -304,7 +304,7 @@ export const WhatsAppChatModal: React.FC<Props> = ({
 
   // Lists
   const [friends, setFriends] = useState<ChatContact[]>([]);
-  const [students, setStudents] = useState<ChatContact[]>(SEEDED_CONTACTS);
+  const [students, setStudents] = useState<ChatContact[]>([]);
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
   const [groups, setGroups] = useState<ChatGroup[]>(getLocalGroups());
   const [searchQuery, setSearchQuery] = useState('');

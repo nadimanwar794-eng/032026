@@ -1202,15 +1202,6 @@ export const fetchRegisteredStudents = async (myUserId: string): Promise<ChatCon
     }
   } catch {}
 
-  // 3. Always include institute classmates (both online & offline students)
-  INSTITUTE_CLASSMATES.forEach((st) => {
-    const isSelf = st.id === myUserId;
-    if (!isSelf && !seenIds.has(st.id)) {
-      seenIds.add(st.id);
-      result.push(st);
-    }
-  });
-
   return result;
 };
 
