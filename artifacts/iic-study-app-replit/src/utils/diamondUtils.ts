@@ -1,4 +1,4 @@
-import { User, UserDiamondSubscription, DiamondPack, DiamondSubscriptionPlan } from '../types';
+import { User, UserDiamondSubscription, DiamondPack, DiamondSubscriptionPlan, SystemSettings } from '../types';
 
 /**
  * Direct Diamond Packs as requested:
@@ -227,13 +227,29 @@ export function claimDailyDiamonds(
 /**
  * Helper to activate diamond subscription upon purchase
  */
+export function getDiamondSubscriptionPlans(settings?: SystemSettings): DiamondSubscriptionPlan[] {
+  if (settings?.diamondTemplates && settings.diamondTemplates.length > 0) {
+    return settings.diamondTemplates.map((t: any) => ({
+        id: t.id,
+        name: t.name,
+        price: 0,
+        dailyDiamonds: t.dailyDiamonds,
+        durationDays: 30, // Default fallback
+        totalDiamonds: t.dailyDiamonds * 30,
+    }));
+  }
+  return DIAMOND_SUBSCRIPTION_PLANS;
+}
+
 export function activateDiamondSub(
   user: User,
   planId: string,
   customDurationDays?: number,
-  customPlanName?: string
+  customPlanName?: string,
+  settings?: SystemSettings
 ): User {
-  const plan = DIAMOND_SUBSCRIPTION_PLANS.find(p => p.id === planId) || DIAMOND_SUBSCRIPTION_PLANS[0];
+  const plans = getDiamondSubscriptionPlans(settings);
+  const plan = plans.find(p => p.id === planId) || plans[0];
   const duration = customDurationDays || plan.durationDays;
   const nameToUse = customPlanName || plan.name;
   const startDate = new Date();

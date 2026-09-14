@@ -99,7 +99,7 @@ const CREDIT_SUB_DURATIONS_LIST = [
   { id: '1_YEAR',  label: '1Y', durationDays: 365, months: 12 },
 ];
 
-const DIAMOND_SUB_DURATIONS_LIST = [
+const DEFAULT_DIAMOND_SUB_DURATIONS_LIST = [
   { id: '7_DAYS', label: '7D', days: 7, ratePerDiamond: 1.80 },
   { id: '30_DAYS', label: '1M', days: 30, ratePerDiamond: 1.50 },
   { id: '90_DAYS', label: '3M', days: 90, ratePerDiamond: 1.30 },
@@ -107,7 +107,7 @@ const DIAMOND_SUB_DURATIONS_LIST = [
   { id: '365_DAYS', label: '1Y', days: 365, ratePerDiamond: 1.00 },
 ];
 
-const diamondUnifiedTemplates = [
+const DEFAULT_diamondUnifiedTemplates = [
   {
     id: 'starter_diamond',
     name: 'Starter Diamond Pass',

@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { User, ViewState, SystemSettings, Subject, Chapter, MCQItem, RecoveryRequest, ActivityLogEntry, LeaderboardEntry, RecycleBinItem, Stream, Board, ClassLevel, GiftCode, SubscriptionPlan, CreditPackage, CreditSubscriptionPlan, UserCreditSubscription, SpinReward, SpinGameType, HtmlModule, PremiumNoteSlot, ContentInfoConfig, ContentInfoItem, SubscriptionHistoryEntry, UniversalAnalysisLog, ContentType, LessonContent, DeepDiveEntry, AdditionalNoteEntry, TeacherStorePlan, TeacherCode, HomeworkItem, LucentNoteEntry, LucentPageNote, AppNotification, BroadcastRedeemCode, LoginBonusRandomGiftOption } from '../types';
 import { DEFAULT_CREDIT_SUB_PLANS, PRESET_CREDIT_SUB_TEMPLATES, grantCreditSubscription, cancelCreditSubscription, getCreditSubPlanMultiplier } from '../utils/creditSubscriptionUtils';
-import { activateDiamondSub, cancelDiamondSub, isDiamondSubActive, getDiamondSubDaysRemaining, DIAMOND_SUBSCRIPTION_PLANS } from '../utils/diamondUtils';
+import { activateDiamondSub, cancelDiamondSub, isDiamondSubActive, getDiamondSubDaysRemaining } from '../utils/diamondUtils';
 import { List, GraduationCap, LayoutDashboard, Users, Search, Trash2, Save, X, Eye, EyeOff, Shield, Megaphone, CheckCircle, ListChecks, Database, FileText, Monitor, Sparkles, Banknote, BrainCircuit, AlertOctagon, ArrowLeft, ArrowRight, Key, Bell, ShieldCheck, Lock, Globe, Layers, Zap, PenTool, RefreshCw, RotateCcw, Plus, LogOut, Download, Upload, CreditCard, Ticket, Video, Image as ImageIcon, Type, Link, FileJson, Activity, AlertTriangle, Gift, Book, Mail, Edit3, MessageSquare, ShoppingBag, Cloud, Rocket, Code2, Layers as LayersIcon, Wifi, WifiOff, Copy, Crown, Gamepad2, Calendar, BookOpen, Image, HelpCircle, Youtube, Play, Star, Trophy, Palette, Settings, Headphones, Layout, Bot, LayoutDashboard as DashboardIcon, Loader2, Gauge, LayoutGrid, ArrowUpCircle, KeyRound, Award, Send, GitCompare, Lightbulb, ThumbsUp, ThumbsDown, Building2, TrendingUp, Coins } from 'lucide-react';
 import { getSubjectsList, DEFAULT_SUBJECTS, DEFAULT_APP_FEATURES, ALL_APP_FEATURES, STUDENT_APP_FEATURES, DEFAULT_CONTENT_INFO_CONFIG, ADMIN_PERMISSIONS, APP_VERSION, STATIC_SYLLABUS, LEVEL_UNLOCKABLE_FEATURES, LUCENT_SUBJECT_OPTIONS_BASE, getClassSubjectOptions, SUPPORT_PHONE } from '../constants';
 import { AdminClassMcqManager } from './AdminClassMcqManager';
@@ -1328,10 +1328,23 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   // --- CREDIT SUBSCRIPTION MANAGER STATE (Daily Pass) ---
   const [newCspName, setNewCspName] = useState('');
   const [newCspPrice, setNewCspPrice] = useState('');
+  const [newCspWeeklyPrice, setNewCspWeeklyPrice] = useState('');
   const [newCspDummyPrice, setNewCspDummyPrice] = useState('');
   const [newCspDailyCredits, setNewCspDailyCredits] = useState('');
   const [newCspDurationDays, setNewCspDurationDays] = useState('30');
   const [newCspBadge, setNewCspBadge] = useState('');
+  const [newCspScoreMultiplier, setNewCspScoreMultiplier] = useState('');
+
+  // Diamond Templates States
+  const [newDiamondTemplateName, setNewDiamondTemplateName] = useState('');
+  const [newDiamondTemplateIcon, setNewDiamondTemplateIcon] = useState('💎');
+  const [newDiamondTemplateDaily, setNewDiamondTemplateDaily] = useState('');
+  const [newDiamondTemplateFeatures, setNewDiamondTemplateFeatures] = useState('');
+
+  // Diamond Durations States
+  const [newDiamondDurationLabel, setNewDiamondDurationLabel] = useState('');
+  const [newDiamondDurationDays, setNewDiamondDurationDays] = useState('');
+  const [newDiamondDurationRate, setNewDiamondDurationRate] = useState('');
 
   // --- GLOBAL BOARD CONTEXT (STRICT ISOLATION) ---
   const [adminBoardContext, setAdminBoardContext] = useState<Board>('NCERT_EN');
@@ -3398,6 +3411,77 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
       return u;
     });
     setLocalSettings({ ...localSettings, creditSubscriptionPlans: updated });
+  };
+
+  const addDiamondTemplate = () => {
+    if (!newDiamondTemplateName || !newDiamondTemplateDaily) return;
+    const newTemplate = {
+      id: `dia_tmpl_${Date.now()}`,
+      name: newDiamondTemplateName,
+      icon: newDiamondTemplateIcon || '💎',
+      dailyDiamonds: Number(newDiamondTemplateDaily),
+      features: newDiamondTemplateFeatures.split(',').map(f => f.trim()).filter(Boolean)
+    };
+    const current = localSettings.diamondTemplates || [
+      { id: 'starter_diamond', name: 'Starter Diamond Pass', icon: '💎', dailyDiamonds: 10, features: ['Daily 10 💎 Drop Claim', 'Chapters Permanently Unlock'] },
+      { id: 'active_diamond', name: 'Active Diamond Pass', icon: '⚡', dailyDiamonds: 20, features: ['Daily 20 💎 Drop Claim', 'Tez Chapters Unlocking'] },
+      { id: 'premium_diamond', name: 'Premium Diamond Pass', icon: '🌟', dailyDiamonds: 30, features: ['Daily 30 💎 Drop Claim', 'Premium Content Unlocks'] },
+      { id: 'elite_diamond', name: 'Elite Diamond Pass', icon: '👑', dailyDiamonds: 50, features: ['Daily 50 💎 Huge Drop', 'Sabse Tez Unlock Speed'] }
+    ];
+    setLocalSettings({ ...localSettings, diamondTemplates: [...current, newTemplate] });
+    setNewDiamondTemplateName(''); setNewDiamondTemplateDaily(''); setNewDiamondTemplateFeatures('');
+  };
+
+  const removeDiamondTemplate = (id: string) => {
+    if (!confirm('Are you sure?')) return;
+    const current = localSettings.diamondTemplates || [];
+    setLocalSettings({ ...localSettings, diamondTemplates: current.filter(t => t.id !== id) });
+  };
+
+  const updateDiamondTemplate = (id: string, field: string, value: any) => {
+    const current = localSettings.diamondTemplates || [];
+    const updated = current.map(t => {
+      if (t.id !== id) return t;
+      if (field === 'features') {
+         return { ...t, features: value.split(',').map((f: string) => f.trim()).filter(Boolean) };
+      }
+      return { ...t, [field]: value };
+    });
+    setLocalSettings({ ...localSettings, diamondTemplates: updated });
+  };
+
+  const addDiamondDuration = () => {
+    if (!newDiamondDurationLabel || !newDiamondDurationDays || !newDiamondDurationRate) return;
+    const newDur = {
+      id: `dia_dur_${Date.now()}`,
+      label: newDiamondDurationLabel,
+      days: Number(newDiamondDurationDays),
+      ratePerDiamond: Number(newDiamondDurationRate)
+    };
+    const current = localSettings.diamondDurations || [
+      { id: '7_DAYS', label: '7D', days: 7, ratePerDiamond: 1.80 },
+      { id: '30_DAYS', label: '1M', days: 30, ratePerDiamond: 1.50 },
+      { id: '90_DAYS', label: '3M', days: 90, ratePerDiamond: 1.30 },
+      { id: '180_DAYS', label: '6M', days: 180, ratePerDiamond: 1.15 },
+      { id: '365_DAYS', label: '1Y', days: 365, ratePerDiamond: 1.00 }
+    ];
+    setLocalSettings({ ...localSettings, diamondDurations: [...current, newDur] });
+    setNewDiamondDurationLabel(''); setNewDiamondDurationDays(''); setNewDiamondDurationRate('');
+  };
+
+  const removeDiamondDuration = (id: string) => {
+    if (!confirm('Are you sure?')) return;
+    const current = localSettings.diamondDurations || [];
+    setLocalSettings({ ...localSettings, diamondDurations: current.filter(d => d.id !== id) });
+  };
+
+  const updateDiamondDuration = (id: string, field: string, value: any) => {
+    const current = localSettings.diamondDurations || [];
+    const updated = current.map(d => {
+      if (d.id !== id) return d;
+      return { ...d, [field]: value };
+    });
+    setLocalSettings({ ...localSettings, diamondDurations: updated });
   };
 
   const addCreditSubPreset = (preset: (typeof PRESET_CREDIT_SUB_TEMPLATES)[0]) => {
@@ -8973,12 +9057,12 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           />
                                       </div>
                                       <div>
-                                          <label className="text-[10px] font-bold uppercase text-slate-400">Dummy Cut ₹</label>
+                                          <label className="text-[10px] font-bold uppercase text-slate-400">Weekly ₹</label>
                                           <input
                                               type="number"
-                                              placeholder="199"
-                                              value={newCspDummyPrice}
-                                              onChange={e => setNewCspDummyPrice(e.target.value)}
+                                              placeholder="40"
+                                              value={newCspWeeklyPrice}
+                                              onChange={e => setNewCspWeeklyPrice(e.target.value)}
                                               className="w-full p-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white"
                                           />
                                       </div>
@@ -8993,12 +9077,13 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           />
                                       </div>
                                       <div>
-                                          <label className="text-[10px] font-bold uppercase text-slate-400">Days (30/90/365)</label>
+                                          <label className="text-[10px] font-bold uppercase text-slate-400">XP Boost (1.2)</label>
                                           <input
                                               type="number"
-                                              placeholder="30"
-                                              value={newCspDurationDays}
-                                              onChange={e => setNewCspDurationDays(e.target.value)}
+                                              step="0.1"
+                                              placeholder="1.1"
+                                              value={newCspScoreMultiplier}
+                                              onChange={e => setNewCspScoreMultiplier(e.target.value)}
                                               className="w-full p-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white"
                                           />
                                       </div>
@@ -15382,7 +15467,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           </div>
                                           <div className="space-y-1">
                                               <label className="text-[10px] font-bold text-slate-500 uppercase">Target Class</label>
-                                              <div className="grid grid-cols-4 gap-1.5">
+                                              <div className="grid grid-cols-5 gap-1.5">
                                                   {(['6','7','8','9','10','11','12'] as string[]).map(c => (
                                                       <button key={c} onClick={() => { setBnMcTargetClass(c); setBnMcTargetSubject('biology'); }}
                                                           className={`py-2 rounded-xl text-xs font-black transition-all active:scale-95 ${bnMcTargetClass === c ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-700 border border-indigo-100'}`}
@@ -15412,7 +15497,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           </div>
                                           <div className="space-y-1">
                                               <label className="text-[10px] font-bold text-slate-500 uppercase">🏫 Board (optional)</label>
-                                              <div className="grid grid-cols-4 gap-1.5">
+                                              <div className="grid grid-cols-5 gap-1.5">
                                                   {([
                                                       { id: '' as const,         label: '🌐 All' },
                                                       { id: 'NCERT_EN' as const, label: '📘 EN' },
@@ -17607,7 +17692,12 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                           <div className="flex flex-col gap-3 p-3 bg-sky-50/70 rounded-xl border border-sky-200 col-span-full">
                               <label className="text-[10px] font-bold text-sky-800 uppercase block">💎 Diamond Subscription Plan</label>
                               <div className="grid grid-cols-2 gap-2">
-                                  {DIAMOND_SUBSCRIPTION_PLANS.map(p => (
+                                  {(localSettings.diamondTemplates || [
+    { id: 'starter_diamond', name: 'Starter Diamond Pass', icon: '💎', dailyDiamonds: 10, features: [] },
+    { id: 'active_diamond', name: 'Active Diamond Pass', icon: '⚡', dailyDiamonds: 20, features: [] },
+    { id: 'premium_diamond', name: 'Premium Diamond Pass', icon: '🌟', dailyDiamonds: 30, features: [] },
+    { id: 'elite_diamond', name: 'Elite Diamond Pass', icon: '👑', dailyDiamonds: 50, features: [] }
+]).map(p => (
                                       <button 
                                           key={p.id}
                                           type="button"
@@ -17625,13 +17715,13 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                               <div className="flex items-center gap-2 mt-1">
                                   <span className="text-[10px] font-bold text-sky-600 uppercase w-16">Validity:</span>
                                   <div className="flex-1 grid grid-cols-5 gap-1">
-                                      {[
+                                      {(localSettings.diamondDurations || [
                                           { label: '7D', days: 7 },
                                           { label: '1M', days: 30 },
                                           { label: '3M', days: 90 },
                                           { label: '6M', days: 180 },
                                           { label: '1Y', days: 365 }
-                                      ].map(opt => (
+                                      ]).map(opt => (
                                           <button 
                                               key={opt.days}
                                               type="button"
@@ -17666,8 +17756,9 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                               </div>
                               <div className="flex items-center gap-2 mt-1">
                                   <span className="text-[10px] font-bold text-indigo-600 uppercase w-16">Validity:</span>
-                                  <div className="flex-1 grid grid-cols-4 gap-1">
+                                  <div className="flex-1 grid grid-cols-5 gap-1">
                                       {[
+                                          { label: '7D', days: 7 },
                                           { label: '1M', days: 30 },
                                           { label: '3M', days: 90 },
                                           { label: '6M', days: 180 },
@@ -17977,8 +18068,9 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                               </div>
                               <div className="flex items-center gap-2 mt-1">
                                   <span className="text-[10px] font-bold text-slate-500 uppercase w-16">Validity:</span>
-                                  <div className="flex-1 grid grid-cols-4 gap-1">
+                                  <div className="flex-1 grid grid-cols-5 gap-1">
                                       {[
+                                          { label: '7D', days: 7 },
                                           { label: '1M', days: 30 },
                                           { label: '3M', days: 90 },
                                           { label: '6M', days: 180 },
@@ -18011,7 +18103,12 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                           <div className="flex flex-col gap-3">
                               <label className="text-xs font-bold text-sky-700 uppercase block">💎 Diamond Subscription Plan</label>
                               <div className="grid grid-cols-2 gap-2">
-                                  {DIAMOND_SUBSCRIPTION_PLANS.map(p => (
+                                  {(localSettings.diamondTemplates || [
+    { id: 'starter_diamond', name: 'Starter Diamond Pass', icon: '💎', dailyDiamonds: 10, features: [] },
+    { id: 'active_diamond', name: 'Active Diamond Pass', icon: '⚡', dailyDiamonds: 20, features: [] },
+    { id: 'premium_diamond', name: 'Premium Diamond Pass', icon: '🌟', dailyDiamonds: 30, features: [] },
+    { id: 'elite_diamond', name: 'Elite Diamond Pass', icon: '👑', dailyDiamonds: 50, features: [] }
+]).map(p => (
                                       <button 
                                           key={p.id}
                                           type="button"
@@ -18029,13 +18126,13 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                               <div className="flex items-center gap-2 mt-1">
                                   <span className="text-[10px] font-bold text-slate-500 uppercase w-16">Validity:</span>
                                   <div className="flex-1 grid grid-cols-5 gap-1">
-                                      {[
+                                      {(localSettings.diamondDurations || [
                                           { label: '7D', days: 7 },
                                           { label: '1M', days: 30 },
                                           { label: '3M', days: 90 },
                                           { label: '6M', days: 180 },
                                           { label: '1Y', days: 365 }
-                                      ].map(opt => (
+                                      ]).map(opt => (
                                           <button 
                                               key={opt.days}
                                               type="button"
@@ -19275,7 +19372,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                       </div>
                                       <div className="flex items-center gap-2">
                                           <span className="text-[10px] font-bold text-slate-500 uppercase w-16">Validity:</span>
-                                          <div className="flex-1 grid grid-cols-4 gap-1">
+                                          <div className="flex-1 grid grid-cols-5 gap-1">
                                               {[
                                                   { label: '1M', days: 30 },
                                                   { label: '3M', days: 90 },
@@ -19365,7 +19462,12 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                   <span className="text-xs text-slate-500 italic block">No active diamond subscription pass</span>
                                   <div className="flex flex-col gap-3">
                                       <div className="grid grid-cols-2 gap-2">
-                                          {DIAMOND_SUBSCRIPTION_PLANS.map(p => (
+                                          {(localSettings.diamondTemplates || [
+    { id: 'starter_diamond', name: 'Starter Diamond Pass', icon: '💎', dailyDiamonds: 10, features: [] },
+    { id: 'active_diamond', name: 'Active Diamond Pass', icon: '⚡', dailyDiamonds: 20, features: [] },
+    { id: 'premium_diamond', name: 'Premium Diamond Pass', icon: '🌟', dailyDiamonds: 30, features: [] },
+    { id: 'elite_diamond', name: 'Elite Diamond Pass', icon: '👑', dailyDiamonds: 50, features: [] }
+]).map(p => (
                                               <button 
                                                   key={p.id}
                                                   type="button"
@@ -19379,7 +19481,17 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                       <button
                                           type="button"
                                           onClick={async () => {
-                                              const plan = DIAMOND_SUBSCRIPTION_PLANS.find(p => p.id === selectedUserDiamondSubPlanId) || DIAMOND_SUBSCRIPTION_PLANS[0];
+                                              const plan = (localSettings.diamondTemplates || [
+    { id: 'starter_diamond', name: 'Starter Diamond Pass', icon: '💎', dailyDiamonds: 10, features: [] },
+    { id: 'active_diamond', name: 'Active Diamond Pass', icon: '⚡', dailyDiamonds: 20, features: [] },
+    { id: 'premium_diamond', name: 'Premium Diamond Pass', icon: '🌟', dailyDiamonds: 30, features: [] },
+    { id: 'elite_diamond', name: 'Elite Diamond Pass', icon: '👑', dailyDiamonds: 50, features: [] }
+]).find(p => p.id === selectedUserDiamondSubPlanId) || (localSettings.diamondTemplates || [
+    { id: 'starter_diamond', name: 'Starter Diamond Pass', icon: '💎', dailyDiamonds: 10, features: [] },
+    { id: 'active_diamond', name: 'Active Diamond Pass', icon: '⚡', dailyDiamonds: 20, features: [] },
+    { id: 'premium_diamond', name: 'Premium Diamond Pass', icon: '🌟', dailyDiamonds: 30, features: [] },
+    { id: 'elite_diamond', name: 'Elite Diamond Pass', icon: '👑', dailyDiamonds: 50, features: [] }
+])[0];
                                               if (!confirm(`Kya aap ${editingUser.name} ko "${plan.name}" Diamond Pass grant karna chahte hain?`)) return;
                                               const updated = activateDiamondSub(editingUser, plan.id);
                                               const ok = await saveUserToLive(updated);

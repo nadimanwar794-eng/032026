@@ -391,6 +391,7 @@ export interface CreditSubscriptionPlan {
   description?: string;
   isActive?: boolean;
   scoreMultiplier?: number; // XP Multiplier: Starter (1.1x), Smart (1.2x), Super (1.3x), Mega (1.5x)
+  weeklyPrice?: number; // Price for 7 days
 }
 
 export interface UserCreditSubscription {
@@ -1069,6 +1070,19 @@ export interface SystemSettings {
   packages?: CreditPackage[];
   subscriptionPlans?: SubscriptionPlan[];
   creditSubscriptionPlans?: CreditSubscriptionPlan[]; // Daily Credit Subscription Plans managed by Admin
+  diamondTemplates?: {
+    id: string;
+    name: string;
+    icon: string;
+    dailyDiamonds: number;
+    features: string[];
+  }[];
+  diamondDurations?: {
+    id: string;
+    label: string;
+    days: number;
+    ratePerDiamond: number;
+  }[];
   startupAd?: StartupConfig;
   // NEW: 3-Tier Popup Control (Free vs Ultra)
   appFeatures?: AppFeature[];
