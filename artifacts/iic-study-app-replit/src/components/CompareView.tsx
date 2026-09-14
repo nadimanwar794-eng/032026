@@ -739,7 +739,7 @@ export const CompareView: React.FC<Props> = ({ hits, query, onClose, user, setti
             )}
 
             {!topicLoading && topicResult && (
-              <>
+              <div>
                 {/* Book + Topic info strip */}
                 <div className="flex flex-wrap gap-1.5">
                   {books.map((h, i) => {
@@ -824,7 +824,7 @@ export const CompareView: React.FC<Props> = ({ hits, query, onClose, user, setti
                 >
                   🔄 Dobara Compare Karein
                 </button>
-              </>
+              </div>
             )}
 
             {!topicLoading && !topicResult && (
