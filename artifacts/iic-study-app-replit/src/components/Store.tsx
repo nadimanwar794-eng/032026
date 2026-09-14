@@ -813,7 +813,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
     'Daily Claim: 50 Credits / Day',
     'Daily XP Limit: +66%',
     'XP Multiplier: 1.5X Boost',
-    'Credit Off Anywhere: 20%',
+    'Credit Off Anywhere: 10%',
     'Store Discount: +5%',
     'Projector & PDF Mode',
     'Writing & Correction Mode',
@@ -832,7 +832,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
     'Store Discount: +10% (Pro & Max)',
     'Daily XP Limit: +133%',
     'XP Multiplier: 2.0X Super Boost',
-    'Credit Off Anywhere: 40%',
+    'Credit Off Anywhere: 20%',
     'Global Student Chat',
     'All Ultra Themes Free',
     'Priority Content Requests',
@@ -1067,7 +1067,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
                       </div>
                       <div className="p-1.5 rounded-lg bg-sky-400/10 border border-sky-400/20">
                         <span className="text-sky-300/70 block text-[8.5px] font-bold uppercase">Credit Discount</span>
-                        <span className="font-black text-emerald-400">Flat 20% OFF Everywhere</span>
+                        <span className="font-black text-emerald-400">Flat 10% OFF Everywhere</span>
                       </div>
                       <div className="p-1.5 rounded-lg bg-sky-400/10 border border-sky-400/20">
                         <span className="text-sky-300/70 block text-[8.5px] font-bold uppercase">Store Discount</span>
@@ -1224,7 +1224,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
                       </div>
                       <div className="p-1.5 rounded-lg bg-purple-400/10 border border-purple-400/20">
                         <span className="text-purple-300/70 block text-[8.5px] font-bold uppercase">Credit Discount</span>
-                        <span className="font-black text-emerald-400">Maximum 40% OFF Everywhere</span>
+                        <span className="font-black text-emerald-400">Maximum 20% OFF Everywhere</span>
                       </div>
                       <div className="p-1.5 rounded-lg bg-purple-400/10 border border-purple-400/20">
                         <span className="text-purple-300/70 block text-[8.5px] font-bold uppercase">Store Discount</span>
