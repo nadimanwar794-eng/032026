@@ -1283,9 +1283,9 @@ function RoutineSetupSheet({ allNotes, currentMode, currentBoard, currentClass, 
       const allowedSavedBooks = currentBooks.filter(book =>
         book.toLowerCase() === 'lucent' || !!unlockedCompetitionBooks[book]
       );
-      return new Set(allowedSavedBooks.length > 0 ? allowedSavedBooks : ['Lucent']);
+      return new Set(currentMode === 'COMPETITION' ? (allowedSavedBooks.length > 0 ? allowedSavedBooks : ['Lucent']) : allowedSavedBooks);
     }
-    return new Set(currentBooks.length > 0 ? currentBooks : ['Lucent']);
+    return new Set(currentMode === 'COMPETITION' ? (currentBooks.length > 0 ? currentBooks : ['Lucent']) : currentBooks);
   });
   const [bookToUnlock, setBookToUnlock] = useState<string | null>(null);
 
@@ -1349,15 +1349,19 @@ function RoutineSetupSheet({ allNotes, currentMode, currentBoard, currentClass, 
                   onClick={() => {
                     setMode(opt.value);
                     if (opt.value === 'SCHOOL') setSelectedBooks(new Set());
-                    if (opt.value === 'COMPETITION' && !isUltraUser) {
-                      setSelectedBooks(prev => {
-                        const allowed = Array.from(prev).filter(book =>
-                          book.toLowerCase() === 'lucent' || !!unlockedCompetitionBooks[book]
-                        );
-                        return new Set(allowed.length > 0 ? allowed : ['Lucent']);
-                      });
+                    if (opt.value === 'COMPETITION') {
+                      if (!isUltraUser) {
+                        setSelectedBooks(prev => {
+                          const allowed = Array.from(prev).filter(book =>
+                            book.toLowerCase() === 'lucent' || !!unlockedCompetitionBooks[book]
+                          );
+                          return new Set(allowed.length > 0 ? allowed : ['Lucent']);
+                        });
+                      } else {
+                        setSelectedBooks(prev => new Set(prev.size > 0 ? prev : ['Lucent']));
+                      }
+                      setClassLevel('');
                     }
-                    if (opt.value === 'COMPETITION') setClassLevel('');
                   }}
                   className={`w-full flex items-center gap-3 px-4 py-3.5 text-left active:bg-slate-50 transition-colors ${i < arr.length - 1 ? 'border-b border-slate-100' : ''}`}
                 >
