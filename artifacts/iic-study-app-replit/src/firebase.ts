@@ -5,16 +5,17 @@ import { getAuth, onAuthStateChanged } from "firebase/auth";
 import { storage } from "./utils/storage";
 
 // --- FIREBASE CONFIGURATION ---
-
 const firebaseConfig = {
-apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyC7N3IOa7GRETNRBo8P-QKVFzg2bLqoEco",
-authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "students-app-deae5.firebaseapp.com",
-databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL || "https://students-app-deae5-default-rtdb.asia-southeast1.firebasedatabase.app",
-projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "students-app-deae5",
-storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "students-app-deae5.firebasestorage.app",
-messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "128267767708",
-appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:128267767708:web:08ed73b1563b2f3eb60259"
+apiKey: "AIzaSyBEDKZVPgwOPCccjWdKSShfvSqC3REDa0c",
+authDomain: "iic-nst.firebaseapp.com",
+databaseURL: "https://iic-nst-default-rtdb.firebaseio.com",
+projectId: "iic-nst",
+storageBucket: "iic-nst.firebasestorage.app",
+messagingSenderId: "984309241322",
+appId: "1:984309241322:web:4dae35987732d630e64e93",
+measurementId: "G-QX0XT7RSQX"
 };
+
 // ── Stale IndexedDB guard ──────────────────────────────────────────────────
 // When the Firebase project changes the old Firestore IndexedDB cache causes
 // "INTERNAL ASSERTION FAILED" crashes. Detect the switch, delete every
