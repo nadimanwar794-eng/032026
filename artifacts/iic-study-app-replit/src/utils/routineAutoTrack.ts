@@ -291,7 +291,7 @@ export function calculatePageRequiredReadingSec(pageOrContent: any): number {
   let dynamicReqSec = Math.round((wordCount / 120) * 60);
   if (dynamicReqSec < 15) dynamicReqSec = 15;
 
-  return dynamicReqSec;
+  return dynamicReqSec * 3;
 }
 
 /** Get total reading seconds for an entire lesson */
