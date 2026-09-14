@@ -586,7 +586,7 @@ export const ContentManager: React.FC<Props> = ({
             <div className={`rounded-2xl border-2 p-1 ${editLesson.features.writingEnabled ? "border-purple-200 dark:border-purple-800" : "border-slate-200 dark:border-slate-700"}`}>
               <div className="flex items-center gap-2 px-3 pt-3 pb-2">
                 <Edit3 className="w-4 h-4 text-purple-500" />
-                <span className="text-sm font-black text-purple-600 dark:text-purple-400">Writing Mode Content</span>
+                <span className="text-sm font-black text-purple-600 dark:text-purple-400">Premium Notes Content</span>
                 <button
                   onClick={() => toggleFeature("writingEnabled")}
                   className={`ml-auto text-xs font-bold px-2.5 py-1 rounded-lg border transition-all ${editLesson.features.writingEnabled ? "bg-purple-100 border-purple-300 text-purple-700 dark:bg-purple-900/30 dark:border-purple-700 dark:text-purple-300" : "bg-slate-100 border-slate-200 text-slate-500"}`}

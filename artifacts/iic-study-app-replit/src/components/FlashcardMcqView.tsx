@@ -42,7 +42,7 @@ interface Props {
   /** Keep the parent lesson tab selection in sync when projector is toggled
    * from inside the flashcard overlay. */
   onProjectorModeChange?: (enabled: boolean) => void;
-  /** Lesson tab bar rendered at the very top (Reading Mode | Writing Mode | MCQ Practice | Projector) */
+  /** Lesson tab bar rendered at the very top (Reading Mode | Premium Notes | MCQ Practice | Projector) */
   tabBar?: React.ReactNode;
   /** If true, hides the "PROJECTOR MODE" badge in the projector header */
   hideProjectorLabel?: boolean;

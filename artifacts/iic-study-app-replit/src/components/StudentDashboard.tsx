@@ -1255,7 +1255,7 @@ export const StudentDashboard: React.FC<Props> = ({
     const _lid = overrideLid ?? (lucentNoteViewer as any)?.id ?? '';
     const _pi  = overridePi  ?? lucentPageIndex ?? 0;
     if (_lid && isPgWriteUnlocked(_lid, _pi)) { action(); return; }
-    showCoinGate(20, 'Writing Mode', () => {
+    showCoinGate(20, 'Premium Notes', () => {
       if (_lid) markPgWriteUnlocked(_lid, _pi);
       action();
     }, undefined, undefined, pgInfo);
@@ -2061,7 +2061,7 @@ export const StudentDashboard: React.FC<Props> = ({
     cost: number;
     originalCost: number;
     discountPct: number; // 0 = no discount, 25 = 25% off, 50 = 50% off
-    reason: string;       // e.g. 'Reading Mode', 'Writing Mode', 'MCQ Session'
+    reason: string;       // e.g. 'Reading Mode', 'Premium Notes', 'MCQ Session'
     action: () => void;
     onCancel?: () => void;
     selectedBulk?: boolean;
@@ -5691,7 +5691,7 @@ export const StudentDashboard: React.FC<Props> = ({
       availableModes: [
         { mode: 'READING',  label: 'Reading Mode',  emoji: '📖', cost: 20,
           isUnlocked: isPgReadUnlocked(entry.id, pageIdx), isAccessible: true, requiredTier: 'free'  as const, unlockAction: () => markPgReadUnlocked(entry.id, pageIdx) },
-        { mode: 'WRITING',  label: 'Writing Mode',  emoji: '✍️', cost: 20,
+        { mode: 'WRITING',  label: 'Premium Notes',  emoji: '✍️', cost: 20,
           isUnlocked: isPgWriteUnlocked(entry.id, pageIdx), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markPgWriteUnlocked(entry.id, pageIdx) },
         { mode: 'PROJECTOR', label: 'Projector Mode', emoji: '📽️', cost: 20,
           isUnlocked: isProjectorUnlocked(entry.id, pageIdx), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markProjectorUnlocked(entry.id, pageIdx) },
@@ -5712,7 +5712,7 @@ export const StudentDashboard: React.FC<Props> = ({
       showCoinGate(20, 'MCQ Practice', () => { markMcqPageUnlocked(entry.id, pageIdx); doOpen(); }, undefined, undefined, _openPgInfo);
     } else if (_isWriteIntent) {
       if (isPgWriteUnlocked(entry.id, pageIdx)) { doOpen(); return; }
-      showCoinGate(20, 'Writing Mode', () => { markPgWriteUnlocked(entry.id, pageIdx); doOpen(); }, undefined, undefined, _openPgInfo);
+      showCoinGate(20, 'Premium Notes', () => { markPgWriteUnlocked(entry.id, pageIdx); doOpen(); }, undefined, undefined, _openPgInfo);
     } else {
       if (isPgReadUnlocked(entry.id, pageIdx)) { doOpen(); return; }
       showCoinGate(20, 'Reading Mode',
@@ -5862,7 +5862,7 @@ export const StudentDashboard: React.FC<Props> = ({
       availableModes: [
         { mode: 'READING',   label: 'Reading Mode', emoji: '📖', cost: 20,
           isUnlocked: isPgReadUnlocked(_lid, 0), isAccessible: true, requiredTier: 'free'  as const, unlockAction: () => markPgReadUnlocked(_lid, 0) },
-        { mode: 'WRITING',   label: 'Writing Mode', emoji: '✍️', cost: 20,
+        { mode: 'WRITING',   label: 'Premium Notes', emoji: '✍️', cost: 20,
           isUnlocked: isPgWriteUnlocked(_lid, 0), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markPgWriteUnlocked(_lid, 0) },
         ...(_hasMcq ? [
           { mode: 'MCQ',       label: 'MCQ Practice', emoji: '🧠', cost: 20,
@@ -5876,7 +5876,7 @@ export const StudentDashboard: React.FC<Props> = ({
 
     if (mode === 'WRITING') {
       if (isPgWriteUnlocked(_lid, 0)) { doOpen(); return; }
-      showCoinGate(20, 'Writing Mode', () => { markPgWriteUnlocked(_lid, 0); doOpen(); }, undefined, undefined, _pgInfo);
+      showCoinGate(20, 'Premium Notes', () => { markPgWriteUnlocked(_lid, 0); doOpen(); }, undefined, undefined, _pgInfo);
     } else if (mode === 'MCQ') {
       if (isMcqPageUnlocked(_lid, 0)) { doOpen(); return; }
       showCoinGate(20, 'MCQ Practice', () => { markMcqPageUnlocked(_lid, 0); doOpen(); }, undefined, undefined, _pgInfo);
@@ -8975,7 +8975,7 @@ export const StudentDashboard: React.FC<Props> = ({
                 availableModes: [
                   { mode: 'READING',   label: 'Reading Mode', emoji: '📖', cost: 20,
                     isUnlocked: isPgReadUnlocked(activeHw.id, 0),  isAccessible: true,                           requiredTier: 'free'  as const, unlockAction: () => markPgReadUnlocked(activeHw.id, 0) },
-                  { mode: 'WRITING',   label: 'Writing Mode', emoji: '✍️', cost: 20,
+                  { mode: 'WRITING',   label: 'Premium Notes', emoji: '✍️', cost: 20,
                     isUnlocked: isPgWriteUnlocked(activeHw.id, 0), isAccessible: true,                           requiredTier: 'free'  as const, unlockAction: () => markPgWriteUnlocked(activeHw.id, 0) },
                   ...(hasMcq ? [
                     { mode: 'MCQ',       label: 'MCQ Practice', emoji: '🧠', cost: 20,
@@ -9020,7 +9020,7 @@ export const StudentDashboard: React.FC<Props> = ({
                     </button>
                     {/* Free+ — Writing (credit gate — pass activeHw.id so unlock is remembered per lesson) */}
                     <button data-tab-active={String(_isWriteActive)} onClick={() => handleWriteModeGate(() => { setHwViewMode('notes'); setHwNotesViewMode('html'); _hwSave('notes', 'html'); }, _hwPgInfo, activeHw.id, 0)} style={_hwTabStyle} className={_hwTabCls(_isWriteActive, 'bg-teal-600', 'text-white')}>
-                      Writing Mode
+                      Premium Notes
                     </button>
                     {/* Free+ — MCQ Practice → Class 6-12 jaisa inline MCQ view */}
                     {hasMcq && (
@@ -22758,7 +22758,7 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
               const _pgModes = [
                 { mode: 'READING',  label: 'Reading Mode',  emoji: '📖', cost: 20,
                   isUnlocked: isPgReadUnlocked(entry.id, safeIndex),  isAccessible: true,                         requiredTier: 'free'  as const, unlockAction: () => markPgReadUnlocked(entry.id, safeIndex) },
-                { mode: 'WRITING',  label: 'Writing Mode',  emoji: '✍️', cost: 20,
+                { mode: 'WRITING',  label: 'Premium Notes',  emoji: '✍️', cost: 20,
                   isUnlocked: isPgWriteUnlocked(entry.id, safeIndex), isAccessible: true,                         requiredTier: 'free'  as const, unlockAction: () => markPgWriteUnlocked(entry.id, safeIndex) },
                 { mode: 'PROJECTOR', label: 'Projector Mode', emoji: '📽️', cost: 20,
                   isUnlocked: isProjectorUnlocked(entry.id, safeIndex), isAccessible: true,                         requiredTier: 'free'  as const, unlockAction: () => markProjectorUnlocked(entry.id, safeIndex) },
@@ -22800,7 +22800,7 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                 if (_isAdm) { _doSwitch(); return; }
 
                 // Free vs Premium reading requirement gate:
-                // Free users MUST complete required reading time (Reading Mode + Writing Mode) before accessing MCQ or Flashcards!
+                // Free users MUST complete required reading time (Reading Mode + Premium Notes) before accessing MCQ or Flashcards!
                 const _isPremUser = !!(
                   user.isPremium ||
                   user.subscriptionLevel === 'BASIC' ||
@@ -22818,7 +22818,7 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                     if (!_isReadDone) {
                       const _remSec = Math.max(0, _reqSec - _combSec);
                       showAlert(
-                        `🔒 Free users ke liye pehle reading complete karna zaroori hai!\nReading Mode ya Writing Mode me ${formatDuration(_remSec)} aur padhein, uske baad hi MCQ unlock hoga.`,
+                        `🔒 Free users ke liye pehle reading complete karna zaroori hai!\nReading Mode ya Premium Notes me ${formatDuration(_remSec)} aur padhein, uske baad hi MCQ unlock hoga.`,
                         'INFO',
                         'MCQ Locked'
                       );
@@ -22859,7 +22859,7 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                       Reading Mode
                     </button>
                     <button data-tab-active={String(_isWriteActive)} onClick={() => handleWriteModeGate(() => { setLucentActiveTab('NOTES'); setLucentNotesViewMode('html'); _save('NOTES', 'html'); }, _pgInfo, entry.id, safeIndex)} style={_tabStyle} className={_tabCls(_isWriteActive, 'bg-teal-600', 'text-white')}>
-                      Writing Mode
+                      Premium Notes
                     </button>
                     {_hasMcqTb && (
                       <button data-tab-active={String(lucentActiveTab === 'MCQS')} onClick={() => _switchMcq('MCQS')} style={_tabStyle} className={_tabCls(lucentActiveTab === 'MCQS', 'bg-purple-600', 'text-white')}>
@@ -22880,7 +22880,7 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                               const _isReadDone = isRoutinePageRead(entry.id, safeIndex) || _combSec >= _reqSec;
                               if (!_isReadDone) {
                                 const _remSec = Math.max(0, _reqSec - _combSec);
-                                showAlert(`🔒 Free users ke liye pehle reading complete karna zaroori hai!\nReading Mode ya Writing Mode me ${formatDuration(_remSec)} aur padhein, uske baad hi Projector unlock hoga.`, 'INFO', 'Projector Locked');
+                                showAlert(`🔒 Free users ke liye pehle reading complete karna zaroori hai!\nReading Mode ya Premium Notes me ${formatDuration(_remSec)} aur padhein, uske baad hi Projector unlock hoga.`, 'INFO', 'Projector Locked');
                                 return;
                               }
                             }
@@ -25663,7 +25663,7 @@ RULES:
           if (_isAdminUser || fl?.isCompetition) { action(); return; }
           const modeConfig = {
             READING: { label: 'Reading Mode', isUnlocked: isPgReadUnlocked(_overlayUnlockId, _overlayUnlockPage), mark: () => markPgReadUnlocked(_overlayUnlockId, _overlayUnlockPage) },
-            WRITING: { label: 'Writing Mode', isUnlocked: isPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage), mark: () => markPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage) },
+            WRITING: { label: 'Premium Notes', isUnlocked: isPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage), mark: () => markPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage) },
             MCQ: { label: 'MCQ Practice', isUnlocked: isMcqPageUnlocked(_overlayUnlockId, _overlayUnlockPage), mark: () => markMcqPageUnlocked(_overlayUnlockId, _overlayUnlockPage) },
             QA: { label: 'Q&A Mode', isUnlocked: isQaPageUnlocked(_overlayUnlockId, _overlayUnlockPage), mark: () => markQaPageUnlocked(_overlayUnlockId, _overlayUnlockPage) },
             FLASHCARD: { label: 'Flashcard', isUnlocked: isFcPageUnlocked(_overlayUnlockId, _overlayUnlockPage), mark: () => markFcPageUnlocked(_overlayUnlockId, _overlayUnlockPage) },
@@ -25682,7 +25682,7 @@ RULES:
            pageLabel: flashcardMcqs.title || 'Lesson',
            availableModes: [
              { mode: 'READING', label: 'Reading Mode', emoji: '📖', cost: 20, isUnlocked: isPgReadUnlocked(_overlayUnlockId, _overlayUnlockPage), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markPgReadUnlocked(_overlayUnlockId, _overlayUnlockPage) },
-             { mode: 'WRITING', label: 'Writing Mode', emoji: '✍️', cost: 20, isUnlocked: isPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage) },
+             { mode: 'WRITING', label: 'Premium Notes', emoji: '✍️', cost: 20, isUnlocked: isPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage) },
              { mode: 'PROJECTOR', label: 'Projector Mode', emoji: '📽️', cost: 20, isUnlocked: isProjectorUnlocked(_overlayUnlockId, _overlayUnlockPage), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markProjectorUnlocked(_overlayUnlockId, _overlayUnlockPage) },
              ...(fl.hasMcq ? [
                { mode: 'MCQ', label: 'MCQ Practice', emoji: '🧠', cost: 20, isUnlocked: isMcqPageUnlocked(_overlayUnlockId, _overlayUnlockPage), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markMcqPageUnlocked(_overlayUnlockId, _overlayUnlockPage) },
@@ -25731,7 +25731,7 @@ RULES:
                 }}>
                 Reading Mode
               </button>
-              {/* Writing Mode — coin gate for competition */}
+              {/* Premium Notes — coin gate for competition */}
               <button style={_ts} className={_tcls(false, 'bg-teal-600')}
                 onClick={() => {
                    stopSpeech();
@@ -25747,7 +25747,7 @@ RULES:
                      });
                    }
                 }}>
-                Writing Mode
+                Premium Notes
               </button>
               {fl.hasMcq && (
                 <button style={_ts} className={_tcls(false, 'bg-purple-600')}
@@ -28730,7 +28730,7 @@ RULES:
         };
 
         const emojiMap: Record<string, string> = {
-          'Reading Mode': '📖', 'Writing Mode': '✍️', 'MCQ Session': '🧠',
+          'Reading Mode': '📖', 'Premium Notes': '✍️', 'MCQ Session': '🧠',
           'Next Page': '📖', 'Next Chapter': '📚', 'Revision Hub MCQ Session': '🏆',
           'Q&A Mode': '💬', 'MCQ Practice': '🧠', 'Flashcard': '🃏',
         };

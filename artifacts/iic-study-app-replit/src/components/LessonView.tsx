@@ -447,7 +447,7 @@ export const LessonView: React.FC<Props> = ({
     onScoreEarned: handleReadingScoreEarned,
   } : undefined;
 
-  // Writing mode: pts via onScoreEarned, 5% scroll/1min required
+  // Premium Notes: pts via onScoreEarned, 5% scroll/1min required
   const writingScoreConfig = readingScoreConfig ? {
     ...readingScoreConfig,
     mode: 'writing' as const,
@@ -990,11 +990,11 @@ export const LessonView: React.FC<Props> = ({
       )
     : null;
 
-  // COIN DEDUCTION MODAL — shown when user tries to switch reading/writing mode
+  // COIN DEDUCTION MODAL — shown when user tries to switch reading/premium notes
   const coinModal = pendingModeSwitch !== null && user && onUpdateUser
     ? createPortal(
         <CreditConfirmationModal
-          title={pendingModeSwitch === 'readable' ? '📖 Reading Mode (TTS)' : '✍️ Writing Mode (Notes)'}
+          title={pendingModeSwitch === 'readable' ? '📖 Reading Mode (TTS)' : '✍️ Premium Notes (Notes)'}
           cost={20}
           userCredits={getTotalCredits(user)}
           onConfirm={() => {
@@ -1332,9 +1332,9 @@ export const LessonView: React.FC<Props> = ({
                           <button onClick={handleBack} className="shrink-0 p-2 bg-white/10 hover:bg-white/20 rounded-xl text-white transition-colors"><ArrowLeft size={18} /></button>
                           <div className="min-w-0 flex-1">
                               <h2 className="text-[13px] font-black text-white truncate leading-tight">{content.title}</h2>
-                              <p className="text-[10px] font-bold text-amber-300 uppercase tracking-wide truncate">{notesViewMode === 'styled' ? '✍️ Writing Mode' : '📖 Reading Mode'}</p>
+                              <p className="text-[10px] font-bold text-amber-300 uppercase tracking-wide truncate">{notesViewMode === 'styled' ? '✍️ Premium Notes' : '📖 Reading Mode'}</p>
                           </div>
-                          {/* Live score chip — both reading & writing modes */}
+                          {/* Live score chip — both reading & premium notess */}
                           <div className="relative shrink-0" style={{ zIndex: 50 }}>
                               <span
                                   onClick={() => { setWritingScoreTooltip(true); setTimeout(() => setWritingScoreTooltip(false), 2500); }}

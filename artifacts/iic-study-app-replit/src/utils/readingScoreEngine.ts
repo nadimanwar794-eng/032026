@@ -7,7 +7,7 @@
  *   • Progress validation every 2 min: need ≥10% net forward progress
  *   • TTS topic highlight → +1 pts; Manual topic 10s → +2 pts
  *
- * Writing Mode:
+ * Premium Notes:
  *   • Every 60 sec → +10 pts (earns pts, not credits)
  *   • Scroll check: need ≥5% net scroll per 60 sec (independent timer)
  *   • After 2 consecutive failed scroll checks: scoring stops (isPermanentlyStopped)
