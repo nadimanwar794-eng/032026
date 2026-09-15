@@ -597,6 +597,15 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
   const activeTopicList = (NOTE_PAGES.length === 0 && isHtmlContent && htmlViewMode === 'chunk' && htmlChunkTopics.length > 0)
     ? htmlChunkTopics
     : topics;
+  // Reading time is based on actual readable points only. Static headings do not
+  // require reading time, so they are intentionally excluded from this count.
+  const requiredReadingTimeSec = activeTopicList.filter(topic => !topic.isHeading).length * 6;
+  const formatRequiredReadingTime = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainder = seconds % 60;
+    if (minutes === 0) return `${remainder}s`;
+    return remainder === 0 ? `${minutes}m` : `${minutes}m ${remainder}s`;
+  };
 
   const [activeIdx, setActiveIdx] = useState<number | null>(initialIndex ?? null);
   const [isReading, setIsReading] = useState(false);
@@ -1311,6 +1320,21 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                   {activeTopicList.length > 0 ? `1/${activeTopicList.length}` : ''}
                 </span>
               )}
+              {/* Required reading time stays visible on the page card.
+                  One readable point = 6 seconds. */}
+              {scoreState?.mode === 'reading' && (
+                <span
+                  className="shrink-0 text-[9px] font-black tabular-nums px-1.5 py-0.5 rounded-full"
+                  title="Required reading time"
+                  style={{
+                    color: '#4f46e5',
+                    background: 'rgba(99,102,241,0.10)',
+                    border: '1px solid rgba(99,102,241,0.22)',
+                  }}
+                >
+                  ⏱ Req {formatRequiredReadingTime(requiredReadingTimeSec)}
+                </span>
+              )}
               {/* Live session score */}
               {scoreState && scoreState.totalSessionScore > 0 && (
                 <span
@@ -1480,9 +1504,20 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
               }}>
               <span style={{ fontSize: 14, flexShrink: 0 }}>{scoreState.mode === 'writing' ? '✍️' : '📖'}</span>
               <span style={{ fontSize: 10, fontWeight: 900, color: scoreState.mode === 'writing' ? '#059669' : isReading ? '#6366f1' : '#475569', textTransform: 'uppercase', letterSpacing: '0.06em', flexShrink: 0 }}>
-                {scoreState.mode === 'writing' ? 'Writing Score' : isReading ? 'Reading Active' : 'Reading Score'}
+                {scoreState.mode === 'writing' ? 'Premium Notes Score' : isReading ? 'Reading Active' : 'Reading Score'}
               </span>
               <div style={{ width: 1, height: 14, background: '#e2e8f0', flexShrink: 0 }} />
+              {isReading && (
+                <>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+                    <span style={{ fontSize: 7, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1 }}>Required Time</span>
+                    <span style={{ fontSize: 11, fontWeight: 900, color: '#6366f1', lineHeight: 1.2, whiteSpace: 'nowrap' }}>
+                      {formatRequiredReadingTime(requiredReadingTimeSec)}
+                    </span>
+                  </div>
+                  <div style={{ width: 1, height: 14, background: '#e2e8f0', flexShrink: 0 }} />
+                </>
+              )}
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
                 <span style={{ fontSize: 7, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1 }}>Score</span>
                 <span style={{ fontSize: 13, fontWeight: 900, color: '#6366f1', lineHeight: 1.2 }}>+{scoreState.totalSessionScore}</span>

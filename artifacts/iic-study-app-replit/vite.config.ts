@@ -6,7 +6,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 import runtimeErrorOverlay from '@replit/vite-plugin-runtime-error-modal';
 
-const rawPort = 3000;
+const rawPort = process.env.PORT ?? '5000';
 
 const port = Number(rawPort);
 
@@ -14,7 +14,7 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-const basePath = process.env.BASE_PATH || '/';
+const basePath = process.env.BASE_PATH ?? '/';
 
 export default defineConfig({
   base: basePath,
@@ -32,12 +32,12 @@ export default defineConfig({
         'icons/icon-512.png',
         'icons/icon-maskable-512.png',
       ],
-      manifest: {
-        name: 'IIC — NSTA',
-        short_name: 'IIC',
-        description: 'IIC Study App — The Future of Learning',
-        theme_color: '#000000',
-        background_color: '#000000',
+        manifest: {
+        name: 'NSTA',
+        short_name: 'NSTA',
+        description: 'National Study & Tracking App',
+        theme_color: '#030717',
+        background_color: '#030717',
         display: 'standalone',
         orientation: 'portrait',
         start_url: basePath,

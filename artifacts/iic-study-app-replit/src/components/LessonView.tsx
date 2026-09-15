@@ -923,7 +923,7 @@ export const LessonView: React.FC<Props> = ({
               onClick={() => { _modeToggleFn.current?.(notesViewMode === 'readable' ? 'styled' : 'readable'); setFabOpen(false); }}
               style={{ display: 'flex', alignItems: 'center', gap: '6px', background: notesViewMode === 'styled' ? '#0f766e' : '#6366f1', color: '#fff', border: 'none', borderRadius: '24px', padding: '8px 14px', fontSize: '12px', fontWeight: 900, boxShadow: '0 4px 16px rgba(0,0,0,0.25)', cursor: 'pointer', whiteSpace: 'nowrap' }}
             >
-              {notesViewMode === 'styled' ? <><Volume2 size={14} /> TTS Reader</> : <><FileText size={14} /> Notes Maker</>}
+              {notesViewMode === 'styled' ? <><Volume2 size={14} /> TTS Reader</> : <><FileText size={14} /> Premium Notes</>}
             </button>
           )}
         </div>
@@ -994,7 +994,7 @@ export const LessonView: React.FC<Props> = ({
   const coinModal = pendingModeSwitch !== null && user && onUpdateUser
     ? createPortal(
         <CreditConfirmationModal
-          title={pendingModeSwitch === 'readable' ? '📖 Reading Mode (TTS)' : '✍️ Writing Mode (Notes)'}
+          title={pendingModeSwitch === 'readable' ? '📖 Reading Mode (TTS)' : '✍️ Premium Notes'}
           cost={20}
           userCredits={getTotalCredits(user)}
           onConfirm={() => {
@@ -1168,7 +1168,7 @@ export const LessonView: React.FC<Props> = ({
                               }`}
                           >
                               <FileText size={14} />
-                              Notes Maker
+                              Premium Notes
                               {!isPremiumUser && !htmlUnlocked && (
                                   <span className="text-[9px] bg-amber-500 text-white rounded-full px-1.5 py-0.5 font-black leading-none">
                                       {HTML_UNLOCK_COST}🪙
@@ -1187,7 +1187,7 @@ export const LessonView: React.FC<Props> = ({
                   </div>
                   {isLandscape && (
                       <div className="text-[10px] text-slate-400 text-center mt-1">
-                          {notesViewMode === 'readable' ? 'TTS Reader' : 'Notes Maker'} mode
+                          {notesViewMode === 'readable' ? 'TTS Reader' : 'Premium Notes'} mode
                       </div>
                   )}
               </div>
@@ -1225,10 +1225,10 @@ export const LessonView: React.FC<Props> = ({
                       />
                   ) : (
                       <>
-                      {/* Notes Maker top bar — label, download, exit */}
+                      {/* Premium Notes top bar — label, download, exit */}
                       <div className="flex items-center justify-between px-1 py-1 mb-1">
                           <span className="text-[10px] font-black text-teal-600 uppercase tracking-widest flex items-center gap-1">
-                              <FileText size={11} /> Notes Maker
+                              <FileText size={11} /> Premium Notes
                           </span>
                           <div className="flex items-center gap-2">
                               <button
@@ -1245,7 +1245,7 @@ export const LessonView: React.FC<Props> = ({
                               </button>
                           </div>
                       </div>
-                      {/* Printable container: wraps all Notes Maker HTML for download */}
+                      {/* Printable container: wraps all Premium Notes HTML for download */}
                       <div id="notes-maker-printable">
                       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden mt-2">
                           <div
@@ -1332,7 +1332,7 @@ export const LessonView: React.FC<Props> = ({
                           <button onClick={handleBack} className="shrink-0 p-2 bg-white/10 hover:bg-white/20 rounded-xl text-white transition-colors"><ArrowLeft size={18} /></button>
                           <div className="min-w-0 flex-1">
                               <h2 className="text-[13px] font-black text-white truncate leading-tight">{content.title}</h2>
-                              <p className="text-[10px] font-bold text-amber-300 uppercase tracking-wide truncate">{notesViewMode === 'styled' ? '✍️ Writing Mode' : '📖 Reading Mode'}</p>
+                              <p className="text-[10px] font-bold text-amber-300 uppercase tracking-wide truncate">{notesViewMode === 'styled' ? '✍️ Premium Notes' : '📖 Reading Mode'}</p>
                           </div>
                           {/* Live score chip — both reading & writing modes */}
                           <div className="relative shrink-0" style={{ zIndex: 50 }}>
@@ -1344,7 +1344,7 @@ export const LessonView: React.FC<Props> = ({
                               {writingScoreTooltip && (
                                   <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 6, background: 'linear-gradient(135deg,#eef2ff,#f5f3ff)', borderTop: '2px solid #10b981', border: '1.5px solid rgba(99,102,241,0.2)', borderTopWidth: 2, borderTopColor: '#10b981', borderRadius: 12, padding: '7px 12px', whiteSpace: 'nowrap', zIndex: 100, boxShadow: '0 4px 20px rgba(16,185,129,0.15), inset 0 -1px 0 #c7d2fe', animation: 'rshud-slide 0.18s ease', display: 'flex', alignItems: 'center', gap: 8, minWidth: 260 }}>
                                       <span style={{ fontSize: 14, flexShrink: 0 }}>✍️</span>
-                                      <span style={{ fontSize: 10, fontWeight: 900, color: '#059669', textTransform: 'uppercase', letterSpacing: '0.06em', flexShrink: 0 }}>Writing Score</span>
+                                      <span style={{ fontSize: 10, fontWeight: 900, color: '#059669', textTransform: 'uppercase', letterSpacing: '0.06em', flexShrink: 0 }}>Premium Notes Score</span>
                                       <div style={{ width: 1, height: 14, background: '#e2e8f0', flexShrink: 0 }} />
                                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
                                           <span style={{ fontSize: 7, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1 }}>Score</span>

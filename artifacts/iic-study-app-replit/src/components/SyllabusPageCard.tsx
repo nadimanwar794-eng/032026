@@ -221,7 +221,7 @@ export const SyllabusPageCard: React.FC<SyllabusPageCardProps> = ({
     e.stopPropagation();
     const rem = Math.max(0, reqSec - combinedReadingSec);
     showAlert(
-      `🔒 Free users ke liye pehle reading complete karna zaroori hai!\nReading Mode ya Writing Mode me ${formatSecs(
+      `🔒 Free users ke liye pehle reading complete karna zaroori hai!\nReading Mode ya Premium Notes me ${formatSecs(
         rem
       )} aur padhein, uske baad MCQ automatic unlock ho jayega.`,
       'INFO',
@@ -284,8 +284,8 @@ export const SyllabusPageCard: React.FC<SyllabusPageCardProps> = ({
               <h4 className="text-xs font-black text-slate-800 truncate leading-snug">
                 {topicTitle}
               </h4>
-              <span className="text-[9px] font-bold text-slate-500 bg-slate-100/90 border border-slate-200/80 px-1.5 py-0.5 rounded-md shrink-0 flex items-center gap-1" title="Word count reading time">
-                ⏱️ {formatSecs(reqSec)}
+              <span className="text-[9px] font-bold text-slate-500 bg-slate-100/90 border border-slate-200/80 px-1.5 py-0.5 rounded-md shrink-0 flex items-center gap-1" title="Required reading time: 6 seconds per reading point">
+                ⏱️ Req: {formatSecs(reqSec)}
               </span>
             </div>
             {snippet && (
@@ -423,10 +423,10 @@ export const SyllabusPageCard: React.FC<SyllabusPageCardProps> = ({
                   type="button"
                   onClick={(e) => { e.stopPropagation(); onOpenWriting(); }}
                   className="py-2 px-3 bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-200 rounded-xl text-xs font-black flex items-center justify-center gap-1 active:scale-98 transition-all shrink-0"
-                  title="Practice writing notes"
+                  title="Open Premium Notes"
                 >
                   <PenTool size={12} />
-                  Writing Mode
+                  Premium Notes
                 </button>
               )}
             </div>

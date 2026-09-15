@@ -88,3 +88,11 @@ root.render(
     </ErrorBoundary>
   </React.StrictMode>
 );
+
+// Keep the first-paint splash visible until React has committed the loading
+// screen, preventing a blank/black frame between the OS splash and the app.
+requestAnimationFrame(() => {
+  requestAnimationFrame(() => {
+    document.getElementById('boot-splash')?.remove();
+  });
+});

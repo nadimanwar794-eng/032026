@@ -2,6 +2,8 @@
 // Automatic per-page read & per-lesson MCQ tracking for My Routine.
 // Written by StudentDashboard hooks; read by MyRoutine to show auto progress.
 
+import { splitIntoTopics } from './notesSplitter';
+
 const AUTO_KEY = 'nst_routine_auto_v1';
 
 interface AutoTrackData {
@@ -251,47 +253,28 @@ export function resetPageTime(lessonId: string, pageIdx: number): void {
   save(d);
 }
 
-/** Calculate minimum required reading seconds based on exact word count (120 WPM / 2 words per second) */
+/**
+ * Calculate required reading time from the same readable points shown in the
+ * Reading mode chunk reader. Headings are navigation labels, not reading
+ * points, so each non-heading point contributes exactly six seconds.
+ */
 export function calculatePageRequiredReadingSec(pageOrContent: any): number {
-  if (!pageOrContent) return 15;
-  if (typeof pageOrContent === 'object' && typeof pageOrContent.requiredReadingSec === 'number' && pageOrContent.requiredReadingSec > 0) {
-    return Math.max(10, pageOrContent.requiredReadingSec);
-  }
+  if (!pageOrContent) return 0;
 
   let rawText = '';
   if (typeof pageOrContent === 'string') {
     rawText = pageOrContent;
   } else if (typeof pageOrContent === 'object') {
+    if (Array.isArray(pageOrContent.topics)) {
+      return pageOrContent.topics.filter((topic: any) => !topic?.isHeading).length * 6;
+    }
     rawText = pageOrContent.chunkNotes || pageOrContent.content || pageOrContent.notes || pageOrContent.htmlNotes || pageOrContent.text || '';
   }
 
-  if (!rawText || typeof rawText !== 'string') return 15;
+  if (!rawText || typeof rawText !== 'string') return 0;
 
-  const textOnly = rawText
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<svg[^>]*>[\s\S]*?<\/svg>/gi, ' ')
-    .replace(/data:image\/[^;]+;base64,[a-zA-Z0-9+/=]+/gi, ' ')
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&#\d+;/g, ' ')
-    .replace(/&[a-z]+;/gi, ' ');
-
-  const words = textOnly.trim().split(/\s+/).filter(w => w.length > 0 && !/^[\W_]+$/.test(w));
-  const wordCount = words.length;
-
-  if (wordCount <= 10) return 15;
-
-  // Realistic reading speed: 120 words/min (2 words per second -> Math.round((wordCount / 120) * 60) = Math.round(wordCount / 2))
-  // Dynamically scales with page content: short pages = less time (e.g. 45s, 1m 20s), long pages = more time (e.g. 2m 40s, 3m 30s, 6m+)
-  let dynamicReqSec = Math.round((wordCount / 120) * 60);
-  if (dynamicReqSec < 15) dynamicReqSec = 15;
-
-  return dynamicReqSec;
+  const readablePointCount = splitIntoTopics(rawText).filter(topic => !topic.isHeading).length;
+  return readablePointCount * 6;
 }
 
 /** Get total reading seconds for an entire lesson */

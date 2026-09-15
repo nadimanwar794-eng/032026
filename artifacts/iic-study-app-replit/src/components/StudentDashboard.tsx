@@ -1255,7 +1255,7 @@ export const StudentDashboard: React.FC<Props> = ({
     const _lid = overrideLid ?? (lucentNoteViewer as any)?.id ?? '';
     const _pi  = overridePi  ?? lucentPageIndex ?? 0;
     if (_lid && isPgWriteUnlocked(_lid, _pi)) { action(); return; }
-    showCoinGate(20, 'Writing Mode', () => {
+    showCoinGate(20, 'Premium Notes', () => {
       if (_lid) markPgWriteUnlocked(_lid, _pi);
       action();
     }, undefined, undefined, pgInfo);
@@ -2646,6 +2646,19 @@ export const StudentDashboard: React.FC<Props> = ({
     return () => clearInterval(timer);
   }, []);
 
+  // Home-only top-bar actions are helpful on entry, then get out of the way.
+  // Returning to Home starts the five-second visibility window again.
+  const [showHomeTransientTopBar, setShowHomeTransientTopBar] = useState(activeTab === 'HOME');
+  useEffect(() => {
+    if (activeTab !== 'HOME') {
+      return;
+    }
+
+    setShowHomeTransientTopBar(true);
+    const timer = window.setTimeout(() => setShowHomeTransientTopBar(false), 5000);
+    return () => window.clearTimeout(timer);
+  }, [activeTab]);
+
   // XP badge state + refs — useEffect is below (after showRevisionHubScreen/showMyRoutine declarations)
   const [showXpBadge, setShowXpBadge] = useState(false);
   const xpBadgeTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -3193,6 +3206,15 @@ export const StudentDashboard: React.FC<Props> = ({
   // First load: 3s after paint. Reconnect: 3s after paint.
   const contentRenderReadyRef = React.useRef(false);
   useEffect(() => {
+    if (activeTab !== 'HOME') {
+      if (dotsHideTimerRef.current) {
+        clearTimeout(dotsHideTimerRef.current);
+        dotsHideTimerRef.current = null;
+      }
+      setShowDots(false);
+      return;
+    }
+
     const connOk = fbConnectLevel >= 5 && fbDotErrors.every(e => !e);
     const settingsOk = !!(settings?.appName || settings?.appShortName);
     const contentOk = Object.keys(classContentStats).length > 0;
@@ -3219,7 +3241,7 @@ export const StudentDashboard: React.FC<Props> = ({
       setShowDots(true);
     }
     return () => { if (dotsHideTimerRef.current) clearTimeout(dotsHideTimerRef.current); };
-  }, [fbConnectLevel, fbDotErrors, settings?.appName, settings?.appShortName, classContentStats]);
+  }, [activeTab, fbConnectLevel, fbDotErrors, settings?.appName, settings?.appShortName, classContentStats]);
 
   // Live 1-second clock for profile card countdown — only runs when Profile tab is open
   const [_profileNow, _setProfileNow] = useState(Date.now());
@@ -5691,7 +5713,7 @@ export const StudentDashboard: React.FC<Props> = ({
       availableModes: [
         { mode: 'READING',  label: 'Reading Mode',  emoji: '📖', cost: 20,
           isUnlocked: isPgReadUnlocked(entry.id, pageIdx), isAccessible: true, requiredTier: 'free'  as const, unlockAction: () => markPgReadUnlocked(entry.id, pageIdx) },
-        { mode: 'WRITING',  label: 'Writing Mode',  emoji: '✍️', cost: 20,
+        { mode: 'WRITING',  label: 'Premium Notes',  emoji: '✍️', cost: 20,
           isUnlocked: isPgWriteUnlocked(entry.id, pageIdx), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markPgWriteUnlocked(entry.id, pageIdx) },
         { mode: 'PROJECTOR', label: 'Projector Mode', emoji: '📽️', cost: 20,
           isUnlocked: isProjectorUnlocked(entry.id, pageIdx), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markProjectorUnlocked(entry.id, pageIdx) },
@@ -5712,7 +5734,7 @@ export const StudentDashboard: React.FC<Props> = ({
       showCoinGate(20, 'MCQ Practice', () => { markMcqPageUnlocked(entry.id, pageIdx); doOpen(); }, undefined, undefined, _openPgInfo);
     } else if (_isWriteIntent) {
       if (isPgWriteUnlocked(entry.id, pageIdx)) { doOpen(); return; }
-      showCoinGate(20, 'Writing Mode', () => { markPgWriteUnlocked(entry.id, pageIdx); doOpen(); }, undefined, undefined, _openPgInfo);
+      showCoinGate(20, 'Premium Notes', () => { markPgWriteUnlocked(entry.id, pageIdx); doOpen(); }, undefined, undefined, _openPgInfo);
     } else {
       if (isPgReadUnlocked(entry.id, pageIdx)) { doOpen(); return; }
       showCoinGate(20, 'Reading Mode',
@@ -5862,7 +5884,7 @@ export const StudentDashboard: React.FC<Props> = ({
       availableModes: [
         { mode: 'READING',   label: 'Reading Mode', emoji: '📖', cost: 20,
           isUnlocked: isPgReadUnlocked(_lid, 0), isAccessible: true, requiredTier: 'free'  as const, unlockAction: () => markPgReadUnlocked(_lid, 0) },
-        { mode: 'WRITING',   label: 'Writing Mode', emoji: '✍️', cost: 20,
+        { mode: 'WRITING',   label: 'Premium Notes', emoji: '✍️', cost: 20,
           isUnlocked: isPgWriteUnlocked(_lid, 0), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markPgWriteUnlocked(_lid, 0) },
         ...(_hasMcq ? [
           { mode: 'MCQ',       label: 'MCQ Practice', emoji: '🧠', cost: 20,
@@ -5876,7 +5898,7 @@ export const StudentDashboard: React.FC<Props> = ({
 
     if (mode === 'WRITING') {
       if (isPgWriteUnlocked(_lid, 0)) { doOpen(); return; }
-      showCoinGate(20, 'Writing Mode', () => { markPgWriteUnlocked(_lid, 0); doOpen(); }, undefined, undefined, _pgInfo);
+      showCoinGate(20, 'Premium Notes', () => { markPgWriteUnlocked(_lid, 0); doOpen(); }, undefined, undefined, _pgInfo);
     } else if (mode === 'MCQ') {
       if (isMcqPageUnlocked(_lid, 0)) { doOpen(); return; }
       showCoinGate(20, 'MCQ Practice', () => { markMcqPageUnlocked(_lid, 0); doOpen(); }, undefined, undefined, _pgInfo);
@@ -8975,7 +8997,7 @@ export const StudentDashboard: React.FC<Props> = ({
                 availableModes: [
                   { mode: 'READING',   label: 'Reading Mode', emoji: '📖', cost: 20,
                     isUnlocked: isPgReadUnlocked(activeHw.id, 0),  isAccessible: true,                           requiredTier: 'free'  as const, unlockAction: () => markPgReadUnlocked(activeHw.id, 0) },
-                  { mode: 'WRITING',   label: 'Writing Mode', emoji: '✍️', cost: 20,
+                  { mode: 'WRITING',   label: 'Premium Notes', emoji: '✍️', cost: 20,
                     isUnlocked: isPgWriteUnlocked(activeHw.id, 0), isAccessible: true,                           requiredTier: 'free'  as const, unlockAction: () => markPgWriteUnlocked(activeHw.id, 0) },
                   ...(hasMcq ? [
                     { mode: 'MCQ',       label: 'MCQ Practice', emoji: '🧠', cost: 20,
@@ -9020,7 +9042,7 @@ export const StudentDashboard: React.FC<Props> = ({
                     </button>
                     {/* Free+ — Writing (credit gate — pass activeHw.id so unlock is remembered per lesson) */}
                     <button data-tab-active={String(_isWriteActive)} onClick={() => handleWriteModeGate(() => { setHwViewMode('notes'); setHwNotesViewMode('html'); _hwSave('notes', 'html'); }, _hwPgInfo, activeHw.id, 0)} style={_hwTabStyle} className={_hwTabCls(_isWriteActive, 'bg-teal-600', 'text-white')}>
-                      Writing Mode
+                      Premium Notes
                     </button>
                     {/* Free+ — MCQ Practice → Class 6-12 jaisa inline MCQ view */}
                     {hasMcq && (
@@ -14929,6 +14951,17 @@ export const StudentDashboard: React.FC<Props> = ({
         <div className="relative z-10 flex items-center justify-between w-full px-2.5 sm:px-3 pt-2.5 pb-1.5 gap-1.5">
           {/* LEFT: logo + app name + verified badge — only the badge tap opens What's New */}
           <div className="flex items-center gap-1.5 shrink-0 min-w-0">
+            {settings?.appLogo ? (
+              <img
+                src={settings.appLogo}
+                alt={`${settings?.appName || 'App'} logo`}
+                className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-contain border border-white/40 bg-white/10 shrink-0"
+              />
+            ) : (
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center bg-white/15 border border-white/40 shrink-0">
+                <BrainCircuit size={15} className="text-white" />
+              </div>
+            )}
             <span className="font-black text-[20px] sm:text-[23px] leading-tight tracking-tight uppercase text-white truncate max-w-[85px] xs:max-w-[120px] sm:max-w-none">
               {settings?.appShortName || settings?.appName || "NSTA"}
             </span>
@@ -15037,9 +15070,9 @@ export const StudentDashboard: React.FC<Props> = ({
                     <button
                       onClick={() => setShowEventDrawer(true)}
                       className="relative inline-flex items-center gap-0.5 px-2 py-1 rounded-full text-[10px] font-black shrink-0 active:scale-90 transition-all"
-                      style={hasEndingEvent
-                        ? { color: '#fca5a5', border: '1px solid rgba(239,68,68,0.55)', boxShadow: '0 0 8px rgba(239,68,68,0.45)' }
-                        : { color: '#fcd34d', border: '1px solid rgba(245,158,11,0.5)' }}
+                       style={hasEndingEvent
+                         ? { order: 6, color: '#fca5a5', border: '1px solid rgba(239,68,68,0.55)', boxShadow: '0 0 8px rgba(239,68,68,0.45)' }
+                         : { order: 6, color: '#fcd34d', border: '1px solid rgba(245,158,11,0.5)' }}
                       title={hasEndingEvent ? 'An event is ending soon!' : `${activeEvents.length} event(s) active`}
                     >
                       <span className="text-[11px] leading-none">⚡</span>
@@ -15051,7 +15084,7 @@ export const StudentDashboard: React.FC<Props> = ({
                     <button
                       onClick={() => setShowEventDrawer(true)}
                       className="relative inline-flex items-center gap-0.5 px-2 py-1 rounded-full text-[10px] font-black shrink-0 active:scale-90 transition-all"
-                      style={{ color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.4)' }}
+                       style={{ order: 6, color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.4)' }}
                       title={`Upcoming event: ${upcomingEvents[0].label}`}
                     >
                       <span className="text-[11px] leading-none">📅</span>
@@ -15390,13 +15423,13 @@ export const StudentDashboard: React.FC<Props> = ({
               const allOk = fbConnectLevel >= 5 && fbDotErrors.every(e => !e);
               const hasError = fbDotErrors.some(e => e);
               return (
-                <div className="relative shrink-0">
+                  <div className="relative shrink-0 order-1" style={{ order: 1 }}>
                   {/* Fading wrapper — only wraps dots button, NOT popup/backdrop */}
                   <div
                     style={{
-                      opacity: (showDots || showSysStatus) ? 1 : 0,
-                      pointerEvents: (showDots || showSysStatus) ? 'auto' : 'none',
-                      maxWidth: (showDots || showSysStatus) ? '65px' : '0px',
+                      opacity: (activeTab === 'HOME' && (showDots || showSysStatus)) ? 1 : 0,
+                      pointerEvents: (activeTab === 'HOME' && (showDots || showSysStatus)) ? 'auto' : 'none',
+                      maxWidth: (activeTab === 'HOME' && (showDots || showSysStatus)) ? '65px' : '0px',
                       overflow: 'hidden',
                       transition: 'opacity 0.6s ease, max-width 0.4s ease',
                     }}
@@ -15536,92 +15569,24 @@ export const StudentDashboard: React.FC<Props> = ({
               );
             })()}
 
-            {/* Refer & Earn (VIP) Gift Box — tap to open Refer & Earn popup */}
-            {(() => {
-              const refStats = getReferralStats(user);
-              const refCount = refStats.totalInvited || 0;
-              const hasUsers = refCount > 0;
-
-              return (
-                <button
-                  id="topbar-referral-gift-btn"
-                  onClick={() => setShowReferralPopup(true)}
-                  className="relative inline-flex items-center justify-center h-7 px-2 rounded-full active:scale-95 transition-all shrink-0 cursor-pointer overflow-hidden border select-none group"
-                  style={{
-                    background: hasUsers
-                      ? 'linear-gradient(135deg, rgba(16,185,129,0.30), rgba(5,150,105,0.18))'
-                      : 'linear-gradient(135deg, rgba(236,72,153,0.22), rgba(168,85,247,0.18))',
-                    borderColor: hasUsers ? 'rgba(16,185,129,0.45)' : 'rgba(236,72,153,0.40)',
-                    boxShadow: hasUsers
-                      ? '0 0 10px rgba(16,185,129,0.25)'
-                      : '0 0 10px rgba(236,72,153,0.22)',
-                  }}
-                  title="Refer & Earn (VIP) — Doston ko jodein aur VIP passes paayein"
-                >
-                  {!hasUsers ? (
-                    /* When no user referred yet: only show animated gift box with sparkles */
-                    <div className="flex items-center gap-1">
-                      <span className="text-[14px] leading-none animate-gift-wiggle">
-                        🎁
-                      </span>
-                      <span className="text-[10px] font-black text-pink-200 tracking-tight hidden xs:inline">
-                        VIP
-                      </span>
-                    </div>
-                  ) : (
-                    /* When users are referred: flip smoothly between gift icon and user count */
-                    <div className="relative h-full flex items-center justify-center min-w-[34px]">
-                      {/* Phase 0: Gift Box */}
-                      <div
-                        className={`flex items-center gap-1 transition-all duration-500 ease-out ${
-                          referralGiftPhase === 0
-                            ? 'opacity-100 translate-y-0 scale-100'
-                            : 'opacity-0 -translate-y-2 scale-90 pointer-events-none absolute'
-                        }`}
-                      >
-                        <span className="text-[13px] leading-none select-none animate-gift-wiggle">🎁</span>
-                        <span className="text-[10px] font-black text-emerald-300">VIP</span>
-                      </div>
-
-                      {/* Phase 1: User Count */}
-                      <div
-                        className={`flex items-center gap-0.5 transition-all duration-500 ease-out ${
-                          referralGiftPhase === 1
-                            ? 'opacity-100 translate-y-0 scale-100'
-                            : 'opacity-0 translate-y-2 scale-90 pointer-events-none absolute'
-                        }`}
-                      >
-                        <Users size={12} className="text-emerald-400 shrink-0" />
-                        <span className="font-black text-[11px] tabular-nums text-emerald-300">
-                          {refCount}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Gentle pulsing ping dot if milestone is reachable or active users present */}
-                  {hasUsers && (
-                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 animate-ping opacity-75" />
-                  )}
-                </button>
-              );
-            })()}
-
             {/* Streak — tap to see streak popup */}
-            <button
-              id="topbar-streak-btn"
-              onClick={() => setShowStreakPopup(true)}
-              className="inline-flex items-center gap-1 px-1.5 py-1 rounded-lg active:scale-95 text-white hover:text-amber-200 transition-all shrink-0"
-              title="Aapki Study Streak — Tap karke detail dekhein"
-            >
-              <span className="text-[13px] sm:text-[14px] leading-none select-none">🔥</span>
-              <span className="font-black text-[11px] sm:text-xs tabular-nums text-amber-300">
-                {user.streak > 0 ? user.streak : 0}
-              </span>
-            </button>
+            {activeTab === 'HOME' && showHomeTransientTopBar && (
+              <button
+                id="topbar-streak-btn"
+                onClick={() => setShowStreakPopup(true)}
+                className="inline-flex items-center gap-1 px-1.5 py-1 rounded-lg active:scale-95 text-white hover:text-amber-200 transition-all shrink-0 order-3"
+                style={{ order: 3 }}
+                title="Aapki Study Streak — Tap karke detail dekhein"
+              >
+                <span className="text-[13px] sm:text-[14px] leading-none select-none">🔥</span>
+                <span className="font-black text-[11px] sm:text-xs tabular-nums text-amber-300">
+                  {user.streak > 0 ? user.streak : 0}
+                </span>
+              </button>
+            )}
 
             {/* Mail */}
-            {(() => {
+            {activeTab === 'HOME' && showHomeTransientTopBar && (() => {
               const pendingCreditSub = canClaimCreditSubToday(user) ? 1 : 0;
               const pendingDiamondSub = canClaimDiamondSubToday(user) ? 1 : 0;
               const pendingRewards = (user.inbox || []).filter(m => (m.type === 'REWARD' || m.type === 'GIFT') && !m.isClaimed && (!m.expiresAt || new Date(m.expiresAt).getTime() > Date.now())).length + pendingCreditSub + pendingDiamondSub;
@@ -15636,7 +15601,8 @@ export const StudentDashboard: React.FC<Props> = ({
                     }
                     setShowInbox(true);
                   }}
-                  className={`p-[3px] rounded-xl transition-colors relative text-white shrink-0 active:scale-95${topBarBtnGlow ? ' nst-topbar-btn-glow' : ''}`}
+                  className={`p-[3px] rounded-xl transition-colors relative text-white shrink-0 active:scale-95 order-4${topBarBtnGlow ? ' nst-topbar-btn-glow' : ''}`}
+                  style={{ order: 4 }}
                   title="Mail & Notifications"
                 >
                   <Mail size={19} />
@@ -15650,7 +15616,7 @@ export const StudentDashboard: React.FC<Props> = ({
             })()}
 
             {/* 3-dot menu */}
-            <div className="relative shrink-0">
+            <div className="relative shrink-0 order-5" style={{ order: 5 }}>
               <button
                 onClick={() => setShowDotsMenu(v => !v)}
                 className="p-1.5 rounded-xl transition-all text-white active:scale-95"
@@ -15810,7 +15776,25 @@ export const StudentDashboard: React.FC<Props> = ({
                         };
 
                         type ListItem = { label: string; right?: string; locked?: boolean; isTheme?: boolean; action: () => void };
+                        const pendingCreditSub = canClaimCreditSubToday(user) ? 1 : 0;
+                        const pendingDiamondSub = canClaimDiamondSubToday(user) ? 1 : 0;
+                        const pendingRewards = (user.inbox || []).filter(m => (m.type === 'REWARD' || m.type === 'GIFT') && !m.isClaimed && (!m.expiresAt || new Date(m.expiresAt).getTime() > Date.now())).length + pendingCreditSub + pendingDiamondSub;
+                        const totalInboxCount = unreadCount + unreadNotifCount + _newContentCount + pendingRewards;
+
                         const items: ListItem[] = [
+                          {
+                            label: 'Mail & Notifications',
+                            right: totalInboxCount > 0 ? `✉️ ${totalInboxCount > 9 ? '9+' : totalInboxCount}` : '✉️',
+                            action: () => {
+                              if ((pendingCreditSub > 0 || pendingDiamondSub > 0) && unreadCount === 0 && unreadNotifCount === 0) {
+                                setInboxTab('REWARDS');
+                              } else {
+                                setInboxTab('UPDATES');
+                              }
+                              setShowInbox(true);
+                              setShowDotsMenu(false);
+                            },
+                          },
                           {
                             label: 'Store',
                             right: '🛍️',
@@ -15923,6 +15907,66 @@ export const StudentDashboard: React.FC<Props> = ({
                   document.body
                 )}
               </div>
+
+              {/* Refer & Earn gift button — stays visible after the transient
+                  dots, streak, and mail controls have faded out. */}
+              {(() => {
+                const refStats = getReferralStats(user);
+                const refCount = refStats.totalInvited || 0;
+                const hasUsers = refCount > 0;
+
+                return (
+                  <button
+                    id="topbar-referral-gift-btn"
+                    onClick={() => setShowReferralPopup(true)}
+                    className="relative inline-flex items-center justify-center h-7 px-2 rounded-full active:scale-95 transition-all shrink-0 cursor-pointer overflow-hidden border select-none group order-2"
+                    style={{
+                      order: 2,
+                      background: hasUsers
+                        ? 'linear-gradient(135deg, rgba(16,185,129,0.30), rgba(5,150,105,0.18))'
+                        : 'linear-gradient(135deg, rgba(236,72,153,0.22), rgba(168,85,247,0.18))',
+                      borderColor: hasUsers ? 'rgba(16,185,129,0.45)' : 'rgba(236,72,153,0.40)',
+                      boxShadow: hasUsers
+                        ? '0 0 10px rgba(16,185,129,0.25)'
+                        : '0 0 10px rgba(236,72,153,0.22)',
+                    }}
+                    title="Refer & Earn (VIP) — Doston ko jodein aur VIP passes paayein"
+                  >
+                    {!hasUsers ? (
+                      <div className="flex items-center gap-1">
+                        <span className="text-[14px] leading-none animate-gift-wiggle">🎁</span>
+                        <span className="text-[10px] font-black text-pink-200 tracking-tight hidden xs:inline">VIP</span>
+                      </div>
+                    ) : (
+                      <div className="relative h-full flex items-center justify-center min-w-[34px]">
+                        <div
+                          className={`flex items-center gap-1 transition-all duration-500 ease-out ${
+                            referralGiftPhase === 0
+                              ? 'opacity-100 translate-y-0 scale-100'
+                              : 'opacity-0 -translate-y-2 scale-90 pointer-events-none absolute'
+                          }`}
+                        >
+                          <span className="text-[13px] leading-none select-none animate-gift-wiggle">🎁</span>
+                          <span className="text-[10px] font-black text-emerald-300">VIP</span>
+                        </div>
+                        <div
+                          className={`flex items-center gap-0.5 transition-all duration-500 ease-out ${
+                            referralGiftPhase === 1
+                              ? 'opacity-100 translate-y-0 scale-100'
+                              : 'opacity-0 translate-y-2 scale-90 pointer-events-none absolute'
+                          }`}
+                        >
+                          <Users size={12} className="text-emerald-400 shrink-0" />
+                          <span className="font-black text-[11px] tabular-nums text-emerald-300">{refCount}</span>
+                        </div>
+                      </div>
+                    )}
+                    {hasUsers && (
+                      <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 animate-ping opacity-75" />
+                    )}
+                  </button>
+                );
+              })()}
 
           </div>
         </div>
@@ -22758,7 +22802,7 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
               const _pgModes = [
                 { mode: 'READING',  label: 'Reading Mode',  emoji: '📖', cost: 20,
                   isUnlocked: isPgReadUnlocked(entry.id, safeIndex),  isAccessible: true,                         requiredTier: 'free'  as const, unlockAction: () => markPgReadUnlocked(entry.id, safeIndex) },
-                { mode: 'WRITING',  label: 'Writing Mode',  emoji: '✍️', cost: 20,
+                { mode: 'WRITING',  label: 'Premium Notes',  emoji: '✍️', cost: 20,
                   isUnlocked: isPgWriteUnlocked(entry.id, safeIndex), isAccessible: true,                         requiredTier: 'free'  as const, unlockAction: () => markPgWriteUnlocked(entry.id, safeIndex) },
                 { mode: 'PROJECTOR', label: 'Projector Mode', emoji: '📽️', cost: 20,
                   isUnlocked: isProjectorUnlocked(entry.id, safeIndex), isAccessible: true,                         requiredTier: 'free'  as const, unlockAction: () => markProjectorUnlocked(entry.id, safeIndex) },
@@ -22818,7 +22862,7 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                     if (!_isReadDone) {
                       const _remSec = Math.max(0, _reqSec - _combSec);
                       showAlert(
-                        `🔒 Free users ke liye pehle reading complete karna zaroori hai!\nReading Mode ya Writing Mode me ${formatDuration(_remSec)} aur padhein, uske baad hi MCQ unlock hoga.`,
+                        `🔒 Free users ke liye pehle reading complete karna zaroori hai!\nReading Mode ya Premium Notes me ${formatDuration(_remSec)} aur padhein, uske baad hi MCQ unlock hoga.`,
                         'INFO',
                         'MCQ Locked'
                       );
@@ -22859,7 +22903,7 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                       Reading Mode
                     </button>
                     <button data-tab-active={String(_isWriteActive)} onClick={() => handleWriteModeGate(() => { setLucentActiveTab('NOTES'); setLucentNotesViewMode('html'); _save('NOTES', 'html'); }, _pgInfo, entry.id, safeIndex)} style={_tabStyle} className={_tabCls(_isWriteActive, 'bg-teal-600', 'text-white')}>
-                      Writing Mode
+                      Premium Notes
                     </button>
                     {_hasMcqTb && (
                       <button data-tab-active={String(lucentActiveTab === 'MCQS')} onClick={() => _switchMcq('MCQS')} style={_tabStyle} className={_tabCls(lucentActiveTab === 'MCQS', 'bg-purple-600', 'text-white')}>
@@ -22880,7 +22924,7 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                               const _isReadDone = isRoutinePageRead(entry.id, safeIndex) || _combSec >= _reqSec;
                               if (!_isReadDone) {
                                 const _remSec = Math.max(0, _reqSec - _combSec);
-                                showAlert(`🔒 Free users ke liye pehle reading complete karna zaroori hai!\nReading Mode ya Writing Mode me ${formatDuration(_remSec)} aur padhein, uske baad hi Projector unlock hoga.`, 'INFO', 'Projector Locked');
+                                showAlert(`🔒 Free users ke liye pehle reading complete karna zaroori hai!\nReading Mode ya Premium Notes me ${formatDuration(_remSec)} aur padhein, uske baad hi Projector unlock hoga.`, 'INFO', 'Projector Locked');
                                 return;
                               }
                             }
@@ -25663,7 +25707,7 @@ RULES:
           if (_isAdminUser || fl?.isCompetition) { action(); return; }
           const modeConfig = {
             READING: { label: 'Reading Mode', isUnlocked: isPgReadUnlocked(_overlayUnlockId, _overlayUnlockPage), mark: () => markPgReadUnlocked(_overlayUnlockId, _overlayUnlockPage) },
-            WRITING: { label: 'Writing Mode', isUnlocked: isPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage), mark: () => markPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage) },
+            WRITING: { label: 'Premium Notes', isUnlocked: isPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage), mark: () => markPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage) },
             MCQ: { label: 'MCQ Practice', isUnlocked: isMcqPageUnlocked(_overlayUnlockId, _overlayUnlockPage), mark: () => markMcqPageUnlocked(_overlayUnlockId, _overlayUnlockPage) },
             QA: { label: 'Q&A Mode', isUnlocked: isQaPageUnlocked(_overlayUnlockId, _overlayUnlockPage), mark: () => markQaPageUnlocked(_overlayUnlockId, _overlayUnlockPage) },
             FLASHCARD: { label: 'Flashcard', isUnlocked: isFcPageUnlocked(_overlayUnlockId, _overlayUnlockPage), mark: () => markFcPageUnlocked(_overlayUnlockId, _overlayUnlockPage) },
@@ -25682,7 +25726,7 @@ RULES:
            pageLabel: flashcardMcqs.title || 'Lesson',
            availableModes: [
              { mode: 'READING', label: 'Reading Mode', emoji: '📖', cost: 20, isUnlocked: isPgReadUnlocked(_overlayUnlockId, _overlayUnlockPage), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markPgReadUnlocked(_overlayUnlockId, _overlayUnlockPage) },
-             { mode: 'WRITING', label: 'Writing Mode', emoji: '✍️', cost: 20, isUnlocked: isPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage) },
+             { mode: 'WRITING', label: 'Premium Notes', emoji: '✍️', cost: 20, isUnlocked: isPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage) },
              { mode: 'PROJECTOR', label: 'Projector Mode', emoji: '📽️', cost: 20, isUnlocked: isProjectorUnlocked(_overlayUnlockId, _overlayUnlockPage), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markProjectorUnlocked(_overlayUnlockId, _overlayUnlockPage) },
              ...(fl.hasMcq ? [
                { mode: 'MCQ', label: 'MCQ Practice', emoji: '🧠', cost: 20, isUnlocked: isMcqPageUnlocked(_overlayUnlockId, _overlayUnlockPage), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markMcqPageUnlocked(_overlayUnlockId, _overlayUnlockPage) },
@@ -25747,7 +25791,7 @@ RULES:
                      });
                    }
                 }}>
-                Writing Mode
+                Premium Notes
               </button>
               {fl.hasMcq && (
                 <button style={_ts} className={_tcls(false, 'bg-purple-600')}
