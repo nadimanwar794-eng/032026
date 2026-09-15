@@ -76,13 +76,7 @@ const App: React.FC = () => {
 
   const [appMcqCommunityDraft, setAppMcqCommunityDraft] = useState<{question: string; options: [string,string,string,string]; correctAnswer: number; explanation: string} | null>(null);
 
-  const [isAppLoading, setIsAppLoading] = useState(() => {
-    try {
-      return sessionStorage.getItem('nst_has_loaded') !== 'true';
-    } catch {
-      return true;
-    }
-  });
+  const [isAppLoading, setIsAppLoading] = useState(() => sessionStorage.getItem('nst_has_loaded') !== 'true');
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
 
   useEffect(() => { initPerfMode(); }, []);
@@ -96,9 +90,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (!isAppLoading) {
-    try {
       sessionStorage.setItem('nst_has_loaded', 'true');
-    } catch {}
     }
   }, [isAppLoading]);
 
@@ -110,7 +102,7 @@ const App: React.FC = () => {
     const failSafe = window.setTimeout(() => {
       console.warn('[IIC] Splash screen fail-safe completed the app load.');
       setIsAppLoading(false);
-    }, isLoadingPreview ? 12000 : 6500);
+    }, 12000);
     return () => window.clearTimeout(failSafe);
   }, [isAppLoading, isLoadingPreview]);
 
@@ -564,7 +556,7 @@ const App: React.FC = () => {
         : 0;
       if (sess.sessionScore != null && user.id) {
         const actLabel = (sess.activityType === 'MCQ' || sess.type === 'MCQ') ? 'MCQ'
-          : sess.activityType === 'Writing' ? 'Premium Notes' : 'Reading Notes';
+          : sess.activityType === 'Writing' ? 'Writing Notes' : 'Reading Notes';
         recordCreditTx(
           user.id,
           sess.coinsEarned || 0,

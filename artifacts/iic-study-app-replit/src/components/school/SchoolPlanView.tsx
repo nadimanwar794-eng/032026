@@ -25,7 +25,7 @@ const FEATURES = [
   { id: "attendance", icon: <ClipboardList size={15}/>, label: "Attendance System",  lite: true,  pro: true  },
   { id: "marks",      icon: <BarChart3   size={15} />, label: "Marks & Results",      lite: true,  pro: true  },
   { id: "reading",    icon: <BookOpen    size={15} />, label: "Smart Reading Notes",  lite: false, pro: true  },
-  { id: "writing",    icon: <FileText    size={15} />, label: "Premium Notes Content", lite: false, pro: true  },
+  { id: "writing",    icon: <FileText    size={15} />, label: "Writing Mode Content", lite: false, pro: true  },
   { id: "pdf",        icon: <FileText    size={15} />, label: "PDF Resources",        lite: false, pro: true  },
   { id: "mcq",        icon: <Brain       size={15} />, label: "MCQ / Quiz System",    lite: false, pro: true  },
 ];

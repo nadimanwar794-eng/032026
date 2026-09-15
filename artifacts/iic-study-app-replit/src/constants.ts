@@ -529,7 +529,7 @@ export const LEVEL_UP_CONFIG = [
 export const NSTA_DEFAULT_FEATURES = [
     { category: '⭐ PAGE 1', id: 'LEADER_BOARD', label: 'Leader Board', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
     { category: '⭐ PAGE 1', id: 'READING_MODE', label: 'Reading mode', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
-    { category: '⭐ PAGE 1', id: 'WRITING_MODE', label: 'Premium Notes', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
+    { category: '⭐ PAGE 1', id: 'WRITING_MODE', label: 'Writing mode', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
     { category: '⭐ PAGE 1', id: 'MCQ_MODE', label: 'Mcq mode', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
     { category: '⭐ PAGE 1', id: 'PROJECTOR_MODE', label: 'Projector mode', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },
     { category: '⭐ PAGE 1', id: 'FLASHCARD', label: 'Flashcard', visible: true, allowedTiers: ['FREE', 'BASIC', 'ULTRA'], limits: {}, creditCost: 0 },

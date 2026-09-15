@@ -1113,7 +1113,7 @@ export const SmartClass: React.FC<Props> = ({
           state={writeScoreState}
           visible={true}
           levelColor="#7c3aed"
-          levelLabel="✍️ Premium Notes"
+          levelLabel="✍️ Writing Mode"
         />
       )}
       <LessonView

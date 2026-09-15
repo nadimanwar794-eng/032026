@@ -1,3 +1,12 @@
 {
-  "outputDirectory": "artifacts/iic-study-app-replit/dist/public"
+  "buildCommand": "npm run build --workspace=artifacts/iic-study-app-replit",
+  "outputDirectory": "artifacts/iic-study-app-replit/dist/public",
+  "framework": "vite",
+  "installCommand": "npm install",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
 }

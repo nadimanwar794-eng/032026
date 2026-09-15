@@ -107,7 +107,7 @@ export const WriteModeCorrection: React.FC<Props> = ({ user, lessonTitle, pageNo
       ) : (
         <div style={{ background: '#fffbeb', border: '2px solid #fcd34d', borderRadius: 14, padding: '12px', gap: 8, display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <p style={{ fontSize: 10, fontWeight: 900, color: '#92400e', margin: 0, textTransform: 'uppercase', letterSpacing: '0.08em' }}>✍️ Premium Notes — Correction</p>
+            <p style={{ fontSize: 10, fontWeight: 900, color: '#92400e', margin: 0, textTransform: 'uppercase', letterSpacing: '0.08em' }}>✍️ Writing Mode — Correction</p>
             <button onClick={() => setOpen(false)} style={{ background: '#fde68a', border: 'none', borderRadius: '50%', width: 20, height: 20, cursor: 'pointer', fontSize: 10, fontWeight: 900, color: '#92400e', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
           </div>
           {(lessonTitle || pageNo) && (

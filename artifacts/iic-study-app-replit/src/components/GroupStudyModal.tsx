@@ -231,7 +231,7 @@ export const GroupStudyModal: React.FC<GroupStudyModalProps> = ({
 
       const mode = isMcq ? 'LIVE_MCQ' : (isReading || isWriting ? 'LIVE_CLASS' : 'STUDY');
       const label = isReading ? 'Reading Notes'
-        : isWriting ? 'Premium Notes'
+        : isWriting ? 'Writing Notes'
         : isMcq ? (prefilledContext.contentType === 'PREMIUM_MCQ' ? 'MCQ Battle' : 'MCQ Practice')
         : isFlashcard ? 'Flashcards'
         : 'PDF Study';
@@ -1805,7 +1805,7 @@ export const GroupStudyModal: React.FC<GroupStudyModalProps> = ({
                   <div className="flex items-center gap-1.5">
                     <span className="text-[9px] font-black uppercase tracking-wider text-indigo-400 bg-indigo-500/20 px-1.5 py-0.5 rounded">
                       {prefilledContext.contentType === 'READING_NOTES' ? 'Reading Notes Room' :
-                       prefilledContext.contentType === 'WRITING_NOTES' ? 'Premium Notes Room' :
+                       prefilledContext.contentType === 'WRITING_NOTES' ? 'Writing Notes Room' :
                        prefilledContext.contentType === 'MCQ' ? 'MCQ Practice Room' :
                        prefilledContext.contentType === 'PREMIUM_MCQ' ? 'Premium MCQ Battle' :
                        prefilledContext.contentType === 'FLASHCARD' ? 'Flashcard Study Room' : 'PDF Study Room'}

@@ -35,7 +35,7 @@ const ACTIVITY_EMOJI: Record<string, string> = {
 const ACTIVITY_LABEL: Record<string, string> = {
   MCQ: 'MCQ',
   Reading: 'Reading Notes',
-  Writing: 'Premium Notes',
+  Writing: 'Writing Notes',
   LESSON: 'Lesson',
 };
 

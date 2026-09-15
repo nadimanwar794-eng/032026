@@ -138,7 +138,7 @@ export const AdminPowerManager: React.FC<Props> = ({ settings, onUpdate }) => {
                                     </span>
                                 </div>
                                 <p className="text-[11px] text-slate-500 mt-0.5">
-                                    Reading mode, Premium Notes, MCQ mode aur baki sabhi jagah se "Live" aur "Apna Study Room Banayein" buttons ko hide karein.
+                                    Reading mode, Writing mode, MCQ mode aur baki sabhi jagah se "Live" aur "Apna Study Room Banayein" buttons ko hide karein.
                                 </p>
                             </div>
                             <button

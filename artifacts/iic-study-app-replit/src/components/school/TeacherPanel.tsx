@@ -255,7 +255,7 @@ export const TeacherPanel: React.FC<Props> = ({ schoolId, teacherId, teacherName
                 {lesson.features.writingEnabled && (
                   <button onClick={() => { setSelectedLesson(lesson); setSmartMode("writing"); setView("smart_class"); }}
                     className="py-2 bg-purple-600 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1">
-                    <Edit3 className="w-3.5 h-3.5" /> Premium Notes
+                    <Edit3 className="w-3.5 h-3.5" /> Writing Mode
                   </button>
                 )}
                 {lesson.features.pdfEnabled && (

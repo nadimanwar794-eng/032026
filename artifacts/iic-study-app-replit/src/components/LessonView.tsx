@@ -994,7 +994,7 @@ export const LessonView: React.FC<Props> = ({
   const coinModal = pendingModeSwitch !== null && user && onUpdateUser
     ? createPortal(
         <CreditConfirmationModal
-          title={pendingModeSwitch === 'readable' ? '📖 Reading Mode (TTS)' : '✍️ Premium Notes'}
+          title={pendingModeSwitch === 'readable' ? '📖 Reading Mode (TTS)' : '✍️ Writing Mode (Notes)'}
           cost={20}
           userCredits={getTotalCredits(user)}
           onConfirm={() => {
@@ -1332,7 +1332,7 @@ export const LessonView: React.FC<Props> = ({
                           <button onClick={handleBack} className="shrink-0 p-2 bg-white/10 hover:bg-white/20 rounded-xl text-white transition-colors"><ArrowLeft size={18} /></button>
                           <div className="min-w-0 flex-1">
                               <h2 className="text-[13px] font-black text-white truncate leading-tight">{content.title}</h2>
-                              <p className="text-[10px] font-bold text-amber-300 uppercase tracking-wide truncate">{notesViewMode === 'styled' ? '✍️ Premium Notes' : '📖 Reading Mode'}</p>
+                              <p className="text-[10px] font-bold text-amber-300 uppercase tracking-wide truncate">{notesViewMode === 'styled' ? '✍️ Writing Mode' : '📖 Reading Mode'}</p>
                           </div>
                           {/* Live score chip — both reading & writing modes */}
                           <div className="relative shrink-0" style={{ zIndex: 50 }}>

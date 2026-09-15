@@ -41,7 +41,7 @@ const MODE_EMOJI: Record<string, string> = {
 const MODE_LABEL: Record<string, string> = {
   MCQ:       'MCQ Practice',
   Reading:   'Reading Notes',
-  Writing:   'Premium Notes',
+  Writing:   'Writing Notes',
   LESSON:    'Lesson',
   PDF:       'PDF Reading',
   Video:     'Video Lecture',
