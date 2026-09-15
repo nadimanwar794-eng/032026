@@ -7,12 +7,20 @@ import 'katex/dist/katex.min.css';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { registerSW } from 'virtual:pwa-register';
 
-registerSW({
-  onNeedRefresh() {},
-  onOfflineReady() {
-    console.log('[PWA] App is ready to work offline');
-  },
-});
+// Service-worker registration must never block the first React paint. A stale
+// PWA worker can otherwise leave the browser between its native splash and the
+// app's own loading screen with only the HTML background visible.
+try {
+  registerSW({
+    immediate: true,
+    onNeedRefresh() {},
+    onOfflineReady() {
+      console.info('[PWA] App is ready to work offline');
+    },
+  });
+} catch (error) {
+  console.warn('[PWA] Service worker registration skipped:', error);
+}
 
 // Request persistent storage so the browser does NOT auto-evict
 // IndexedDB data (nst_content_* chapter cache, nst_user_history, etc.)

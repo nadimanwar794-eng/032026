@@ -1255,7 +1255,7 @@ export const StudentDashboard: React.FC<Props> = ({
     const _lid = overrideLid ?? (lucentNoteViewer as any)?.id ?? '';
     const _pi  = overridePi  ?? lucentPageIndex ?? 0;
     if (_lid && isPgWriteUnlocked(_lid, _pi)) { action(); return; }
-    showCoinGate(20, 'Writing Mode', () => {
+    showCoinGate(20, 'Premium Notes', () => {
       if (_lid) markPgWriteUnlocked(_lid, _pi);
       action();
     }, undefined, undefined, pgInfo);
@@ -5330,6 +5330,19 @@ export const StudentDashboard: React.FC<Props> = ({
   }, [globalNoteStars, applyStarBoost]);
   const [readingStreak, setReadingStreak] = useState<StreakInfo>({ current: 0, longest: 0, readToday: false });
   const [showStreakPopup, setShowStreakPopup] = useState(false);
+  const [showTopBarStreak, setShowTopBarStreak] = useState(false);
+  // Keep the top-bar streak compact: show it for five seconds whenever the
+  // user lands on Home, then let the remaining actions use that space.
+  useEffect(() => {
+    if (activeTab !== 'HOME') {
+      setShowTopBarStreak(false);
+      return undefined;
+    }
+
+    setShowTopBarStreak(true);
+    const timer = window.setTimeout(() => setShowTopBarStreak(false), 5000);
+    return () => window.clearTimeout(timer);
+  }, [activeTab]);
   const [showEventDrawer, setShowEventDrawer] = useState(false);
   const [_eventTick, _setEventTick] = useState(0);
   // Re-check event active/upcoming status every second so countdown is live and
@@ -5691,7 +5704,7 @@ export const StudentDashboard: React.FC<Props> = ({
       availableModes: [
         { mode: 'READING',  label: 'Reading Mode',  emoji: '📖', cost: 20,
           isUnlocked: isPgReadUnlocked(entry.id, pageIdx), isAccessible: true, requiredTier: 'free'  as const, unlockAction: () => markPgReadUnlocked(entry.id, pageIdx) },
-        { mode: 'WRITING',  label: 'Writing Mode',  emoji: '✍️', cost: 20,
+        { mode: 'WRITING',  label: 'Premium Notes',  emoji: '✍️', cost: 20,
           isUnlocked: isPgWriteUnlocked(entry.id, pageIdx), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markPgWriteUnlocked(entry.id, pageIdx) },
         { mode: 'PROJECTOR', label: 'Projector Mode', emoji: '📽️', cost: 20,
           isUnlocked: isProjectorUnlocked(entry.id, pageIdx), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markProjectorUnlocked(entry.id, pageIdx) },
@@ -5712,7 +5725,7 @@ export const StudentDashboard: React.FC<Props> = ({
       showCoinGate(20, 'MCQ Practice', () => { markMcqPageUnlocked(entry.id, pageIdx); doOpen(); }, undefined, undefined, _openPgInfo);
     } else if (_isWriteIntent) {
       if (isPgWriteUnlocked(entry.id, pageIdx)) { doOpen(); return; }
-      showCoinGate(20, 'Writing Mode', () => { markPgWriteUnlocked(entry.id, pageIdx); doOpen(); }, undefined, undefined, _openPgInfo);
+      showCoinGate(20, 'Premium Notes', () => { markPgWriteUnlocked(entry.id, pageIdx); doOpen(); }, undefined, undefined, _openPgInfo);
     } else {
       if (isPgReadUnlocked(entry.id, pageIdx)) { doOpen(); return; }
       showCoinGate(20, 'Reading Mode',
@@ -5862,7 +5875,7 @@ export const StudentDashboard: React.FC<Props> = ({
       availableModes: [
         { mode: 'READING',   label: 'Reading Mode', emoji: '📖', cost: 20,
           isUnlocked: isPgReadUnlocked(_lid, 0), isAccessible: true, requiredTier: 'free'  as const, unlockAction: () => markPgReadUnlocked(_lid, 0) },
-        { mode: 'WRITING',   label: 'Writing Mode', emoji: '✍️', cost: 20,
+        { mode: 'WRITING',   label: 'Premium Notes', emoji: '✍️', cost: 20,
           isUnlocked: isPgWriteUnlocked(_lid, 0), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markPgWriteUnlocked(_lid, 0) },
         ...(_hasMcq ? [
           { mode: 'MCQ',       label: 'MCQ Practice', emoji: '🧠', cost: 20,
@@ -5876,7 +5889,7 @@ export const StudentDashboard: React.FC<Props> = ({
 
     if (mode === 'WRITING') {
       if (isPgWriteUnlocked(_lid, 0)) { doOpen(); return; }
-      showCoinGate(20, 'Writing Mode', () => { markPgWriteUnlocked(_lid, 0); doOpen(); }, undefined, undefined, _pgInfo);
+      showCoinGate(20, 'Premium Notes', () => { markPgWriteUnlocked(_lid, 0); doOpen(); }, undefined, undefined, _pgInfo);
     } else if (mode === 'MCQ') {
       if (isMcqPageUnlocked(_lid, 0)) { doOpen(); return; }
       showCoinGate(20, 'MCQ Practice', () => { markMcqPageUnlocked(_lid, 0); doOpen(); }, undefined, undefined, _pgInfo);
@@ -8975,7 +8988,7 @@ export const StudentDashboard: React.FC<Props> = ({
                 availableModes: [
                   { mode: 'READING',   label: 'Reading Mode', emoji: '📖', cost: 20,
                     isUnlocked: isPgReadUnlocked(activeHw.id, 0),  isAccessible: true,                           requiredTier: 'free'  as const, unlockAction: () => markPgReadUnlocked(activeHw.id, 0) },
-                  { mode: 'WRITING',   label: 'Writing Mode', emoji: '✍️', cost: 20,
+                  { mode: 'WRITING',   label: 'Premium Notes', emoji: '✍️', cost: 20,
                     isUnlocked: isPgWriteUnlocked(activeHw.id, 0), isAccessible: true,                           requiredTier: 'free'  as const, unlockAction: () => markPgWriteUnlocked(activeHw.id, 0) },
                   ...(hasMcq ? [
                     { mode: 'MCQ',       label: 'MCQ Practice', emoji: '🧠', cost: 20,
@@ -9020,7 +9033,7 @@ export const StudentDashboard: React.FC<Props> = ({
                     </button>
                     {/* Free+ — Writing (credit gate — pass activeHw.id so unlock is remembered per lesson) */}
                     <button data-tab-active={String(_isWriteActive)} onClick={() => handleWriteModeGate(() => { setHwViewMode('notes'); setHwNotesViewMode('html'); _hwSave('notes', 'html'); }, _hwPgInfo, activeHw.id, 0)} style={_hwTabStyle} className={_hwTabCls(_isWriteActive, 'bg-teal-600', 'text-white')}>
-                      Writing Mode
+                      Premium Notes
                     </button>
                     {/* Free+ — MCQ Practice → Class 6-12 jaisa inline MCQ view */}
                     {hasMcq && (
@@ -14929,6 +14942,12 @@ export const StudentDashboard: React.FC<Props> = ({
         <div className="relative z-10 flex items-center justify-between w-full px-2.5 sm:px-3 pt-2.5 pb-1.5 gap-1.5">
           {/* LEFT: logo + app name + verified badge — only the badge tap opens What's New */}
           <div className="flex items-center gap-1.5 shrink-0 min-w-0">
+            <img
+              src={settings?.appLogo || "/branding/nsta-logo.png"}
+              alt=""
+              aria-hidden="true"
+              className="h-7 w-7 sm:h-8 sm:w-8 rounded-lg object-cover shrink-0 border border-white/25 shadow-sm"
+            />
             <span className="font-black text-[20px] sm:text-[23px] leading-tight tracking-tight uppercase text-white truncate max-w-[85px] xs:max-w-[120px] sm:max-w-none">
               {settings?.appShortName || settings?.appName || "NSTA"}
             </span>
@@ -15607,18 +15626,20 @@ export const StudentDashboard: React.FC<Props> = ({
               );
             })()}
 
-            {/* Streak — tap to see streak popup */}
-            <button
-              id="topbar-streak-btn"
-              onClick={() => setShowStreakPopup(true)}
-              className="inline-flex items-center gap-1 px-1.5 py-1 rounded-lg active:scale-95 text-white hover:text-amber-200 transition-all shrink-0"
-              title="Aapki Study Streak — Tap karke detail dekhein"
-            >
-              <span className="text-[13px] sm:text-[14px] leading-none select-none">🔥</span>
-              <span className="font-black text-[11px] sm:text-xs tabular-nums text-amber-300">
-                {user.streak > 0 ? user.streak : 0}
-              </span>
-            </button>
+            {/* Streak — visible for five seconds after arriving on Home */}
+            {showTopBarStreak && (
+              <button
+                id="topbar-streak-btn"
+                onClick={() => setShowStreakPopup(true)}
+                className="inline-flex items-center gap-1 px-1.5 py-1 rounded-lg active:scale-95 text-white hover:text-amber-200 transition-all shrink-0"
+                title="Aapki Study Streak — Tap karke detail dekhein"
+              >
+                <span className="text-[13px] sm:text-[14px] leading-none select-none">🔥</span>
+                <span className="font-black text-[11px] sm:text-xs tabular-nums text-amber-300">
+                  {user.streak > 0 ? user.streak : 0}
+                </span>
+              </button>
+            )}
 
             {/* Mail */}
             {(() => {
@@ -15626,6 +15647,7 @@ export const StudentDashboard: React.FC<Props> = ({
               const pendingDiamondSub = canClaimDiamondSubToday(user) ? 1 : 0;
               const pendingRewards = (user.inbox || []).filter(m => (m.type === 'REWARD' || m.type === 'GIFT') && !m.isClaimed && (!m.expiresAt || new Date(m.expiresAt).getTime() > Date.now())).length + pendingCreditSub + pendingDiamondSub;
               const totalCount = unreadCount + unreadNotifCount + _newContentCount + pendingRewards;
+              if (totalCount <= 0) return null;
               return (
                 <button
                   onClick={() => {
@@ -15815,6 +15837,28 @@ export const StudentDashboard: React.FC<Props> = ({
                             label: 'Store',
                             right: '🛍️',
                             action: () => { setStoreInitialTier('FREE'); onTabChange("STORE"); setShowDotsMenu(false); },
+                          },
+                          {
+                            label: 'Mailbox',
+                            right: '✉️',
+                            action: () => {
+                              const pendingCreditSub = canClaimCreditSubToday(user) ? 1 : 0;
+                              const pendingDiamondSub = canClaimDiamondSubToday(user) ? 1 : 0;
+                              const pendingRewards =
+                                (user.inbox || []).filter(
+                                  m =>
+                                    (m.type === 'REWARD' || m.type === 'GIFT') &&
+                                    !m.isClaimed &&
+                                    (!m.expiresAt || new Date(m.expiresAt).getTime() > Date.now()),
+                                ).length +
+                                pendingCreditSub +
+                                pendingDiamondSub;
+                              const hasOnlyPendingRewards =
+                                pendingRewards > 0 && unreadCount === 0 && unreadNotifCount === 0;
+                              setInboxTab(hasOnlyPendingRewards ? 'REWARDS' : 'UPDATES');
+                              setShowInbox(true);
+                              setShowDotsMenu(false);
+                            },
                           },
                           {
                             label: 'Diamond Store',
@@ -22758,7 +22802,7 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
               const _pgModes = [
                 { mode: 'READING',  label: 'Reading Mode',  emoji: '📖', cost: 20,
                   isUnlocked: isPgReadUnlocked(entry.id, safeIndex),  isAccessible: true,                         requiredTier: 'free'  as const, unlockAction: () => markPgReadUnlocked(entry.id, safeIndex) },
-                { mode: 'WRITING',  label: 'Writing Mode',  emoji: '✍️', cost: 20,
+                { mode: 'WRITING',  label: 'Premium Notes',  emoji: '✍️', cost: 20,
                   isUnlocked: isPgWriteUnlocked(entry.id, safeIndex), isAccessible: true,                         requiredTier: 'free'  as const, unlockAction: () => markPgWriteUnlocked(entry.id, safeIndex) },
                 { mode: 'PROJECTOR', label: 'Projector Mode', emoji: '📽️', cost: 20,
                   isUnlocked: isProjectorUnlocked(entry.id, safeIndex), isAccessible: true,                         requiredTier: 'free'  as const, unlockAction: () => markProjectorUnlocked(entry.id, safeIndex) },
@@ -22818,7 +22862,7 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                     if (!_isReadDone) {
                       const _remSec = Math.max(0, _reqSec - _combSec);
                       showAlert(
-                        `🔒 Free users ke liye pehle reading complete karna zaroori hai!\nReading Mode ya Writing Mode me ${formatDuration(_remSec)} aur padhein, uske baad hi MCQ unlock hoga.`,
+                        `🔒 Free users ke liye pehle reading complete karna zaroori hai!\nReading Mode ya Premium Notes me ${formatDuration(_remSec)} aur padhein, uske baad hi MCQ unlock hoga.`,
                         'INFO',
                         'MCQ Locked'
                       );
@@ -22859,7 +22903,7 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                       Reading Mode
                     </button>
                     <button data-tab-active={String(_isWriteActive)} onClick={() => handleWriteModeGate(() => { setLucentActiveTab('NOTES'); setLucentNotesViewMode('html'); _save('NOTES', 'html'); }, _pgInfo, entry.id, safeIndex)} style={_tabStyle} className={_tabCls(_isWriteActive, 'bg-teal-600', 'text-white')}>
-                      Writing Mode
+                      Premium Notes
                     </button>
                     {_hasMcqTb && (
                       <button data-tab-active={String(lucentActiveTab === 'MCQS')} onClick={() => _switchMcq('MCQS')} style={_tabStyle} className={_tabCls(lucentActiveTab === 'MCQS', 'bg-purple-600', 'text-white')}>
@@ -22880,7 +22924,7 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                               const _isReadDone = isRoutinePageRead(entry.id, safeIndex) || _combSec >= _reqSec;
                               if (!_isReadDone) {
                                 const _remSec = Math.max(0, _reqSec - _combSec);
-                                showAlert(`🔒 Free users ke liye pehle reading complete karna zaroori hai!\nReading Mode ya Writing Mode me ${formatDuration(_remSec)} aur padhein, uske baad hi Projector unlock hoga.`, 'INFO', 'Projector Locked');
+                                showAlert(`🔒 Free users ke liye pehle reading complete karna zaroori hai!\nReading Mode ya Premium Notes me ${formatDuration(_remSec)} aur padhein, uske baad hi Projector unlock hoga.`, 'INFO', 'Projector Locked');
                                 return;
                               }
                             }
@@ -25663,7 +25707,7 @@ RULES:
           if (_isAdminUser || fl?.isCompetition) { action(); return; }
           const modeConfig = {
             READING: { label: 'Reading Mode', isUnlocked: isPgReadUnlocked(_overlayUnlockId, _overlayUnlockPage), mark: () => markPgReadUnlocked(_overlayUnlockId, _overlayUnlockPage) },
-            WRITING: { label: 'Writing Mode', isUnlocked: isPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage), mark: () => markPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage) },
+            WRITING: { label: 'Premium Notes', isUnlocked: isPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage), mark: () => markPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage) },
             MCQ: { label: 'MCQ Practice', isUnlocked: isMcqPageUnlocked(_overlayUnlockId, _overlayUnlockPage), mark: () => markMcqPageUnlocked(_overlayUnlockId, _overlayUnlockPage) },
             QA: { label: 'Q&A Mode', isUnlocked: isQaPageUnlocked(_overlayUnlockId, _overlayUnlockPage), mark: () => markQaPageUnlocked(_overlayUnlockId, _overlayUnlockPage) },
             FLASHCARD: { label: 'Flashcard', isUnlocked: isFcPageUnlocked(_overlayUnlockId, _overlayUnlockPage), mark: () => markFcPageUnlocked(_overlayUnlockId, _overlayUnlockPage) },
@@ -25682,7 +25726,7 @@ RULES:
            pageLabel: flashcardMcqs.title || 'Lesson',
            availableModes: [
              { mode: 'READING', label: 'Reading Mode', emoji: '📖', cost: 20, isUnlocked: isPgReadUnlocked(_overlayUnlockId, _overlayUnlockPage), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markPgReadUnlocked(_overlayUnlockId, _overlayUnlockPage) },
-             { mode: 'WRITING', label: 'Writing Mode', emoji: '✍️', cost: 20, isUnlocked: isPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage) },
+             { mode: 'WRITING', label: 'Premium Notes', emoji: '✍️', cost: 20, isUnlocked: isPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage) },
              { mode: 'PROJECTOR', label: 'Projector Mode', emoji: '📽️', cost: 20, isUnlocked: isProjectorUnlocked(_overlayUnlockId, _overlayUnlockPage), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markProjectorUnlocked(_overlayUnlockId, _overlayUnlockPage) },
              ...(fl.hasMcq ? [
                { mode: 'MCQ', label: 'MCQ Practice', emoji: '🧠', cost: 20, isUnlocked: isMcqPageUnlocked(_overlayUnlockId, _overlayUnlockPage), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markMcqPageUnlocked(_overlayUnlockId, _overlayUnlockPage) },
@@ -25747,7 +25791,7 @@ RULES:
                      });
                    }
                 }}>
-                Writing Mode
+                Premium Notes
               </button>
               {fl.hasMcq && (
                 <button style={_ts} className={_tcls(false, 'bg-purple-600')}
@@ -28730,7 +28774,7 @@ RULES:
         };
 
         const emojiMap: Record<string, string> = {
-          'Reading Mode': '📖', 'Writing Mode': '✍️', 'MCQ Session': '🧠',
+          'Reading Mode': '📖', 'Premium Notes': '✍️', 'MCQ Session': '🧠',
           'Next Page': '📖', 'Next Chapter': '📚', 'Revision Hub MCQ Session': '🏆',
           'Q&A Mode': '💬', 'MCQ Practice': '🧠', 'Flashcard': '🃏',
         };

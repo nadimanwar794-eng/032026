@@ -221,7 +221,7 @@ export const SyllabusPageCard: React.FC<SyllabusPageCardProps> = ({
     e.stopPropagation();
     const rem = Math.max(0, reqSec - combinedReadingSec);
     showAlert(
-      `🔒 Free users ke liye pehle reading complete karna zaroori hai!\nReading Mode ya Writing Mode me ${formatSecs(
+      `🔒 Free users ke liye pehle reading complete karna zaroori hai!\nReading Mode ya Premium Notes me ${formatSecs(
         rem
       )} aur padhein, uske baad MCQ automatic unlock ho jayega.`,
       'INFO',
@@ -423,10 +423,10 @@ export const SyllabusPageCard: React.FC<SyllabusPageCardProps> = ({
                   type="button"
                   onClick={(e) => { e.stopPropagation(); onOpenWriting(); }}
                   className="py-2 px-3 bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-200 rounded-xl text-xs font-black flex items-center justify-center gap-1 active:scale-98 transition-all shrink-0"
-                  title="Practice writing notes"
+                  title="Practice Premium Notes"
                 >
                   <PenTool size={12} />
-                  Writing Mode
+                  Premium Notes
                 </button>
               )}
             </div>

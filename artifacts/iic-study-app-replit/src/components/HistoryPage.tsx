@@ -936,7 +936,7 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
                                 // ── Toast-style session card ──────────────────
                                 const actLabel =
                                     tx.activityType === 'MCQ' ? '📝 MCQ' :
-                                    tx.activityType === 'Writing' ? '✍️ Writing Notes' :
+                                    tx.activityType === 'Writing' ? '✍️ Premium Notes' :
                                     tx.activityType === 'Reading' ? '📖 Reading Notes' :
                                     `📝 ${tx.activityType || 'Session'}`;
                                 const formatTime = (s: number) => {

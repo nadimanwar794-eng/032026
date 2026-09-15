@@ -146,7 +146,7 @@ const SubEditor = ({
           <div className="space-y-1 pt-1">
             {([ 
               ["reading", "📖 Reading Mode"],
-              ["writing", "✏️ Writing Mode"],
+              ["writing", "✏️ Premium Notes"],
               ["pdf",     "📄 PDF System"],
               ["mcq",     "❓ MCQ System"],
             ] as const).map(([key, featureLabel]) => (

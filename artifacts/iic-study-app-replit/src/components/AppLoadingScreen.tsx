@@ -417,50 +417,15 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({
 
       {/* ── TOP NSTA BRANDING & FEATURE BADGES ── */}
       <div className="relative z-10 flex flex-col items-center w-full max-w-md">
-        <div className="w-40 h-28 flex items-center justify-center">
-          <svg className="w-full h-full drop-shadow-[0_0_24px_rgba(56,189,248,0.65)]" viewBox="0 0 220 180" fill="none">
-            <defs>
-              <linearGradient id="mainPageLeft" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0%" stopColor="#0284c7" />
-                <stop offset="60%" stopColor="#38bdf8" />
-                <stop offset="100%" stopColor="#818cf8" />
-              </linearGradient>
-              <linearGradient id="mainPageRight" x1="1" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#9333ea" />
-                <stop offset="60%" stopColor="#c084fc" />
-                <stop offset="100%" stopColor="#818cf8" />
-              </linearGradient>
-              <linearGradient id="glowBase" x1="0" y1="1" x2="0" y2="0">
-                <stop offset="0%" stopColor="#38bdf8" />
-                <stop offset="100%" stopColor="#ffffff" />
-              </linearGradient>
-            </defs>
-
-            <path d="M110 148 C65 125 25 138 12 110 C50 102 85 118 110 138 Z" fill="#0369a1" opacity="0.6" />
-            <path d="M110 148 C155 125 195 138 208 110 C170 102 135 118 110 138 Z" fill="#7e22ce" opacity="0.6" />
-            <path d="M110 140 C70 115 32 124 20 100 C56 94 90 108 110 128 Z" fill="url(#mainPageLeft)" />
-            <path d="M110 140 C150 115 188 124 200 100 C164 94 130 108 110 128 Z" fill="url(#mainPageRight)" />
-            <path d="M110 130 C75 105 45 112 35 90 C68 84 95 98 110 118 Z" fill="#e0f2fe" opacity="0.95" />
-            <path d="M110 130 C145 105 175 112 185 90 C152 84 125 98 110 118 Z" fill="#f3e8ff" opacity="0.95" />
-            <path d="M108 152 L112 152 L111 65 L109 65 Z" fill="url(#glowBase)" filter="drop-shadow(0 0 8px #38bdf8)" />
-
-            <path d="M110 40 L160 58 L110 76 L60 58 Z" fill="#1e293b" stroke="#38bdf8" strokeWidth="2" />
-            <path d="M88 68 L88 84 C88 94 132 94 132 84 L132 68 Z" fill="#0f172a" />
-            <path d="M160 58 L170 82 L166 84 L156 60 Z" fill="#fbbf24" />
-          </svg>
+        <div className="w-52 h-52 sm:w-60 sm:h-60 flex items-center justify-center">
+          <img
+            src="/branding/nsta-logo.png"
+            alt="NSTA — National Study & Tracking App"
+            className="w-full h-full object-contain drop-shadow-[0_0_28px_rgba(255,255,255,0.2)]"
+          />
         </div>
 
-        <h1 className="text-5xl font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-b from-white via-blue-100 to-blue-300 drop-shadow-[0_4px_18px_rgba(255,255,255,0.25)]">
-          NSTA
-        </h1>
-
-        <div className="flex items-center gap-1.5 mt-1 text-slate-100 text-sm font-bold">
-          <span className="text-sky-400 text-xs">✦</span>
-          <span>National Study & Tracking App</span>
-          <span className="text-sky-400 text-xs">✦</span>
-        </div>
-
-        <div className="flex items-center justify-center gap-2.5 mt-2.5 text-xs font-bold flex-wrap">
+        <div className="flex items-center justify-center gap-2.5 mt-3 text-xs font-bold flex-wrap">
           <div className="flex items-center gap-1 text-sky-400">
             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a8.5 8.5 0 0 1 13 0"/></svg>
             <span>Self Study</span>

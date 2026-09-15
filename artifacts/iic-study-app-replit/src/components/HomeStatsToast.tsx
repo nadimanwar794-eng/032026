@@ -29,7 +29,7 @@ const DISPLAY_MS = 2000;
 const ACTIVITY_LABEL: Record<string, string> = {
   MCQ: '📝 MCQ',
   Reading: '📖 Reading Notes',
-  Writing: '✍️ Writing Notes',
+  Writing: '✍️ Premium Notes',
 };
 
 // Theme-aware CSS variables

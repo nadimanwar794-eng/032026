@@ -23,7 +23,7 @@ const FULL_FEATURES = [
   { text: "Fee Management & Reports", included: true },
   { text: "Marks & Report Cards", included: true },
   { text: "Reading Mode (Smart Notes)", included: true },
-  { text: "Writing Mode (Board-style)", included: true },
+  { text: "Premium Notes (Board-style)", included: true },
   { text: "PDF System", included: true },
   { text: "MCQ Practice System", included: true },
 ];
