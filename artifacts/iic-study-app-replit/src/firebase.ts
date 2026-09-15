@@ -6,14 +6,13 @@ import { storage } from "./utils/storage";
 
 // --- FIREBASE CONFIGURATION ---
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyBEDKZVPgwOPCccjWdKSShfvSqC3REDa0c",
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "iic-nst.firebaseapp.com",
-  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL || "https://iic-nst-default-rtdb.firebaseio.com",
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "iic-nst",
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "iic-nst.firebasestorage.app",
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "984309241322",
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:984309241322:web:4dae35987732d630e64e93",
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-QX0XT7RSQX"
+apiKey: "AIzaSyDyYNuSJr72nC52MinT0rt6jbDae8HLCts",
+authDomain: "project-1959318394445181665.firebaseapp.com",
+databaseURL: "https://project-1959318394445181665-default-rtdb.asia-southeast1.firebasedatabase.app",
+projectId: "project-1959318394445181665",
+storageBucket: "project-1959318394445181665.firebasestorage.app",
+messagingSenderId: "130030264192",
+appId: "1:130030264192:web:1b8a53d694b15c8ef1eb65"
 };
 
 // ── Stale IndexedDB guard ──────────────────────────────────────────────────
