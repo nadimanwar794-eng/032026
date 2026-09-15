@@ -118,6 +118,8 @@ export interface RoutineData {
   // Per-class/book category snapshots — keyed by "SCHOOL_<classLevel>" or "COMPETITION_<book1+book2>"
   // Saved automatically when user switches class/books so state is fully restored on switch-back.
   routineCategoriesByClass: Record<string, RoutineCategory[]>;
+  // Competition books unlocked by Free/Basic users with the one-time book fee.
+  unlockedCompetitionBooks: Record<string, boolean>;
   unlockedTierSlot: boolean;            // paid with coins (tier-price)
   unlockedLevel5Slot: boolean;          // legacy flag — level bonus now computed from level directly
   unlockedLevel8Slot: boolean;          // legacy flag — level bonus now computed from level directly
@@ -179,6 +181,7 @@ export function loadRoutineData(userId: string): RoutineData {
         routineSlots: slots,
         routineCategories: cats,
         routineCategoriesByClass: parsed.routineCategoriesByClass ?? {},
+        unlockedCompetitionBooks: parsed.unlockedCompetitionBooks ?? {},
         unlockedTierSlot: parsed.unlockedTierSlot ?? false,
         unlockedLevel5Slot: parsed.unlockedLevel5Slot ?? false,
         unlockedLevel8Slot: parsed.unlockedLevel8Slot ?? false,
@@ -204,6 +207,7 @@ export function loadRoutineData(userId: string): RoutineData {
     routineSlots: [],
     routineCategories: [],
     routineCategoriesByClass: {},
+    unlockedCompetitionBooks: {},
     unlockedTierSlot: false,
     unlockedLevel5Slot: false,
     unlockedLevel8Slot: false,
@@ -360,8 +364,11 @@ export const MCQ_COST                 = 40;
 export const LESSON_COMPLETE_REWARD   = 50;
 export const SKIP_LESSON_COST_PER_LESSON = 25;
 
-/** Reward coins per page read: level÷2 if applied, level÷4 if not */
-export function getPageReadReward(level: number, routineApplied: boolean): number {
+/** Reward coins per page read: for Basic/Ultra, reward is not halved even if routine is off; for Free, level÷2 if applied, level÷4 if not */
+export function getPageReadReward(level: number, routineApplied: boolean, isSubscriber?: boolean): number {
+  if (isSubscriber) {
+    return Math.floor(level / 2);
+  }
   return Math.floor(level / (routineApplied ? 2 : 4));
 }
 
@@ -491,11 +498,11 @@ export function getBaseSlotCount(tier: UserSubTier): number {
   return 2;
 }
 
-export function getTierSlotCost(tier: UserSubTier): number {
-  if (tier === 'MAX_PRO') return 500;
-  if (tier === 'PRO') return 250;
+export function getTierSlotCost(_tier?: UserSubTier): number {
   return 100;
 }
+
+export const TIER_SLOT_DIAMOND_COST = 10;
 
 export function getActualMaxSlots(tier: UserSubTier, level: number, data: RoutineData): number {
   let max = getBaseSlotCount(tier);

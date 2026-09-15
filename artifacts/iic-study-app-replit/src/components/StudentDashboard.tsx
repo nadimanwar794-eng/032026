@@ -12,6 +12,7 @@ import { StudentProgressDashboard } from "./StudentProgressDashboard";
 import { SuggestionsPanel } from "./SuggestionsPanel";
 import { applyDeduction, getTotalCredits, getCreditCost } from "../utils/creditSystem";
 import { fireCreditNotify } from "../utils/creditNotify";
+import { getDiamondUnlockCost, UNLOCK_COSTS } from "../utils/limits";
 import { LevelLeaderboard } from "./LevelLeaderboard";
 import { StudentLevelPage } from "./StudentLevelPage";
 import { TopBarRow2XpBar } from "./TopBarRow2XpBar";
@@ -1132,14 +1133,14 @@ export const StudentDashboard: React.FC<Props> = ({
   const _trackBasicHtmlOpen = _trackHtmlOpen;
 
   // ── COIN GATE helpers ────────────────────────────────────────────────────
-  // Returns effective cost after discount: Ultra gets 40% off everywhere, Basic gets 20% off; Routine can boost to 50%
+  // Returns effective cost after discount: Ultra gets 10% off everywhere, Basic gets 5% off; Routine can boost to 50%
   const _getCoinCost = (baseCost: number): { cost: number; discountPct: number } => {
     const _isAdm = user.role === 'ADMIN' || user.role === 'SUB_ADMIN';
     if (_isAdm) return { cost: 0, discountPct: 100 };
     try {
       let disc = 0;
-      if (_isUltraUser) disc = 40;
-      else if (_isBasicUser) disc = 20;
+      if (_isUltraUser) disc = 10;
+      else if (_isBasicUser) disc = 5;
 
       const _rd = loadRoutineData(user.id);
       if (_rd?.enabled) {
@@ -1154,7 +1155,7 @@ export const StudentDashboard: React.FC<Props> = ({
       }
       return { cost: Math.max(1, Math.floor(baseCost * (1 - disc / 100))), discountPct: disc };
     } catch {
-      const disc = _isUltraUser ? 40 : _isBasicUser ? 20 : 0;
+      const disc = _isUltraUser ? 10 : _isBasicUser ? 5 : 0;
       return { cost: Math.max(1, Math.floor(baseCost * (1 - disc / 100))), discountPct: disc };
     }
   };
@@ -1192,6 +1193,27 @@ export const StudentDashboard: React.FC<Props> = ({
       pages: (bulkOpt.pages || []).map(p => ({ name: p.name, cost: p.cost })),
     } : undefined;
     setCoinGate({ cost, originalCost: baseCost, discountPct, reason, action, onCancel, bulkOption: _bulkOption, pageInfo });
+  };
+
+  // Show diamond-only unlock gate for Ultra/exclusive features (Flashcard, Video, PDF for free)
+  const showDiamondOnlyGate = (
+    diamonds: number,
+    featureName: string,
+    action: () => void,
+    onCancel?: () => void
+  ) => {
+    const _isAdm = user.role === 'ADMIN' || user.role === 'SUB_ADMIN';
+    if (_isAdm) { action(); return; }
+    setCoinGate({
+      cost: 0,
+      originalCost: 0,
+      discountPct: 0,
+      reason: featureName,
+      action,
+      onCancel,
+      diamondOnly: true,
+      costDiamonds: diamonds,
+    });
   };
 
   // Per-page / per-session unlock localStorage helpers
@@ -2026,11 +2048,13 @@ export const StudentDashboard: React.FC<Props> = ({
     deducted: number;
     current: number;
     type: 'ADD' | 'DEDUCT';
+    currency?: 'COIN' | 'DIAMOND';
     xpPrevious?: number;
     xpEarned?: number;
     xpCurrent?: number;
   } | null>(null);
   const creditToastTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastDiamondDeductTimeRef = React.useRef<number>(0);
 
   // COIN GATE STATE — full-screen confirmation popup before any coin spend
   const [coinGate, setCoinGate] = React.useState<{
@@ -2041,6 +2065,9 @@ export const StudentDashboard: React.FC<Props> = ({
     action: () => void;
     onCancel?: () => void;
     selectedBulk?: boolean;
+    diamondOnly?: boolean;
+    costDiamonds?: number;
+    diamondCostOverride?: number;
     bulkOption?: { count: number; totalCost: number; originalTotal: number; action: () => void; pages: Array<{ name: string; cost: number }> };
     // New: page-mode panel (shows all modes for current page with tier locks)
     pageInfo?: {
@@ -2778,6 +2805,64 @@ export const StudentDashboard: React.FC<Props> = ({
   const [splashPurchaseDuration, setSplashPurchaseDuration] = useState<1 | 7 | 30>(7);
   const [showLevelChooser, setShowLevelChooser] = useState(false);
   const [showProfileSettings, setShowProfileSettings] = useState(false);
+  const [isUpdatingName, setIsUpdatingName] = useState(false);
+
+  const handleChangeName = async (currency: 'CREDITS' | 'DIAMONDS') => {
+    const trimmed = newNameInput.trim();
+    if (!trimmed || trimmed.length < 2) {
+      showAlert('⚠️ Naam kam se kam 2 aksharon ka hona chahiye.', 'ERROR');
+      return;
+    }
+    if (trimmed === user.name) {
+      showAlert('⚠️ Yeh naam pehle se set hai.', 'INFO');
+      return;
+    }
+    const costCredits = 100;
+    const costDiamonds = 20;
+    const curCredits = getTotalCredits(user);
+    const curDiamonds = user.diamonds || 0;
+
+    if (currency === 'CREDITS') {
+      if (curCredits < costCredits) {
+        showAlert(`⚠️ Credits kam hain! Zaroorat: ${costCredits} 🪙, Aapke paas: ${curCredits} 🪙.`, 'ERROR');
+        return;
+      }
+    } else {
+      if (curDiamonds < costDiamonds) {
+        showAlert(`⚠️ Diamonds kam hain! Zaroorat: ${costDiamonds} 💎, Aapke paas: ${curDiamonds} 💎.`, 'ERROR');
+        return;
+      }
+    }
+
+    setIsUpdatingName(true);
+    try {
+      const updatedUser: User = currency === 'CREDITS'
+        ? (applyDeduction(user, costCredits) || { ...user, credits: Math.max(0, (user.credits || 0) - costCredits) })
+        : { ...user, diamonds: Math.max(0, curDiamonds - costDiamonds) };
+
+      updatedUser.name = trimmed;
+
+      try {
+        await updateDoc(doc(db, 'users', user.id), {
+          name: trimmed,
+          credits: updatedUser.credits,
+          diamonds: updatedUser.diamonds,
+        });
+      } catch (err) {
+        console.warn('Firestore user name update error:', err);
+      }
+
+      await saveUserToLive(updatedUser);
+      handleUserUpdate(updatedUser);
+      setShowNameChangeModal(false);
+      showAlert(`🎉 Naam safaltapoorvak badal kar "${trimmed}" kar diya gaya!`, 'SUCCESS');
+    } catch (e: any) {
+      console.error('Name update failed:', e);
+      showAlert('Naam update nahi ho saka. Kripya punah koshish karein.', 'ERROR');
+    } finally {
+      setIsUpdatingName(false);
+    }
+  };
   const [rewardSubTab, setRewardSubTab] = useState<'EARNED' | 'RULES' | 'HISTORY'>('EARNED');
   const [rewardHistorySeenCount, setRewardHistorySeenCount] = useState<number>(() => {
     const saved = localStorage.getItem(`nst_reward_hist_seen_${user?.id || ''}`);
@@ -5800,18 +5885,39 @@ export const StudentDashboard: React.FC<Props> = ({
       if (isQaPageUnlocked(_lid, 0)) { doOpen(); return; }
       showCoinGate(20, 'Q&A Mode', () => { markQaPageUnlocked(_lid, 0); doOpen(); }, undefined, undefined, _pgInfo);
     } else if (mode === 'FLASHCARD') {
-      if (!_isUltraUser) { showAlert('🔒 Flashcard ke liye ULTRA subscription chahiye! Store se upgrade karein.', 'INFO'); return; }
-      if (isFcPageUnlocked(_lid, 0)) { doOpen(); return; }
-      showCoinGate(20, 'Flashcard', () => { markFcPageUnlocked(_lid, 0); doOpen(); }, undefined, undefined, _pgInfo);
+      if (_isUltraUser || _isAdminUser) {
+        if (isFcPageUnlocked(_lid, 0)) { doOpen(); return; }
+        showCoinGate(20, 'Flashcard', () => { markFcPageUnlocked(_lid, 0); doOpen(); }, undefined, undefined, _pgInfo);
+      } else {
+        if (isFcPageUnlocked(_lid, 0)) { doOpen(); return; }
+        showDiamondOnlyGate(5, 'Flashcard (Ultra Exclusive)', () => { markFcPageUnlocked(_lid, 0); doOpen(); });
+        return;
+      }
     } else if (mode === 'PROJECTOR') {
       if (isProjectorUnlocked(_lid, 0)) { doOpen(); return; }
       showCoinGate(20, 'Projector Mode', () => { markProjectorUnlocked(_lid, 0); doOpen(); }, undefined, undefined, _pgInfo);
     } else if (mode === 'PDF') {
-      if (!_isBasicUser && !_isUltraUser) { showAlert('🔒 PDF ke liye BASIC subscription chahiye! Store se upgrade karein.', 'INFO'); return; }
-      doOpen();
+      if (_isBasicUser || _isUltraUser || _isAdminUser) {
+        doOpen();
+      } else {
+        const _pdfKey = `nst_pdf_unlocked_${user.id}_${_lid}`;
+        if (localStorage.getItem(_pdfKey) === '1') { doOpen(); return; }
+        showDiamondOnlyGate(5, 'PDF Document', () => {
+          try { localStorage.setItem(_pdfKey, '1'); } catch {}
+          doOpen();
+        });
+      }
     } else if (mode === 'VIDEO') {
-      if (!_isUltraUser) { showAlert('🔒 Video ke liye ULTRA subscription chahiye! Store se upgrade karein.', 'INFO'); return; }
-      doOpen();
+      if (_isUltraUser || _isAdminUser) {
+        doOpen();
+      } else {
+        const _vidKey = `nst_video_unlocked_${user.id}_${_lid}`;
+        if (localStorage.getItem(_vidKey) === '1') { doOpen(); return; }
+        showDiamondOnlyGate(5, 'Video Lesson (Ultra Exclusive)', () => {
+          try { localStorage.setItem(_vidKey, '1'); } catch {}
+          doOpen();
+        });
+      }
     } else if (mode === 'AUDIO') {
       if (!_isUltraUser) { showAlert('🔒 Audio ke liye ULTRA subscription chahiye! Store se upgrade karein.', 'INFO'); return; }
       doOpen();
@@ -6705,27 +6811,8 @@ export const StudentDashboard: React.FC<Props> = ({
   };
 
   useEffect(() => {
-    const checkCompetitionAccess = () => {
-      if (syllabusMode === "COMPETITION") {
-        const access = checkFeatureAccess(
-          "COMPETITION_MODE",
-          user,
-          settings || {},
-        );
-        if (!access.hasAccess) {
-          setSyllabusMode("SCHOOL");
-          document.documentElement.style.setProperty(
-            "--primary",
-            settings?.themeColor || "#3b82f6",
-          );
-          showAlert(
-            "⚠️ Competition Mode is locked! Please upgrade to an Ultra subscription to access competition content.",
-            "ERROR",
-            "Locked Feature",
-          );
-        }
-      }
-    };
+    // Competition Mode is open for all users (Lucent book is free for all; extra books require Basic/Ultra)
+    const checkCompetitionAccess = () => {};
     checkCompetitionAccess();
     const interval = setInterval(checkCompetitionAccess, 60000);
     return () => clearInterval(interval);
@@ -7078,6 +7165,16 @@ export const StudentDashboard: React.FC<Props> = ({
             updated.unlockedContent = currentUser.unlockedContent;
           if (!cloudData.hasOwnProperty("dailyRoutine"))
             updated.dailyRoutine = currentUser.dailyRoutine;
+          if (typeof (cloudData as any).diamonds === 'undefined' && typeof currentUser.diamonds !== 'undefined') {
+            updated.diamonds = currentUser.diamonds;
+          } else if (
+            Date.now() - lastDiamondDeductTimeRef.current < 5000 &&
+            typeof currentUser.diamonds === 'number' &&
+            typeof (cloudData as any).diamonds === 'number' &&
+            (cloudData as any).diamonds > currentUser.diamonds
+          ) {
+            updated.diamonds = currentUser.diamonds;
+          }
 
           // Recalculate only from backend subscription records. Local cached
           // subscription fields must not override an admin/device change.
@@ -7507,7 +7604,39 @@ export const StudentDashboard: React.FC<Props> = ({
     return true;
   };
 
+  const handleSpendDiamonds = (amount: number): boolean => {
+    if (user.role === 'ADMIN' || user.role === 'SUB_ADMIN') return true;
+    const freshU = (window as any).__dashUserRef?.current ?? userRef.current ?? user;
+    const currentDiamonds = typeof freshU.diamonds === 'number' ? freshU.diamonds : (user.diamonds ?? 0);
+    if (currentDiamonds < amount) return false;
+    const updated: User = {
+      ...freshU,
+      diamonds: Math.max(0, currentDiamonds - amount),
+    };
+    handleUserUpdate(updated);
+    return true;
+  };
+
   const handleUserUpdate = async (updatedUser: User) => {
+    // Keep internal refs in sync immediately to avoid stale closures
+    userRef.current = updatedUser;
+    if ((window as any).__dashUserRef) {
+      (window as any).__dashUserRef.current = updatedUser;
+    }
+
+    // Detect diamond deduction and show toast
+    const prevDiamonds = user.diamonds ?? 0;
+    const newDiamonds = updatedUser.diamonds ?? 0;
+    if (newDiamonds < prevDiamonds) {
+      const diaDeducted = prevDiamonds - newDiamonds;
+      lastDiamondDeductTimeRef.current = Date.now();
+      if (creditToastTimerRef.current) clearTimeout(creditToastTimerRef.current);
+      setCreditDeductToast({ visible: true, previous: prevDiamonds, deducted: diaDeducted, current: newDiamonds, type: 'DEDUCT', currency: 'DIAMOND' });
+      creditToastTimerRef.current = setTimeout(() => {
+        setCreditDeductToast(null);
+      }, 2000);
+    }
+
     // Detect credit deduction and show toast (compare total credits including bonus/gifted)
     const prevCredits = getTotalCredits(user);
     const newCredits = getTotalCredits(updatedUser);
@@ -7515,7 +7644,7 @@ export const StudentDashboard: React.FC<Props> = ({
       const deducted = prevCredits - newCredits;
       // Credit Invest Bonus removed — credit spend pe score nahi milega
       if (creditToastTimerRef.current) clearTimeout(creditToastTimerRef.current);
-      setCreditDeductToast({ visible: true, previous: prevCredits, deducted, current: newCredits, type: 'DEDUCT' });
+      setCreditDeductToast({ visible: true, previous: prevCredits, deducted, current: newCredits, type: 'DEDUCT', currency: 'COIN' });
       creditToastTimerRef.current = setTimeout(() => {
         setCreditDeductToast(null);
       }, 2000);
@@ -7525,7 +7654,7 @@ export const StudentDashboard: React.FC<Props> = ({
       const _newXP  = updatedUser.totalScore || 0;
       const _xpGained = Math.max(0, _newXP - _prevXP);
       if (creditToastTimerRef.current) clearTimeout(creditToastTimerRef.current);
-      setCreditDeductToast({ visible: true, previous: prevCredits, deducted: added, current: newCredits, type: 'ADD', xpPrevious: _prevXP, xpEarned: _xpGained > 0 ? _xpGained : undefined, xpCurrent: _xpGained > 0 ? _newXP : undefined });
+      setCreditDeductToast({ visible: true, previous: prevCredits, deducted: added, current: newCredits, type: 'ADD', currency: 'COIN', xpPrevious: _prevXP, xpEarned: _xpGained > 0 ? _xpGained : undefined, xpCurrent: _xpGained > 0 ? _newXP : undefined });
       creditToastTimerRef.current = setTimeout(() => {
         setCreditDeductToast(null);
       }, 2000);
@@ -7543,7 +7672,7 @@ export const StudentDashboard: React.FC<Props> = ({
 
     // Sync to cloud in background
     if (!isImpersonating) {
-      saveUserToLive(updatedUser).then(saved => {
+      saveUserToLive(updatedUser, { immediate: true }).then(saved => {
         if (!saved) {
           console.warn("[StudentDashboard] saveUserToLive returned false, saved in localStorage.");
         }
@@ -7684,6 +7813,14 @@ export const StudentDashboard: React.FC<Props> = ({
   };
 
   const handleContentSubjectSelect = (subject: Subject) => {
+    /* Temporarily completely removed free mode block as per user instructions
+    if (syllabusMode === 'COMPETITION' && subject.id !== 'lucent') {
+      if (!_isBasicUser && !_isUltraUser && user.role !== 'ADMIN') {
+        showAlert('🔒 Yeh Book Compilation Basic aur Ultra members ke liye hai. Free mode me Lucent Book available hai.', 'INFO');
+        return;
+      }
+    }
+    */
     setSelectedSubject(subject);
     setHomeworkSubjectView(null);
     setLucentCategoryView(false);
@@ -7762,16 +7899,21 @@ export const StudentDashboard: React.FC<Props> = ({
       return;
     }
 
-    if (app.creditCost > 0) {
-      if (getTotalCredits(user) < app.creditCost) {
-        showAlert(`Insufficient Credits! Need ${app.creditCost}.`, "ERROR");
-        return;
-      }
-      const _uDeducted = applyDeduction(user, app.creditCost);
-      if (!_uDeducted) return;
-      const u = { ..._uDeducted, totalScore: (user.totalScore || 0) + app.creditCost };
-      handleUserUpdate(u);
-      setActiveExternalApp(app.url);
+    const creditCost = Math.max(0, Number(app.creditCost || 0));
+    const diamondCost = Math.max(0, Number(app.diamondCost || 0));
+    const openApp = () => setActiveExternalApp(app.url);
+    if (creditCost === 0 && diamondCost > 0) {
+      showDiamondOnlyGate(diamondCost, app.name, openApp);
+    } else if (creditCost > 0 || diamondCost > 0) {
+      setCoinGate({
+        cost: creditCost,
+        originalCost: creditCost,
+        discountPct: 0,
+        reason: app.name,
+        action: openApp,
+        costDiamonds: diamondCost || undefined,
+        diamondCostOverride: diamondCost || undefined,
+      });
     } else {
       setActiveExternalApp(app.url);
     }
@@ -8931,31 +9073,38 @@ export const StudentDashboard: React.FC<Props> = ({
                           style={_hwTabStyle}
                           className={_hwTabCls(false, 'bg-amber-500', 'text-white') + (_fcLocked ? ' opacity-60' : '')}
                           onClick={() => {
+                            const _openFc = () => {
+                              stopSpeech();
+                              setFlashcardMcqs({
+                                items: _hwMcqs,
+                                title: activeHw.title || 'Competition Flashcards',
+                                subtitle: `${_hwMcqs.length} Cards`,
+                                subject: activeHw.subject || '',
+                                sourceKey: getStudyActivityKey(activeHw.id, 0),
+                                startInProjectorMode: false,
+                                fromLesson: {
+                                  hasMcq: true,
+                                  isAdmin: _isAdminUser,
+                                  activeMode: 'flashcard',
+                                  hasPdf,
+                                  hasVideo,
+                                  hasAudio,
+                                  isCompetition: true,
+                                  returnMode: effectiveMode,
+                                  unlockId: activeHw.id,
+                                  unlockPageIndex: 0,
+                                },
+                              });
+                            };
                             if (_fcLocked) {
-                              showAlert('🔒 Flashcard ke liye ULTRA subscription chahiye! Store se upgrade karein.', 'INFO');
+                              if (isFcPageUnlocked(activeHw.id, 0)) { _openFc(); return; }
+                              showDiamondOnlyGate(5, 'Flashcard (Ultra Exclusive)', () => {
+                                markFcPageUnlocked(activeHw.id, 0);
+                                _openFc();
+                              });
                               return;
                             }
-                            stopSpeech();
-                            setFlashcardMcqs({
-                              items: _hwMcqs,
-                              title: activeHw.title || 'Competition Flashcards',
-                              subtitle: `${_hwMcqs.length} Cards`,
-                              subject: activeHw.subject || '',
-                              sourceKey: getStudyActivityKey(activeHw.id, 0),
-                              startInProjectorMode: false,
-                              fromLesson: {
-                                hasMcq: true,
-                                isAdmin: _isAdminUser,
-                                activeMode: 'flashcard',
-                                hasPdf,
-                                hasVideo,
-                                hasAudio,
-                                isCompetition: true,
-                                returnMode: effectiveMode,
-                                unlockId: activeHw.id,
-                                unlockPageIndex: 0,
-                              },
-                            });
+                            _openFc();
                           }}
                         >
                           {_fcLocked ? '🔒' : '🃏'} Flashcard{_fcLocked ? ' · ULTRA' : ''}
@@ -8968,7 +9117,17 @@ export const StudentDashboard: React.FC<Props> = ({
                         <button
                           data-tab-active={String(effectiveMode === 'pdf')}
                           onClick={() => {
-                            if (_pdfLocked) { showAlert('🔒 PDF ke liye BASIC subscription chahiye! Store se upgrade karein.', 'INFO'); return; }
+                            if (_pdfLocked) {
+                              const _pdfKey = `nst_pdf_unlocked_${user.id}_${activeHw.id}`;
+                              if (localStorage.getItem(_pdfKey) === '1') {
+                                stopSpeech(); setHwViewMode('pdf'); _hwSave('pdf'); return;
+                              }
+                              showDiamondOnlyGate(5, 'PDF Document', () => {
+                                try { localStorage.setItem(_pdfKey, '1'); } catch {}
+                                stopSpeech(); setHwViewMode('pdf'); _hwSave('pdf');
+                              });
+                              return;
+                            }
                             stopSpeech(); setHwViewMode('pdf'); _hwSave('pdf');
                           }}
                           style={_hwTabStyle}
@@ -8984,7 +9143,17 @@ export const StudentDashboard: React.FC<Props> = ({
                         <button
                           data-tab-active={String(effectiveMode === 'video')}
                           onClick={() => {
-                            if (_vidLocked) { showAlert('🔒 Video ke liye ULTRA subscription chahiye! Store se upgrade karein.', 'INFO'); return; }
+                            if (_vidLocked) {
+                              const _vidKey = `nst_video_unlocked_${user.id}_${activeHw.id}`;
+                              if (localStorage.getItem(_vidKey) === '1') {
+                                stopSpeech(); setHwViewMode('video'); _hwSave('video'); return;
+                              }
+                              showDiamondOnlyGate(5, 'Video Lesson (Ultra Exclusive)', () => {
+                                try { localStorage.setItem(_vidKey, '1'); } catch {}
+                                stopSpeech(); setHwViewMode('video'); _hwSave('video');
+                              });
+                              return;
+                            }
                             stopSpeech(); setHwViewMode('video'); _hwSave('video');
                           }}
                           style={_hwTabStyle}
@@ -9723,6 +9892,7 @@ export const StudentDashboard: React.FC<Props> = ({
                              user={user}
                              settings={settings}
                              onClose={() => setHwShowAnalysis(null)}
+                             onUpdateUser={handleUserUpdate}
                              onRestart={() => {
                                setHwShowAnalysis(null);
                                setHwAnswers(prev => {
@@ -12070,6 +12240,14 @@ export const StudentDashboard: React.FC<Props> = ({
                 setSelectedSubject(subject);
                 setHomeworkSubjectView(null);
                 setLucentCategoryView(false);
+                /* Temporarily completely removed free mode block as per user instructions
+                if (syllabusMode === 'COMPETITION' && subject.id !== 'lucent') {
+                  if (!_isBasicUser && !_isUltraUser && user.role !== 'ADMIN') {
+                    showAlert('🔒 Yeh Book Compilation Basic aur Ultra members ke liye hai. Free mode me Lucent Book available hai.', 'INFO');
+                    return;
+                  }
+                }
+                */
                 if (HOMEWORK_SUBJECTS.includes(subject.id)) {
                   setHomeworkSubjectView(subject.id);
                   setHwSubjectOpenedFrom('COURSES');
@@ -13978,8 +14156,10 @@ export const StudentDashboard: React.FC<Props> = ({
             {/* ── Score History Button ── */}
             <button
               onClick={() => {
-                if (!_isBasicUser && !_isUltraUser && user.role !== 'ADMIN') {
-                  showAlert('🔒 Score History Basic aur Ultra members ke liye unlocked hai. Upgrade karein!', 'INFO');
+                const userLvl = user.level || getLevelInfo(user.totalScore || 0).level || 1;
+                const isScoreUnlocked = _isBasicUser || _isUltraUser || user.role === 'ADMIN' || userLvl >= 3;
+                if (!isScoreUnlocked) {
+                  showAlert('🔒 Score History Free users ke liye Level 3 par unlock hota hai. Basic aur Ultra members ke liye Level 1 se unlocked hai.', 'INFO');
                   return;
                 }
                 setShowScoreHistoryDirect(true);
@@ -13993,7 +14173,7 @@ export const StudentDashboard: React.FC<Props> = ({
                 <div className="flex items-center gap-1.5">
                   <p className={`text-sm font-bold ${_pTxt}`}>Score History</p>
                   {!_isBasicUser && !_isUltraUser && user.role !== 'ADMIN' && (
-                    <span className="text-[9px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-black">PRO+</span>
+                    <span className="text-[9px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-black">Lvl 3</span>
                   )}
                 </div>
                 <p className={`text-[10px] mt-0.5 ${_pTxtSub}`}>Apna activity score ka pura record</p>
@@ -14013,6 +14193,30 @@ export const StudentDashboard: React.FC<Props> = ({
               <ChevronRight size={15} style={{ color: _pTxtMutedColor, transform: showProfileSettings ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }} className="shrink-0" />
             </button>
             {showProfileSettings && (<>
+
+            {/* ── Change Name Button ── */}
+            <button
+              onClick={() => {
+                setNewNameInput(user.name || '');
+                setShowNameChangeModal(true);
+              }}
+              className={`w-full px-4 py-4 flex items-center gap-3.5 ${_pHovCls} transition-colors`}
+              style={{ borderBottom: _pSep }}>
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{
+                background: `${tierTheme.primary}18`,
+                border: `1px solid ${tierTheme.primary}40`,
+              }}>
+                <span className="text-base leading-none">👤</span>
+              </div>
+              <div className="flex-1 text-left">
+                <div className="flex items-center gap-1.5">
+                  <p className={`text-sm font-bold ${_pTxt}`}>Change Name</p>
+                  <span className="text-[9px] bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.5 rounded font-black">100 Cr / 20 Dia</span>
+                </div>
+                <p className={`text-[10px] mt-0.5 ${_pTxtSub}`}>Apna profile name badlein</p>
+              </div>
+              <ChevronRight size={14} style={{ color: _pTxtMutedColor }} className="shrink-0" />
+            </button>
 
             {/* ── Theme Override Toggle ── */}
             {(() => {
@@ -15619,10 +15823,11 @@ export const StudentDashboard: React.FC<Props> = ({
                           },
                           {
                             label: 'Score History',
-                            locked: !_isBasicUser && !_isUltraUser && user.role !== 'ADMIN',
+                            locked: !_isBasicUser && !_isUltraUser && user.role !== 'ADMIN' && (user.level || getLevelInfo(user.totalScore || 0).level || 1) < 3,
                             action: () => {
-                              if (!_isBasicUser && !_isUltraUser && user.role !== 'ADMIN') {
-                                showAlert('🔒 Score History Basic aur Ultra members ke liye unlocked hai. Upgrade karein!', 'INFO');
+                              const userLvl = user.level || getLevelInfo(user.totalScore || 0).level || 1;
+                              if (!_isBasicUser && !_isUltraUser && user.role !== 'ADMIN' && userLvl < 3) {
+                                showAlert('🔒 Score History Free users ke liye Level 3 par unlock hota hai. Basic aur Ultra members ke liye Level 1 se unlocked hai.', 'INFO');
                                 return;
                               }
                               setShowScoreHistoryDirect(true); setShowDotsMenu(false);
@@ -19565,9 +19770,11 @@ export const StudentDashboard: React.FC<Props> = ({
               user={user}
               onClose={() => setShowChat(false)}
               isAdmin={false}
-              allowStudentMcq={!!settings?.allowStudentCommunityMcq}
+              allowStudentMcq={settings?.allowStudentCommunityMcq !== false}
               hideGlobalTab={!!settings?.hideGlobalChat}
               onSpendCoins={handleSpendCoins}
+              onSpendDiamonds={handleSpendDiamonds}
+              onUpdateUser={handleUserUpdate}
               themeColor={_overrideColor || undefined}
             />
           </div>
@@ -19947,64 +20154,101 @@ export const StudentDashboard: React.FC<Props> = ({
               defaultTab="MCQ"
               initialMcqDraft={mcqCommunityDraft}
               onSpendCoins={handleSpendCoins}
+              onSpendDiamonds={handleSpendDiamonds}
+              onUpdateUser={handleUserUpdate}
               themeColor={_overrideColor || undefined}
             />
           </div>
         </div>
       )}
 
-      {/* NAME CHANGE MODAL */}
+      {/* NAME CHANGE MODAL (100 CREDITS OR 20 DIAMONDS) */}
       {showNameChangeModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-white rounded-2xl p-6 w-full shadow-xl">
-            <h3 className="text-lg font-bold mb-4 text-slate-800">
-              Change Display Name
-            </h3>
-            <input
-              type="text"
-              value={newNameInput}
-              onChange={(e) => setNewNameInput(e.target.value)}
-              className="w-full p-3 border rounded-xl mb-2"
-              placeholder="Enter new name"
-            />
-            <p className="text-xs text-slate-600 mb-4">
-              Cost:{" "}
-              <span className="font-bold text-orange-600">
-                {settings?.nameChangeCost || 10} Coins
-              </span>
-            </p>
-            <div className="flex gap-2">
-              <Button
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 text-center shadow-2xl border border-slate-200 dark:border-slate-800 max-w-sm w-full space-y-4">
+            <div className="w-14 h-14 rounded-2xl mx-auto flex items-center justify-center bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 text-2xl shadow-inner border border-indigo-100 dark:border-indigo-900">
+              👤
+            </div>
+
+            <div>
+              <h3 className="text-base font-black text-slate-900 dark:text-white">
+                Apna Naam Badlein
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Aapka naya naam Leaderboard aur Profile par dikhega.
+              </p>
+            </div>
+
+            <div className="space-y-1.5 text-left">
+              <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                Naya Naam Likhein:
+              </label>
+              <input
+                type="text"
+                value={newNameInput}
+                onChange={(e) => setNewNameInput(e.target.value)}
+                placeholder="Enter your new name"
+                maxLength={30}
+                className="w-full px-3.5 py-2.5 rounded-xl text-sm font-bold bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+
+            {/* Price Box */}
+            <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-3 text-xs space-y-1.5 border border-slate-200 dark:border-slate-700/60 text-left">
+              <div className="flex justify-between items-center text-slate-600 dark:text-slate-300">
+                <span>Fee:</span>
+                <span className="font-black text-indigo-600 dark:text-indigo-400">100 Credits ya 20 Diamonds</span>
+              </div>
+              <div className="flex justify-between items-center text-slate-600 dark:text-slate-300">
+                <span>Aapke Credits:</span>
+                <span className={getTotalCredits(user) >= 100 ? 'font-black text-emerald-600' : 'font-black text-rose-500'}>
+                  🪙 {getTotalCredits(user)}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-slate-600 dark:text-slate-300">
+                <span>Aapke Diamonds:</span>
+                <span className={(user.diamonds || 0) >= 20 ? 'font-black text-cyan-600' : 'font-black text-rose-500'}>
+                  💎 {user.diamonds || 0}
+                </span>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="space-y-2 pt-1">
+              <button
+                type="button"
+                onClick={() => handleChangeName('CREDITS')}
+                disabled={isUpdatingName || getTotalCredits(user) < 100}
+                className={`w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                  getTotalCredits(user) >= 100
+                    ? 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 cursor-pointer'
+                    : 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-300 dark:border-slate-700'
+                }`}
+              >
+                <span>100 Credits dekar Badlein</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleChangeName('DIAMONDS')}
+                disabled={isUpdatingName || (user.diamonds || 0) < 20}
+                className={`w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                  (user.diamonds || 0) >= 20
+                    ? 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 text-white cursor-pointer'
+                    : 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-300 dark:border-slate-700'
+                }`}
+              >
+                <span>20 Diamonds dekar Badlein</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setShowNameChangeModal(false)}
-                variant="ghost"
-                className="flex-1"
+                disabled={isUpdatingName}
+                className="w-full py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
               >
                 Cancel
-              </Button>
-              <Button
-                onClick={() => {
-                  const cost = settings?.nameChangeCost || 10;
-                  if (newNameInput && newNameInput !== user.name) {
-                    if (getTotalCredits(user) < cost) {
-                      showAlert(`Insufficient Coins! Need ${cost}.`, "ERROR");
-                      return;
-                    }
-                    const _deducted = applyDeduction(user, cost);
-                    if (!_deducted) return;
-                    const u = {
-                      ..._deducted,
-                      name: newNameInput,
-                      totalScore: (user.totalScore || 0) + cost,
-                    };
-                    handleUserUpdate(u);
-                    setShowNameChangeModal(false);
-                    showAlert("Name Updated Successfully!", "SUCCESS");
-                  }
-                }}
-                className="flex-1"
-              >
-                Pay & Update
-              </Button>
+              </button>
             </div>
           </div>
         </div>
@@ -22595,13 +22839,13 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                   if (isQaPageUnlocked(entry.id, safeIndex)) { _doSwitch(); return; }
                   showCoinGate(20, 'Q&A Mode', () => { markQaPageUnlocked(entry.id, safeIndex); _doSwitch(); }, undefined, undefined, _pgInfo);
                 } else if (tab === 'FLASHCARD') {
-                  // Tier gate: Flashcard requires ULTRA subscription
-                  if (!_isUltraUser) {
-                    showAlert('🔒 Flashcard ke liye ULTRA subscription chahiye! Store se upgrade karein.', 'INFO');
-                    return;
+                  if (_isUltraUser || _isAdm) {
+                    if (isFcPageUnlocked(entry.id, safeIndex)) { _doSwitch(); return; }
+                    showCoinGate(20, 'Flashcard', () => { markFcPageUnlocked(entry.id, safeIndex); _doSwitch(); }, undefined, undefined, _pgInfo);
+                  } else {
+                    if (isFcPageUnlocked(entry.id, safeIndex)) { _doSwitch(); return; }
+                    showDiamondOnlyGate(5, 'Flashcard (Ultra Exclusive)', () => { markFcPageUnlocked(entry.id, safeIndex); _doSwitch(); });
                   }
-                  if (isFcPageUnlocked(entry.id, safeIndex)) { _doSwitch(); return; }
-                  showCoinGate(20, 'Flashcard', () => { markFcPageUnlocked(entry.id, safeIndex); _doSwitch(); }, undefined, undefined, _pgInfo);
                 }
               };
               return (
@@ -22660,7 +22904,17 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                         <button
                           data-tab-active={String(lucentActiveTab === 'PDF')}
                           onClick={() => {
-                            if (_pdfLocked) { showAlert('🔒 PDF ke liye BASIC subscription chahiye! Store se upgrade karein.', 'INFO'); return; }
+                            if (_pdfLocked) {
+                              const _pdfKey = `nst_pdf_unlocked_${user.id}_${entry.id}_${safeIndex}`;
+                              if (localStorage.getItem(_pdfKey) === '1') {
+                                stopSpeech(); setLucentActiveTab('PDF'); _save('PDF'); return;
+                              }
+                              showDiamondOnlyGate(5, 'PDF Document', () => {
+                                try { localStorage.setItem(_pdfKey, '1'); } catch {}
+                                stopSpeech(); setLucentActiveTab('PDF'); _save('PDF');
+                              });
+                              return;
+                            }
                             stopSpeech(); setLucentActiveTab('PDF'); _save('PDF');
                           }}
                           style={_tabStyle}
@@ -22676,7 +22930,17 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                         <button
                           data-tab-active={String(lucentActiveTab === 'VIDEO')}
                           onClick={() => {
-                            if (_vidLocked) { showAlert('🔒 Video ke liye ULTRA subscription chahiye! Store se upgrade karein.', 'INFO'); return; }
+                            if (_vidLocked) {
+                              const _vidKey = `nst_video_unlocked_${user.id}_${entry.id}_${safeIndex}`;
+                              if (localStorage.getItem(_vidKey) === '1') {
+                                stopSpeech(); setLucentActiveTab('VIDEO'); _save('VIDEO'); return;
+                              }
+                              showDiamondOnlyGate(5, 'Video Lesson (Ultra Exclusive)', () => {
+                                try { localStorage.setItem(_vidKey, '1'); } catch {}
+                                stopSpeech(); setLucentActiveTab('VIDEO'); _save('VIDEO');
+                              });
+                              return;
+                            }
                             stopSpeech(); setLucentActiveTab('VIDEO'); _save('VIDEO');
                           }}
                           style={_tabStyle}
@@ -23499,6 +23763,7 @@ RULES:
                             user={user}
                             settings={settings}
                             onClose={() => setLucentMcqShowReview(prev => ({ ...prev, [pageKey]: false }))}
+                            onUpdateUser={handleUserUpdate}
                             onRestart={doRestart}
                           />
                         );
@@ -25532,15 +25797,21 @@ RULES:
                   ref={el => { if (el && fl.activeMode === 'flashcard' && !el.dataset.scrolled) { el.dataset.scrolled = '1'; el.scrollIntoView({ behavior: 'instant' as ScrollBehavior, inline: 'center', block: 'nearest' }); } }}
                   className={_tcls(fl.activeMode === 'flashcard', 'bg-amber-500') + (!_isUltraUser && !_isAdminUser && !fl?.isCompetition ? ' opacity-60' : '')}
                   onClick={() => {
-                    if (!_isUltraUser && !_isAdminUser && !fl?.isCompetition) { showAlert('🔒 Flashcard ke liye ULTRA subscription chahiye!', 'INFO'); return; }
-                     if (fl.activeMode !== 'flashcard') {
-                       stopSpeech();
-                       setFlashcardMcqs(prev => prev ? {
-                         ...prev,
-                         startInProjectorMode: false,
-                         fromLesson: prev.fromLesson ? { ...prev.fromLesson, activeMode: 'flashcard' } : prev.fromLesson,
-                       } : null);
-                     }
+                    const _doFc = () => {
+                      stopSpeech();
+                      setFlashcardMcqs(prev => prev ? {
+                        ...prev,
+                        startInProjectorMode: false,
+                        fromLesson: prev.fromLesson ? { ...prev.fromLesson, activeMode: 'flashcard' } : prev.fromLesson,
+                      } : null);
+                    };
+                    if (!_isUltraUser && !_isAdminUser && !fl?.isCompetition) {
+                      showDiamondOnlyGate(5, 'Flashcard (Ultra Exclusive)', _doFc);
+                      return;
+                    }
+                    if (fl.activeMode !== 'flashcard') {
+                      _doFc();
+                    }
                   }}>
                   {!_isUltraUser && !_isAdminUser && !fl?.isCompetition ? '🔒' : '🃏'} Flashcard
                 </button>
@@ -25549,10 +25820,16 @@ RULES:
                 <button style={_ts}
                   className={_tcls(false, 'bg-blue-600') + (!_isBasicUser && !_isUltraUser && !_isAdminUser && !fl?.isCompetition ? ' opacity-60' : '')}
                   onClick={() => {
-                    if (!_isBasicUser && !_isUltraUser && !_isAdminUser && !fl?.isCompetition) { showAlert('🔒 PDF ke liye BASIC subscription chahiye!', 'INFO'); return; }
-                    stopSpeech();
-                    setFlashcardMcqs(null);
-                    if (fl.isCompetition) { setHwViewMode('pdf'); } else { setLucentActiveTab('PDF'); }
+                    const _doPdf = () => {
+                      stopSpeech();
+                      setFlashcardMcqs(null);
+                      if (fl.isCompetition) { setHwViewMode('pdf'); } else { setLucentActiveTab('PDF'); }
+                    };
+                    if (!_isBasicUser && !_isUltraUser && !_isAdminUser && !fl?.isCompetition) {
+                      showDiamondOnlyGate(5, 'PDF Document', _doPdf);
+                      return;
+                    }
+                    _doPdf();
                   }}>
                   {!_isBasicUser && !_isUltraUser && !_isAdminUser && !fl?.isCompetition ? '🔒' : ''} PDF
                 </button>
@@ -25561,10 +25838,16 @@ RULES:
                 <button style={_ts}
                   className={_tcls(false, 'bg-rose-600') + (!_isUltraUser && !_isAdminUser && !fl?.isCompetition ? ' opacity-60' : '')}
                   onClick={() => {
-                    if (!_isUltraUser && !_isAdminUser && !fl?.isCompetition) { showAlert('🔒 Video ke liye ULTRA subscription chahiye!', 'INFO'); return; }
-                    stopSpeech();
-                    setFlashcardMcqs(null);
-                    if (fl.isCompetition) { setHwViewMode('video'); } else { setLucentActiveTab('VIDEO'); }
+                    const _doVid = () => {
+                      stopSpeech();
+                      setFlashcardMcqs(null);
+                      if (fl.isCompetition) { setHwViewMode('video'); } else { setLucentActiveTab('VIDEO'); }
+                    };
+                    if (!_isUltraUser && !_isAdminUser && !fl?.isCompetition) {
+                      showDiamondOnlyGate(5, 'Video Lesson (Ultra Exclusive)', _doVid);
+                      return;
+                    }
+                    _doVid();
                   }}>
                   {!_isUltraUser && !_isAdminUser && !fl?.isCompetition ? '🔒' : ''} Video
                 </button>
@@ -25780,6 +26063,7 @@ RULES:
                        user={user}
                        settings={settings}
                        onClose={() => setCompMcqShowReview(false)}
+                       onUpdateUser={handleUserUpdate}
                        onRestart={doCompRestart}
                      />
                    );
@@ -28399,13 +28683,15 @@ RULES:
       {/* ── COIN GATE POPUP ── Premium full-screen confirm ── */}
       {coinGate && (() => {
         const balance = getTotalCredits(user);
-        const { cost, originalCost, discountPct, reason, action, onCancel, selectedBulk, bulkOption, pageInfo } = coinGate;
+        const { cost, originalCost, discountPct, reason, action, onCancel, selectedBulk, bulkOption, pageInfo, diamondOnly, costDiamonds, diamondCostOverride } = coinGate;
+        const isDiamondOnly = !!diamondOnly;
+        const diamondCostOnly = costDiamonds || 5;
         const isPermanentlyUnlocked = !!(
           (user.unlockedContent || []).includes(reason) ||
           (pageInfo?.pageLabel && (user.unlockedContent || []).includes(pageInfo.pageLabel))
         );
-        const isFree = cost === 0 || isPermanentlyUnlocked;
-        const hasPageInfo = !!pageInfo;
+        const isFree = !isDiamondOnly && (cost === 0 || isPermanentlyUnlocked);
+        const hasPageInfo = !isDiamondOnly && !!pageInfo;
         const isDisc50 = discountPct === 50;
         const isDisc25 = discountPct === 25;
         const discMult = isDisc50 ? 0.5 : isDisc25 ? 0.75 : 1;
@@ -28470,11 +28756,11 @@ RULES:
               <div className="relative w-[60px] h-[60px] rounded-2xl mx-auto mb-4 flex items-center justify-center z-10"
                 style={{ background: 'rgba(255,255,255,0.14)', border: '1.5px solid rgba(255,255,255,0.28)', backdropFilter: 'blur(8px)' }}
               >
-                <span className="text-[28px] leading-none">{isFree ? '🎁' : emoji}</span>
+                <span className="text-[28px] leading-none">{isDiamondOnly ? '💎' : isFree ? '🎁' : emoji}</span>
               </div>
               <h2 className="relative z-10 text-white font-black text-[22px] tracking-tight leading-tight">{reason}</h2>
               <p className="relative z-10 text-white/60 text-[11px] mt-1.5 font-semibold uppercase tracking-[0.12em]">
-                {isFree ? 'First Time Free!' : 'Premium Content Unlock'}
+                {isDiamondOnly ? 'Diamond Exclusive Unlock' : isFree ? 'First Time Free!' : 'Premium Content Unlock'}
               </p>
               {hasPageInfo && pageInfo!.pageLabel && (
                 <p className="relative z-10 text-white/45 text-[10px] mt-1 font-semibold">{pageInfo!.pageLabel}</p>
@@ -28483,6 +28769,81 @@ RULES:
 
             {/* ── Body ── */}
             <div className="bg-white px-5 pt-5 pb-6">
+
+              {/* DIAMOND ONLY UNLOCK */}
+              {isDiamondOnly && (
+                <div>
+                  <div className="bg-sky-50 border-2 border-sky-200 rounded-2xl p-4 text-center mb-4">
+                    <p className="text-[10px] font-black text-sky-600 uppercase tracking-widest mb-1">Premium Exclusive</p>
+                    <div className="flex items-center justify-center gap-2 mb-1.5">
+                      <span className="text-3xl font-black text-sky-900 leading-none">{diamondCostOnly}</span>
+                      <span className="text-base font-black text-sky-600">💎 Diamonds</span>
+                    </div>
+                    <p className="text-[11px] font-semibold text-sky-800 leading-relaxed">
+                      Ye exclusive feature sirf Diamonds se unlock hoga (Credits use nahi honge).
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-between px-4 py-2.5 bg-sky-50/70 border border-sky-100 rounded-xl mb-4">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] font-black text-sky-600 uppercase tracking-wider">Aapke Diamonds</span>
+                      <span className="text-[9px] px-1.5 py-0.2 rounded bg-sky-100 text-sky-700 font-bold">Balance</span>
+                    </div>
+                    <span className="text-xs font-black text-sky-700">
+                      💎 {(user.diamonds ?? 0).toLocaleString('en-IN')}
+                    </span>
+                  </div>
+
+                  <div className="flex gap-2.5">
+                    <button
+                      onClick={dismissGate}
+                      className="flex-1 py-3.5 rounded-2xl font-black text-sm text-slate-500 border-2 border-slate-200 bg-white active:scale-95 transition-all"
+                    >
+                      Nahi
+                    </button>
+                    <button
+                      onClick={() => {
+                        const freshU = (window as any).__dashUserRef?.current ?? userRef.current ?? user;
+                        const userDiamonds = typeof freshU.diamonds === 'number' ? freshU.diamonds : (user.diamonds ?? 0);
+                        if (userDiamonds < diamondCostOnly) {
+                          setCoinGate(null);
+                          onOpenStore?.();
+                          return;
+                        }
+                        const contentKey = pageInfo?.pageLabel || reason;
+                        const updatedUnlocked = Array.from(new Set([...(freshU.unlockedContent || []), contentKey]));
+                        const updatedU = {
+                          ...freshU,
+                          diamonds: Math.max(0, userDiamonds - diamondCostOnly),
+                          unlockedContent: updatedUnlocked,
+                        };
+                        handleUserUpdate(updatedU);
+                        setCoinGate(null);
+                        action();
+                      }}
+                      className="flex-[2] py-3.5 rounded-2xl font-black text-sm text-white active:scale-95 transition-all flex items-center justify-center gap-2"
+                      style={{
+                        background: (user.diamonds ?? 0) >= diamondCostOnly
+                          ? 'linear-gradient(135deg, #0284c7, #0369a1)'
+                          : '#94a3b8',
+                        boxShadow: (user.diamonds ?? 0) >= diamondCostOnly
+                          ? '0 10px 28px -6px rgba(2,132,199,0.5)'
+                          : 'none',
+                      }}
+                    >
+                      <span>💎</span>
+                      <span>
+                        {(user.diamonds ?? 0) >= diamondCostOnly
+                          ? `${diamondCostOnly} Diamonds se Kholo`
+                          : `Store se Diamonds Lein`}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!isDiamondOnly && (
+                <>
 
               {/* FREE */}
               {isFree && (
@@ -28719,23 +29080,22 @@ RULES:
                   <button
                     type="button"
                     onClick={() => {
-                      const diamondCost = Math.max(1, Math.ceil(activeCost / 20));
-                      const userDiamonds = user.diamonds ?? 0;
+                       const diamondCost = diamondCostOverride || getDiamondUnlockCost(activeCost, reason);
+                      const freshU = (window as any).__dashUserRef?.current ?? userRef.current ?? user;
+                      const userDiamonds = typeof freshU.diamonds === 'number' ? freshU.diamonds : (user.diamonds ?? 0);
                       if (userDiamonds < diamondCost) {
                         setCoinGate(null);
                         onOpenStore?.();
                         return;
                       }
-                      const freshU = (window as any).__dashUserRef?.current ?? user;
                       const contentKey = pageInfo?.pageLabel || reason;
                       const updatedUnlocked = Array.from(new Set([...(freshU.unlockedContent || []), contentKey]));
                       const updatedU = {
                         ...freshU,
-                        diamonds: Math.max(0, (freshU.diamonds ?? 0) - diamondCost),
+                        diamonds: Math.max(0, userDiamonds - diamondCost),
                         unlockedContent: updatedUnlocked,
                       };
                       handleUserUpdate(updatedU);
-                      saveUserToLive(updatedU);
                       setCoinGate(null);
                       activeAction();
                     }}
@@ -28743,13 +29103,15 @@ RULES:
                   >
                     <span>💎</span>
                     <span>
-                      {(user.diamonds ?? 0) >= Math.max(1, Math.ceil(activeCost / 20))
-                        ? `💎 ${Math.max(1, Math.ceil(activeCost / 20))} Diamonds Se Permanent Unlock`
-                        : `💎 Store se Diamonds Lein (Need ${Math.max(1, Math.ceil(activeCost / 20))} 💎)`}
+                      {(user.diamonds ?? 0) >= (diamondCostOverride || getDiamondUnlockCost(activeCost, reason))
+                        ? `💎 ${diamondCostOverride || getDiamondUnlockCost(activeCost, reason)} Diamonds Se Permanent Unlock`
+                        : `💎 Store se Diamonds Lein (Need ${diamondCostOverride || getDiamondUnlockCost(activeCost, reason)} 💎)`}
                     </span>
                   </button>
                 )}
-              </div>
+                </div>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -28980,18 +29342,18 @@ RULES:
 
               {/* RIGHT: credit + xp single row */}
               <div className="flex items-center gap-0 shrink-0">
-                {/* Credits */}
+                {/* Credits / Diamonds */}
                 <div className="flex items-center gap-[5px]">
                   <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11, fontWeight: 700, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                    {creditDeductToast.previous.toLocaleString('en-IN')}🪙
+                    {creditDeductToast.previous.toLocaleString('en-IN')}{creditDeductToast.currency === 'DIAMOND' ? '💎' : '🪙'}
                   </span>
                   <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 10 }}>→</span>
-                  <span style={{ color: deltaColor, fontSize: 12, fontWeight: 900, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                    {sign}{creditDeductToast.deducted} CR
+                  <span style={{ color: creditDeductToast.currency === 'DIAMOND' ? '#38bdf8' : deltaColor, fontSize: 12, fontWeight: 900, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                    {sign}{creditDeductToast.deducted} {creditDeductToast.currency === 'DIAMOND' ? '💎' : 'CR'}
                   </span>
                   <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 10 }}>=</span>
                   <span style={{ color: '#fff', fontSize: 12, fontWeight: 900, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                    {creditDeductToast.current.toLocaleString('en-IN')}🪙
+                    {creditDeductToast.current.toLocaleString('en-IN')}{creditDeductToast.currency === 'DIAMOND' ? '💎' : '🪙'}
                   </span>
                 </div>
                 {/* Divider + XP (only on ADD with xp data) */}

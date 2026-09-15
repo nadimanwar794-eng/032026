@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { User, SystemSettings } from '../types';
 import { ADMIN_EMAIL } from '../constants';
 import { saveUserToLive, auth, getUserByEmail, getUserByMobileOrId, getUserData, getFreshUserData, getUserByLinkedGoogleUid } from '../firebase';
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, setPersistence, browserLocalPersistence, signInAnonymously, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, setPersistence, browserLocalPersistence, signInAnonymously, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult } from 'firebase/auth';
 import { Lock, User as UserIcon, Phone, Mail, ShieldCheck, KeyRound, Copy, Check, XCircle, HelpCircle, Eye, EyeOff, ShieldQuestion, Loader2, ArrowRight, CheckCircle2, Laptop, Smartphone } from 'lucide-react';
 import { rotateScreen } from '../utils/displayPrefs';
 import { LoginGuide } from './LoginGuide';
@@ -28,6 +28,51 @@ const DEFAULT_QUESTIONS = [
   "Aapka favorite teacher kaun hai?",
   "Aapka birth city / gaon kaunsa hai?"
 ];
+
+const withTimeout = async <T,>(promise: Promise<T>, timeoutMs = 8000, fallback: T): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
+
+const getAuthErrorMessage = (error: any, fallback: string) => {
+  switch (error?.code) {
+    case 'auth/unauthorized-domain':
+      return 'Is app domain ko Firebase Auth me authorize nahi kiya gaya. Firebase Console ke Authorized domains me current app domain add karein.';
+    case 'auth/popup-blocked':
+      return 'Google sign-in popup browser ne block kiya. Redirect sign-in try karein.';
+    case 'auth/popup-closed-by-user':
+      return 'Sign-in window band kar di gayi.';
+    case 'auth/network-request-failed':
+      return 'Network problem hai. Internet check karke dobara try karein.';
+    case 'auth/too-many-requests':
+      return 'Bahut attempts ho gaye. Thodi der baad dobara try karein.';
+    case 'auth/user-disabled':
+      return 'Yeh account disabled hai. Admin se contact karein.';
+    case 'auth/invalid-email':
+      return 'Email address sahi format me enter karein.';
+    case 'auth/user-not-found':
+    case 'auth/invalid-credential':
+    case 'auth/wrong-password':
+      return 'Email ya password galat hai.';
+    default:
+      return error?.message || fallback;
+  }
+};
+
+// Start persistence setup while the auth screen is rendering instead of
+// making the user wait for it after pressing Login or Create Account.
+const authPersistenceReady = setPersistence(auth, browserLocalPersistence).catch((error) => {
+  console.warn('[Auth] Could not enable persistent auth session:', error);
+});
 
 // ── FULLY SYNCHRONIZED HUSKY AVATAR ──
 const HuskyAvatar: React.FC<{
@@ -224,6 +269,83 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
     onLogin(safeUser);
   };
 
+  const completeGoogleRedirectLogin = async (firebaseUser: any) => {
+    const userEmail = (firebaseUser.email || '').trim().toLowerCase();
+    const userDisplayName = firebaseUser.displayName || 'Student';
+    const userPhoto = firebaseUser.photoURL || '';
+    const uid = firebaseUser.uid;
+
+    let appUser: any = await withTimeout(getFreshUserData(uid), 8000, null);
+    if (!appUser && userEmail) appUser = await withTimeout(getUserByEmail(userEmail), 8000, null);
+    if (!appUser) appUser = await withTimeout(getUserByLinkedGoogleUid(uid), 8000, null);
+
+    const newUser: User = appUser ? {
+      ...appUser,
+      id: uid,
+      uid,
+      displayId: appUser.displayId || generateUserId(),
+      email: appUser.email || userEmail,
+      name: appUser.name || userDisplayName,
+      provider: 'google',
+      photoURL: userPhoto || appUser.photoURL,
+      profileCompleted: true,
+      securityQuestion: appUser.securityQuestion || DEFAULT_QUESTIONS[0],
+      securityAnswer: appUser.securityAnswer || 'google',
+      credits: typeof appUser.credits === 'number' ? appUser.credits : 50,
+    } : {
+      id: uid,
+      uid,
+      displayId: generateUserId(),
+      name: userDisplayName,
+      email: userEmail,
+      password: '',
+      mobile: '',
+      role: 'STUDENT',
+      createdAt: new Date().toISOString(),
+      credits: (settings && typeof settings.signupBonus === 'number') ? settings.signupBonus : (appSettings?.signupBonus || 50),
+      streak: 1,
+      totalScore: 0,
+      lastLoginDate: new Date().toISOString(),
+      board: 'CBSE',
+      classLevel: '10',
+      provider: 'google',
+      photoURL: userPhoto,
+      avatarChoice: userPhoto ? 'gmail' : 'app',
+      profileCompleted: true,
+      securityQuestion: DEFAULT_QUESTIONS[0],
+      securityAnswer: 'google',
+      progress: {},
+      subscriptionTier: 'FREE',
+      isPremium: false,
+    };
+
+    // Auth should succeed even when a Firestore/RTDB mirror is temporarily unavailable.
+    void saveUserToLive(newUser, { immediate: true });
+    localStorage.setItem('nst_current_user', JSON.stringify(newUser));
+    localStorage.setItem('nst_last_user_id', uid);
+    if (logActivity) logActivity(appUser ? "LOGIN" : "SIGNUP_GOOGLE", appUser ? "Logged In via Google Auth" : "New Student via Google", newUser);
+    triggerLoginSuccess(newUser);
+  };
+
+  useEffect(() => {
+    let active = true;
+    getRedirectResult(auth)
+      .then(async (result) => {
+        if (!active || !result?.user) return;
+        setLoading(true);
+        await completeGoogleRedirectLogin(result.user);
+      })
+      .catch((err) => {
+        if (active && err?.code !== 'auth/no-auth-event') {
+          setError(getAuthErrorMessage(err, 'Google Login fail hua.'));
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
+  }, []);
+
   const handleGoogleAuth = async () => {
     try {
       setLoading(true);
@@ -231,95 +353,21 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
 
-      await setPersistence(auth, browserLocalPersistence);
+      await authPersistenceReady;
       const result = await signInWithPopup(auth, provider);
-      const firebaseUser = result.user;
-      const userEmail = (firebaseUser.email || '').trim().toLowerCase();
-      const userDisplayName = firebaseUser.displayName || 'Student';
-      const userPhoto = firebaseUser.photoURL || '';
-      const uid = firebaseUser.uid;
-
-      let appUser: any = await getFreshUserData(uid);
-      if (!appUser && userEmail) appUser = await getUserByEmail(userEmail);
-      if (!appUser) appUser = await getUserByLinkedGoogleUid(uid);
-
-      if (appUser) {
-        appUser = {
-          ...appUser,
-          id: uid,
-          uid: uid,
-          displayId: appUser.displayId || generateUserId(),
-          email: appUser.email || userEmail,
-          name: appUser.name || userDisplayName,
-          provider: 'google',
-          photoURL: userPhoto || appUser.photoURL,
-          profileCompleted: true,
-          securityQuestion: appUser.securityQuestion || DEFAULT_QUESTIONS[0],
-          securityAnswer: appUser.securityAnswer || 'google',
-          credits: typeof appUser.credits === 'number' ? appUser.credits : 50
-        };
-
-        if (!await saveUserToLive(appUser)) throw new Error('Account could not be saved to the backend.');
-        localStorage.setItem('nst_current_user', JSON.stringify(appUser));
-        localStorage.setItem('nst_last_user_id', uid);
-
-        if (logActivity) logActivity("LOGIN", "Logged In via Google Auth", appUser);
-        triggerLoginSuccess(appUser);
-      } else {
-        const newId = generateUserId();
-        const signupCoins = (settings && typeof settings.signupBonus === 'number') ? settings.signupBonus : (appSettings?.signupBonus || 50);
-
-        const newUser: User = {
-          id: uid,
-          uid: uid,
-          displayId: newId,
-          name: userDisplayName,
-          email: userEmail,
-          password: '',
-          mobile: '',
-          role: 'STUDENT',
-          createdAt: new Date().toISOString(),
-          credits: signupCoins,
-          streak: 1,
-          totalScore: 0,
-          lastLoginDate: new Date().toISOString(),
-          board: 'CBSE',
-          classLevel: '10',
-          provider: 'google',
-          photoURL: userPhoto,
-          avatarChoice: userPhoto ? 'gmail' : 'app',
-          profileCompleted: true,
-          securityQuestion: DEFAULT_QUESTIONS[0],
-          securityAnswer: 'google',
-          progress: {},
-          redeemedCodes: [],
-          subscriptionTier: 'FREE',
-          isPremium: false,
-          inbox: [
-            {
-              id: `welcome-bonus-${Date.now()}`,
-              text: `🎉 Welcome to NSTA! Aapko ${signupCoins} Welcome Credits mil gaye hain.`,
-              date: new Date().toISOString(),
-              read: false,
-              type: 'GIFT',
-              gift: { type: 'CREDITS', value: signupCoins },
-              isClaimed: true
-            }
-          ]
-        };
-
-        if (!await saveUserToLive(newUser)) throw new Error('Account could not be saved to the backend.');
-        localStorage.setItem('nst_current_user', JSON.stringify(newUser));
-        localStorage.setItem('nst_last_user_id', uid);
-
-        if (logActivity) logActivity("SIGNUP_GOOGLE", "New Student via Google", newUser);
-        triggerLoginSuccess(newUser);
-      }
+      await completeGoogleRedirectLogin(result.user);
     } catch (err: any) {
-      if (err.code === 'auth/popup-closed-by-user') {
-        setError("Sign-in window band kar di gayi.");
+      if (err.code === 'auth/popup-blocked' || err.code === 'auth/operation-not-supported-in-this-environment') {
+        try {
+          const redirectProvider = new GoogleAuthProvider();
+          redirectProvider.setCustomParameters({ prompt: 'select_account' });
+          await signInWithRedirect(auth, redirectProvider);
+          return;
+        } catch (redirectError: any) {
+          setError(getAuthErrorMessage(redirectError, 'Google Login fail hua.'));
+        }
       } else {
-        setError(err.message || "Google Login fail hua.");
+        setError(getAuthErrorMessage(err, 'Google Login fail hua.'));
       }
     } finally {
       setLoading(false);
@@ -339,14 +387,14 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
 
     setLoading(true);
     try {
-      await setPersistence(auth, browserLocalPersistence);
+      await authPersistenceReady;
 
       if (input.includes('@')) {
         try {
           const res = await signInWithEmailAndPassword(auth, input.toLowerCase(), pass);
           const uid = res.user.uid;
-          let appUser: any = await getFreshUserData(uid);
-          if (!appUser) appUser = await getUserByEmail(input.toLowerCase());
+           let appUser: any = await withTimeout(getFreshUserData(uid), 8000, null);
+           if (!appUser) appUser = await withTimeout(getUserByEmail(input.toLowerCase()), 8000, null);
 
           const completeUser: User = {
             ...(appUser || {}),
@@ -366,19 +414,17 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
             profileCompleted: true
           };
 
-          if (!await saveUserToLive(completeUser)) throw new Error('Account could not be saved to the backend.');
+           void saveUserToLive(completeUser, { immediate: true });
           localStorage.setItem('nst_current_user', JSON.stringify(completeUser));
           localStorage.setItem('nst_last_user_id', uid);
 
           if (logActivity) logActivity("LOGIN", "Logged In via Email", completeUser);
           triggerLoginSuccess(completeUser);
           return;
-        } catch (e: any) {
-          if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential') {
-            setError("Galat password. Dobara check karein.");
-            setLoading(false);
-            return;
-          }
+         } catch (e: any) {
+           setError(getAuthErrorMessage(e, 'Email Login fail hua.'));
+           setLoading(false);
+           return;
         }
       }
 
@@ -430,7 +476,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
             profileCompleted: true
           };
 
-           if (!await saveUserToLive(finalUser)) throw new Error('Account could not be saved to the backend.');
+           if (!await saveUserToLive(finalUser, { immediate: true })) throw new Error('Account could not be saved to the backend.');
            localStorage.setItem('nst_current_user', JSON.stringify(finalUser));
            localStorage.setItem('nst_last_user_id', uid);
 
@@ -441,7 +487,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
           return;
         }
 
-        if (isGoogleUser) {
+        if (targetUser.provider === 'google' || targetUser.provider === 'gmail') {
           setError("Yeh account Google se bana hai. 'Google Sign-in' button use karein.");
           setLoading(false);
           return;
@@ -487,7 +533,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
 
     setLoading(true);
     try {
-      await setPersistence(auth, browserLocalPersistence);
+      await authPersistenceReady;
       const res = await createUserWithEmailAndPassword(auth, cleanEmail, cleanPassword);
       const uid = res.user.uid;
       const newId = generateUserId();
@@ -530,7 +576,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
         ]
       };
 
-      if (!await saveUserToLive(newStudentUser)) throw new Error('Account could not be saved to the backend.');
+      void saveUserToLive(newStudentUser, { immediate: true });
       localStorage.setItem('nst_current_user', JSON.stringify(newStudentUser));
       localStorage.setItem('nst_last_user_id', uid);
       if (logActivity) logActivity("SIGNUP_EMAIL", "New Student Registered", newStudentUser);
@@ -635,7 +681,7 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
           provider: raw.provider || 'recovery'
         };
 
-        if (!await saveUserToLive(completeUser)) throw new Error('Account could not be saved to the backend.');
+        if (!await saveUserToLive(completeUser, { immediate: true })) throw new Error('Account could not be saved to the backend.');
         localStorage.setItem('nst_current_user', JSON.stringify(completeUser));
         localStorage.setItem('nst_last_user_id', validId);
 

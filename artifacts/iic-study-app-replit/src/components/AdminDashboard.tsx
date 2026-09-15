@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { User, ViewState, SystemSettings, Subject, Chapter, MCQItem, RecoveryRequest, ActivityLogEntry, LeaderboardEntry, RecycleBinItem, Stream, Board, ClassLevel, GiftCode, SubscriptionPlan, CreditPackage, CreditSubscriptionPlan, UserCreditSubscription, SpinReward, SpinGameType, HtmlModule, PremiumNoteSlot, ContentInfoConfig, ContentInfoItem, SubscriptionHistoryEntry, UniversalAnalysisLog, ContentType, LessonContent, DeepDiveEntry, AdditionalNoteEntry, TeacherStorePlan, TeacherCode, HomeworkItem, LucentNoteEntry, LucentPageNote, AppNotification, BroadcastRedeemCode, LoginBonusRandomGiftOption } from '../types';
 import { DEFAULT_CREDIT_SUB_PLANS, PRESET_CREDIT_SUB_TEMPLATES, grantCreditSubscription, cancelCreditSubscription, getCreditSubPlanMultiplier } from '../utils/creditSubscriptionUtils';
-import { activateDiamondSub, cancelDiamondSub, isDiamondSubActive, getDiamondSubDaysRemaining, DIAMOND_SUBSCRIPTION_PLANS } from '../utils/diamondUtils';
+import { activateDiamondSub, cancelDiamondSub, isDiamondSubActive, getDiamondSubDaysRemaining } from '../utils/diamondUtils';
 import { List, GraduationCap, LayoutDashboard, Users, Search, Trash2, Save, X, Eye, EyeOff, Shield, Megaphone, CheckCircle, ListChecks, Database, FileText, Monitor, Sparkles, Banknote, BrainCircuit, AlertOctagon, ArrowLeft, ArrowRight, Key, Bell, ShieldCheck, Lock, Globe, Layers, Zap, PenTool, RefreshCw, RotateCcw, Plus, LogOut, Download, Upload, CreditCard, Ticket, Video, Image as ImageIcon, Type, Link, FileJson, Activity, AlertTriangle, Gift, Book, Mail, Edit3, MessageSquare, ShoppingBag, Cloud, Rocket, Code2, Layers as LayersIcon, Wifi, WifiOff, Copy, Crown, Gamepad2, Calendar, BookOpen, Image, HelpCircle, Youtube, Play, Star, Trophy, Palette, Settings, Headphones, Layout, Bot, LayoutDashboard as DashboardIcon, Loader2, Gauge, LayoutGrid, ArrowUpCircle, KeyRound, Award, Send, GitCompare, Lightbulb, ThumbsUp, ThumbsDown, Building2, TrendingUp, Coins } from 'lucide-react';
 import { getSubjectsList, DEFAULT_SUBJECTS, DEFAULT_APP_FEATURES, ALL_APP_FEATURES, STUDENT_APP_FEATURES, DEFAULT_CONTENT_INFO_CONFIG, ADMIN_PERMISSIONS, APP_VERSION, STATIC_SYLLABUS, LEVEL_UNLOCKABLE_FEATURES, LUCENT_SUBJECT_OPTIONS_BASE, getClassSubjectOptions, SUPPORT_PHONE } from '../constants';
 import { AdminClassMcqManager } from './AdminClassMcqManager';
@@ -66,7 +66,7 @@ const DEFAULT_BASIC_FEATURES = [
     'Store Discount: +5%',
     'Score History Unlocked',
     'Download Available',
-    'Credit Off Anywhere: 20%',
+    'Credit Off Anywhere: 10%',
     'XP Multiplier: 1.5X',
     'Projector Mode & PDF Mode (1,500 MCQ/day)'
 ];
@@ -79,7 +79,7 @@ const DEFAULT_ULTRA_FEATURES = [
     'Store Discount: +10% (Pro & Max)',
     'Daily XP Limit: +133%',
     'XP Multiplier: 2.0X',
-    'Credit Off Anywhere: 40%',
+    'Credit Off Anywhere: 20%',
     'Global Chat Available',
     'Ultra Themes Free',
     'Suggestions',
@@ -1328,10 +1328,23 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   // --- CREDIT SUBSCRIPTION MANAGER STATE (Daily Pass) ---
   const [newCspName, setNewCspName] = useState('');
   const [newCspPrice, setNewCspPrice] = useState('');
+  const [newCspWeeklyPrice, setNewCspWeeklyPrice] = useState('');
   const [newCspDummyPrice, setNewCspDummyPrice] = useState('');
   const [newCspDailyCredits, setNewCspDailyCredits] = useState('');
   const [newCspDurationDays, setNewCspDurationDays] = useState('30');
   const [newCspBadge, setNewCspBadge] = useState('');
+  const [newCspScoreMultiplier, setNewCspScoreMultiplier] = useState('');
+
+  // Diamond Templates States
+  const [newDiamondTemplateName, setNewDiamondTemplateName] = useState('');
+  const [newDiamondTemplateIcon, setNewDiamondTemplateIcon] = useState('💎');
+  const [newDiamondTemplateDaily, setNewDiamondTemplateDaily] = useState('');
+  const [newDiamondTemplateFeatures, setNewDiamondTemplateFeatures] = useState('');
+
+  // Diamond Durations States
+  const [newDiamondDurationLabel, setNewDiamondDurationLabel] = useState('');
+  const [newDiamondDurationDays, setNewDiamondDurationDays] = useState('');
+  const [newDiamondDurationRate, setNewDiamondDurationRate] = useState('');
 
   // --- GLOBAL BOARD CONTEXT (STRICT ISOLATION) ---
   const [adminBoardContext, setAdminBoardContext] = useState<Board>('NCERT_EN');
@@ -1552,6 +1565,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   const [editSubscriptionMinutes, setEditSubscriptionMinutes] = useState(0);
   const [selectedUserCreditSubPlanId, setSelectedUserCreditSubPlanId] = useState<string>('');
   const [selectedUserCreditSubDuration, setSelectedUserCreditSubDuration] = useState<number>(30);
+  const [selectedUserDiamondSubDuration, setSelectedUserDiamondSubDuration] = useState<number>(30);
   const [editSubscriptionSeconds, setEditSubscriptionSeconds] = useState(0);
   const [editSubscriptionPrice, setEditSubscriptionPrice] = useState(0);
   const [editCustomSubName, setEditCustomSubName] = useState('');
@@ -1983,7 +1997,10 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   // --- GIFT CODE STATE ---
   const [newCodeType, setNewCodeType] = useState<'CREDITS' | 'CREDIT_SUBSCRIPTION' | 'DIAMONDS' | 'DIAMOND_SUBSCRIPTION' | 'SUBSCRIPTION' | 'DISCOUNT' | 'CONTENT_UNLOCK' | 'TOPBAR_EFFECT_COLOR' | 'TOPBAR_EFFECT_ID' | 'SCORE' | 'SCORE_BOOST' | 'SCORE_LIMIT_BOOST' | 'THEME_COLOR'>('CREDITS');
   const [newCodeDiamonds, setNewCodeDiamonds] = useState<number>(50);
-  const [newCodeDiamondSubPlan, setNewCodeDiamondSubPlan] = useState<string>('7_DAYS_PASS');
+  const [newCodeDiamondSubPlan, setNewCodeDiamondSubPlan] = useState<string>('starter_diamond');
+  const [newCodeDiamondSubDays, setNewCodeDiamondSubDays] = useState<number>(30);
+  const [newCodeDiamondSubDaily, setNewCodeDiamondSubDaily] = useState<number>(10);
+  const [newCodeDiamondSubName, setNewCodeDiamondSubName] = useState<string>('Starter Diamond Pass');
   const [newCodeCreditPlanId, setNewCodeCreditPlanId] = useState<string>('');
   const [newCodeCreditDaily, setNewCodeCreditDaily] = useState<number>(100);
   const [newCodeCreditDays, setNewCodeCreditDays] = useState<number>(30);
@@ -2017,7 +2034,10 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   // --- BROADCAST REDEEM CODE STATE ---
   const [broadcastType, setBroadcastType] = useState<BroadcastRedeemCode['type']>('CREDITS');
   const [broadcastDiamondAmount, setBroadcastDiamondAmount] = useState<number>(50);
-  const [broadcastDiamondSubPlan, setBroadcastDiamondSubPlan] = useState<string>('7_DAYS_PASS');
+  const [broadcastDiamondSubPlan, setBroadcastDiamondSubPlan] = useState<string>('starter_diamond');
+  const [broadcastDiamondSubDays, setBroadcastDiamondSubDays] = useState<number>(30);
+  const [broadcastDiamondSubDaily, setBroadcastDiamondSubDaily] = useState<number>(10);
+  const [broadcastDiamondSubName, setBroadcastDiamondSubName] = useState<string>('Starter Diamond Pass');
   const [broadcastCreditPlanId, setBroadcastCreditPlanId] = useState<string>('');
   const [broadcastCreditDaily, setBroadcastCreditDaily] = useState<number>(100);
   const [broadcastCreditDays, setBroadcastCreditDays] = useState<number>(30);
@@ -3172,7 +3192,12 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                   type: newCodeType || 'CREDITS',
                   ...(newCodeType === 'CREDITS' ? { amount: newCodeAmount || 10 } : {}),
                   ...(newCodeType === 'DIAMONDS' ? { diamondAmount: newCodeDiamonds || 50, amount: newCodeDiamonds || 50 } : {}),
-                  ...(newCodeType === 'DIAMOND_SUBSCRIPTION' ? { diamondSubPlanId: newCodeDiamondSubPlan || '7_DAYS_PASS' } : {}),
+                  ...(newCodeType === 'DIAMOND_SUBSCRIPTION' ? { 
+                      diamondSubPlanId: newCodeDiamondSubPlan || 'starter_diamond',
+                      diamondSubPlanName: newCodeDiamondSubName,
+                      diamondSubDailyAmount: newCodeDiamondSubDaily,
+                      diamondSubDurationDays: newCodeDiamondSubDays,
+                  } : {}),
                   ...(newCodeType === 'CREDIT_SUBSCRIPTION' ? {
                       creditPlanId: newCodeCreditPlanId || `csp-redeem-${Date.now()}`,
                       creditPlanName: newCodeCreditPlanName || `${newCodeCreditDaily} Daily Credits Pass`,
@@ -3260,6 +3285,9 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
               amount: broadcastType === 'CREDITS' ? broadcastAmount : undefined,
               diamondAmount: broadcastType === 'DIAMONDS' ? broadcastDiamondAmount : undefined,
               diamondSubPlanId: broadcastType === 'DIAMOND_SUBSCRIPTION' ? broadcastDiamondSubPlan : undefined,
+              diamondSubPlanName: broadcastType === 'DIAMOND_SUBSCRIPTION' ? broadcastDiamondSubName : undefined,
+              diamondSubDailyAmount: broadcastType === 'DIAMOND_SUBSCRIPTION' ? broadcastDiamondSubDaily : undefined,
+              diamondSubDurationDays: broadcastType === 'DIAMOND_SUBSCRIPTION' ? broadcastDiamondSubDays : undefined,
               scoreAmount: broadcastType === 'SCORE' ? broadcastScoreAmount : undefined,
               scoreBoostPercent: broadcastType === 'SCORE_BOOST' ? broadcastScoreBoostPercent : undefined,
               scoreBoostDurationHours: broadcastType === 'SCORE_BOOST' ? broadcastScoreBoostHours : undefined,
@@ -3384,6 +3412,77 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
       return u;
     });
     setLocalSettings({ ...localSettings, creditSubscriptionPlans: updated });
+  };
+
+  const addDiamondTemplate = () => {
+    if (!newDiamondTemplateName || !newDiamondTemplateDaily) return;
+    const newTemplate = {
+      id: `dia_tmpl_${Date.now()}`,
+      name: newDiamondTemplateName,
+      icon: newDiamondTemplateIcon || '💎',
+      dailyDiamonds: Number(newDiamondTemplateDaily),
+      features: newDiamondTemplateFeatures.split(',').map(f => f.trim()).filter(Boolean)
+    };
+    const current = localSettings.diamondTemplates || [
+      { id: 'starter_diamond', name: 'Starter Diamond Pass', icon: '💎', dailyDiamonds: 10, features: ['Daily 10 💎 Drop Claim', 'Chapters Permanently Unlock'] },
+      { id: 'active_diamond', name: 'Active Diamond Pass', icon: '⚡', dailyDiamonds: 20, features: ['Daily 20 💎 Drop Claim', 'Tez Chapters Unlocking'] },
+      { id: 'premium_diamond', name: 'Premium Diamond Pass', icon: '🌟', dailyDiamonds: 30, features: ['Daily 30 💎 Drop Claim', 'Premium Content Unlocks'] },
+      { id: 'elite_diamond', name: 'Elite Diamond Pass', icon: '👑', dailyDiamonds: 50, features: ['Daily 50 💎 Huge Drop', 'Sabse Tez Unlock Speed'] }
+    ];
+    setLocalSettings({ ...localSettings, diamondTemplates: [...current, newTemplate] });
+    setNewDiamondTemplateName(''); setNewDiamondTemplateDaily(''); setNewDiamondTemplateFeatures('');
+  };
+
+  const removeDiamondTemplate = (id: string) => {
+    if (!confirm('Are you sure?')) return;
+    const current = localSettings.diamondTemplates || [];
+    setLocalSettings({ ...localSettings, diamondTemplates: current.filter(t => t.id !== id) });
+  };
+
+  const updateDiamondTemplate = (id: string, field: string, value: any) => {
+    const current = localSettings.diamondTemplates || [];
+    const updated = current.map(t => {
+      if (t.id !== id) return t;
+      if (field === 'features') {
+         return { ...t, features: value.split(',').map((f: string) => f.trim()).filter(Boolean) };
+      }
+      return { ...t, [field]: value };
+    });
+    setLocalSettings({ ...localSettings, diamondTemplates: updated });
+  };
+
+  const addDiamondDuration = () => {
+    if (!newDiamondDurationLabel || !newDiamondDurationDays || !newDiamondDurationRate) return;
+    const newDur = {
+      id: `dia_dur_${Date.now()}`,
+      label: newDiamondDurationLabel,
+      days: Number(newDiamondDurationDays),
+      ratePerDiamond: Number(newDiamondDurationRate)
+    };
+    const current = localSettings.diamondDurations || [
+      { id: '7_DAYS', label: '7D', days: 7, ratePerDiamond: 1.80 },
+      { id: '30_DAYS', label: '1M', days: 30, ratePerDiamond: 1.50 },
+      { id: '90_DAYS', label: '3M', days: 90, ratePerDiamond: 1.30 },
+      { id: '180_DAYS', label: '6M', days: 180, ratePerDiamond: 1.15 },
+      { id: '365_DAYS', label: '1Y', days: 365, ratePerDiamond: 1.00 }
+    ];
+    setLocalSettings({ ...localSettings, diamondDurations: [...current, newDur] });
+    setNewDiamondDurationLabel(''); setNewDiamondDurationDays(''); setNewDiamondDurationRate('');
+  };
+
+  const removeDiamondDuration = (id: string) => {
+    if (!confirm('Are you sure?')) return;
+    const current = localSettings.diamondDurations || [];
+    setLocalSettings({ ...localSettings, diamondDurations: current.filter(d => d.id !== id) });
+  };
+
+  const updateDiamondDuration = (id: string, field: string, value: any) => {
+    const current = localSettings.diamondDurations || [];
+    const updated = current.map(d => {
+      if (d.id !== id) return d;
+      return { ...d, [field]: value };
+    });
+    setLocalSettings({ ...localSettings, diamondDurations: updated });
   };
 
   const addCreditSubPreset = (preset: (typeof PRESET_CREDIT_SUB_TEMPLATES)[0]) => {
@@ -5296,6 +5395,175 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                               </div>
                           );
                       })}
+                  </div>
+              </div>
+
+              {/* CREDIT PASSES */}
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mt-4">
+                  <div className="flex items-center justify-between mb-4">
+                      <h4 className="font-bold text-slate-800 flex items-center gap-2">⚡ Daily Credit Passes</h4>
+                      <button
+                          onClick={() => {
+                              const newPlan = {
+                                  id: `credit-pass-${Date.now()}`,
+                                  name: 'New Credit Pass',
+                                  dailyCredits: 100,
+                                  scoreMultiplier: 1.1,
+                                  price: 299,
+                                  weeklyPrice: 99,
+                                  isActive: true,
+                                  popular: false
+                              };
+                              const current = localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS;
+                              setLocalSettings({...localSettings, creditSubscriptionPlans: [...current, newPlan]});
+                          }}
+                          className="bg-slate-800 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-slate-700 transition-colors flex items-center gap-1"
+                      >
+                          <Plus size={14} /> Add Credit Pass
+                      </button>
+                  </div>
+                  <div className="space-y-4">
+                      {(localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS).map((plan, idx) => {
+                          const updatePlan = (field: string, value: any) => {
+                              const current = localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS;
+                              const newPlans = [...current];
+                              newPlans[idx] = { ...newPlans[idx], [field]: value };
+                              setLocalSettings({...localSettings, creditSubscriptionPlans: newPlans});
+                          };
+                          return (
+                              <div key={plan.id} className="bg-white p-3 rounded-lg border border-slate-200 relative grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 items-end">
+                                  <button onClick={() => {
+                                      if(!confirm('Delete this pass?')) return;
+                                      const current = localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS;
+                                      const newPlans = current.filter(p => p.id !== plan.id);
+                                      setLocalSettings({...localSettings, creditSubscriptionPlans: newPlans});
+                                  }} className="absolute -top-2 -right-2 bg-red-100 text-red-600 p-1 rounded-full hover:bg-red-200"><X size={14}/></button>
+
+                                  <div>
+                                      <label className="text-[10px] text-slate-500 font-bold">Pass Name</label>
+                                      <input type="text" value={plan.name} onChange={e => updatePlan('name', e.target.value)} className="w-full p-2 border rounded-lg text-xs font-bold" />
+                                  </div>
+                                  <div>
+                                      <label className="text-[10px] text-slate-500 font-bold">Daily Credits 🪙</label>
+                                      <input type="number" value={plan.dailyCredits || 0} onChange={e => updatePlan('dailyCredits', Number(e.target.value))} className="w-full p-2 border rounded-lg text-xs" />
+                                  </div>
+                                  <div>
+                                      <label className="text-[10px] text-slate-500 font-bold">XP Boost (e.g. 1.2 = +20%)</label>
+                                      <input type="number" step="0.1" value={plan.scoreMultiplier || 1.0} onChange={e => updatePlan('scoreMultiplier', Number(e.target.value))} className="w-full p-2 border rounded-lg text-xs" />
+                                  </div>
+                                  <div>
+                                      <label className="text-[10px] text-slate-500 font-bold">Monthly Price (₹)</label>
+                                      <input type="number" value={plan.price} onChange={e => updatePlan('price', Number(e.target.value))} className="w-full p-2 border rounded-lg text-xs font-bold text-green-600" />
+                                  </div>
+                                  <div>
+                                      <label className="text-[10px] text-slate-500 font-bold">Weekly Price (₹)</label>
+                                      <input type="number" value={plan.weeklyPrice || 0} onChange={e => updatePlan('weeklyPrice', Number(e.target.value))} className="w-full p-2 border rounded-lg text-xs font-bold text-blue-600" />
+                                  </div>
+                                  <div className="flex items-center gap-2 pb-2">
+                                      <input type="checkbox" checked={plan.isActive !== false} onChange={e => updatePlan('isActive', e.target.checked)} className="w-4 h-4 accent-green-600"/>
+                                      <label className="text-xs font-bold text-slate-700">Active</label>
+                                  </div>
+                              </div>
+                          );
+                      })}
+                  </div>
+              </div>
+
+              {/* DIAMOND PASSES */}
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mt-4">
+                  <div className="flex items-center justify-between mb-4">
+                      <h4 className="font-bold text-slate-800 flex items-center gap-2">💎 Diamond Passes</h4>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Diamond Tiers */}
+                    <div>
+                        <div className="flex justify-between items-center mb-2">
+                            <h5 className="font-bold text-sm text-slate-700">Tiers & Daily Drops</h5>
+                            <button onClick={() => {
+                                const newT = { id: `dia-${Date.now()}`, name: 'New Diamond', icon: '💎', dailyDiamonds: 10, features: [] };
+                                const current = localSettings.diamondTemplates || [];
+                                setLocalSettings({...localSettings, diamondTemplates: [...current, newT]});
+                            }} className="text-xs bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded font-bold text-slate-700">+ Add Tier</button>
+                        </div>
+                        <div className="space-y-3">
+                            {(localSettings.diamondTemplates || [
+                                { id: 'starter_diamond', name: 'Starter Diamond Pass', icon: '💎', dailyDiamonds: 10, features: ['Daily 10 💎 Drop Claim'] },
+                                { id: 'active_diamond', name: 'Active Diamond Pass', icon: '⚡', dailyDiamonds: 20, features: ['Daily 20 💎 Drop Claim'] },
+                                { id: 'premium_diamond', name: 'Premium Diamond Pass', icon: '🌟', dailyDiamonds: 30, features: ['Daily 30 💎 Drop Claim'] },
+                                { id: 'elite_diamond', name: 'Elite Diamond Pass', icon: '👑', dailyDiamonds: 50, features: ['Daily 50 💎 Huge Drop'] }
+                            ]).map((template) => {
+                                const updateT = (field: string, val: any) => {
+                                    const current = localSettings.diamondTemplates || [];
+                                    const newT = current.map(t => t.id === template.id ? {...t, [field]: val} : t);
+                                    setLocalSettings({...localSettings, diamondTemplates: newT});
+                                };
+                                return (
+                                    <div key={template.id} className="bg-white p-3 rounded-lg border border-slate-200 relative flex flex-col gap-2">
+                                        <button onClick={() => {
+                                            if(!confirm('Delete this tier?')) return;
+                                            const current = localSettings.diamondTemplates || [];
+                                            setLocalSettings({...localSettings, diamondTemplates: current.filter(t => t.id !== template.id)});
+                                        }} className="absolute top-2 right-2 text-red-500 hover:bg-red-50 p-1 rounded"><X size={14}/></button>
+                                        <div className="flex gap-2 items-center">
+                                            <input type="text" value={template.icon} onChange={e => updateT('icon', e.target.value)} className="w-10 p-2 border rounded-lg text-center" />
+                                            <input type="text" value={template.name} onChange={e => updateT('name', e.target.value)} className="flex-1 p-2 border rounded-lg text-xs font-bold" />
+                                            <div className="flex items-center gap-1 bg-slate-50 border rounded-lg px-2">
+                                                <input type="number" value={template.dailyDiamonds} onChange={e => updateT('dailyDiamonds', Number(e.target.value))} className="w-16 p-1 text-center font-black text-sky-600 bg-transparent outline-none" />
+                                                <span className="text-xs font-bold text-slate-500">💎/d</span>
+                                            </div>
+                                        </div>
+                                        <input type="text" value={(template.features||[]).join(', ')} onChange={e => updateT('features', e.target.value.split(',').map(s=>s.trim()).filter(Boolean))} placeholder="Features (comma separated)" className="w-full p-2 border rounded-lg text-xs text-slate-600" />
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    </div>
+
+                    {/* Diamond Durations */}
+                    <div>
+                        <div className="flex justify-between items-center mb-2">
+                            <h5 className="font-bold text-sm text-slate-700">Validities & Pricing Multipliers</h5>
+                            <button onClick={() => {
+                                const newD = { id: `dur-${Date.now()}`, label: 'New', days: 30, ratePerDiamond: 1.5 };
+                                const current = localSettings.diamondDurations || [];
+                                setLocalSettings({...localSettings, diamondDurations: [...current, newD]});
+                            }} className="text-xs bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded font-bold text-slate-700">+ Add Validity</button>
+                        </div>
+                        <div className="space-y-3">
+                            {(localSettings.diamondDurations || [
+                                { id: '7_DAYS', label: '7D', days: 7, ratePerDiamond: 2.00 },
+                                { id: '30_DAYS', label: '1M', days: 30, ratePerDiamond: 1.50 },
+                                { id: '90_DAYS', label: '3M', days: 90, ratePerDiamond: 1.30 },
+                                { id: '180_DAYS', label: '6M', days: 180, ratePerDiamond: 1.15 },
+                                { id: '365_DAYS', label: '1Y', days: 365, ratePerDiamond: 1.00 }
+                            ]).map((dur) => {
+                                const updateD = (field: string, val: any) => {
+                                    const current = localSettings.diamondDurations || [];
+                                    const newD = current.map(d => d.id === dur.id ? {...d, [field]: val} : d);
+                                    setLocalSettings({...localSettings, diamondDurations: newD});
+                                };
+                                return (
+                                    <div key={dur.id} className="bg-white p-2 rounded-lg border border-slate-200 relative flex items-center justify-between gap-2">
+                                        <button onClick={() => {
+                                            if(!confirm('Delete this validity?')) return;
+                                            const current = localSettings.diamondDurations || [];
+                                            setLocalSettings({...localSettings, diamondDurations: current.filter(d => d.id !== dur.id)});
+                                        }} className="absolute -left-2 -top-2 bg-red-100 text-red-600 hover:bg-red-200 p-1 rounded-full"><X size={12}/></button>
+                                        <div className="flex items-center gap-2 flex-1 ml-2">
+                                            <input type="text" value={dur.label} onChange={e => updateD('label', e.target.value)} className="w-12 p-1.5 border rounded text-xs font-bold text-center" placeholder="e.g. 1M" />
+                                            <input type="number" value={dur.days} onChange={e => updateD('days', Number(e.target.value))} className="w-16 p-1.5 border rounded text-xs text-center" placeholder="Days" />
+                                            <span className="text-[10px] text-slate-500 font-bold">Days</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-[10px] text-slate-500 font-bold">₹ Rate per 💎:</span>
+                                            <input type="number" step="0.01" value={dur.ratePerDiamond} onChange={e => updateD('ratePerDiamond', Number(e.target.value))} className="w-20 p-1.5 border rounded text-xs font-bold text-green-600 bg-green-50 text-right" />
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    </div>
                   </div>
               </div>
 
@@ -8959,12 +9227,12 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           />
                                       </div>
                                       <div>
-                                          <label className="text-[10px] font-bold uppercase text-slate-400">Dummy Cut ₹</label>
+                                          <label className="text-[10px] font-bold uppercase text-slate-400">Weekly ₹</label>
                                           <input
                                               type="number"
-                                              placeholder="199"
-                                              value={newCspDummyPrice}
-                                              onChange={e => setNewCspDummyPrice(e.target.value)}
+                                              placeholder="40"
+                                              value={newCspWeeklyPrice}
+                                              onChange={e => setNewCspWeeklyPrice(e.target.value)}
                                               className="w-full p-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white"
                                           />
                                       </div>
@@ -8979,12 +9247,13 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           />
                                       </div>
                                       <div>
-                                          <label className="text-[10px] font-bold uppercase text-slate-400">Days (30/90/365)</label>
+                                          <label className="text-[10px] font-bold uppercase text-slate-400">XP Boost (1.2)</label>
                                           <input
                                               type="number"
-                                              placeholder="30"
-                                              value={newCspDurationDays}
-                                              onChange={e => setNewCspDurationDays(e.target.value)}
+                                              step="0.1"
+                                              placeholder="1.1"
+                                              value={newCspScoreMultiplier}
+                                              onChange={e => setNewCspScoreMultiplier(e.target.value)}
                                               className="w-full p-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white"
                                           />
                                       </div>
@@ -9361,7 +9630,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                   {activeTab === 'CONFIG_EXTERNAL_APPS' && (
                       <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                           <h4 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Globe size={18} /> Manage External Apps</h4>
-                          <p className="text-xs text-slate-600 mb-4">Add up to 20 apps/websites. These will appear in the Student Dashboard.</p>
+                           <p className="text-xs text-slate-600 mb-4">Add up to 20 apps/websites. Students ko ye 3-dot menu ke Utilities section mein dikhenge. Unlock ke liye Credits aur Diamonds dono set kar sakte hain.</p>
                           
                           <div className="space-y-3 mb-6">
                               {(localSettings.externalApps || []).map((app, idx) => (
@@ -9386,8 +9655,8 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                   }} 
                                               /> Lock
                                           </label>
-                                          <div className="flex items-center gap-1 ml-auto">
-                                              <span className="font-bold text-slate-600">Price:</span>
+                                           <div className="flex items-center gap-1 ml-auto">
+                                               <span className="font-bold text-slate-600">CR:</span>
                                               <input 
                                                   type="number" 
                                                   value={app.creditCost} 
@@ -9397,6 +9666,17 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                   }} 
                                                   className="w-16 p-1 border rounded text-center font-bold"
                                               />
+                                               <span className="font-bold text-sky-600 ml-1">💎:</span>
+                                               <input
+                                                   type="number"
+                                                   min="0"
+                                                   value={app.diamondCost || 0}
+                                                   onChange={e => {
+                                                       const updated = localSettings.externalApps!.map((a, i) => i === idx ? { ...a, diamondCost: Number(e.target.value) } : a);
+                                                       setLocalSettings({...localSettings, externalApps: updated});
+                                                   }}
+                                                   className="w-16 p-1 border border-sky-200 rounded text-center font-bold text-sky-700"
+                                               />
                                           </div>
                                       </div>
                                   </div>
@@ -9411,7 +9691,8 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           name: 'New App',
                                           url: 'https://google.com',
                                           isLocked: false,
-                                          creditCost: 0
+                                           creditCost: 0,
+                                           diamondCost: 0,
                                       };
                                       setLocalSettings({...localSettings, externalApps: [...(localSettings.externalApps || []), newApp]});
                                   }}
@@ -9504,137 +9785,6 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                <span className="text-sm text-slate-600">Hours</span>
                                <span className="text-xs text-slate-400">(1–168 hours = max 7 days)</span>
                              </div>
-                           </div>
-
-                           {/* Store Visit Discount Setting */}
-                           <div className="bg-white p-4 rounded-xl border border-green-200 shadow-sm space-y-4">
-                             {/* Header + Master Toggle */}
-                             <div className="flex items-start justify-between gap-3">
-                               <div>
-                                 <h5 className="font-bold text-sm text-slate-800 flex items-center gap-2">🏷️ Store Visit Discount</h5>
-                                 <p className="text-xs text-slate-500 mt-1">Store visit count ke hisab se automatic discount milega — jitna zyada visit, utna zyada off. Mailbox coupon alag hai yeh direct Store mein apply hoga.</p>
-                               </div>
-                               <button
-                                 onClick={() => setLocalSettings({ ...localSettings, storeVisitDiscountEnabled: !(localSettings.storeVisitDiscountEnabled ?? false) })}
-                                 className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-black transition-all border ${localSettings.storeVisitDiscountEnabled ? 'bg-green-500 text-white border-green-600' : 'bg-slate-100 text-slate-500 border-slate-300'}`}
-                               >
-                                 <span className={`w-2 h-2 rounded-full ${localSettings.storeVisitDiscountEnabled ? 'bg-white' : 'bg-slate-400'}`} />
-                                 {localSettings.storeVisitDiscountEnabled ? 'ON' : 'OFF'}
-                               </button>
-                             </div>
-
-                             {localSettings.storeVisitDiscountEnabled && (<>
-                               {/* User Tier Selection */}
-                               <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
-                                 <p className="text-xs font-black text-slate-700 mb-2">👥 Kis Tier Ko Discount Milega?</p>
-                                 <div className="flex gap-2 flex-wrap">
-                                   {(['FREE', 'BASIC', 'ULTRA'] as const).map(tier => {
-                                     const currentTiers: ('FREE'|'BASIC'|'ULTRA')[] = localSettings.storeVisitDiscountTiers || ['FREE'];
-                                     const isChecked = currentTiers.includes(tier);
-                                     return (
-                                       <button
-                                         key={tier}
-                                         onClick={() => {
-                                           const updated = isChecked
-                                             ? currentTiers.filter(t => t !== tier)
-                                             : [...currentTiers, tier];
-                                           setLocalSettings({ ...localSettings, storeVisitDiscountTiers: updated });
-                                         }}
-                                         className={`px-3 py-1.5 rounded-full text-xs font-black border transition-all ${
-                                           isChecked
-                                             ? tier === 'FREE' ? 'bg-emerald-500 text-white border-emerald-600'
-                                               : tier === 'BASIC' ? 'bg-sky-500 text-white border-sky-600'
-                                               : 'bg-purple-500 text-white border-purple-600'
-                                             : 'bg-white text-slate-500 border-slate-300'
-                                         }`}
-                                       >
-                                         {isChecked ? '✓ ' : ''}{tier === 'FREE' ? 'Free User' : tier === 'BASIC' ? 'Basic (PRO)' : 'Ultra (MAX)'}
-                                       </button>
-                                     );
-                                   })}
-                                 </div>
-                                 <p className="text-[10px] text-slate-400 mt-1.5">Select karo ki discount kis subscription level ke users ko milegi.</p>
-                               </div>
-
-                               {/* Visit Rules */}
-                               <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
-                                 <div className="flex items-center justify-between mb-2">
-                                   <p className="text-xs font-black text-slate-700">📊 Visit Count → Discount Rules</p>
-                                   <button
-                                     onClick={() => {
-                                       const rules = [...(localSettings.storeVisitDiscountRules || [])];
-                                       const maxVisits = rules.length > 0 ? Math.max(...rules.map(r => r.visits)) : 0;
-                                       rules.push({ visits: maxVisits + 5, discountPercent: 5 });
-                                       setLocalSettings({ ...localSettings, storeVisitDiscountRules: rules });
-                                     }}
-                                     className="text-[10px] font-black bg-green-100 text-green-700 border border-green-300 px-2 py-1 rounded-lg hover:bg-green-200 transition"
-                                   >
-                                     + Rule Add Karo
-                                   </button>
-                                 </div>
-                                 <p className="text-[10px] text-slate-400 mb-2">Jab user X baar Store visit kare toh Y% discount milega. Sab rules mein se highest matching rule apply hoga.</p>
-
-                                 {(localSettings.storeVisitDiscountRules || []).length === 0 && (
-                                   <p className="text-[11px] text-slate-400 italic py-2 text-center">Koi rule nahi. "+ Rule Add Karo" click karein.</p>
-                                 )}
-
-                                 <div className="space-y-2">
-                                   {(localSettings.storeVisitDiscountRules || [])
-                                     .slice()
-                                     .sort((a, b) => a.visits - b.visits)
-                                     .map((rule, rIdx) => {
-                                       const allRules = localSettings.storeVisitDiscountRules || [];
-                                       const origIdx = allRules.findIndex(r => r.visits === rule.visits && r.discountPercent === rule.discountPercent);
-                                       return (
-                                         <div key={rIdx} className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl p-2.5">
-                                           <span className="text-[10px] text-slate-500 font-bold shrink-0">Visits ≥</span>
-                                           <input
-                                             type="number" min={1} max={9999}
-                                             value={rule.visits}
-                                             onChange={e => {
-                                               const updated = [...allRules];
-                                               updated[origIdx] = { ...updated[origIdx], visits: Number(e.target.value) };
-                                               setLocalSettings({ ...localSettings, storeVisitDiscountRules: updated });
-                                             }}
-                                             className="w-16 p-1.5 border border-slate-200 rounded-lg text-sm font-black text-center"
-                                           />
-                                           <span className="text-[10px] text-slate-500 font-bold shrink-0">→</span>
-                                           <input
-                                             type="number" min={1} max={100}
-                                             value={rule.discountPercent}
-                                             onChange={e => {
-                                               const updated = [...allRules];
-                                               updated[origIdx] = { ...updated[origIdx], discountPercent: Number(e.target.value) };
-                                               setLocalSettings({ ...localSettings, storeVisitDiscountRules: updated });
-                                             }}
-                                             className="w-16 p-1.5 border border-slate-200 rounded-lg text-sm font-black text-center"
-                                           />
-                                           <span className="text-[10px] text-slate-500 font-bold shrink-0">% OFF</span>
-                                           <button
-                                             onClick={() => {
-                                               const updated = allRules.filter((_, i) => i !== origIdx);
-                                               setLocalSettings({ ...localSettings, storeVisitDiscountRules: updated });
-                                             }}
-                                             className="ml-auto text-red-400 hover:text-red-600 text-xs font-black"
-                                           >✕</button>
-                                         </div>
-                                       );
-                                     })}
-                                 </div>
-                               </div>
-
-                               {/* Legacy mailbox % (kept for backward compat) */}
-                               <div className="flex items-center gap-3">
-                                 <span className="text-xs text-slate-600 font-bold shrink-0">📬 Mailbox Coupon %</span>
-                                 <input
-                                   type="number" min={1} max={100}
-                                   value={localSettings.storeVisitDiscountPercent ?? 10}
-                                   onChange={e => setLocalSettings({ ...localSettings, storeVisitDiscountPercent: Number(e.target.value) })}
-                                   className="w-20 p-2 border rounded-lg text-sm font-bold"
-                                 />
-                                 <span className="text-xs text-slate-400">(Study streak mailbox coupon ke liye)</span>
-                               </div>
-                             </>)}
                            </div>
 
                            {/* MCQ Reward Rules */}
@@ -15356,7 +15506,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           </div>
                                           <div className="space-y-1">
                                               <label className="text-[10px] font-bold text-slate-500 uppercase">Target Class</label>
-                                              <div className="grid grid-cols-4 gap-1.5">
+                                              <div className="grid grid-cols-5 gap-1.5">
                                                   {(['6','7','8','9','10','11','12'] as string[]).map(c => (
                                                       <button key={c} onClick={() => { setBnMcTargetClass(c); setBnMcTargetSubject('biology'); }}
                                                           className={`py-2 rounded-xl text-xs font-black transition-all active:scale-95 ${bnMcTargetClass === c ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-700 border border-indigo-100'}`}
@@ -15386,7 +15536,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           </div>
                                           <div className="space-y-1">
                                               <label className="text-[10px] font-bold text-slate-500 uppercase">🏫 Board (optional)</label>
-                                              <div className="grid grid-cols-4 gap-1.5">
+                                              <div className="grid grid-cols-5 gap-1.5">
                                                   {([
                                                       { id: '' as const,         label: '🌐 All' },
                                                       { id: 'NCERT_EN' as const, label: '📘 EN' },
@@ -17578,54 +17728,92 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                           </div>
                       )}
                       {broadcastType === 'DIAMOND_SUBSCRIPTION' && (
-                          <div className="flex flex-col gap-2 p-3 bg-sky-50/70 rounded-xl border border-sky-200 col-span-full">
-                              <label className="text-[10px] font-bold text-sky-800 uppercase block mb-1">💎 Diamond Subscription Plan</label>
-                              <select
-                                  value={broadcastDiamondSubPlan}
-                                  onChange={e => setBroadcastDiamondSubPlan(e.target.value)}
-                                  className="w-full p-2.5 rounded-xl border border-sky-300 bg-white font-bold text-sm text-sky-900"
-                              >
-                                  <option value="7_DAYS_PASS">7 Days Pass (+10 💎 / day = 70 total)</option>
-                                  <option value="30_DAYS_PASS">Monthly Pass (+25 💎 / day = 750 total)</option>
-                              </select>
-                              <p className="text-[10px] text-sky-700">Subscribers ko daily diamonds claim karne ka pass milega.</p>
+                          <div className="flex flex-col gap-3 p-3 bg-sky-50/70 rounded-xl border border-sky-200 col-span-full">
+                              <label className="text-[10px] font-bold text-sky-800 uppercase block">💎 Diamond Subscription Plan</label>
+                              <div className="grid grid-cols-2 gap-2">
+                                  {(localSettings.diamondTemplates || [
+    { id: 'starter_diamond', name: 'Starter Diamond Pass', icon: '💎', dailyDiamonds: 10, features: [] },
+    { id: 'active_diamond', name: 'Active Diamond Pass', icon: '⚡', dailyDiamonds: 20, features: [] },
+    { id: 'premium_diamond', name: 'Premium Diamond Pass', icon: '🌟', dailyDiamonds: 30, features: [] },
+    { id: 'elite_diamond', name: 'Elite Diamond Pass', icon: '👑', dailyDiamonds: 50, features: [] }
+]).map(p => (
+                                      <button 
+                                          key={p.id}
+                                          type="button"
+                                          onClick={() => {
+                                              setBroadcastDiamondSubPlan(p.id);
+                                              setBroadcastDiamondSubDaily(p.dailyDiamonds);
+                                              setBroadcastDiamondSubName(p.name);
+                                          }}
+                                          className={`p-2 rounded font-bold text-[11px] border leading-tight ${broadcastDiamondSubPlan === p.id ? 'bg-sky-100 border-sky-400 text-sky-900 shadow-sm' : 'bg-white border-sky-100 text-sky-600 hover:bg-sky-50'}`}>
+                                          <div className="text-sky-700 truncate">{p.name.replace('Diamond Pass', 'Pass')}</div>
+                                          <div className="opacity-80 font-normal">+{p.dailyDiamonds} 💎/d</div>
+                                      </button>
+                                  ))}
+                              </div>
+                              <div className="flex items-center gap-2 mt-1">
+                                  <span className="text-[10px] font-bold text-sky-600 uppercase w-16">Validity:</span>
+                                  <div className="flex-1 grid grid-cols-5 gap-1">
+                                      {(localSettings.diamondDurations || [
+                                          { label: '7D', days: 7 },
+                                          { label: '1M', days: 30 },
+                                          { label: '3M', days: 90 },
+                                          { label: '6M', days: 180 },
+                                          { label: '1Y', days: 365 }
+                                      ]).map(opt => (
+                                          <button 
+                                              key={opt.days}
+                                              type="button"
+                                              onClick={() => setBroadcastDiamondSubDays(opt.days)}
+                                              className={`py-1.5 rounded font-bold text-[10px] border ${broadcastDiamondSubDays === opt.days ? 'bg-sky-700 border-sky-800 text-white shadow-sm' : 'bg-white border-sky-200 text-sky-600 hover:bg-sky-50'}`}>
+                                              {opt.label}
+                                          </button>
+                                      ))}
+                                  </div>
+                              </div>
+                              <p className="text-[9px] text-sky-700 mt-1">💎 Redeemer ko har din +{broadcastDiamondSubDaily} diamonds milenge ({broadcastDiamondSubDays} din tak).</p>
                           </div>
                       )}
                       {broadcastType === 'CREDIT_SUBSCRIPTION' && (
-                          <div className="flex flex-col gap-2 p-3 bg-indigo-50/60 rounded-xl border border-indigo-200 col-span-full">
-                              <div>
-                                  <label className="text-[10px] font-bold text-indigo-700 uppercase block mb-1">Select Credit Plan or Custom</label>
-                                  <select
-                                      value={broadcastCreditPlanId}
-                                      onChange={e => {
-                                          const val = e.target.value;
-                                          setBroadcastCreditPlanId(val);
-                                          const found = (localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS).find(p => p.id === val);
-                                          if (found) {
-                                              setBroadcastCreditDaily(found.dailyCredits);
-                                              setBroadcastCreditDays(found.durationDays);
-                                              setBroadcastCreditPlanName(found.name);
-                                          }
-                                      }}
-                                      className="w-full p-2.5 rounded-xl border border-indigo-200 bg-white font-bold text-sm"
-                                  >
-                                      <option value="">Custom Daily Pass</option>
-                                      {(localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS).map(p => (
-                                          <option key={p.id} value={p.id}>{p.name} — +{p.dailyCredits} CR/d ({p.durationDays} Days)</option>
-                                      ))}
-                                  </select>
-                              </div>
+                          <div className="flex flex-col gap-3 p-3 bg-indigo-50/60 rounded-xl border border-indigo-200 col-span-full">
+                              <label className="text-[10px] font-bold text-indigo-700 uppercase block">⚡ Select Credit Plan</label>
                               <div className="grid grid-cols-2 gap-2">
-                                  <div>
-                                      <label className="text-[10px] font-bold text-indigo-700 uppercase block mb-1">🪙 Daily Credits</label>
-                                      <input type="number" min={1} value={broadcastCreditDaily} onChange={e => setBroadcastCreditDaily(Number(e.target.value))} className="w-full p-2.5 rounded-xl border border-indigo-200 font-bold bg-white text-sm" />
-                                  </div>
-                                  <div>
-                                      <label className="text-[10px] font-bold text-indigo-700 uppercase block mb-1">📅 Duration (Days)</label>
-                                      <input type="number" min={1} value={broadcastCreditDays} onChange={e => setBroadcastCreditDays(Number(e.target.value))} className="w-full p-2.5 rounded-xl border border-indigo-200 font-bold bg-white text-sm" />
+                                  {(localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS).map(p => (
+                                      <button 
+                                          key={p.id}
+                                          type="button"
+                                          onClick={() => {
+                                              setBroadcastCreditPlanId(p.id);
+                                              setBroadcastCreditDaily(p.dailyCredits);
+                                              setBroadcastCreditPlanName(p.name);
+                                          }}
+                                          className={`p-2 rounded font-bold text-[11px] border leading-tight ${broadcastCreditPlanId === p.id ? 'bg-indigo-100 border-indigo-400 text-indigo-900 shadow-sm' : 'bg-white border-indigo-100 text-indigo-600 hover:bg-indigo-50'}`}>
+                                          <div className="text-indigo-700 truncate">{p.name.replace('Credit Pass', 'Pass')}</div>
+                                          <div className="opacity-80 font-normal">+{p.dailyCredits} CR/d</div>
+                                      </button>
+                                  ))}
+                              </div>
+                              <div className="flex items-center gap-2 mt-1">
+                                  <span className="text-[10px] font-bold text-indigo-600 uppercase w-16">Validity:</span>
+                                  <div className="flex-1 grid grid-cols-5 gap-1">
+                                      {(localSettings.diamondDurations || [
+                                          { label: '7D', days: 7 },
+                                          { label: '1M', days: 30 },
+                                          { label: '3M', days: 90 },
+                                          { label: '6M', days: 180 },
+                                          { label: '1Y', days: 365 }
+                                      ]).map(opt => (
+                                          <button 
+                                              key={opt.days}
+                                              type="button"
+                                              onClick={() => setBroadcastCreditDays(opt.days)}
+                                              className={`py-1.5 rounded font-bold text-[11px] border ${broadcastCreditDays === opt.days ? 'bg-indigo-700 border-indigo-800 text-white shadow-sm' : 'bg-white border-indigo-200 text-indigo-600 hover:bg-indigo-50'}`}>
+                                              {opt.label}
+                                          </button>
+                                      ))}
                                   </div>
                               </div>
-                              <p className="text-[9px] text-indigo-700 font-medium">⚡ Saare recipients ko roz +{broadcastCreditDaily} credits milenge ({broadcastCreditDays} din tak Store me claim karne ke liye).</p>
+                              <p className="text-[9px] text-indigo-700 font-medium mt-1">⚡ Redeemer ko har din +{broadcastCreditDaily} credits milenge ({broadcastCreditDays} din tak).</p>
                           </div>
                       )}
                       {broadcastType === 'SCORE' && (
@@ -17899,40 +18087,45 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                               <p className="text-[10px] text-slate-500 mt-1">Student ko redeem karne par yeh animation permanently milegi top bar + profile card pe.</p>
                           </div>
                       ) : newCodeType === 'CREDIT_SUBSCRIPTION' ? (
-                          <div className="flex flex-col gap-2 p-3 bg-white rounded-xl border border-pink-200">
-                              <div>
-                                  <label className="text-xs font-bold text-pink-700 uppercase block mb-1">Select Credit Plan or Custom</label>
-                                  <select
-                                      value={newCodeCreditPlanId}
-                                      onChange={e => {
-                                          const val = e.target.value;
-                                          setNewCodeCreditPlanId(val);
-                                          const found = (localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS).find(p => p.id === val);
-                                          if (found) {
-                                              setNewCodeCreditDaily(found.dailyCredits);
-                                              setNewCodeCreditDays(found.durationDays);
-                                              setNewCodeCreditPlanName(found.name);
-                                          }
-                                      }}
-                                      className="p-3 rounded-xl border border-pink-200 bg-white font-bold text-sm w-full"
-                                  >
-                                      <option value="">Custom Daily Pass</option>
-                                      {(localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS).map(p => (
-                                          <option key={p.id} value={p.id}>{p.name} — +{p.dailyCredits} CR/d ({p.durationDays} Days)</option>
+                          <div className="flex flex-col gap-3 p-3 bg-white rounded-xl border border-pink-200">
+                              <label className="text-xs font-bold text-pink-700 uppercase block">⚡ Select Credit Plan</label>
+                              <div className="grid grid-cols-2 gap-2">
+                                  {(localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS).map(p => (
+                                      <button 
+                                          key={p.id}
+                                          type="button"
+                                          onClick={() => {
+                                              setNewCodeCreditPlanId(p.id);
+                                              setNewCodeCreditDaily(p.dailyCredits);
+                                              setNewCodeCreditPlanName(p.name);
+                                          }}
+                                          className={`p-2 rounded font-bold text-[11px] border leading-tight ${newCodeCreditPlanId === p.id ? 'bg-pink-50 border-pink-400 text-pink-900 shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                                          <div className="text-pink-600 truncate">{p.name.replace('Credit Pass', 'Pass')}</div>
+                                          <div className="opacity-80 font-normal">+{p.dailyCredits} CR/d</div>
+                                      </button>
+                                  ))}
+                              </div>
+                              <div className="flex items-center gap-2 mt-1">
+                                  <span className="text-[10px] font-bold text-slate-500 uppercase w-16">Validity:</span>
+                                  <div className="flex-1 grid grid-cols-5 gap-1">
+                                      {(localSettings.diamondDurations || [
+                                          { label: '7D', days: 7 },
+                                          { label: '1M', days: 30 },
+                                          { label: '3M', days: 90 },
+                                          { label: '6M', days: 180 },
+                                          { label: '1Y', days: 365 }
+                                      ]).map(opt => (
+                                          <button 
+                                              key={opt.days}
+                                              type="button"
+                                              onClick={() => setNewCodeCreditDays(opt.days)}
+                                              className={`py-1.5 rounded font-bold text-[11px] border ${newCodeCreditDays === opt.days ? 'bg-pink-600 border-pink-700 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                                              {opt.label}
+                                          </button>
                                       ))}
-                                  </select>
-                              </div>
-                              <div className="flex gap-2">
-                                  <div>
-                                      <label className="text-[10px] font-bold text-pink-700 uppercase block mb-1">🪙 Daily Credits</label>
-                                      <input type="number" min={1} value={newCodeCreditDaily} onChange={e => setNewCodeCreditDaily(Number(e.target.value))} className="p-2.5 rounded-xl border border-pink-200 w-28 font-bold text-sm" />
-                                  </div>
-                                  <div>
-                                      <label className="text-[10px] font-bold text-pink-700 uppercase block mb-1">📅 Days</label>
-                                      <input type="number" min={1} value={newCodeCreditDays} onChange={e => setNewCodeCreditDays(Number(e.target.value))} className="p-2.5 rounded-xl border border-pink-200 w-24 font-bold text-sm" />
                                   </div>
                               </div>
-                              <p className="text-[10px] text-pink-700 font-semibold">⚡ Redeemer ko har din +{newCodeCreditDaily} Credits milenge Store se claim karne ke liye {newCodeCreditDays} dino tak.</p>
+                              <p className="text-[10px] text-pink-700 font-semibold mt-1">⚡ Redeemer ko har din +{newCodeCreditDaily} credits milenge ({newCodeCreditDays} din tak).</p>
                           </div>
                       ) : newCodeType === 'CREDITS' ? (
                           <div>
@@ -17946,17 +18139,50 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                               <p className="text-[10px] text-sky-600 mt-1">Instant Diamonds milenge redeem karne par.</p>
                           </div>
                       ) : newCodeType === 'DIAMOND_SUBSCRIPTION' ? (
-                          <div className="flex flex-col gap-2">
-                              <label className="text-xs font-bold text-sky-700 uppercase block mb-1">💎 Diamond Subscription Plan</label>
-                              <select 
-                                  value={newCodeDiamondSubPlan} 
-                                  onChange={e => setNewCodeDiamondSubPlan(e.target.value)} 
-                                  className="p-3 rounded-xl border border-sky-300 font-bold text-sky-900 bg-white"
-                              >
-                                  <option value="7_DAYS_PASS">7 Days Pass (+10 💎 / day = 70 total)</option>
-                                  <option value="30_DAYS_PASS">Monthly Pass (+25 💎 / day = 750 total)</option>
-                              </select>
-                              <p className="text-[10px] text-sky-600">Redeemer ko daily diamonds claim karne ka pass active hoga.</p>
+                          <div className="flex flex-col gap-3">
+                              <label className="text-xs font-bold text-sky-700 uppercase block">💎 Diamond Subscription Plan</label>
+                              <div className="grid grid-cols-2 gap-2">
+                                  {(localSettings.diamondTemplates || [
+    { id: 'starter_diamond', name: 'Starter Diamond Pass', icon: '💎', dailyDiamonds: 10, features: [] },
+    { id: 'active_diamond', name: 'Active Diamond Pass', icon: '⚡', dailyDiamonds: 20, features: [] },
+    { id: 'premium_diamond', name: 'Premium Diamond Pass', icon: '🌟', dailyDiamonds: 30, features: [] },
+    { id: 'elite_diamond', name: 'Elite Diamond Pass', icon: '👑', dailyDiamonds: 50, features: [] }
+]).map(p => (
+                                      <button 
+                                          key={p.id}
+                                          type="button"
+                                          onClick={() => {
+                                              setNewCodeDiamondSubPlan(p.id);
+                                              setNewCodeDiamondSubDaily(p.dailyDiamonds);
+                                              setNewCodeDiamondSubName(p.name);
+                                          }}
+                                          className={`p-2 rounded font-bold text-[11px] border leading-tight ${newCodeDiamondSubPlan === p.id ? 'bg-sky-50 border-sky-400 text-sky-900 shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                                          <div className="text-sky-600 truncate">{p.name.replace('Diamond Pass', 'Pass')}</div>
+                                          <div className="opacity-80 font-normal">+{p.dailyDiamonds} 💎/d</div>
+                                      </button>
+                                  ))}
+                              </div>
+                              <div className="flex items-center gap-2 mt-1">
+                                  <span className="text-[10px] font-bold text-slate-500 uppercase w-16">Validity:</span>
+                                  <div className="flex-1 grid grid-cols-5 gap-1">
+                                      {(localSettings.diamondDurations || [
+                                          { label: '7D', days: 7 },
+                                          { label: '1M', days: 30 },
+                                          { label: '3M', days: 90 },
+                                          { label: '6M', days: 180 },
+                                          { label: '1Y', days: 365 }
+                                      ]).map(opt => (
+                                          <button 
+                                              key={opt.days}
+                                              type="button"
+                                              onClick={() => setNewCodeDiamondSubDays(opt.days)}
+                                              className={`py-1.5 rounded font-bold text-[10px] border ${newCodeDiamondSubDays === opt.days ? 'bg-sky-600 border-sky-700 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                                              {opt.label}
+                                          </button>
+                                      ))}
+                                  </div>
+                              </div>
+                              <p className="text-[10px] text-sky-600">Redeemer ko har din +{newCodeDiamondSubDaily} diamonds milenge ({newCodeDiamondSubDays} din tak).</p>
                           </div>
                       ) : newCodeType === 'SCORE' ? (
                           <div>
@@ -19170,28 +19396,58 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                           ) : (
                               <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
                                   <span className="text-xs text-slate-500 italic block">No active daily credit pass</span>
-                                  <div className="flex flex-col gap-2">
-                                      <div className="flex gap-2">
-                                          <select
-                                              value={selectedUserCreditSubPlanId}
-                                              onChange={e => setSelectedUserCreditSubPlanId(e.target.value)}
-                                              className="flex-1 p-2 border rounded-lg text-xs bg-white">
-                                              <option value="">-- Credit Plan Chunein --</option>
-                                              {(localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS).map(p => (
-                                                  <option key={p.id} value={p.id}>
-                                                      {p.name} (Base ₹{p.price} · +{p.dailyCredits} CR/d)
-                                                  </option>
+                                  <div className="flex flex-col gap-3">
+                                      <div className="grid grid-cols-2 gap-2">
+                                          {(localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS).map(p => (
+                                              <button 
+                                                  key={p.id}
+                                                  type="button"
+                                                  onClick={() => setSelectedUserCreditSubPlanId(p.id)}
+                                                  className={`p-2 rounded font-bold text-[11px] border leading-tight ${selectedUserCreditSubPlanId === p.id ? 'bg-amber-100 border-amber-400 text-amber-900 shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                                                  <div className="text-amber-600 truncate">{p.name.replace('Credit Pass', 'Pass')}</div>
+                                                  <div className="opacity-80 font-normal">+{p.dailyCredits} CR/d</div>
+                                              </button>
+                                          ))}
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                          <span className="text-[10px] font-bold text-slate-500 uppercase w-16">Validity:</span>
+                                          <div className="flex-1 grid grid-cols-5 gap-1">
+                                              {[
+                                                  { label: '1W', days: 7 },
+                                                  { label: '1M', days: 30 },
+                                                  { label: '3M', days: 90 },
+                                                  { label: '6M', days: 180 },
+                                                  { label: '1Y', days: 365 }
+                                              ].map(opt => (
+                                                  <button 
+                                                      key={opt.days}
+                                                      type="button"
+                                                      onClick={() => setSelectedUserCreditSubDuration(opt.days)}
+                                                      className={`py-1.5 rounded font-bold text-[11px] border ${selectedUserCreditSubDuration === opt.days ? 'bg-slate-800 border-slate-900 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                                                      {opt.label}
+                                                  </button>
                                               ))}
-                                          </select>
-                                          <select
-                                              value={selectedUserCreditSubDuration}
-                                              onChange={e => setSelectedUserCreditSubDuration(Number(e.target.value))}
-                                              className="w-36 p-2 border rounded-lg text-xs bg-white font-medium">
-                                              <option value="30">1 Month (30d · 5% off)</option>
-                                              <option value="90">3 Months (90d · 10% off)</option>
-                                              <option value="180">6 Months (180d · 15% off)</option>
-                                              <option value="365">1 Year (365d · 25% off)</option>
-                                          </select>
+                                          </div>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                          <span className="text-[10px] font-bold text-slate-500 uppercase w-16">Validity:</span>
+                                          <div className="flex-1 grid grid-cols-5 gap-1">
+                                              {[
+                                                  { label: '1W', days: 7 },
+                                                  { label: '1M', days: 30 },
+                                                  { label: '3M', days: 90 },
+                                                  { label: '6M', days: 180 },
+                                                  { label: '1Y', days: 365 }
+                                              ].map(opt => (
+                                                  <button 
+                                                      key={opt.days}
+                                                      type="button"
+                                                      onClick={() => setSelectedUserDiamondSubDuration(opt.days)}
+                                                      className={`py-1.5 rounded font-bold text-[11px] border ${selectedUserDiamondSubDuration === opt.days ? 'bg-sky-800 border-sky-900 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                                                      {opt.label}
+                                                  </button>
+                                              ))}
+                                          </div>
                                       </div>
                                       <button
                                           type="button"
@@ -19264,23 +19520,61 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                           ) : (
                               <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
                                   <span className="text-xs text-slate-500 italic block">No active diamond subscription pass</span>
-                                  <div className="flex gap-2">
-                                      <select
-                                          value={selectedUserDiamondSubPlanId}
-                                          onChange={e => setSelectedUserDiamondSubPlanId(e.target.value)}
-                                          className="flex-1 p-2 border border-sky-200 rounded-lg text-xs bg-white font-medium">
-                                          {DIAMOND_SUBSCRIPTION_PLANS.map(p => (
-                                              <option key={p.id} value={p.id}>
-                                                  {p.name} (+{p.dailyDiamonds} 💎/d · {p.durationDays} Days · Total {p.totalDiamonds} 💎)
-                                              </option>
+                                  <div className="flex flex-col gap-3">
+                                      <div className="grid grid-cols-2 gap-2">
+                                          {(localSettings.diamondTemplates || [
+    { id: 'starter_diamond', name: 'Starter Diamond Pass', icon: '💎', dailyDiamonds: 10, features: [] },
+    { id: 'active_diamond', name: 'Active Diamond Pass', icon: '⚡', dailyDiamonds: 20, features: [] },
+    { id: 'premium_diamond', name: 'Premium Diamond Pass', icon: '🌟', dailyDiamonds: 30, features: [] },
+    { id: 'elite_diamond', name: 'Elite Diamond Pass', icon: '👑', dailyDiamonds: 50, features: [] }
+]).map(p => (
+                                              <button 
+                                                  key={p.id}
+                                                  type="button"
+                                                  onClick={() => setSelectedUserDiamondSubPlanId(p.id)}
+                                                  className={`p-2 rounded font-bold text-[11px] border leading-tight ${selectedUserDiamondSubPlanId === p.id ? 'bg-sky-100 border-sky-400 text-sky-900 shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                                                  <div className="text-sky-600 truncate">{p.name.replace('Diamond Pass', 'Pass')}</div>
+                                                  <div className="opacity-80 font-normal">+{p.dailyDiamonds}💎/d</div>
+                                              </button>
                                           ))}
-                                      </select>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                          <span className="text-[10px] font-bold text-slate-500 uppercase w-16">Validity:</span>
+                                          <div className="flex-1 grid grid-cols-5 gap-1">
+                                              {[
+                                                  { label: '1W', days: 7 },
+                                                  { label: '1M', days: 30 },
+                                                  { label: '3M', days: 90 },
+                                                  { label: '6M', days: 180 },
+                                                  { label: '1Y', days: 365 }
+                                              ].map(opt => (
+                                                  <button 
+                                                      key={opt.days}
+                                                      type="button"
+                                                      onClick={() => setSelectedUserDiamondSubDuration(opt.days)}
+                                                      className={`py-1.5 rounded font-bold text-[11px] border ${selectedUserDiamondSubDuration === opt.days ? 'bg-sky-800 border-sky-900 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                                                      {opt.label}
+                                                  </button>
+                                              ))}
+                                          </div>
+                                      </div>
                                       <button
                                           type="button"
                                           onClick={async () => {
-                                              const plan = DIAMOND_SUBSCRIPTION_PLANS.find(p => p.id === selectedUserDiamondSubPlanId) || DIAMOND_SUBSCRIPTION_PLANS[0];
+                                              const plan = (localSettings.diamondTemplates || [
+    { id: 'starter_diamond', name: 'Starter Diamond Pass', icon: '💎', dailyDiamonds: 10, features: [] },
+    { id: 'active_diamond', name: 'Active Diamond Pass', icon: '⚡', dailyDiamonds: 20, features: [] },
+    { id: 'premium_diamond', name: 'Premium Diamond Pass', icon: '🌟', dailyDiamonds: 30, features: [] },
+    { id: 'elite_diamond', name: 'Elite Diamond Pass', icon: '👑', dailyDiamonds: 50, features: [] }
+]).find(p => p.id === selectedUserDiamondSubPlanId) || (localSettings.diamondTemplates || [
+    { id: 'starter_diamond', name: 'Starter Diamond Pass', icon: '💎', dailyDiamonds: 10, features: [] },
+    { id: 'active_diamond', name: 'Active Diamond Pass', icon: '⚡', dailyDiamonds: 20, features: [] },
+    { id: 'premium_diamond', name: 'Premium Diamond Pass', icon: '🌟', dailyDiamonds: 30, features: [] },
+    { id: 'elite_diamond', name: 'Elite Diamond Pass', icon: '👑', dailyDiamonds: 50, features: [] }
+])[0];
                                               if (!confirm(`Kya aap ${editingUser.name} ko "${plan.name}" Diamond Pass grant karna chahte hain?`)) return;
-                                              const updated = activateDiamondSub(editingUser, plan.id);
+                                              const durDays = selectedUserDiamondSubDuration || 30;
+                                              const updated = activateDiamondSub(editingUser, plan.id, durDays);
                                               const ok = await saveUserToLive(updated);
                                               if (ok) {
                                                   setEditingUser(updated);

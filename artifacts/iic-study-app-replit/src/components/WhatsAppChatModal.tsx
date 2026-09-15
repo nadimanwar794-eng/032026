@@ -53,7 +53,7 @@ import {
   ChatMessage,
   ChatGroup,
   FriendRequest,
-  SEEDED_CONTACTS,
+  
   SEEDED_GROUPS,
   getDirectConversationId,
   sendPrivateMessage,
@@ -126,30 +126,48 @@ export const getStudentSubscriptionTier = (student: ChatContact): 'ULTRA' | 'BAS
   return 'FREE';
 };
 
-// Daily message limit: Free -> 50, Basic -> 200, Ultra -> Unlimited (Infinity)
+// Daily message limit: Free -> 50, Basic -> 100, Ultra -> 300
 export const getBaseDailyMessageLimit = (tier: 'FREE' | 'BASIC' | 'ULTRA'): number => {
   switch (tier) {
     case 'ULTRA':
-      return Infinity;
+      return 300;
     case 'BASIC':
-      return 200;
+      return 100;
     case 'FREE':
     default:
       return 50;
   }
 };
 
-// Friend limit: Free -> 10, Basic -> 20, Ultra -> 40
+// Friend limit: Free -> 10, Basic -> 20, Ultra -> 50 (capped at 50 max)
 export const getBaseFriendLimit = (tier: 'FREE' | 'BASIC' | 'ULTRA'): number => {
   switch (tier) {
     case 'ULTRA':
-      return 40;
+      return 50;
     case 'BASIC':
       return 20;
     case 'FREE':
     default:
       return 10;
   }
+};
+
+export const calculateTotalDailyMsgLimit = (tier: 'FREE' | 'BASIC' | 'ULTRA', expansions: number): number => {
+  const base = getBaseDailyMessageLimit(tier);
+  let total = base;
+  for (let i = 1; i <= expansions; i++) {
+    if (tier === 'FREE') {
+      total += (i === 1 ? 50 : 100);
+    } else {
+      total += 100;
+    }
+  }
+  return Math.min(500, total);
+};
+
+export const getNextMessageExpansionAmount = (tier: 'FREE' | 'BASIC' | 'ULTRA', currentExpansions: number): number => {
+  if (tier === 'FREE' && currentExpansions === 0) return 50;
+  return 100;
 };
 
 // Block limit: Free -> 10, Basic -> 20, Ultra -> 40
@@ -246,10 +264,10 @@ export const WhatsAppChatModal: React.FC<Props> = ({
     }
   });
   const baseFriendLimit = getBaseFriendLimit(currentTier);
-  const totalFriendLimit = baseFriendLimit + friendExpansions * 10;
+  const totalFriendLimit = Math.min(50, baseFriendLimit + friendExpansions * 10);
   const [showFriendLimitModal, setShowFriendLimitModal] = useState(false);
 
-  // 3. Daily message tracking & expansions (Free: 50, Basic: 200, Ultra: Unlimited)
+  // 3. Daily message tracking & expansions (Free: 50, Basic: 100, Ultra: 300, max 500)
   const getTodayStr = () => new Date().toISOString().slice(0, 10);
   const [dailyMessagesSent, setDailyMessagesSent] = useState<number>(() => {
     try {
@@ -270,7 +288,7 @@ export const WhatsAppChatModal: React.FC<Props> = ({
     }
   });
   const baseDailyMsgLimit = getBaseDailyMessageLimit(currentTier);
-  const totalDailyMsgLimit = baseDailyMsgLimit === Infinity ? Infinity : baseDailyMsgLimit + dailyMsgExpansions * 10;
+  const totalDailyMsgLimit = calculateTotalDailyMsgLimit(currentTier, dailyMsgExpansions);
   const isDailyMsgLimitReached = totalDailyMsgLimit !== Infinity && dailyMessagesSent >= totalDailyMsgLimit;
   const [showMessageLimitModal, setShowMessageLimitModal] = useState(false);
 
@@ -286,10 +304,16 @@ export const WhatsAppChatModal: React.FC<Props> = ({
 
   // Lists
   const [friends, setFriends] = useState<ChatContact[]>([]);
-  const [students, setStudents] = useState<ChatContact[]>(SEEDED_CONTACTS);
+  const [students, setStudents] = useState<ChatContact[]>([]);
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
   const [groups, setGroups] = useState<ChatGroup[]>(getLocalGroups());
+
   const [searchQuery, setSearchQuery] = useState('');
+  
+  const isUserFriend = (userId: string) => {
+    return friends.some(f => f.id === userId);
+  };
+
   const [showSearchInput, setShowSearchInput] = useState(false);
   const [findFriendQuery, setFindFriendQuery] = useState('');
   const [findFriendClassFilter, setFindFriendClassFilter] = useState<string>('ALL');
@@ -391,13 +415,13 @@ export const WhatsAppChatModal: React.FC<Props> = ({
     setTimeout(() => setBannerNotice(null), 3500);
   };
 
-  // Unified Limit Expansion with 100 Credits OR 10 Diamonds (+10 limit)
+  // Unified Limit Expansion: 100 Credits OR 20 Diamonds for Messages (+50 limit), 100 Credits OR 10 Diamonds for Friends/Blocks (+10)
   const handleExpandLimit = async (
     type: 'MESSAGE' | 'FRIEND' | 'BLOCK',
     currency: 'CREDITS' | 'DIAMONDS'
   ): Promise<boolean> => {
     const costCredits = 100;
-    const costDiamonds = 10;
+    const costDiamonds = 20;
     const curCredits = getTotalCredits(currentUser);
     const curDiamonds = currentUser.diamonds || 0;
 
@@ -433,6 +457,8 @@ export const WhatsAppChatModal: React.FC<Props> = ({
       if (type === 'MESSAGE') {
         const today = getTodayStr();
         const nextExp = dailyMsgExpansions + 1;
+        const addedAmount = getNextMessageExpansionAmount(currentTier, dailyMsgExpansions);
+        const newLimit = calculateTotalDailyMsgLimit(currentTier, nextExp);
         setDailyMsgExpansions(nextExp);
         updated = {
           ...updated,
@@ -441,7 +467,7 @@ export const WhatsAppChatModal: React.FC<Props> = ({
         try {
           localStorage.setItem(`nsta_msg_expansions_${user.id}_${today}`, String(nextExp));
         } catch {}
-        showToast(`🎉 +10 Daily Messages unlock ho gaye! Aaj ka naya limit: ${baseDailyMsgLimit + nextExp * 10} msgs.`);
+        showToast(`🎉 +${addedAmount} Daily Messages unlock ho gaye! Aaj ka naya limit: ${newLimit} msgs (Max 500).`);
         setShowMessageLimitModal(false);
       } else if (type === 'FRIEND') {
         const nextExp = friendExpansions + 1;
@@ -1580,17 +1606,19 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                           )}
                         </div>
                       </div>
-                      {student.isOnline ? (
-                        <div
-                          className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 border-2 border-white dark:border-slate-900 rounded-full"
-                          title="Online"
-                        />
-                      ) : (
-                        <div
-                          className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-slate-400 border-2 border-white dark:border-slate-900 rounded-full"
-                          title="Offline"
-                        />
-                      )}
+                      {isUserFriend(student.id) ? (
+                        student.isOnline ? (
+                          <div
+                            className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 border-2 border-white dark:border-slate-900 rounded-full"
+                            title="Online"
+                          />
+                        ) : (
+                          <div
+                            className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-slate-400 border-2 border-white dark:border-slate-900 rounded-full"
+                            title="Offline"
+                          />
+                        )
+                      ) : null}
                     </div>
 
                     <div className="min-w-0 flex-1">
@@ -1632,15 +1660,21 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                       </div>
 
                       <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
-                        {student.isOnline ? (
-                          <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
-                            <span>Online</span>
-                          </span>
+                        {isUserFriend(student.id) ? (
+                          student.isOnline ? (
+                            <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+                              <span>Online</span>
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-slate-400 dark:text-slate-500 flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-400 inline-block" />
+                              <span>Offline {student.lastSeen ? `• ${formatTime(student.lastSeen)}` : ''}</span>
+                            </span>
+                          )
                         ) : (
                           <span className="text-[11px] text-slate-400 dark:text-slate-500 flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-slate-400 inline-block" />
-                            <span>Offline {student.lastSeen ? `• ${formatTime(student.lastSeen)}` : ''}</span>
+                            <span>Private Profile</span>
                           </span>
                         )}
                         {student.statusText && (
@@ -1969,7 +2003,7 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                     {selectedGroup?.emoji || '👥'}
                   </div>
                 )}
-                {selectedContact?.isOnline && (
+                {(selectedContact && isUserFriend(selectedContact.id) && selectedContact.isOnline) && (
                   <div className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 rounded-full border-2 border-slate-950" />
                 )}
               </div>
@@ -2008,8 +2042,12 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                 </h3>
                 <p className="text-[11px] text-purple-200/80 truncate">
                   {selectedContact ? (
-                    selectedContact.isOnline ? (
-                      <span className="text-emerald-400 font-semibold">online</span>
+                    isUserFriend(selectedContact.id) ? (
+                      selectedContact.isOnline ? (
+                        <span className="text-emerald-400 font-semibold">online</span>
+                      ) : (
+                        selectedContact.lastSeen ? `last seen ${formatTime(selectedContact.lastSeen)}` : 'Offline'
+                      )
                     ) : (
                       'active on Nsta Messenger'
                     )
@@ -4255,7 +4293,7 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                   Aapne aaj ki <strong>{totalDailyMsgLimit} messages</strong> ki limit poori kar li hai ({currentTier} plan).
                 </p>
                 <div className="mt-2 text-[10px] text-slate-400 bg-slate-100 dark:bg-slate-800/60 py-1.5 px-2 rounded-xl">
-                  Free: 50/day · Basic: 200/day · Ultra: Unlimited
+                  Free: 50/day · Basic: 100/day · Ultra: 300/day
                 </div>
               </div>
 
@@ -4264,10 +4302,10 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5 font-black text-xs text-purple-900 dark:text-purple-200 uppercase tracking-wide">
                     <Zap size={14} className="text-amber-500" />
-                    <span>+10 Daily Messages Unlock Karein</span>
+                    <span>+{getNextMessageExpansionAmount(currentTier, dailyMsgExpansions)} Daily Messages Unlock Karein</span>
                   </div>
                   <span className="text-[10px] font-black px-1.5 py-0.5 bg-purple-500/20 text-purple-700 dark:text-purple-300 rounded-md">
-                    Instant
+                    Max 500/day
                   </span>
                 </div>
 
@@ -4279,42 +4317,50 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                 </div>
                 <div className="flex items-center justify-between text-xs font-bold">
                   <span className="text-slate-600 dark:text-slate-300">Aapke Diamonds:</span>
-                  <span className={userDiamonds >= 10 ? 'text-cyan-600 dark:text-cyan-400 font-black' : 'text-rose-600 dark:text-rose-400 font-black'}>
+                  <span className={userDiamonds >= 20 ? 'text-cyan-600 dark:text-cyan-400 font-black' : 'text-rose-600 dark:text-rose-400 font-black'}>
                     💎 {userDiamonds} Diamonds
                   </span>
                 </div>
               </div>
 
               <div className="space-y-2 pt-1">
-                {/* Option 1: 100 Credits */}
-                <button
-                  type="button"
-                  onClick={() => handleExpandLimit('MESSAGE', 'CREDITS')}
-                  disabled={isExpandingLimit || userCoins < 100}
-                  className={`w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
-                    userCoins >= 100
-                      ? 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 cursor-pointer'
-                      : 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-300 dark:border-slate-700'
-                  }`}
-                >
-                  <Coins size={14} />
-                  <span>100 Credits se Unlock Karein (+10 Messages)</span>
-                </button>
+                {totalDailyMsgLimit >= 500 ? (
+                  <p className="text-xs font-bold text-amber-500 py-2">
+                    Aapne maximum 500 messages/day ki limit reach kar li hai!
+                  </p>
+                ) : (
+                  <>
+                    {/* Option 1: 100 Credits */}
+                    <button
+                      type="button"
+                      onClick={() => handleExpandLimit('MESSAGE', 'CREDITS')}
+                      disabled={isExpandingLimit || userCoins < 100}
+                      className={`w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                        userCoins >= 100
+                          ? 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 cursor-pointer'
+                          : 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-300 dark:border-slate-700'
+                      }`}
+                    >
+                      <Coins size={14} />
+                      <span>100 Credits se Unlock Karein (+{getNextMessageExpansionAmount(currentTier, dailyMsgExpansions)} Messages)</span>
+                    </button>
 
-                {/* Option 2: 10 Diamonds */}
-                <button
-                  type="button"
-                  onClick={() => handleExpandLimit('MESSAGE', 'DIAMONDS')}
-                  disabled={isExpandingLimit || userDiamonds < 10}
-                  className={`w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
-                    userDiamonds >= 10
-                      ? 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 text-white cursor-pointer'
-                      : 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-300 dark:border-slate-700'
-                  }`}
-                >
-                  <Gem size={14} />
-                  <span>10 Diamonds se Unlock Karein (+10 Messages)</span>
-                </button>
+                    {/* Option 2: 20 Diamonds */}
+                    <button
+                      type="button"
+                      onClick={() => handleExpandLimit('MESSAGE', 'DIAMONDS')}
+                      disabled={isExpandingLimit || userDiamonds < 20}
+                      className={`w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                        userDiamonds >= 20
+                          ? 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 text-white cursor-pointer'
+                          : 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-300 dark:border-slate-700'
+                      }`}
+                    >
+                      <Gem size={14} />
+                      <span>20 Diamonds se Unlock Karein (+{getNextMessageExpansionAmount(currentTier, dailyMsgExpansions)} Messages)</span>
+                    </button>
+                  </>
+                )}
 
                 <button
                   type="button"
@@ -4347,7 +4393,7 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                   Aapki <strong>{totalFriendLimit} friends</strong> ki limit poori ho chuki hai ({currentTier} plan).
                 </p>
                 <div className="mt-2 text-[10px] text-slate-400 bg-slate-100 dark:bg-slate-800/60 py-1.5 px-2 rounded-xl">
-                  Free: 10 friends · Basic: 20 friends · Ultra: 40 friends
+                  Free: 10 friends · Basic: 20 friends · Ultra: 50 friends (Max 50)
                 </div>
               </div>
 
@@ -4359,7 +4405,7 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                     <span>+10 Friend Slots Unlock Karein</span>
                   </div>
                   <span className="text-[10px] font-black px-1.5 py-0.5 bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 rounded-md">
-                    Permanent
+                    Max 50
                   </span>
                 </div>
 
@@ -4371,42 +4417,50 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                 </div>
                 <div className="flex items-center justify-between text-xs font-bold">
                   <span className="text-slate-600 dark:text-slate-300">Aapke Diamonds:</span>
-                  <span className={userDiamonds >= 10 ? 'text-cyan-600 dark:text-cyan-400 font-black' : 'text-rose-600 dark:text-rose-400 font-black'}>
+                  <span className={userDiamonds >= 20 ? 'text-cyan-600 dark:text-cyan-400 font-black' : 'text-rose-600 dark:text-rose-400 font-black'}>
                     💎 {userDiamonds} Diamonds
                   </span>
                 </div>
               </div>
 
               <div className="space-y-2 pt-1">
-                {/* Option 1: 100 Credits */}
-                <button
-                  type="button"
-                  onClick={() => handleExpandLimit('FRIEND', 'CREDITS')}
-                  disabled={isExpandingLimit || userCoins < 100}
-                  className={`w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
-                    userCoins >= 100
-                      ? 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 cursor-pointer'
-                      : 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-300 dark:border-slate-700'
-                  }`}
-                >
-                  <Coins size={14} />
-                  <span>100 Credits se Unlock Karein (+10 Friends)</span>
-                </button>
+                {totalFriendLimit >= 50 ? (
+                  <p className="text-xs font-bold text-amber-500 py-2">
+                    Aapne maximum 50 friends ki limit reach kar li hai!
+                  </p>
+                ) : (
+                  <>
+                    {/* Option 1: 100 Credits */}
+                    <button
+                      type="button"
+                      onClick={() => handleExpandLimit('FRIEND', 'CREDITS')}
+                      disabled={isExpandingLimit || userCoins < 100}
+                      className={`w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                        userCoins >= 100
+                          ? 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 cursor-pointer'
+                          : 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-300 dark:border-slate-700'
+                      }`}
+                    >
+                      <Coins size={14} />
+                      <span>100 Credits se Unlock Karein (+10 Friends)</span>
+                    </button>
 
-                {/* Option 2: 10 Diamonds */}
-                <button
-                  type="button"
-                  onClick={() => handleExpandLimit('FRIEND', 'DIAMONDS')}
-                  disabled={isExpandingLimit || userDiamonds < 10}
-                  className={`w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
-                    userDiamonds >= 10
-                      ? 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 text-white cursor-pointer'
-                      : 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-300 dark:border-slate-700'
-                  }`}
-                >
-                  <Gem size={14} />
-                  <span>10 Diamonds se Unlock Karein (+10 Friends)</span>
-                </button>
+                    {/* Option 2: 20 Diamonds */}
+                    <button
+                      type="button"
+                      onClick={() => handleExpandLimit('FRIEND', 'DIAMONDS')}
+                      disabled={isExpandingLimit || userDiamonds < 20}
+                      className={`w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                        userDiamonds >= 20
+                          ? 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 text-white cursor-pointer'
+                          : 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-300 dark:border-slate-700'
+                      }`}
+                    >
+                      <Gem size={14} />
+                      <span>20 Diamonds se Unlock Karein (+10 Friends)</span>
+                    </button>
+                  </>
+                )}
 
                 <button
                   type="button"

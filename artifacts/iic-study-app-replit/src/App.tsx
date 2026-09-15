@@ -94,6 +94,18 @@ const App: React.FC = () => {
     }
   }, [isAppLoading]);
 
+  // A loading animation must never be able to hide an already-authenticated
+  // dashboard forever. This also covers interrupted timers after a tab restore
+  // or a browser throttles the animation loop.
+  useEffect(() => {
+    if (!isAppLoading || isLoadingPreview) return;
+    const failSafe = window.setTimeout(() => {
+      console.warn('[IIC] Splash screen fail-safe completed the app load.');
+      setIsAppLoading(false);
+    }, 12000);
+    return () => window.clearTimeout(failSafe);
+  }, [isAppLoading, isLoadingPreview]);
+
   // Profile se loading-screen preview request aaye to sirf animation dikhayein,
   // phir user ko usi page par wapas laayein.
   useEffect(() => {
@@ -1243,6 +1255,9 @@ const App: React.FC = () => {
                       if (!cloudUser.hasOwnProperty('redeemedCodes')) mergedUser.redeemedCodes = prev.user.redeemedCodes;
                       if (!cloudUser.hasOwnProperty('unlockedContent')) mergedUser.unlockedContent = prev.user.unlockedContent;
                       if (!cloudUser.hasOwnProperty('dailyRoutine')) mergedUser.dailyRoutine = prev.user.dailyRoutine;
+                      if (typeof (cloudUser as any).diamonds === 'undefined' && typeof prev.user.diamonds !== 'undefined') {
+                          mergedUser.diamonds = prev.user.diamonds;
+                      }
 
                       if (prev.user.role === 'ADMIN' && cloudUser.role !== 'ADMIN') {
                           mergedUser.role = 'ADMIN';
@@ -2016,26 +2031,13 @@ const App: React.FC = () => {
       return;
     }
 
-    const [schoolProfile, coachingProfile] = await Promise.all([
-      getSchoolUserProfile(activeUser.id).catch(() => null),
-      getCoachingUserProfile(activeUser.id).catch(() => null),
-    ]);
-
-    if (schoolProfile) {
-      setState(prev => ({ ...prev, user: activeUser, view: 'SCHOOL_ECOSYSTEM' as any }));
-      return;
-    }
-
-    if (coachingProfile) {
-      setState(prev => ({ ...prev, user: activeUser, view: 'COACHING_ECOSYSTEM' as any }));
-      return;
-    }
-
     if (activeUser.role === 'ADMIN' || activeUser.role === 'SUB_ADMIN') {
       setState(prev => ({ ...prev, user: activeUser, view: 'ADMIN_DASHBOARD' }));
       return;
     }
 
+    // Show the regular dashboard immediately. School/coaching membership is
+    // uncommon and can be detected in the background without blocking login.
     setState(prev => ({
       ...prev,
       user: activeUser,
@@ -2045,6 +2047,25 @@ const App: React.FC = () => {
       selectedStream: activeUser.stream || null,
       language: activeUser.board === 'BSEB' ? 'Hindi' : 'English',
     }));
+
+    void Promise.all([
+      getSchoolUserProfile(activeUser.id).catch(() => null),
+      getCoachingUserProfile(activeUser.id).catch(() => null),
+    ]).then(([schoolProfile, coachingProfile]) => {
+      if (schoolProfile) {
+        setState(prev => (
+          prev.user?.id === activeUser.id
+            ? { ...prev, view: 'SCHOOL_ECOSYSTEM' as any }
+            : prev
+        ));
+      } else if (coachingProfile) {
+        setState(prev => (
+          prev.user?.id === activeUser.id
+            ? { ...prev, view: 'COACHING_ECOSYSTEM' as any }
+            : prev
+        ));
+      }
+    });
   };
 
   const [logoutPending, setLogoutPending] = useState(false);
@@ -3897,6 +3918,17 @@ const App: React.FC = () => {
                   };
                   savePublicActivity(activity);
                   setAlertConfig({isOpen: true, message: "Result published!"});
+              }}
+              onUpdateUser={(updatedUser: User) => {
+                  setState(prev => ({ ...prev, user: updatedUser }));
+                  try {
+                      localStorage.setItem("nst_current_user", JSON.stringify(updatedUser));
+                      if (updatedUser?.id) {
+                          localStorage.setItem(`nst_user_profile_${updatedUser.id}`, JSON.stringify(updatedUser));
+                          localStorage.setItem("nst_user_profile", JSON.stringify(updatedUser));
+                      }
+                  } catch (_) {}
+                  saveUserToLive(updatedUser, { immediate: true });
               }}
           />
         </Suspense>

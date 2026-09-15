@@ -1,21 +1,20 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Helper function to check if the user is signed in
+
     function isSignedIn() {
       return request.auth != null;
     }
-    
-    // Helper function to get the current user's role safely from the 'users' collection
+
     function getUserRole() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'STUDENT');
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+        : 'STUDENT';
     }
-    
-    // Helper function to check if the user is an admin or sub-admin
+
     function isAdminOrSubAdmin() {
       return isSignedIn() && (
-        getUserRole() == 'ADMIN' || 
+        getUserRole() == 'ADMIN' ||
         getUserRole() == 'SUB_ADMIN' ||
         request.auth.token.get('role', '') == 'ADMIN' ||
         request.auth.token.get('role', '') == 'SUB_ADMIN' ||
@@ -23,27 +22,39 @@ service cloud.firestore {
       );
     }
 
-    // Default rule: Allow reading everything if authenticated. Write explicitly denied by default unless specified.
     match /{document=**} {
       allow read: if isSignedIn();
       allow write: if isAdminOrSubAdmin();
     }
 
-    // ------------------------------------------------------------------------
-    // User Data Collections & Subcollections
-    // ------------------------------------------------------------------------
+    // WhatsApp Direct & Group Chats
+    match /whatsapp_direct/{convId}/messages/{msgId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (!request.resource.data.keys().hasAny(['senderId']) || request.resource.data.senderId == request.auth.uid || isAdminOrSubAdmin());
+    }
+
+    match /whatsapp_groups/{groupId}/messages/{msgId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (!request.resource.data.keys().hasAny(['senderId']) || request.resource.data.senderId == request.auth.uid || isAdminOrSubAdmin());
+    }
+
+    // Users & Subcollections
     match /users/{userId} {
       allow read: if isSignedIn();
-      // Allow user to create or update their own document, preventing privilege escalation to ADMIN
-      allow create: if isSignedIn() && request.auth.uid == userId 
-                    && request.resource.data.get('role', '') != 'ADMIN' 
-                    && request.resource.data.get('role', '') != 'SUB_ADMIN';
-      allow update: if isSignedIn() && request.auth.uid == userId 
-                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) 
-                        || (request.resource.data.get('role', '') != 'ADMIN' && request.resource.data.get('role', '') != 'SUB_ADMIN'));
+      allow create: if isSignedIn() && (
+        (request.auth.uid == userId && request.resource.data.get('role', '') != 'ADMIN' && request.resource.data.get('role', '') != 'SUB_ADMIN')
+        || isAdminOrSubAdmin()
+      );
+
+      allow update: if isSignedIn() && (
+        (request.auth.uid == userId && (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) ||
+          (request.resource.data.get('role', '') != 'ADMIN' && request.resource.data.get('role', '') != 'SUB_ADMIN')
+        ))
+        || isAdminOrSubAdmin()
+      );
       allow delete: if isAdminOrSubAdmin();
-      
-      // Allow writing to all user personal subcollections (history, test_results, routine_lessons, revision_lessons, streaks, bookmarks, etc.)
+
       match /{subcollection=**} {
         allow read, write: if isSignedIn() && request.auth.uid == userId;
       }
@@ -53,20 +64,21 @@ service cloud.firestore {
       allow read, write: if isSignedIn() && request.auth.uid == userId;
     }
 
-    // Coin Wallet (Protects against hack injections)
     match /user_coins/{userId} {
       allow read: if isSignedIn();
-      
-      allow create: if isSignedIn() && request.auth.uid == userId
-                    && request.resource.data.get('coins', 0) <= 1000000;
-      
-      allow update: if isSignedIn() && request.auth.uid == userId
-                    && (
-                      !request.resource.data.diff(resource.data).affectedKeys().hasAny(['coins'])
-                      || (request.resource.data.get('coins', 0) <= resource.data.get('coins', 0) + 1000000)
-                    );
+      allow create: if isSignedIn() && (
+        (request.auth.uid == userId && request.resource.data.get('coins', 0) <= 1000000)
+        || isAdminOrSubAdmin()
+      );
+      allow update: if isSignedIn() && (
+        (request.auth.uid == userId && (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['coins'])
+          || (request.resource.data.get('coins', 0) <= resource.data.get('coins', 0) + 1000000)
+        ))
+        || isAdminOrSubAdmin()
+      );
     }
-    
+
     match /user_animations/{userId} {
       allow read, write: if isSignedIn() && request.auth.uid == userId;
     }
@@ -78,17 +90,14 @@ service cloud.firestore {
     match /suggestion_leaderboard/{userId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && request.auth.uid == userId
-                    && request.resource.data.get('totalCoins', 0) <= 1000000;
+        && request.resource.data.get('totalCoins', 0) <= 1000000;
       allow update: if isSignedIn() && request.auth.uid == userId
-                    && (
-                      !request.resource.data.diff(resource.data).affectedKeys().hasAny(['totalCoins'])
-                      || (request.resource.data.get('totalCoins', 0) <= resource.data.get('totalCoins', 0) + 1000000)
-                    );
+        && (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['totalCoins'])
+          || (request.resource.data.get('totalCoins', 0) <= resource.data.get('totalCoins', 0) + 1000000)
+        );
     }
 
-    // ------------------------------------------------------------------------
-    // Public / Shared Write Collections
-    // ------------------------------------------------------------------------
     match /demand_requests/{requestId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && (!request.resource.data.keys().hasAny(['userId']) || request.resource.data.userId == request.auth.uid);
@@ -97,7 +106,6 @@ service cloud.firestore {
 
     match /public_activity/{activityId} {
       allow read: if isSignedIn();
-      // Ensure users cannot spoof the userId in activity feeds
       allow create: if isSignedIn() && (!request.resource.data.keys().hasAny(['userId']) || request.resource.data.userId == request.auth.uid);
     }
 
@@ -110,7 +118,7 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && (!request.resource.data.keys().hasAny(['userId']) || request.resource.data.userId == request.auth.uid);
     }
-    
+
     match /app_feedback/{feedbackId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && (!request.resource.data.keys().hasAny(['userId']) || request.resource.data.userId == request.auth.uid);
@@ -123,24 +131,13 @@ service cloud.firestore {
 
     match /redeem_codes/{docId} {
       allow read: if isSignedIn();
-      // Users can write to update used count and append their uid to claimed arrays
-      allow write: if isSignedIn();
+      allow create, delete: if isAdminOrSubAdmin();
+      allow update: if isSignedIn() && (
+        isAdminOrSubAdmin() ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usedCount', 'isRedeemed', 'redeemedBy', 'lastRedeemedAt'])
+      );
     }
 
-    // ------------------------------------------------------------------------
-    // WhatsApp Direct & Group Chats (Cloud Firestore Persistence)
-    // ------------------------------------------------------------------------
-    match /whatsapp_direct/{convId}/messages/{msgId} {
-      allow read, write: if isSignedIn();
-    }
-
-    match /whatsapp_groups/{groupId}/messages/{msgId} {
-      allow read, write: if isSignedIn();
-    }
-
-    // ------------------------------------------------------------------------
-    // School & Coaching Modules
-    // ------------------------------------------------------------------------
     match /schoolPlanRequests/{id} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
@@ -173,9 +170,6 @@ service cloud.firestore {
       allow read, write: if isSignedIn();
     }
 
-    // ------------------------------------------------------------------------
-    // Content and System (Admin Only Write)
-    // ------------------------------------------------------------------------
     match /admin_secure/{docId} {
       allow read, write: if isAdminOrSubAdmin();
     }
@@ -229,10 +223,10 @@ service cloud.firestore {
       allow write: if isAdminOrSubAdmin();
     }
     match /trash_homework_entries/{docId} {
-      allow read, write: if isAdminOrSubAdmin();
+      allow read: if isAdminOrSubAdmin();
     }
     match /trash_lucent_entries/{docId} {
-      allow read, write: if isAdminOrSubAdmin();
+      allow read: if isAdminOrSubAdmin();
     }
   }
 }

@@ -19,6 +19,8 @@ interface Props {
     defaultTab?: 'GLOBAL' | 'MCQ' | 'SUPPORT';
     hideGlobalTab?: boolean;
     onSpendCoins?: (amount: number) => boolean;
+    onSpendDiamonds?: (amount: number) => boolean;
+    onUpdateUser?: (updatedUser: User) => void;
     themeColor?: string; // Optional override color from admin settings or user redeem code
 }
 
@@ -31,7 +33,7 @@ interface McqDraft {
 
 const EMPTY_MCQ: McqDraft = { question: '', options: ['', '', '', ''], correctAnswer: 0, explanation: '' };
 
-export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetUser, roomId, roomName, allowStudentMcq, initialMcqDraft, defaultTab, hideGlobalTab, onSpendCoins, themeColor }) => {
+export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetUser, roomId, roomName, allowStudentMcq, initialMcqDraft, defaultTab, hideGlobalTab, onSpendCoins, onSpendDiamonds, onUpdateUser, themeColor }) => {
     const appTheme = useAppTheme();
     // Determine effective color: prop override > subscription tier
     const _baseSubColor = (user.subscriptionLevel === 'ULTRA' && user.isPremium) ? '#1d4ed8'
@@ -50,10 +52,19 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                 : 'rgba(14,165,233,0.28)',
           };
     const isUltraChatUser = (user.subscriptionLevel === 'ULTRA' && user.isPremium) || isAdmin;
-    const isSubscriber = isAdmin || !!(user.isPremium || (user.subscriptionTier && user.subscriptionTier !== 'FREE') || user.subscriptionLevel === 'BASIC' || user.subscriptionLevel === 'ULTRA');
+    // Community MCQ posting is free, but sending is available to Basic/Ultra.
+    // Free users can still open the MCQ tab and solve shared questions.
+    const isSubscriber = isAdmin
+        || (allowStudentMcq !== false && !!(
+            user.isPremium
+            || (user.subscriptionTier && user.subscriptionTier !== 'FREE')
+            || user.subscriptionLevel === 'BASIC'
+            || user.subscriptionLevel === 'ULTRA'
+        ));
     const [activeTab, setActiveTab] = useState<'GLOBAL' | 'SUPPORT' | 'MCQ'>(
-        defaultTab || (hideGlobalTab || !isUltraChatUser ? 'MCQ' : 'GLOBAL')
+        defaultTab || (hideGlobalTab ? 'MCQ' : 'GLOBAL')
     );
+    const [supportCurrency, setSupportCurrency] = useState<'CREDITS' | 'DIAMONDS'>('CREDITS');
     const [mcqVotes, setMcqVotes] = useState<Record<string, Record<string, number>>>({});
     const [mcqDailyCount, setMcqDailyCount] = useState(0);
     const [messages, setMessages] = useState<any[]>([]);
@@ -281,16 +292,45 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
     };
 
     const SUPPORT_COIN_COST = 10;
+    const SUPPORT_DIAMOND_COST = 5;
     const MCQ_COIN_COST = 5;
 
     const handleSendText = async () => {
         const txt = input.trim();
         if (!txt) return;
-        if (!isAdminOrSub && activeTab === 'SUPPORT' && onSpendCoins) {
-            const ok = onSpendCoins(SUPPORT_COIN_COST);
-            if (!ok) {
-                alert(`Admin ko message bhejne ke liye ${SUPPORT_COIN_COST} coins chahiye. Aapke paas coins kam hain!`);
-                return;
+
+        // Global chat check: Only Ultra users and Admin can send
+        if (activeTab === 'GLOBAL' && !isAdminOrSub && !isUltraChatUser) {
+            alert('🔒 Global chat mein message sirf Ultra users bhej sakte hain. Free aur Basic users sabhi messages dekh aur like kar sakte hain.');
+            return;
+        }
+
+        // Support chat: Free for subscribers. For Free users: 10 Credits or 5 Diamonds
+        if (!isAdminOrSub && activeTab === 'SUPPORT' && !isSubscriber) {
+            if (supportCurrency === 'DIAMONDS') {
+                const curDia = user.diamonds ?? 0;
+                if (curDia < SUPPORT_DIAMOND_COST) {
+                    alert(`⚠️ Admin ko message bhejne ke liye ${SUPPORT_DIAMOND_COST} Diamonds chahiye. Aapke paas sirf ${curDia} 💎 hain.`);
+                    return;
+                }
+                if (onSpendDiamonds) {
+                    const ok = onSpendDiamonds(SUPPORT_DIAMOND_COST);
+                    if (!ok) return;
+                } else if (onUpdateUser) {
+                    onUpdateUser({ ...user, diamonds: Math.max(0, curDia - SUPPORT_DIAMOND_COST) });
+                }
+            } else {
+                const curCr = (user.credits || 0) + (user.bonusCredits || 0);
+                if (curCr < SUPPORT_COIN_COST) {
+                    alert(`⚠️ Admin ko message bhejne ke liye ${SUPPORT_COIN_COST} Coins chahiye. Aapke paas sirf ${curCr} 🪙 hain.`);
+                    return;
+                }
+                if (onSpendCoins) {
+                    const ok = onSpendCoins(SUPPORT_COIN_COST);
+                    if (!ok) return;
+                } else if (onUpdateUser) {
+                    onUpdateUser({ ...user, credits: Math.max(0, (user.credits || 0) - SUPPORT_COIN_COST) });
+                }
             }
         }
         const replyPayload = replyTarget ? {
@@ -349,13 +389,6 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
         const { question, options, correctAnswer, explanation } = mcqDraft;
         if (!question.trim() || options.some(o => !o.trim())) {
             alert('Question aur sare 4 options fill karo'); return;
-        }
-        if (!isAdminOrSub && onSpendCoins) {
-            const ok = onSpendCoins(MCQ_COIN_COST);
-            if (!ok) {
-                alert(`MCQ bhejne ke liye ${MCQ_COIN_COST} coins chahiye. Aapke paas coins kam hain!`);
-                return;
-            }
         }
         const msg = buildBase({
             type: 'MCQ',
@@ -928,15 +961,15 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                                     </div>
                                     {/* Fixed send footer */}
                                     <div className="shrink-0 px-5 pt-4 pb-[calc(env(safe-area-inset-bottom,0px)+92px)] border-t border-slate-100 bg-white">
-                                        {!isAdminOrSub && onSpendCoins && (
-                                            <p className="text-[11px] text-amber-600 font-bold text-center mb-2 flex items-center justify-center gap-1">
-                                                <Crown size={11} /> MCQ bhejne par <span className="bg-amber-100 px-1.5 py-0.5 rounded-full">{MCQ_COIN_COST} coins</span> katenge
+                                        {!isAdminOrSub && isSubscriber && (
+                                            <p className="text-[11px] text-emerald-600 font-bold text-center mb-2">
+                                                ✓ Community MCQ posting free hai
                                             </p>
                                         )}
                                         <button
                                             onClick={() => {
                                                 if (!isSubscriber) {
-                                                    alert('🔒 Community MCQ Send feature Basic aur Ultra members ke liye hai! Upgrade your plan to participate.');
+                                                    alert('🔒 Community MCQ posting abhi admin ne disable ki hai.');
                                                     return;
                                                 }
                                                 handleSendMcq();
@@ -946,7 +979,7 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                                         >
                                             {!isSubscriber ? (
                                                 <>
-                                                    <Lock size={15} /> <span>Upgrade to Basic/Ultra to Send</span>
+                                                    <Lock size={15} /> <span>Community MCQ posting unavailable</span>
                                                 </>
                                             ) : (
                                                 <>
@@ -962,60 +995,104 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                         {/* Input area — hidden in MCQ tab (no text messages allowed) */}
                         {activeTab !== 'MCQ' && (
                         <div className="p-3 pb-[calc(env(safe-area-inset-bottom,0px)+88px)] border-t border-slate-100 shrink-0 sticky bottom-0" style={{ background: appTheme.profileCardBg || '#ffffff' }}>
-                            {replyTarget && (
-                                <div className="mb-2 rounded-xl bg-blue-50 border border-blue-200 px-3 py-2 text-xs flex items-start justify-between gap-2">
-                                    <div className="min-w-0">
-                                        <div className="font-black text-blue-700">Replying to {replyTarget.userName}</div>
-                                        <div className="text-slate-600 truncate">{replyTarget.text}</div>
+                            {/* Global Chat Send restriction for Free & Basic users */}
+                            {activeTab === 'GLOBAL' && !isAdminOrSub && !isUltraChatUser ? (
+                                <div className="p-3 rounded-2xl bg-amber-50/90 border border-amber-200 flex items-center gap-2.5">
+                                    <Lock size={18} className="text-amber-600 shrink-0" />
+                                    <div className="flex-1">
+                                        <p className="text-xs font-bold text-amber-900 leading-tight">
+                                            Global Chat mein message bhejna sirf <span className="text-purple-700 font-black">Ultra members</span> ke liye hai.
+                                        </p>
+                                        <p className="text-[11px] text-amber-700 font-medium mt-0.5">
+                                            Aap sabhi messages padh aur like kar sakte hain! ❤️
+                                        </p>
                                     </div>
-                                    <button onClick={() => setReplyTarget(null)} className="text-slate-500 font-black">X</button>
                                 </div>
-                            )}
-                            {/* Admin toggles */}
-                            {isAdminOrSub && (
-                                <div className="flex items-center gap-2 mb-2 flex-wrap">
-                                    <button
-                                        onClick={() => setIsAdminOnly(v => !v)}
-                                        className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold border transition-all ${isAdminOnly ? 'bg-amber-500 text-white border-amber-500' : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-amber-50'}`}
-                                    >
-                                        <Lock size={9} /> Admin Only
-                                    </button>
-                                    <button
-                                        onClick={handleBroadcast}
-                                        className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold border bg-red-50 text-red-600 border-red-200 hover:bg-red-100 transition-all"
-                                        title="Input ka text broadcast karo"
-                                    >
-                                        <Megaphone size={9} /> Broadcast
-                                    </button>
-                                </div>
-                            )}
+                            ) : (
+                                <>
+                                    {replyTarget && (
+                                        <div className="mb-2 rounded-xl bg-blue-50 border border-blue-200 px-3 py-2 text-xs flex items-start justify-between gap-2">
+                                            <div className="min-w-0">
+                                                <div className="font-black text-blue-700">Replying to {replyTarget.userName}</div>
+                                                <div className="text-slate-600 truncate">{replyTarget.text}</div>
+                                            </div>
+                                            <button onClick={() => setReplyTarget(null)} className="text-slate-500 font-black">X</button>
+                                        </div>
+                                    )}
+                                    {/* Admin toggles */}
+                                    {isAdminOrSub && (
+                                        <div className="flex items-center gap-2 mb-2 flex-wrap">
+                                            <button
+                                                onClick={() => setIsAdminOnly(v => !v)}
+                                                className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold border transition-all ${isAdminOnly ? 'bg-amber-500 text-white border-amber-500' : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-amber-50'}`}
+                                            >
+                                                <Lock size={9} /> Admin Only
+                                            </button>
+                                            <button
+                                                onClick={handleBroadcast}
+                                                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold border bg-red-50 text-red-600 border-red-200 hover:bg-red-100 transition-all"
+                                                title="Input ka text broadcast karo"
+                                            >
+                                                <Megaphone size={9} /> Broadcast
+                                            </button>
+                                        </div>
+                                    )}
 
-                            {!isAdminOrSub && activeTab === 'SUPPORT' && onSpendCoins && (
-                                <p className="text-[10px] text-amber-600 font-bold mb-1.5 flex items-center gap-1">
-                                    <Crown size={9} /> Har message pe <span className="bg-amber-100 px-1 rounded">{SUPPORT_COIN_COST} coins</span> katenge • Aapke paas: {user.credits ?? 0} coins
-                                </p>
-                            )}
-                            <div className="flex gap-2 items-center">
-                                <input
-                                    type="text"
-                                    value={input}
-                                    onChange={e => setInput(e.target.value)}
-                                    onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSendText()}
-                                    placeholder="Message likhein..."
-                                    className="flex-1 bg-slate-100 border-none rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                                />
-                                <button
-                                    onClick={handleSendText}
-                                    disabled={!input.trim()}
-                                    className="bg-blue-600 hover:bg-blue-700 text-white p-2.5 rounded-xl transition-all disabled:opacity-40 shrink-0 self-end"
-                                >
-                                    <Send size={18} />
-                                </button>
-                            </div>
-                            {isAdminOnly && (
-                                <p className="text-[10px] text-amber-600 font-bold mt-1.5 flex items-center gap-1">
-                                    <Lock size={9} /> Ye message sirf Admin/Mod dekhenge
-                                </p>
+                                    {/* Support Tab Pricing Information */}
+                                    {activeTab === 'SUPPORT' && (
+                                        (isSubscriber || isAdminOrSub) ? (
+                                            <div className="flex items-center gap-1.5 px-3 py-1.5 mb-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-bold">
+                                                <Crown size={12} className="text-emerald-600" />
+                                                <span>Subscribers ke liye Admin Support bilkul <strong>FREE</strong> hai! 🎉</span>
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-center justify-between gap-2 mb-2 px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-[11px]">
+                                                <div className="flex items-center gap-1 text-amber-900 font-bold">
+                                                    <span>Cost: 10 🪙 ya 5 💎 per message</span>
+                                                </div>
+                                                <div className="flex gap-1 bg-white p-0.5 rounded-lg border border-amber-200">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setSupportCurrency('CREDITS')}
+                                                        className={`px-2 py-0.5 rounded-md font-black text-[10px] transition-all ${supportCurrency === 'CREDITS' ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600'}`}
+                                                    >
+                                                        10 🪙
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setSupportCurrency('DIAMONDS')}
+                                                        className={`px-2 py-0.5 rounded-md font-black text-[10px] transition-all ${supportCurrency === 'DIAMONDS' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600'}`}
+                                                    >
+                                                        5 💎
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )
+                                    )}
+
+                                    <div className="flex gap-2 items-center">
+                                        <input
+                                            type="text"
+                                            value={input}
+                                            onChange={e => setInput(e.target.value)}
+                                            onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSendText()}
+                                            placeholder="Message likhein..."
+                                            className="flex-1 bg-slate-100 border-none rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                        />
+                                        <button
+                                            onClick={handleSendText}
+                                            disabled={!input.trim()}
+                                            className="bg-blue-600 hover:bg-blue-700 text-white p-2.5 rounded-xl transition-all disabled:opacity-40 shrink-0 self-end"
+                                        >
+                                            <Send size={18} />
+                                        </button>
+                                    </div>
+                                    {isAdminOnly && (
+                                        <p className="text-[10px] text-amber-600 font-bold mt-1.5 flex items-center gap-1">
+                                            <Lock size={9} /> Ye message sirf Admin/Mod dekhenge
+                                        </p>
+                                    )}
+                                </>
                             )}
                         </div>
                         )}

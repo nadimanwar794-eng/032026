@@ -173,10 +173,12 @@ export const getCreditCost = (
       const raw = localStorage.getItem('nst_system_settings');
       if (raw) s = JSON.parse(raw);
     }
-    if (s) {
-      const rawTier = (userTier || 'FREE').toUpperCase();
-      const normTier = rawTier === 'ULTRA' ? 'ultra' : rawTier === 'BASIC' ? 'basic' : 'free';
+    
+    let baseCost = fallback;
+    const rawTier = (userTier || 'FREE').toUpperCase();
+    const normTier = rawTier === 'ULTRA' ? 'ultra' : rawTier === 'BASIC' ? 'basic' : 'free';
 
+    if (s) {
       // 1. Check Tiered Credit Costs table
       if (s.tieredCreditCosts && s.tieredCreditCosts[key]) {
         const tierVal = s.tieredCreditCosts[key][normTier];
@@ -202,9 +204,22 @@ export const getCreditCost = (
       }
 
       // 4. Check direct key on settings
-      if (typeof s[key] === 'number' && !isNaN(s[key])) return Math.max(0, s[key]);
+      if (typeof s[key] === 'number' && !isNaN(s[key])) {
+          baseCost = Math.max(0, s[key]);
+      }
     }
+    
+    // Apply VIP "Credit Off Anywhere" discount (10% for Basic, 20% for Ultra)
+    // Only applied if we didn't use a specific Tiered override above!
+    if (baseCost > 0) {
+      if (normTier === 'ultra') return Math.ceil(baseCost * 0.80);
+      if (normTier === 'basic') return Math.ceil(baseCost * 0.90);
+    }
+    
+    return baseCost;
+
   } catch {}
+  
   return fallback;
 };
 

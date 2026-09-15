@@ -19,6 +19,7 @@ import { syncAllRevisionBuckets } from '../utils/revisionFirebase';
 import { applyDeduction, getTotalCredits } from '../utils/creditSystem';
 import { CreditConfirmationModal } from './CreditConfirmationModal';
 import { renderMathInHtml } from '../utils/mathUtils';
+import { UNLOCK_COSTS } from '../utils/limits';
 import McqQuestionDisplay from './McqQuestionDisplay';
 import McqPracticeCard from './McqPracticeCard';
 import McqQuestionNavigator from './McqQuestionNavigator';
@@ -212,8 +213,8 @@ export const RevisionHubScreen: React.FC<Props> = ({
   const revCfg = (settings as any)?.revisionConfig;
 
   const MCQ_START_COST = 40;
-  const LESSON_OPEN_COST = 100;
-  const LESSON_OPEN_DIAMOND_COST = 10;
+  const LESSON_OPEN_COST = UNLOCK_COSTS.REVISION_HUB_MCQ.credits;
+  const LESSON_OPEN_DIAMOND_COST = UNLOCK_COSTS.REVISION_HUB_MCQ.diamonds;
 
   function doStartSession() {
     // ── Session tracking: App.tsx ko batao session shuru hua ─────────────
@@ -295,7 +296,14 @@ export const RevisionHubScreen: React.FC<Props> = ({
           diamonds: Math.max(0, curDiamonds - LESSON_OPEN_DIAMOND_COST),
         };
         onUpdateUser(updated);
-        saveUserToLive(updated);
+        try {
+          localStorage.setItem("nst_current_user", JSON.stringify(updated));
+          if (updated?.id) {
+            localStorage.setItem(`nst_user_profile_${updated.id}`, JSON.stringify(updated));
+            localStorage.setItem("nst_user_profile", JSON.stringify(updated));
+          }
+        } catch (_) {}
+        saveUserToLive(updated, { immediate: true });
         setCoinModal(null);
         setMcqSelectedLesson(lesson);
         setPendingLesson(null);

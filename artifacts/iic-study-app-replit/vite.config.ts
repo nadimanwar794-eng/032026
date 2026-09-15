@@ -4,11 +4,17 @@ import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
-const rawPort = process.env.PORT ?? '3000';
+import runtimeErrorOverlay from '@replit/vite-plugin-runtime-error-modal';
 
-const port = Number(rawPort) || 3000;
+const rawPort = 3000;
 
-const basePath = process.env.BASE_PATH ?? '/';
+const port = Number(rawPort);
+
+if (Number.isNaN(port) || port <= 0) {
+  throw new Error(`Invalid PORT value: "${rawPort}"`);
+}
+
+const basePath = process.env.BASE_PATH || '/';
 
 export default defineConfig({
   base: basePath,
@@ -20,7 +26,6 @@ export default defineConfig({
       devOptions: { enabled: false },
       includeAssets: [
         'favicon.svg',
-        'splash-logo.png',
         'branding/nsta-logo.png',
         'icons/apple-touch-icon.png',
         'icons/icon-192.png',
@@ -71,6 +76,20 @@ export default defineConfig({
         clientsClaim: true,
       },
     }),
+    runtimeErrorOverlay(),
+    ...(process.env.NODE_ENV !== 'production' &&
+    process.env.REPL_ID !== undefined
+      ? [
+          await import('@replit/vite-plugin-cartographer').then((m) =>
+            m.cartographer({
+              root: path.resolve(import.meta.dirname, '..'),
+            }),
+          ),
+          await import('@replit/vite-plugin-dev-banner').then((m) =>
+            m.devBanner(),
+          ),
+        ]
+      : []),
   ],
   resolve: {
     alias: {
@@ -86,7 +105,7 @@ export default defineConfig({
   },
   root: path.resolve(import.meta.dirname),
   build: {
-    outDir: path.resolve(import.meta.dirname, '../../dist'),
+    outDir: path.resolve(import.meta.dirname, 'dist/public'),
     emptyOutDir: true,
   },
   server: {
@@ -95,7 +114,7 @@ export default defineConfig({
     host: '0.0.0.0',
     allowedHosts: true,
     fs: {
-      strict: false,
+      strict: true,
     },
   },
   preview: {

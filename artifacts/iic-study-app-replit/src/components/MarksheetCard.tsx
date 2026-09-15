@@ -134,6 +134,7 @@ export const MarksheetCard: React.FC<Props> = ({
   const [isAnalysisUnlocked, setIsAnalysisUnlocked] = useState(
     mcqMode === "PREMIUM",
   );
+  const [showAnalysisUnlockModal, setShowAnalysisUnlockModal] = useState(false);
   const [expandedNotes, setExpandedNotes] = useState<Record<string, boolean>>({});
 
   // Fetch Topic Notes for the Chapter
@@ -661,22 +662,46 @@ export const MarksheetCard: React.FC<Props> = ({
   };
 
   const unlockFreeAnalysis = () => {
-    const COST = 20;
-    if (user.credits < COST) {
-      alert(`Insufficient Credits! Unlock costs ${COST} coins.`);
-      return;
+    setShowAnalysisUnlockModal(true);
+  };
+
+  const handleUnlockAnalysis = (currency: 'CREDITS' | 'DIAMONDS') => {
+    const COST_CREDITS = 20;
+    const COST_DIAMONDS = 5;
+    let updatedUser: User | null = null;
+    if (currency === 'DIAMONDS') {
+      const curDia = user.diamonds || 0;
+      if (curDia < COST_DIAMONDS) {
+        alert(`Insufficient Diamonds! Unlock costs ${COST_DIAMONDS} diamonds. You have ${curDia} 💎.`);
+        return;
+      }
+      updatedUser = { ...user, diamonds: Math.max(0, curDia - COST_DIAMONDS) };
+    } else {
+      const curCr = (user.credits || 0) + (user.bonusCredits || 0);
+      if (curCr < COST_CREDITS) {
+        alert(`Insufficient Credits! Unlock costs ${COST_CREDITS} coins. You have ${curCr} 🪙.`);
+        return;
+      }
+      updatedUser = applyDeduction(user, COST_CREDITS) ?? user;
     }
-    setConfirmConfig({
-      isOpen: true,
-      title: "Unlock Analysis",
-      message: `View answers and explanations for ${COST} Coins?`,
-      onConfirm: () => {
-        if (onUpdateUser)
-          onUpdateUser(applyDeduction(user, COST) ?? user);
-        setIsAnalysisUnlocked(true);
-        setConfirmConfig((prev) => ({ ...prev, isOpen: false }));
-      },
-    });
+
+    if (updatedUser) {
+      if (onUpdateUser) {
+        onUpdateUser(updatedUser);
+      }
+      try {
+        localStorage.setItem("nst_current_user", JSON.stringify(updatedUser));
+        if (updatedUser?.id) {
+          localStorage.setItem(`nst_user_profile_${updatedUser.id}`, JSON.stringify(updatedUser));
+          localStorage.setItem("nst_user_profile", JSON.stringify(updatedUser));
+        }
+      } catch (_) {}
+      saveUserToLive(updatedUser, { immediate: true });
+    }
+
+    setIsAnalysisUnlocked(true);
+    setActiveTab("ANALYSIS_TOPIC");
+    setShowAnalysisUnlockModal(false);
   };
 
   const handleUltraAnalysis = async (skipCost: boolean = false) => {
@@ -2186,7 +2211,7 @@ export const MarksheetCard: React.FC<Props> = ({
                     onClick={unlockFreeAnalysis}
                     className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-bold shadow-xl hover:bg-indigo-700 active:scale-95 transition-all flex items-center justify-center gap-2 mx-auto"
                   >
-                    <BrainCircuit size={20} /> Unlock Now (20 Coins)
+                    <BrainCircuit size={20} /> Unlock Full Analysis (20 Coins / 5 Diamonds)
                   </button>
                 </div>
               )}
@@ -2266,6 +2291,50 @@ export const MarksheetCard: React.FC<Props> = ({
                 }}
               />
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Full Analysis Unlock Modal: 20 Credits or 5 Diamonds */}
+      {showAnalysisUnlockModal && (
+        <div className="fixed inset-0 z-[400] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="w-full max-w-sm bg-white rounded-3xl p-6 text-center shadow-2xl border border-indigo-100 space-y-4">
+            <div className="w-16 h-16 rounded-full mx-auto flex items-center justify-center bg-indigo-50 text-indigo-600 shadow-inner">
+              <BrainCircuit size={32} />
+            </div>
+            <div>
+              <h3 className="font-black text-lg text-slate-800">Unlock Full Analysis</h3>
+              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                Detailed topic breakdown, concept strength & weakness report aur deep insights unlock karein.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => handleUnlockAnalysis('CREDITS')}
+                className="p-3.5 rounded-2xl border-2 border-amber-300 bg-amber-50/80 hover:bg-amber-100 flex flex-col items-center gap-1.5 transition-all active:scale-95 shadow-sm"
+              >
+                <span className="text-2xl">🪙</span>
+                <span className="text-xs font-black text-amber-900">20 Credits</span>
+                <span className="text-[10px] text-amber-700 font-bold">Aapke paas: {(user.credits || 0) + (user.bonusCredits || 0)}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleUnlockAnalysis('DIAMONDS')}
+                className="p-3.5 rounded-2xl border-2 border-cyan-300 bg-cyan-50/80 hover:bg-cyan-100 flex flex-col items-center gap-1.5 transition-all active:scale-95 shadow-sm"
+              >
+                <span className="text-2xl">💎</span>
+                <span className="text-xs font-black text-cyan-900">5 Diamonds</span>
+                <span className="text-[10px] text-cyan-700 font-bold">Aapke paas: {user.diamonds || 0}</span>
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowAnalysisUnlockModal(false)}
+              className="w-full py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs transition-colors"
+            >
+              Cancel
+            </button>
           </div>
         </div>
       )}

@@ -2,24 +2,28 @@
   "name": "workspace",
   "version": "0.0.0",
   "license": "MIT",
-  "private": true,
   "workspaces": [
     "artifacts/*",
     "lib/*",
     "scripts"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace=@workspace/iic-study-app-replit",
-    "build": "npm run build --workspace=@workspace/iic-study-app-replit",
-    "serve": "npm run serve --workspace=@workspace/iic-study-app-replit",
-    "lint": "tsc -p ./artifacts/iic-study-app-replit/tsconfig.json --noEmit",
-    "typecheck": "tsc -b"
+    "dev": "npm run dev --workspace=artifacts/iic-study-app-replit",
+    "build": "npm run typecheck && npm run build --workspaces --if-present",
+    "typecheck:libs": "tsc --build --force",
+    "typecheck": "npm run typecheck:libs && npm run typecheck --workspaces --if-present"
   },
+  "private": true,
   "dependencies": {
-    "@replit/connectors-sdk": "^0.4.1"
+    "@replit/connectors-sdk": "^0.4.3"
   },
   "devDependencies": {
     "prettier": "^3.9.6",
     "typescript": "~5.9.3"
+  },
+  "overrides": {
+    "@esbuild-kit/esm-loader": "npm:tsx@^4.21.0",
+    "esbuild": "0.28.2",
+    "js-yaml": "4.3.2"
   }
 }

@@ -99,7 +99,7 @@ const CREDIT_SUB_DURATIONS_LIST = [
   { id: '1_YEAR',  label: '1Y', durationDays: 365, months: 12 },
 ];
 
-const DIAMOND_SUB_DURATIONS_LIST = [
+const DEFAULT_DIAMOND_SUB_DURATIONS_LIST = [
   { id: '7_DAYS', label: '7D', days: 7, ratePerDiamond: 1.80 },
   { id: '30_DAYS', label: '1M', days: 30, ratePerDiamond: 1.50 },
   { id: '90_DAYS', label: '3M', days: 90, ratePerDiamond: 1.30 },
@@ -107,7 +107,7 @@ const DIAMOND_SUB_DURATIONS_LIST = [
   { id: '365_DAYS', label: '1Y', days: 365, ratePerDiamond: 1.00 },
 ];
 
-const diamondUnifiedTemplates = [
+const DEFAULT_diamondUnifiedTemplates = [
   {
     id: 'starter_diamond',
     name: 'Starter Diamond Pass',
@@ -378,9 +378,132 @@ function TierDailyClaimCard({
   );
 }
 
+
+
+const compareData = [
+  { category: 'Account & Limits', items: [
+    { label: 'Leaderboard Unlock', free: 'Level 2 Unlock', basic: 'Instant (Level 1)', ultra: 'Instant (Level 1)' },
+    { label: 'Daily MCQ Limit', free: '300 / day', basic: '1,500 / day', ultra: '3,000 / day' },
+    { label: 'Daily XP Cap', free: '1,500 XP', basic: '2,500 XP', ultra: '3,500 XP' },
+    { label: 'XP Multiplier', free: '1.0x', basic: '1.5x', ultra: '2.0x' },
+    { label: 'Store Discount (Credits)', free: '0%', basic: '5%', ultra: '10%' },
+    { label: 'Daily Store Rewards', free: '—', basic: '50 Credits / day', ultra: '5 Diamonds / day' },
+    { label: 'Profile Name Change', free: '100 🪙 or 20 💎', basic: '100 🪙 or 20 💎', ultra: '100 🪙 or 20 💎' },
+  ]},
+  { category: 'Study Content & Modes', items: [
+    { label: 'PDF Notes / Material', free: '5 💎', basic: '✅ Free Included', ultra: '✅ Free Included' },
+    { label: 'Flashcard & Video', free: '5 💎', basic: '5 💎', ultra: '✅ Free / Unlocked' },
+    { label: 'Study Modes (Read/Write/etc)', free: '20 🪙 or 5 💎', basic: '20 🪙 or 5 💎', ultra: '20 🪙 or 5 💎' },
+    { label: 'MCQ Full Analysis', free: '20 🪙 or 5 💎', basic: '20 🪙 or 5 💎', ultra: '20 🪙 or 5 💎' },
+    { label: 'MCQ Marksheet & Solution', free: '✅ Free', basic: '✅ Free', ultra: '✅ Free' },
+    { label: 'Editor / Study Utilities', free: '❌ Locked', basic: '✅ Enabled', ultra: '✅ Enabled' },
+    { label: 'Revision Hub', free: '100 🪙 or 20 💎', basic: '100 🪙 or 20 💎', ultra: '100 🪙 or 20 💎' },
+  ]},
+  { category: 'Routine Engine', items: [
+    { label: 'Routine Default Slots', free: '2 Slots', basic: '3 Slots', ultra: '4 Slots' },
+    { label: 'Routine Books Selection', free: 'Lucent Only', basic: 'Lucent Only', ultra: 'Multiple Books Allowed' },
+    { label: 'Routine Penalty (Inactive)', free: 'Credits Rate Reduced', basic: 'No Penalty', ultra: 'No Penalty' },
+    { label: 'Routine Progression Slots', free: '+1 (Lvl 5), +1 (Lvl 8)', basic: '+1 (Lvl 5), +1 (Lvl 8)', ultra: '+1 (Lvl 5), +1 (Lvl 8)' },
+    { label: 'Routine Paid Slot', free: '100 🪙 / slot', basic: '100 🪙 / slot', ultra: '100 🪙 / slot' },
+  ]},
+  { category: 'Community & Chat', items: [
+    { label: 'Global Chat', free: 'View & Like Only', basic: 'View & Like Only', ultra: '✅ Send Messages Allowed' },
+    { label: 'MCQ Sharing', free: 'Solve Only', basic: '✅ Post MCQs Allowed', ultra: '✅ Post MCQs Allowed' },
+    { label: 'Admin Support', free: '10 🪙 or 5 💎 / msg', basic: '✅ Free', ultra: '✅ Free' },
+    { label: 'Messenger Friend Limit', free: '10 Friends', basic: '30 Friends', ultra: '60 Friends' },
+    { label: 'Messenger Expansion', free: 'Up to 50 max', basic: 'Up to 50+', ultra: 'Unlimited' },
+    { label: 'Daily Message Limit', free: '50 / day', basic: '100 / day', ultra: '300 / day' },
+    { label: 'Message Limit Extension', free: '+50 first, +100 next', basic: '+100 per upgrade', ultra: '+100 per upgrade' },
+    { label: 'Chat Security & Actions', free: '✅ Free', basic: '✅ Free', ultra: '✅ Free' },
+  ]},
+  { category: 'Customization & Themes', items: [
+    { label: 'Theme Studio Access', free: 'Level 3 Unlock', basic: '✅ Instant Unlock', ultra: '✅ Instant Unlock' },
+    { label: 'Score History', free: 'Level 3 Unlock', basic: '✅ Instant Access', ultra: '✅ Instant Access' },
+    { label: 'Theme Library Packs', free: 'Free themes only', basic: 'Basic themes free', ultra: 'Ultra themes free' },
+    { label: 'Theme Pricing (Rental)', free: '1D: 10🪙, 7D: 50🪙, 30D: 100🪙', basic: '1D: 10🪙, 7D: 50🪙, 30D: 100🪙', ultra: '1D: 10🪙, 7D: 50🪙, 30D: 100🪙' },
+  ]}
+];
+
+const CompareMatrix = () => {
+  return (
+    <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="rounded-3xl p-5 border border-sky-400/20 bg-sky-950/20 shadow-xl overflow-hidden relative">
+        <div className="absolute -top-10 -right-10 w-32 h-32 bg-sky-500/10 rounded-full blur-2xl pointer-events-none" />
+        
+        <div className="text-center mb-6">
+          <span className="inline-block px-3 py-1 rounded-full bg-sky-500/20 text-sky-400 text-[10px] font-black uppercase tracking-widest mb-2 border border-sky-400/20">Full Transparency</span>
+          <h2 className="text-xl font-black text-white">Feature Comparison Matrix</h2>
+          <p className="text-xs text-slate-400 mt-1">See exactly what you get across Free, Basic, and Ultra tiers</p>
+        </div>
+
+        <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-sky-500/30 scrollbar-track-transparent">
+          <table className="w-full text-left min-w-[700px] border-collapse">
+            <thead>
+              <tr>
+                <th className="p-3 border-b-2 border-white/10 text-xs font-black text-slate-300 w-[28%]">Feature / Module</th>
+                <th className="p-3 border-b-2 border-slate-700 text-center w-[24%] bg-slate-900/40 rounded-tl-xl border-l border-t border-slate-700/50">
+                  <div className="text-[10px] uppercase text-slate-400 font-bold">Standard</div>
+                  <div className="text-sm font-black text-slate-200 mt-0.5">Free User</div>
+                </th>
+                <th className="p-3 border-b-2 border-sky-500/40 text-center w-[24%] bg-sky-900/20 border-l border-t border-sky-500/20">
+                  <div className="text-[10px] uppercase text-sky-400 font-bold flex justify-center gap-1"><span>⭐</span> Pro</div>
+                  <div className="text-sm font-black text-sky-300 mt-0.5">Basic User</div>
+                </th>
+                <th className="p-3 border-b-2 border-purple-500/50 text-center w-[24%] bg-purple-900/30 rounded-tr-xl border-l border-t border-r border-purple-500/30">
+                  <div className="text-[10px] uppercase text-purple-300 font-bold flex justify-center gap-1"><span>👑</span> Max</div>
+                  <div className="text-sm font-black text-purple-200 mt-0.5">Ultra User</div>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {compareData.map((group, gIdx) => (
+                <React.Fragment key={gIdx}>
+                  {/* Category Header */}
+                  <tr>
+                    <td colSpan={4} className="py-4 px-2 pt-6">
+                      <div className="flex items-center gap-2">
+                        <div className="h-px bg-slate-700 flex-1" />
+                        <span className="text-xs font-black text-slate-400 uppercase tracking-widest">{group.category}</span>
+                        <div className="h-px bg-slate-700 flex-1" />
+                      </div>
+                    </td>
+                  </tr>
+                  
+                  {/* Items */}
+                  {group.items.map((item, iIdx) => (
+                    <tr key={iIdx} className="group hover:bg-white/[0.02] transition-colors">
+                      <td className="p-3 border-b border-white/5 text-xs text-slate-300 font-medium group-hover:text-white transition-colors">{item.label}</td>
+                      
+                      {/* Free Col */}
+                      <td className="p-3 border-b border-l border-white/5 text-center text-xs text-slate-400 bg-slate-900/20">
+                        <span className={item.free.includes('❌') ? 'text-rose-400/80' : item.free.includes('✅') ? 'text-emerald-400/80 font-bold' : ''}>{item.free}</span>
+                      </td>
+                      
+                      {/* Basic Col */}
+                      <td className="p-3 border-b border-l border-sky-500/10 text-center text-xs text-sky-200/80 bg-sky-900/10 group-hover:bg-sky-900/20 transition-colors">
+                        <span className={item.basic.includes('❌') ? 'text-rose-400' : item.basic.includes('✅') ? 'text-emerald-400 font-bold' : ''}>{item.basic}</span>
+                      </td>
+                      
+                      {/* Ultra Col */}
+                      <td className="p-3 border-b border-l border-r border-purple-500/20 text-center text-xs text-purple-200/90 bg-purple-900/20 group-hover:bg-purple-900/30 transition-colors">
+                        <span className={item.ultra.includes('❌') ? 'text-rose-400' : item.ultra.includes('✅') ? 'text-emerald-400 font-bold' : item.ultra.includes('Unlimited') || item.ultra.includes('Instant') ? 'text-amber-300 font-bold' : ''}>{item.ultra}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 /* ─── Main Store Screen Component ─── */
+
 export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, initialTier }) => {
-  const [tierType, setTierType] = useState<'SUBSCRIPTION' | 'CREDITS' | 'DIAMONDS' | 'EXCHANGE' | 'HISTORY'>(() =>
+  const [tierType, setTierType] = useState<'SUBSCRIPTION' | 'COMPARE' | 'CREDITS' | 'DIAMONDS' | 'EXCHANGE' | 'HISTORY'>(() =>
     initialTier || 'SUBSCRIPTION'
   );
 
@@ -389,21 +512,17 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
   }, [initialTier]);
 
   /* Free Plan Side-by-Side Ad Modal State */
-  const [showFreeAdModal, setShowFreeAdModal] = useState(false);
+  
 
-  useEffect(() => {
-    const key = `free_plan_ad_seen_${user.id}`;
-    const alreadySeen = localStorage.getItem(key);
-    if (!alreadySeen) {
-      setShowFreeAdModal(true);
-    }
-  }, [user.id]);
+  const DIAMOND_SUB_DURATIONS_LIST = settings?.diamondDurations && settings.diamondDurations.length > 0 
+    ? settings.diamondDurations 
+    : DEFAULT_DIAMOND_SUB_DURATIONS_LIST;
 
-  const handleDismissFreeAd = () => {
-    const key = `free_plan_ad_seen_${user.id}`;
-    localStorage.setItem(key, 'true');
-    setShowFreeAdModal(false);
-  };
+  const diamondUnifiedTemplates = settings?.diamondTemplates && settings.diamondTemplates.length > 0 
+    ? settings.diamondTemplates 
+    : DEFAULT_diamondUnifiedTemplates;
+
+
 
   /* Diamond State */
   const [diamondSubTab, setDiamondSubTab] = useState<'PACKS' | 'SUBSCRIPTION'>('SUBSCRIPTION');
@@ -454,25 +573,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
     (user.storeDiscount && user.storeDiscount > 0 && scoreTier.level <= 4 && totalScore >= 100)
       ? user.storeDiscount : 0;
 
-  const [visitCount, setVisitCount] = useState<number>(0);
-  const visitDiscountRules = settings?.storeVisitDiscountRules || [];
-  const visitDiscountEnabled = !!(settings?.storeVisitDiscountEnabled && visitDiscountRules.length > 0);
-  const userSubTier: 'FREE' | 'BASIC' | 'ULTRA' =
-    (user as any).subscriptionLevel === 'ULTRA' ? 'ULTRA'
-    : (user as any).subscriptionLevel === 'BASIC' ? 'BASIC' : 'FREE';
-  const eligibleTiers: ('FREE' | 'BASIC' | 'ULTRA')[] = settings?.storeVisitDiscountTiers || ['FREE'];
-  const isEligibleForVisitDiscount = visitDiscountEnabled && eligibleTiers.includes(userSubTier);
-  const visitDiscount = isEligibleForVisitDiscount
-    ? (visitDiscountRules.filter(r => visitCount >= r.visits).sort((a, b) => b.discountPercent - a.discountPercent)[0]?.discountPercent || 0)
-    : 0;
-
-  useEffect(() => {
-    if (!visitDiscountEnabled) return;
-    const key = `store_visit_total_${user.id}`;
-    const prev = parseInt(localStorage.getItem(key) || '0', 10);
-    localStorage.setItem(key, String(prev + 1));
-    setVisitCount(prev + 1);
-  }, [user.id, visitDiscountEnabled]);
+  // Store visit discount removed
 
   useEffect(() => {
     if (subscriptionPlans.length > 0) {
@@ -646,6 +747,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
 
   const allTabs = [
     { id: 'SUBSCRIPTION' as const, label: 'VIP Plans',    emoji: '👑', color: '#c084fc', bg: 'rgba(192,132,252,0.16)', border: 'rgba(192,132,252,0.35)', glow: 'rgba(192,132,252,0.25)' },
+    { id: 'COMPARE'      as const, label: 'Compare',      emoji: '⚖️', color: '#38bdf8', bg: 'rgba(56,189,248,0.16)', border: 'rgba(56,189,248,0.35)', glow: 'rgba(56,189,248,0.25)' },
     { id: 'CREDITS'      as const, label: 'Credits',      emoji: '🪙', color: C.gold,   bg: C.goldBg,                  border: C.goldBorder,            glow: 'rgba(251,191,36,0.22)' },
     { id: 'DIAMONDS'     as const, label: 'Diamonds',     emoji: '💎', color: C.diamond,bg: C.diamondBg,               border: C.diamondBorder,         glow: C.diamondGlow },
     { id: 'EXCHANGE'     as const, label: 'Exchange',     emoji: '🔄', color: '#10b981',bg: 'rgba(16,185,129,0.14)', border: 'rgba(16,185,129,0.35)',glow: 'rgba(16,185,129,0.20)' },
@@ -657,7 +759,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
   const subDiscount = isSubscribed ? (isUltraUser ? 10 : 5) : 0;
   const userBonusDiscount = (activeStoreDiscount > 0 ? activeStoreDiscount : 0) +
     (scoreDiscount > 0 ? scoreDiscount : 0) +
-    (visitDiscount > 0 ? visitDiscount : 0);
+    0;
   const baseAccountDiscount = subDiscount + userBonusDiscount;
   
   // 👑 VIP Plans Special Discount Event (Pro & Max)
@@ -804,7 +906,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
     'Daily Claim: 50 Credits / Day',
     'Daily XP Limit: +66%',
     'XP Multiplier: 1.5X Boost',
-    'Credit Off Anywhere: 20%',
+    'Credit Off Anywhere: 10%',
     'Store Discount: +5%',
     'Projector & PDF Mode',
     'Writing & Correction Mode',
@@ -823,7 +925,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
     'Store Discount: +10% (Pro & Max)',
     'Daily XP Limit: +133%',
     'XP Multiplier: 2.0X Super Boost',
-    'Credit Off Anywhere: 40%',
+    'Credit Off Anywhere: 20%',
     'Global Student Chat',
     'All Ultra Themes Free',
     'Priority Content Requests',
@@ -920,368 +1022,6 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
 
   return (
     <div className="min-h-[100dvh] pb-32 animate-in fade-in duration-300" style={{ background: pageTheme.bg, backgroundImage: pageTheme.bgGrad }}>
-
-      {/* ── SIDE-BY-SIDE MODAL: ALL 14-15 FEATURES COMPARE ── */}
-      {showFreeAdModal && (
-        <div className="fixed inset-0 z-[500] flex items-center justify-center p-3 sm:p-5 bg-black/85 backdrop-blur-md animate-in fade-in duration-300">
-          <div
-            className="w-full max-w-xl max-h-[92dvh] flex flex-col rounded-3xl overflow-hidden border shadow-2xl relative"
-            style={{
-              background: '#090b14',
-              borderColor: 'rgba(255,255,255,0.18)',
-              boxShadow: '0 0 50px rgba(56,189,248,0.2)'
-            }}
-          >
-            {/* Modal Header */}
-            <div className="px-4 py-3.5 flex items-center justify-between border-b border-white/10 bg-slate-900/90 shrink-0">
-              <div className="flex items-center gap-2">
-                <span className="text-base">⚖️</span>
-                <div>
-                  <h3 className="font-black text-sm text-white">Compare Plans Side-by-Side</h3>
-                  <p className="text-[10px] text-slate-400">Scroll karke Free vs Basic aur Free vs Ultra tulna dekhein</p>
-                </div>
-              </div>
-              <button
-                onClick={handleDismissFreeAd}
-                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-slate-300 hover:text-white active:scale-90 transition cursor-pointer"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            {/* Scrollable Comparison Area */}
-            <div className="p-3.5 sm:p-4 space-y-4 overflow-y-auto flex-1 scrollbar-thin text-xs">
-              
-              {/* SECTION 1: FREE VS BASIC (SKY BLUE - 14 FEATURES) */}
-              <div className="rounded-2xl p-3 border border-sky-400/35 bg-gradient-to-b from-[#081e34]/70 to-[#040d18] shadow-lg">
-                <div className="flex items-center justify-between mb-2.5 pb-2 border-b border-white/10">
-                  <div className="flex items-center gap-1.5">
-                    <span>⭐</span>
-                    <h4 className="font-black text-xs sm:text-sm text-white">Free vs Basic (Pro)</h4>
-                  </div>
-                  <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-400/40">
-                    14 PRO SUPERPOWERS
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  {/* Left: Free Side */}
-                  <div className="rounded-xl p-2.5 bg-black/50 border border-white/10 space-y-2">
-                    <div className="flex items-center justify-between pb-1.5 border-b border-white/10">
-                      <span className="font-black text-[11px] text-slate-300 flex items-center gap-1">
-                        <span>🎯</span> Free Plan
-                      </span>
-                      <span className="text-[9px] font-bold text-slate-400">₹0/Forever</span>
-                    </div>
-                    
-                    <div className="space-y-1.5 text-[10px]">
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">Daily Claim</span>
-                        <span className="font-medium text-slate-300">—</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">Daily XP Limit</span>
-                        <span className="font-bold text-slate-300">1,500 pts</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">XP Boost</span>
-                        <span className="font-bold text-slate-300">1.0X Base</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">Credit Discount</span>
-                        <span className="font-bold text-slate-300">0% OFF</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">Store Discount</span>
-                        <span className="font-bold text-slate-300">0%</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">Group Study Rooms</span>
-                        <span className="text-rose-400 font-bold">✕ Locked</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">Projector Mode</span>
-                        <span className="text-rose-400 font-bold">✕ Locked</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">Full PDF Mode</span>
-                        <span className="text-rose-400 font-bold">✕ Locked</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">Digital Writing</span>
-                        <span className="text-rose-400 font-bold">✕ Locked</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">MCQ Mistake Fix</span>
-                        <span className="text-rose-400 font-bold">✕ Locked</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">Color & Fonts</span>
-                        <span className="font-medium text-slate-300">Default Only</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">Basic Themes</span>
-                        <span className="font-medium text-slate-300">Locked</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">Offline Download</span>
-                        <span className="text-rose-400 font-bold">✕ Online only</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">Score Analytics</span>
-                        <span className="font-medium text-slate-300">Basic View</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Right: Basic Side (Sky Blue) */}
-                  <div className="rounded-xl p-2.5 bg-sky-950/35 border border-sky-400/40 space-y-2">
-                    <div className="flex items-center justify-between pb-1.5 border-b border-sky-400/25">
-                      <span className="font-black text-[11px] text-sky-300 flex items-center gap-1">
-                        <span>⭐</span> Basic (Pro)
-                      </span>
-                      <span className="text-[9px] font-black text-sky-400 bg-sky-400/15 px-1.5 py-0.2 rounded">PRO UNLOCK</span>
-                    </div>
-
-                    <div className="space-y-1.5 text-[10px]">
-                      <div className="p-1.5 rounded-lg bg-sky-400/10 border border-sky-400/20">
-                        <span className="text-sky-300/70 block text-[8.5px] font-bold uppercase">Daily Claim</span>
-                        <span className="font-black text-amber-300">🪙 +50 CR / Day</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-sky-400/10 border border-sky-400/20">
-                        <span className="text-sky-300/70 block text-[8.5px] font-bold uppercase">Daily XP Limit</span>
-                        <span className="font-black text-sky-200">2,500 pts (+66%)</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-sky-400/10 border border-sky-400/20">
-                        <span className="text-sky-300/70 block text-[8.5px] font-bold uppercase">XP Boost</span>
-                        <span className="font-black text-sky-200">1.5X Super Boost</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-sky-400/10 border border-sky-400/20">
-                        <span className="text-sky-300/70 block text-[8.5px] font-bold uppercase">Credit Discount</span>
-                        <span className="font-black text-emerald-400">Flat 20% OFF Everywhere</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-sky-400/10 border border-sky-400/20">
-                        <span className="text-sky-300/70 block text-[8.5px] font-bold uppercase">Store Discount</span>
-                        <span className="font-black text-sky-300">+5% Extra OFF</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-sky-400/10 border border-sky-400/20">
-                        <span className="text-sky-300/70 block text-[8.5px] font-bold uppercase">Group Study Rooms</span>
-                        <span className="text-sky-300 font-black">✓ Join Live Rooms & Battles</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-sky-400/10 border border-sky-400/20">
-                        <span className="text-sky-300/70 block text-[8.5px] font-bold uppercase">Projector Mode</span>
-                        <span className="text-sky-300 font-black">✓ Big Screen Display</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-sky-400/10 border border-sky-400/20">
-                        <span className="text-sky-300/70 block text-[8.5px] font-bold uppercase">Full PDF Mode</span>
-                        <span className="text-sky-300 font-black">✓ Full PDF Reading Mode</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-sky-400/10 border border-sky-400/20">
-                        <span className="text-sky-300/70 block text-[8.5px] font-bold uppercase">Digital Writing</span>
-                        <span className="text-sky-300 font-black">✓ Notebook Mode Unlocked</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-sky-400/10 border border-sky-400/20">
-                        <span className="text-sky-300/70 block text-[8.5px] font-bold uppercase">MCQ Mistake Fix</span>
-                        <span className="text-sky-300 font-black">✓ Community Mistakes Correction</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-sky-400/10 border border-sky-400/20">
-                        <span className="text-sky-300/70 block text-[8.5px] font-bold uppercase">Color & Fonts</span>
-                        <span className="text-sky-300 font-black">✓ Full Styling Custom</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-sky-400/10 border border-sky-400/20">
-                        <span className="text-sky-300/70 block text-[8.5px] font-bold uppercase">Basic Themes</span>
-                        <span className="text-sky-300 font-black">✓ All Basic Themes Free</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-sky-400/10 border border-sky-400/20">
-                        <span className="text-sky-300/70 block text-[8.5px] font-bold uppercase">Offline Download</span>
-                        <span className="text-sky-300 font-black">✓ Save Lessons Offline</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-sky-400/10 border border-sky-400/20">
-                        <span className="text-sky-300/70 block text-[8.5px] font-bold uppercase">Score Analytics</span>
-                        <span className="text-sky-300 font-black">✓ Performance Graphs & History</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* SECTION 2: FREE VS ULTRA (PURPLE - 15 FEATURES) */}
-              <div className="rounded-2xl p-3 border border-purple-400/35 bg-gradient-to-b from-[#2e1065]/60 to-[#0e041d] shadow-lg">
-                <div className="flex items-center justify-between mb-2.5 pb-2 border-b border-white/10">
-                  <div className="flex items-center gap-1.5">
-                    <span>👑</span>
-                    <h4 className="font-black text-xs sm:text-sm text-white">Free vs Ultra (Max VIP)</h4>
-                  </div>
-                  <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-400/40">
-                    15 ULTRA SUPERPOWERS
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  {/* Left: Free Side */}
-                  <div className="rounded-xl p-2.5 bg-black/50 border border-white/10 space-y-2">
-                    <div className="flex items-center justify-between pb-1.5 border-b border-white/10">
-                      <span className="font-black text-[11px] text-slate-300 flex items-center gap-1">
-                        <span>🎯</span> Free Plan
-                      </span>
-                      <span className="text-[9px] font-bold text-slate-400">₹0/Forever</span>
-                    </div>
-                    
-                    <div className="space-y-1.5 text-[10px]">
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">Daily Claim</span>
-                        <span className="font-medium text-slate-300">—</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">Daily XP Limit</span>
-                        <span className="font-bold text-slate-300">1,500 pts</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">XP Boost</span>
-                        <span className="font-bold text-slate-300">1.0X Base</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">Credit Discount</span>
-                        <span className="font-bold text-slate-300">0% OFF</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">Store Discount</span>
-                        <span className="font-bold text-slate-300">0%</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">Daily MCQ Limit</span>
-                        <span className="font-medium text-slate-300">Free Standard Quota</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">Host Live Room</span>
-                        <span className="text-rose-400 font-bold">✕ Locked</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">Concept Videos</span>
-                        <span className="text-rose-400 font-bold">✕ Locked</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">Flashcard Mode</span>
-                        <span className="text-rose-400 font-bold">✕ Locked</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">Ultra Notes Mode</span>
-                        <span className="text-rose-400 font-bold">✕ Locked</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">Global Student Chat</span>
-                        <span className="text-rose-400 font-bold">✕ Locked</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">Content Request</span>
-                        <span className="text-rose-400 font-bold">✕ Standard</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">Ultra VIP Themes</span>
-                        <span className="text-rose-400 font-bold">✕ Locked</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">Golden Crown / Glow</span>
-                        <span className="text-rose-400 font-bold">✕ No Badge</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-white/[0.03] border border-white/5 text-slate-400">
-                        <span className="text-slate-500 block text-[8.5px] font-bold uppercase">Priority VIP Help</span>
-                        <span className="font-medium text-slate-300">Standard</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Right: Ultra Side (Purple) */}
-                  <div className="rounded-xl p-2.5 bg-purple-950/35 border border-purple-400/40 space-y-2">
-                    <div className="flex items-center justify-between pb-1.5 border-b border-purple-400/25">
-                      <span className="font-black text-[11px] text-purple-300 flex items-center gap-1">
-                        <span>👑</span> Ultra (Max VIP)
-                      </span>
-                      <span className="text-[9px] font-black text-purple-300 bg-purple-400/15 px-1.5 py-0.2 rounded">MAX ELITE</span>
-                    </div>
-
-                    <div className="space-y-1.5 text-[10px]">
-                      <div className="p-1.5 rounded-lg bg-purple-400/10 border border-purple-400/20">
-                        <span className="text-purple-300/70 block text-[8.5px] font-bold uppercase">Daily Claim</span>
-                        <span className="font-black text-amber-300">🪙 +100 CR / Day (3,000/M)</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-purple-400/10 border border-purple-400/20">
-                        <span className="text-purple-300/70 block text-[8.5px] font-bold uppercase">Daily XP Limit</span>
-                        <span className="font-black text-purple-200">3,500 pts (+133% MAX)</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-purple-400/10 border border-purple-400/20">
-                        <span className="text-purple-300/70 block text-[8.5px] font-bold uppercase">XP Boost</span>
-                        <span className="font-black text-purple-200">2.0X Double Super Boost</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-purple-400/10 border border-purple-400/20">
-                        <span className="text-purple-300/70 block text-[8.5px] font-bold uppercase">Credit Discount</span>
-                        <span className="font-black text-emerald-400">Maximum 40% OFF Everywhere</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-purple-400/10 border border-purple-400/20">
-                        <span className="text-purple-300/70 block text-[8.5px] font-bold uppercase">Store Discount</span>
-                        <span className="font-black text-purple-300">+10% Permanent (Pro & Max)</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-purple-400/10 border border-purple-400/20">
-                        <span className="text-purple-300/70 block text-[8.5px] font-bold uppercase">Daily MCQ Limit</span>
-                        <span className="font-black text-purple-200">Huge 3,000 MCQ / Day Limit</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-purple-400/10 border border-purple-400/20">
-                        <span className="text-purple-300/70 block text-[8.5px] font-bold uppercase">Host Live Room</span>
-                        <span className="text-purple-300 font-black">✓ Host Classroom & Teach</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-purple-400/10 border border-purple-400/20">
-                        <span className="text-purple-300/70 block text-[8.5px] font-bold uppercase">Concept Videos</span>
-                        <span className="text-purple-300 font-black">✓ Full Concept Video Lectures</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-purple-400/10 border border-purple-400/20">
-                        <span className="text-purple-300/70 block text-[8.5px] font-bold uppercase">Flashcard Mode</span>
-                        <span className="text-purple-300 font-black">✓ Memory Revision Flashcards</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-purple-400/10 border border-purple-400/20">
-                        <span className="text-purple-300/70 block text-[8.5px] font-bold uppercase">Ultra Notes Mode</span>
-                        <span className="text-purple-300 font-black">✓ Ultra High-Yield Notes</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-purple-400/10 border border-purple-400/20">
-                        <span className="text-purple-300/70 block text-[8.5px] font-bold uppercase">Global Student Chat</span>
-                        <span className="text-purple-300 font-black">✓ Live Discussion & Doubts</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-purple-400/10 border border-purple-400/20">
-                        <span className="text-purple-300/70 block text-[8.5px] font-bold uppercase">Content Request</span>
-                        <span className="text-purple-300 font-black">✓ Priority Chapter Additions</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-purple-400/10 border border-purple-400/20">
-                        <span className="text-purple-300/70 block text-[8.5px] font-bold uppercase">Ultra VIP Themes</span>
-                        <span className="text-purple-300 font-black">✓ Neon & Glowing Themes Free</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-purple-400/10 border border-purple-400/20">
-                        <span className="text-purple-300/70 block text-[8.5px] font-bold uppercase">Golden Crown / Glow</span>
-                        <span className="text-purple-300 font-black">👑 VIP Crown & Glowing Name</span>
-                      </div>
-                      <div className="p-1.5 rounded-lg bg-purple-400/10 border border-purple-400/20">
-                        <span className="text-purple-300/70 block text-[8.5px] font-bold uppercase">Priority VIP Help</span>
-                        <span className="text-purple-300 font-black">✓ Zero Interruption & Priority Help</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-            </div>
-
-            {/* Bottom Sticky Continue Button */}
-            <div className="p-3.5 border-t border-white/10 bg-slate-900/90 shrink-0">
-              <button
-                type="button"
-                onClick={handleDismissFreeAd}
-                className="w-full py-3 rounded-xl font-black text-xs sm:text-sm text-slate-950 bg-gradient-to-r from-sky-400 via-cyan-300 to-purple-400 hover:opacity-95 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 shadow-lg cursor-pointer"
-              >
-                <span>Continue to Store</span>
-                <ChevronRight size={16} />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ── SUPPORT / WHATSAPP CHECKOUT MODAL ── */}
       {showSupportModal && (
@@ -1572,21 +1312,6 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
           {/* Bottom Row: Tabs (Free vs VIP at the very beginning) */}
           <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
             
-            {/* 1. FREE VS VIP BUTTON (START MEIN) */}
-            <button
-              onClick={() => setShowFreeAdModal(true)}
-              className="py-1 px-2.5 rounded-xl flex items-center gap-1 shrink-0 active:scale-95 transition-all cursor-pointer font-black text-xs"
-              style={{
-                background: 'linear-gradient(135deg, rgba(56,189,248,0.18), rgba(192,132,252,0.18))',
-                border: '1.5px solid rgba(56,189,248,0.45)',
-                boxShadow: '0 0 10px rgba(56,189,248,0.15)',
-              }}
-              title="Compare Free vs VIP"
-            >
-              <span className="text-xs">🎯</span>
-              <span className="text-[10px] text-sky-300">Free vs VIP</span>
-            </button>
-
             {/* 2. MAIN TABS (VIP Plans, Credits, Diamonds, Exchange) */}
             {allTabs.map(tab => {
               const isActive = tierType === tab.id;
@@ -1620,6 +1345,10 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
 
         {/* ── 1. HISTORY TAB ── */}
         {tierType === 'HISTORY' && <SubHistory user={user} onBack={() => setTierType('SUBSCRIPTION')} />}
+
+        
+        {/* ── COMPARE MATRIX ── */}
+        {tierType === 'COMPARE' && <CompareMatrix />}
 
         {/* ── 2. VIP SUBSCRIPTIONS (CLEAN PRO & MAX PASS CARDS) ── */}
         {tierType === 'SUBSCRIPTION' && (
@@ -1870,12 +1599,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
         {tierType === 'CREDITS' && (() => {
           const rawCreditSubPlans = getCreditSubPlans(settings).filter(p => p.isActive !== false);
           
-          const creditSubPlans = rawCreditSubPlans.length > 0 ? rawCreditSubPlans : [
-            { id: 'starter_credit_pass', name: 'Starter Credit Pass', badge: 'STARTER PASS', dailyCredits: 50,  scoreMultiplier: 1.1, weeklyPrice: 40,  price: 150 },
-            { id: 'smart_credit_pass',   name: 'Smart Credit Pass',   badge: 'POPULAR PASS', dailyCredits: 100, scoreMultiplier: 1.2, weeklyPrice: 70,  price: 260 },
-            { id: 'super_credit_pass',   name: 'Super Credit Pass',   badge: 'VALUE PASS',   dailyCredits: 150, scoreMultiplier: 1.3, weeklyPrice: 100, price: 380 },
-            { id: 'mega_credit_pass',    name: 'Mega Credit Pass',    badge: 'MEGA PACK',    dailyCredits: 250, scoreMultiplier: 1.5, weeklyPrice: 150, price: 550 },
-          ];
+          const creditSubPlans = rawCreditSubPlans;
 
           const calculateCustomCreditPrice = (plan: any, durOpt: any, durDisc: number) => {
             let basePrice = 0;
@@ -2643,8 +2367,16 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
                     return;
                   }
                   const res = exchangeDiamondsForCredits(user, exchangeDiamondsCount);
-                  if (res && await saveUserToLive(res.updatedUser)) {
+                  if (res) {
                     onUserUpdate(res.updatedUser);
+                    try {
+                      localStorage.setItem("nst_current_user", JSON.stringify(res.updatedUser));
+                      if (res.updatedUser?.id) {
+                        localStorage.setItem(`nst_user_profile_${res.updatedUser.id}`, JSON.stringify(res.updatedUser));
+                        localStorage.setItem("nst_user_profile", JSON.stringify(res.updatedUser));
+                      }
+                    } catch (_) {}
+                    saveUserToLive(res.updatedUser, { immediate: true });
                     setExchangeMsg(`✅ Badhai! +${res.creditsEarned} 🪙 Credits mil gaye!`);
                     setTimeout(() => setExchangeMsg(null), 5000);
                   }

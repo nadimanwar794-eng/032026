@@ -14,6 +14,7 @@ interface Props {
   settings?: SystemSettings | null;
   onClose: () => void;
   onRestart?: () => void;
+  onUpdateUser?: (user: User) => void;
 }
 
 /**
@@ -109,7 +110,7 @@ export const McqAnalysisOverlay: React.FC<Props> = ({
       mcqMode="PREMIUM"
       onClose={onClose}
        onRestart={onRestart}
-      onUpdateUser={() => {}}
+      onUpdateUser={onUpdateUser}
     />
   );
 };

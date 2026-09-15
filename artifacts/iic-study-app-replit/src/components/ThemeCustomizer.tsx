@@ -23,6 +23,7 @@ const THEME_COST = 200;
 const ACCESS_DURATIONS = [1, 7, 30] as const;
 type AccessDurationDays = typeof ACCESS_DURATIONS[number];
 const ACCESS_PRICES: Record<AccessDurationDays, number> = { 1: 10, 7: 50, 30: 100 };
+const ACCESS_DIAMOND_PRICES: Record<AccessDurationDays, number> = { 1: 1, 7: 5, 30: 15 };
 
 interface ThemeState {
     bgColor: string;
@@ -894,6 +895,7 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
 
     /* ── USER HISTORY STATE ── */
     const [userThemeSaving, setUserThemeSaving]       = useState(false);
+    const [rentalCurrency, setRentalCurrency]         = useState<'CREDITS' | 'DIAMONDS'>('CREDITS');
 
     /* ── ADMIN HISTORY PREVIEW STATE ── */
     const [adminHistoryPreview, setAdminHistoryPreview] = useState<ThemeHistoryEntry | null>(null);
@@ -1816,7 +1818,8 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
             delete (updated as any).personalThemeColor;
         } else if (selected) {
             const duration = selectedDuration || selected.accessDurationDays || 7;
-            const cost = selected.accessMode === 'CREDITS' ? ACCESS_PRICES[duration] : 0;
+            const costCredits = selected.accessMode === 'CREDITS' ? ACCESS_PRICES[duration] : 0;
+            const costDiamonds = selected.accessMode === 'CREDITS' ? ACCESS_DIAMOND_PRICES[duration] : 0;
             const currentExpiry = (user as any).personalThemeExpiry as string | undefined;
             const ownedEntry = ownedThemes.find(item => item.sourceThemeId === themeId);
             const ownedEntryActive = !!ownedEntry && (!ownedEntry.expiresAt || new Date(ownedEntry.expiresAt) > new Date());
@@ -1825,12 +1828,25 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
                 !!currentExpiry &&
                 new Date(currentExpiry) > new Date()
             );
-            if (!alreadyOwned && totalCoins < cost) {
-                alert(`❌ Is theme ke liye ${cost} credits chahiye. Aapke paas ${totalCoins} hain.`);
-                setUserThemeSaving(false);
-                return;
+            let deducted: User | null = user;
+            if (!alreadyOwned && selected.accessMode === 'CREDITS') {
+                if (rentalCurrency === 'DIAMONDS') {
+                    const dia = user.diamonds || 0;
+                    if (dia < costDiamonds) {
+                        alert(`❌ Is theme ke liye ${costDiamonds} diamonds chahiye. Aapke paas ${dia} 💎 hain.`);
+                        setUserThemeSaving(false);
+                        return;
+                    }
+                    deducted = { ...user, diamonds: Math.max(0, dia - costDiamonds) };
+                } else {
+                    if (totalCoins < costCredits) {
+                        alert(`❌ Is theme ke liye ${costCredits} credits chahiye. Aapke paas ${totalCoins} 🪙 hain.`);
+                        setUserThemeSaving(false);
+                        return;
+                    }
+                    deducted = applyDeduction(user, costCredits);
+                }
             }
-            const deducted = alreadyOwned ? user : applyDeduction(user, cost);
             if (!deducted) { setUserThemeSaving(false); return; }
             const nextExpiry = alreadyOwned
                 ? (ownedEntry?.expiresAt || currentExpiry)
@@ -1850,7 +1866,7 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
                 selected.themeData as UserCustomTheme,
                 duration,
                 selected.accessMode || 'FREE',
-                cost,
+                rentalCurrency === 'DIAMONDS' ? costDiamonds : costCredits,
                 nextExpiry,
             );
         } else {
@@ -1859,12 +1875,23 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
             delete (updated as any).personalThemeColor;
         }
         onUpdateUser(updated);
-        try { await saveUserToLive(updated); } catch {}
+        try {
+            localStorage.setItem("nst_current_user", JSON.stringify(updated));
+            if (updated?.id) {
+                localStorage.setItem(`nst_user_profile_${updated.id}`, JSON.stringify(updated));
+                localStorage.setItem("nst_user_profile", JSON.stringify(updated));
+            }
+            await saveUserToLive(updated, { immediate: true });
+        } catch {}
         setThemeDurationEntry(null);
         if (selected && !isAdmin) {
             const duration = selectedDuration || selected.accessDurationDays || 7;
-            const cost = selected.accessMode === 'CREDITS' ? ACCESS_PRICES[duration] : 0;
-            alert(`✅ Theme apply ho gayi! ${duration} din ke liye${cost ? ` ${cost} credits deduct hue` : ' free'} .`);
+            const costCredits = selected.accessMode === 'CREDITS' ? ACCESS_PRICES[duration] : 0;
+            const costDiamonds = selected.accessMode === 'CREDITS' ? ACCESS_DIAMOND_PRICES[duration] : 0;
+            const priceLabel = selected.accessMode === 'CREDITS'
+                ? (rentalCurrency === 'DIAMONDS' ? ` ${costDiamonds} diamonds` : ` ${costCredits} credits`)
+                : ' free';
+            alert(`✅ Theme apply ho gayi! ${duration} din ke liye${priceLabel} deduct hue.`);
         }
         setUserThemeSaving(false);
     };
@@ -1974,6 +2001,38 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
             </>
         ),
     };
+
+    const isBasicOrUltra = user.role === 'ADMIN' || user.role === 'SUB_ADMIN' || user.isPremium || user.subscriptionLevel === 'BASIC' || user.subscriptionLevel === 'ULTRA';
+    const userLevel = (user as any).level || (user as any).totalScore ? Math.max(1, Math.floor(Math.sqrt((user as any).totalScore || 0) / 10)) : 1;
+    const isThemeStudioUnlocked = isBasicOrUltra || userLevel >= 3;
+
+    if (!isThemeStudioUnlocked) {
+        return (
+            <div className="min-h-screen bg-[#06080f] text-white p-6 flex flex-col items-center justify-center text-center">
+                <div className="w-20 h-20 rounded-3xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400 mb-6 shadow-2xl">
+                    <Palette size={40} />
+                </div>
+                <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 text-xs font-black mb-3">
+                    🔒 Level 3 Required
+                </div>
+                <h2 className="text-2xl font-black text-white mb-2">Theme Studio Locked</h2>
+                <p className="text-slate-400 text-xs max-w-xs mb-6 leading-relaxed">
+                    Free users ke liye Theme Studio <span className="text-purple-400 font-bold">Level 3</span> par unlock hota hai.
+                    Aap abhi <span className="text-indigo-400 font-bold">Level {userLevel}</span> par hain.
+                    <br /><br />
+                    Study karke Level 3 achieve karein ya <span className="text-indigo-400 font-bold">Basic / Ultra</span> subscription lein jisme instant access mil jata hai!
+                </p>
+                {onBack && (
+                    <button
+                        onClick={onBack}
+                        className="px-6 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-white font-bold text-xs transition-all active:scale-95"
+                    >
+                        Wapas Jayein
+                    </button>
+                )}
+            </div>
+        );
+    }
 
     return (
         <>
@@ -2513,10 +2572,34 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
                                 </button>
                             </div>
 
+                            {themeDurationEntry.accessMode === 'CREDITS' && (
+                                <div className="flex items-center justify-between gap-2 mb-3 p-2 rounded-xl bg-white/5 border border-white/10">
+                                    <span className="text-[11px] font-bold text-white/70">Payment Currency:</span>
+                                    <div className="flex gap-1 bg-black/40 p-0.5 rounded-lg border border-white/10">
+                                        <button
+                                            type="button"
+                                            onClick={() => setRentalCurrency('CREDITS')}
+                                            className={`px-2.5 py-1 rounded-md text-[10px] font-black transition-all ${rentalCurrency === 'CREDITS' ? 'bg-amber-500 text-black shadow-sm' : 'text-white/60 hover:text-white'}`}
+                                        >
+                                            🪙 Credits ({totalCoins})
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setRentalCurrency('DIAMONDS')}
+                                            className={`px-2.5 py-1 rounded-md text-[10px] font-black transition-all ${rentalCurrency === 'DIAMONDS' ? 'bg-cyan-500 text-black shadow-sm' : 'text-white/60 hover:text-white'}`}
+                                        >
+                                            💎 Diamonds ({user.diamonds || 0})
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
                             <div className="grid grid-cols-3 gap-2 mb-4">
                                 {ACCESS_DURATIONS.map(days => {
                                     const selected = themeDurationDays === days;
-                                    const price = themeDurationEntry.accessMode === 'CREDITS' ? ACCESS_PRICES[days] : 0;
+                                    const priceCr = themeDurationEntry.accessMode === 'CREDITS' ? ACCESS_PRICES[days] : 0;
+                                    const priceDia = themeDurationEntry.accessMode === 'CREDITS' ? ACCESS_DIAMOND_PRICES[days] : 0;
+                                    const label = days === 1 ? '1 Day' : days === 7 ? '1 Week' : '1 Month';
                                     return (
                                         <button
                                             key={days}
@@ -2528,9 +2611,11 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
                                                 borderColor: selected ? `${themeDurationEntry.themeData.btnStart || '#a855f7'}90` : 'rgba(255,255,255,0.10)',
                                             }}
                                         >
-                                            <p className="text-sm font-black text-white">{days} day{days > 1 ? 's' : ''}</p>
+                                            <p className="text-sm font-black text-white">{label}</p>
                                             <p className="text-[9px] font-bold mt-0.5" style={{ color: selected ? '#fcd34d' : 'rgba(255,255,255,0.45)' }}>
-                                                {price ? `${price} credits` : 'FREE'}
+                                                {themeDurationEntry.accessMode === 'CREDITS'
+                                                    ? (rentalCurrency === 'DIAMONDS' ? `${priceDia} 💎` : `${priceCr} 🪙`)
+                                                    : 'FREE'}
                                             </p>
                                         </button>
                                     );
@@ -2539,7 +2624,7 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
 
                             <p className="text-[9px] text-white/35 text-center mb-3">
                                 {themeDurationEntry.accessMode === 'CREDITS'
-                                    ? 'Duration select karne par usi hisaab se credits deduct honge.'
+                                    ? `Duration select karne par ${rentalCurrency === 'DIAMONDS' ? 'diamonds' : 'credits'} deduct honge.`
                                     : 'Ye admin-published theme free hai; selected duration ke baad default theme wapas aayegi.'}
                             </p>
                             <button
@@ -2551,7 +2636,7 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
                             >
                                 {userThemeSaving || saving
                                     ? 'Applying…'
-                                    : `Apply for ${themeDurationDays} day${themeDurationDays > 1 ? 's' : ''}${themeDurationEntry.accessMode === 'CREDITS' ? ` · ${ACCESS_PRICES[themeDurationDays]} 🪙` : ' · FREE'}`}
+                                    : `Apply for ${themeDurationDays === 1 ? '1 Day' : themeDurationDays === 7 ? '1 Week' : '1 Month'}${themeDurationEntry.accessMode === 'CREDITS' ? ` · ${rentalCurrency === 'DIAMONDS' ? `${ACCESS_DIAMOND_PRICES[themeDurationDays]} 💎` : `${ACCESS_PRICES[themeDurationDays]} 🪙`}` : ' · FREE'}`}
                             </button>
                         </div>
                     </div>
