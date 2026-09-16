@@ -2004,7 +2004,7 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
 
     const isBasicOrUltra = user.role === 'ADMIN' || user.role === 'SUB_ADMIN' || user.isPremium || user.subscriptionLevel === 'BASIC' || user.subscriptionLevel === 'ULTRA';
     const userLevel = (user as any).level || (user as any).totalScore ? Math.max(1, Math.floor(Math.sqrt((user as any).totalScore || 0) / 10)) : 1;
-    const isThemeStudioUnlocked = isBasicOrUltra || userLevel >= 3;
+    const isThemeStudioUnlocked = isBasicOrUltra || userLevel >= 2;
 
     if (!isThemeStudioUnlocked) {
         return (
@@ -2013,14 +2013,14 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
                     <Palette size={40} />
                 </div>
                 <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 text-xs font-black mb-3">
-                    🔒 Level 3 Required
+                    🔒 Level 2 Required
                 </div>
                 <h2 className="text-2xl font-black text-white mb-2">Theme Studio Locked</h2>
                 <p className="text-slate-400 text-xs max-w-xs mb-6 leading-relaxed">
-                    Free users ke liye Theme Studio <span className="text-purple-400 font-bold">Level 3</span> par unlock hota hai.
+                    Free users ke liye Theme Studio <span className="text-purple-400 font-bold">Level 2</span> par unlock hota hai.
                     Aap abhi <span className="text-indigo-400 font-bold">Level {userLevel}</span> par hain.
                     <br /><br />
-                    Study karke Level 3 achieve karein ya <span className="text-indigo-400 font-bold">Basic / Ultra</span> subscription lein jisme instant access mil jata hai!
+                    Study karke Level 2 achieve karein ya <span className="text-indigo-400 font-bold">Basic / Ultra</span> subscription lein jisme instant access mil jata hai!
                 </p>
                 {onBack && (
                     <button

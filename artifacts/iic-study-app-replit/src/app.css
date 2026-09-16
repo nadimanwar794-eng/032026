@@ -3063,6 +3063,31 @@ model-viewer {
   border-radius: 9999px;
 }
 
+/* ── Top-bar staged handoff ─────────────────────────────
+   Keeps the Row 2 control in flow while it collapses, so
+   the level bar expands instead of jumping. */
+@keyframes nst-topbar-row1-entry {
+  0% {
+    opacity: 0;
+    transform: translateX(8px) scale(0.96);
+    filter: saturate(0.7) brightness(0.9);
+  }
+  55% {
+    opacity: 1;
+    transform: translateX(-1px) scale(1.015);
+    filter: saturate(1.15) brightness(1.08);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    filter: saturate(1) brightness(1);
+  }
+}
+
+.nst-topbar-row1-handoff-active .nst-topbar-row1-content {
+  animation: nst-topbar-row1-entry 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 /* ── UNIFIED SUBJECT CARDS — White inside, tier color on border/left accent ── */
 .nst-subject-card {
   transition: all 0.18s ease;

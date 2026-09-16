@@ -18,6 +18,7 @@ import {
   getPageTime,
   isRoutinePageRead,
   calculatePageRequiredReadingSec,
+  getPagePointsCount,
 } from '../utils/routineAutoTrack';
 import {
   getStudyActivity,
@@ -99,7 +100,8 @@ export const SyllabusPageCard: React.FC<SyllabusPageCardProps> = ({
   const writeSec = actStats?.WRITING?.seconds || 0;
   const combinedReadingSec = readSec + writeSec;
 
-  const reqSec = useMemo(() => calculatePageRequiredReadingSec(page), [page]);
+  const pointsCount = useMemo(() => getPagePointsCount(page), [page]);
+  const reqSec = useMemo(() => pointsCount * 6, [pointsCount]);
   const isReadGoalMet = isRoutinePageRead(lessonId, pageIndex) || combinedReadingSec >= reqSec;
 
   // User subscription checks
@@ -284,7 +286,7 @@ export const SyllabusPageCard: React.FC<SyllabusPageCardProps> = ({
               <h4 className="text-xs font-black text-slate-800 truncate leading-snug">
                 {topicTitle}
               </h4>
-              <span className="text-[9px] font-bold text-slate-500 bg-slate-100/90 border border-slate-200/80 px-1.5 py-0.5 rounded-md shrink-0 flex items-center gap-1" title="Word count reading time">
+              <span className="text-[9px] font-bold text-slate-500 bg-slate-100/90 border border-slate-200/80 px-1.5 py-0.5 rounded-md shrink-0 flex items-center gap-1" title={`${pointsCount} points × 6s = ${formatSecs(reqSec)}`}>
                 ⏱️ {formatSecs(reqSec)}
               </span>
             </div>

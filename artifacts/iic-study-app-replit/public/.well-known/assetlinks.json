@@ -1,12 +1,10 @@
-[
-  {
-    "relation": ["delegate_permission/common.handle_all_urls"],
-    "target": {
-      "namespace": "android_app",
-      "package_name": "app.vercel.app_2nsta.twa",
-      "sha256_cert_fingerprints": [
-        "21:DB:9F:D1:65:D2:84:8D:64:FB:04:9E:2D:1F:E3:1D:8E:DE:49:BB:A3:EF:70:68:79:D0:62:21:E4:B7:57:80"
-      ]
-    }
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "app.vercel.app_2nsta.twa",
+    "sha256_cert_fingerprints": [
+      "3C:01:30:15:4B:A2:0A:BE:FC:71:B3:9F:00:A4:41:42:6C:6C:5C:97:58:E6:1F:AE:8A:8E:98:75:A7:46:46:6A"
+    ]
   }
-]
+}]

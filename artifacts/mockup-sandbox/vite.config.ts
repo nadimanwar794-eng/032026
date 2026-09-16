@@ -5,6 +5,9 @@ import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 import { mockupPreviewPlugin } from "./mockupPreviewPlugin";
 
+// Replit's managed workflow provides PORT and BASE_PATH at runtime. Static
+// hosts such as Vercel build this config without those workflow variables, so
+// keep development defaults for the build step.
 const rawPort = process.env.PORT || 3000;
 
 const port = Number(rawPort);

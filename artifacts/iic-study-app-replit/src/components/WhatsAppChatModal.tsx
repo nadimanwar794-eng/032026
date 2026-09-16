@@ -63,6 +63,7 @@ import {
   createWhatsAppGroup,
   reactToChatMessage,
   getLocalGroups,
+  formatLastSeen,
   fetchRegisteredStudents,
   sendFriendRequest,
   acceptFriendRequest,
@@ -1669,7 +1670,7 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                           ) : (
                             <span className="text-[11px] text-slate-400 dark:text-slate-500 flex items-center gap-1">
                               <span className="w-1.5 h-1.5 rounded-full bg-slate-400 inline-block" />
-                              <span>Offline {student.lastSeen ? `• ${formatTime(student.lastSeen)}` : ''}</span>
+                              <span>Offline • last seen {formatLastSeen(student.lastSeen)}</span>
                             </span>
                           )
                         ) : (
@@ -2046,7 +2047,7 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                       selectedContact.isOnline ? (
                         <span className="text-emerald-400 font-semibold">online</span>
                       ) : (
-                        selectedContact.lastSeen ? `last seen ${formatTime(selectedContact.lastSeen)}` : 'Offline'
+                        <span>last seen {formatLastSeen(selectedContact.lastSeen)}</span>
                       )
                     ) : (
                       'active on Nsta Messenger'
@@ -2490,7 +2491,11 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                                 </span>
                               </h4>
                               <span className="text-[10px] text-slate-400 font-medium">
-                                {contact.isOnline ? 'Online' : 'Active'}
+                                {contact.isOnline ? (
+                                  <span className="text-emerald-400 font-semibold">Online</span>
+                                ) : (
+                                  <span>last seen {formatLastSeen(contact.lastSeen)}</span>
+                                )}
                               </span>
                             </div>
                             <p className="text-xs text-slate-500 dark:text-slate-400 truncate flex items-center gap-1">

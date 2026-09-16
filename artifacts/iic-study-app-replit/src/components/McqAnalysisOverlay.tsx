@@ -35,6 +35,7 @@ export const McqAnalysisOverlay: React.FC<Props> = ({
   settings,
   onClose,
   onRestart,
+  onUpdateUser,
 }) => {
   const resultIdRef = useRef(`mcq_session_${Date.now()}_${Math.random().toString(36).slice(2)}`);
 

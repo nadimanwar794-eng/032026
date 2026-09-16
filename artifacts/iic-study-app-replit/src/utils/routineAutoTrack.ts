@@ -2,6 +2,8 @@
 // Automatic per-page read & per-lesson MCQ tracking for My Routine.
 // Written by StudentDashboard hooks; read by MyRoutine to show auto progress.
 
+import { splitIntoTopics } from './notesSplitter';
+
 const AUTO_KEY = 'nst_routine_auto_v1';
 
 interface AutoTrackData {
@@ -251,11 +253,23 @@ export function resetPageTime(lessonId: string, pageIdx: number): void {
   save(d);
 }
 
-/** Calculate minimum required reading seconds based on exact word count (120 WPM / 2 words per second) */
-export function calculatePageRequiredReadingSec(pageOrContent: any): number {
-  if (!pageOrContent) return 15;
-  if (typeof pageOrContent === 'object' && typeof pageOrContent.requiredReadingSec === 'number' && pageOrContent.requiredReadingSec > 0) {
-    return Math.max(10, pageOrContent.requiredReadingSec);
+/** Calculate number of points in a page or note content */
+export function getPagePointsCount(pageOrContent: any): number {
+  if (!pageOrContent) return 1;
+  if (typeof pageOrContent === 'number') return Math.max(1, pageOrContent);
+  if (typeof pageOrContent === 'object') {
+    if (typeof pageOrContent.points === 'number' && pageOrContent.points > 0) {
+      return pageOrContent.points;
+    }
+    if (Array.isArray(pageOrContent.points) && pageOrContent.points.length > 0) {
+      return pageOrContent.points.length;
+    }
+    if (Array.isArray(pageOrContent.pointsData) && pageOrContent.pointsData.length > 0) {
+      return pageOrContent.pointsData.length;
+    }
+    if (Array.isArray(pageOrContent.topics) && pageOrContent.topics.length > 0) {
+      return pageOrContent.topics.length;
+    }
   }
 
   let rawText = '';
@@ -265,33 +279,26 @@ export function calculatePageRequiredReadingSec(pageOrContent: any): number {
     rawText = pageOrContent.chunkNotes || pageOrContent.content || pageOrContent.notes || pageOrContent.htmlNotes || pageOrContent.text || '';
   }
 
-  if (!rawText || typeof rawText !== 'string') return 15;
+  if (!rawText || typeof rawText !== 'string') return 1;
 
-  const textOnly = rawText
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<svg[^>]*>[\s\S]*?<\/svg>/gi, ' ')
-    .replace(/data:image\/[^;]+;base64,[a-zA-Z0-9+/=]+/gi, ' ')
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&#\d+;/g, ' ')
-    .replace(/&[a-z]+;/gi, ' ');
+  try {
+    const topics = splitIntoTopics(rawText);
+    if (topics && topics.length > 0) return topics.length;
+  } catch {}
 
-  const words = textOnly.trim().split(/\s+/).filter(w => w.length > 0 && !/^[\W_]+$/.test(w));
-  const wordCount = words.length;
+  const textLines = rawText
+    .replace(/<[^>]+>/g, '\n')
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l.length > 0);
+  return Math.max(1, textLines.length);
+}
 
-  if (wordCount <= 10) return 15;
-
-  // Realistic reading speed: 120 words/min (2 words per second -> Math.round((wordCount / 120) * 60) = Math.round(wordCount / 2))
-  // Dynamically scales with page content: short pages = less time (e.g. 45s, 1m 20s), long pages = more time (e.g. 2m 40s, 3m 30s, 6m+)
-  let dynamicReqSec = Math.round((wordCount / 120) * 60);
-  if (dynamicReqSec < 15) dynamicReqSec = 15;
-
-  return dynamicReqSec;
+/** Calculate minimum required reading seconds based on points: points * 6 seconds */
+export function calculatePageRequiredReadingSec(pageOrContent: any): number {
+  if (!pageOrContent) return 6;
+  const points = getPagePointsCount(pageOrContent);
+  return Math.max(6, points * 6);
 }
 
 /** Get total reading seconds for an entire lesson */

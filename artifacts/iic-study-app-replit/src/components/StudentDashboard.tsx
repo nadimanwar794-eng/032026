@@ -6097,9 +6097,6 @@ export const StudentDashboard: React.FC<Props> = ({
     if (unseen.length === 0) return;
     const first = unseen[0];
     setNotifToast(first);
-    const ids = [...seenNotifIds, ...unseen.map(n => n.id)];
-    setSeenNotifIds(ids);
-    try { localStorage.setItem('nst_seen_notifs_v1', JSON.stringify(ids)); } catch {}
     const t = setTimeout(() => setNotifToast(null), 5000);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -7277,6 +7274,61 @@ export const StudentDashboard: React.FC<Props> = ({
     return false;
   }).length;
 
+  // TopBar buttons dynamic auto-hide:
+  // After 5s on HOME page: Mail hides first (only when there is nothing unread).
+  // At 6s: Streak hides.
+  // At 7s: Gift hides and the Store/Credits/Diamonds button moves to Row 1.
+  // If user navigates away from HOME (competition, lucent, classes, etc.), components remain hidden.
+  // When user returns to HOME, everything resets back to visible, and the 5s timer restarts.
+  const [hideStreakTopBar, setHideStreakTopBar] = useState(false);
+  const [hideMailTopBar, setHideMailTopBar] = useState(false);
+  const [hideGiftTopBar, setHideGiftTopBar] = useState(false);
+  const [hasHiddenOnHome, setHasHiddenOnHome] = useState(false);
+
+  useEffect(() => {
+    if (activeTab === 'HOME') {
+      setHideStreakTopBar(false);
+      setHideMailTopBar(false);
+      setHideGiftTopBar(false);
+      setHasHiddenOnHome(false);
+
+      // At 5s: Mail hides first, unless it still has something unread/pending.
+      const tMail = setTimeout(() => {
+        const pendingRewards = (user?.inbox || []).filter(
+          (m: any) => (m.type === 'REWARD' || m.type === 'GIFT') && !m.isClaimed && (!m.expiresAt || new Date(m.expiresAt).getTime() > Date.now())
+        ).length;
+        const total = (unreadCount || 0) + (unreadNotifCount || 0) + pendingRewards;
+        if (total === 0) {
+          setHideMailTopBar(true);
+        }
+      }, 5000);
+
+      // 1s later: hide the streak independently of the mail button.
+      const tStreak = setTimeout(() => {
+        setHideStreakTopBar(true);
+      }, 6000);
+
+      // 1s later: hide the gift and move the rotating store button to Row 1.
+      const tGift = setTimeout(() => {
+        setHideGiftTopBar(true);
+        setHasHiddenOnHome(true);
+      }, 7000);
+
+      return () => {
+        clearTimeout(tMail);
+        clearTimeout(tStreak);
+        clearTimeout(tGift);
+      };
+    } else {
+      // If elements already hid on HOME, keep them hidden when user navigates to other tabs/classes
+      if (hasHiddenOnHome) {
+        setHideStreakTopBar(true);
+        setHideMailTopBar(true);
+        setHideGiftTopBar(true);
+      }
+    }
+  }, [activeTab, unreadCount, unreadNotifCount, user?.inbox]);
+
   useEffect(() => {
     setCanClaimReward(
       RewardEngine.canClaimDaily(user, dailyStudySeconds, dailyTargetSeconds),
@@ -7764,24 +7816,41 @@ export const StudentDashboard: React.FC<Props> = ({
   useEffect(() => {
     if (!showInbox) return;
     const freshUser = (window as any).__dashUserRef?.current ?? user;
-    if (!freshUser.inbox || freshUser.inbox.length === 0) return;
-    const hasUnread = freshUser.inbox.some((m: any) => {
-      if (m.isClaimed) return false;
-      const now = Date.now();
-      const expired = m.expiresAt && new Date(m.expiresAt).getTime() <= now;
-      if (expired) return false;
-      if (!m.read) return true;
-      const expiringSoon = m.expiresAt && (new Date(m.expiresAt).getTime() - now) < EXPIRY_SOON_MS;
-      if (expiringSoon && !m.expirySoonRead) return true;
-      return false;
-    });
-    if (!hasUnread) return;
-    const updatedInbox = freshUser.inbox.map((m: any) => {
-      const now = Date.now();
-      const expiringSoon = m.expiresAt && (new Date(m.expiresAt).getTime() - now) < EXPIRY_SOON_MS;
-      return { ...m, read: true, ...(expiringSoon ? { expirySoonRead: true } : {}) };
-    });
-    handleUserUpdate({ ...freshUser, inbox: updatedInbox });
+    if (freshUser.inbox && freshUser.inbox.length > 0) {
+      const hasUnread = freshUser.inbox.some((m: any) => {
+        if (m.isClaimed) return false;
+        const now = Date.now();
+        const expired = m.expiresAt && new Date(m.expiresAt).getTime() <= now;
+        if (expired) return false;
+        if (!m.read) return true;
+        const expiringSoon = m.expiresAt && (new Date(m.expiresAt).getTime() - now) < EXPIRY_SOON_MS;
+        if (expiringSoon && !m.expirySoonRead) return true;
+        return false;
+      });
+      if (hasUnread) {
+        const updatedInbox = freshUser.inbox.map((m: any) => {
+          const now = Date.now();
+          const expiringSoon = m.expiresAt && (new Date(m.expiresAt).getTime() - now) < EXPIRY_SOON_MS;
+          return { ...m, read: true, ...(expiringSoon ? { expirySoonRead: true } : {}) };
+        });
+        handleUserUpdate({ ...freshUser, inbox: updatedInbox });
+      }
+    }
+
+    // Opening the mailbox is the user's explicit "seen" action for admin
+    // notifications and new-content alerts. A toast alone must not clear the
+    // mailbox badge.
+    const notificationIds = allNotifications.map(n => n.id);
+    if (notificationIds.length > 0) {
+      const mergedIds = [...new Set([...seenNotifIds, ...notificationIds])];
+      if (mergedIds.length !== seenNotifIds.length) {
+        setSeenNotifIds(mergedIds);
+        try { localStorage.setItem('nst_seen_notifs_v1', JSON.stringify(mergedIds)); } catch {}
+      }
+    }
+    if (_newContentFiltered.length > 0) {
+      markAllContentItemsSeen(user.id, _newContentFiltered.map(item => item.id));
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showInbox]);
 
@@ -13392,41 +13461,120 @@ export const StudentDashboard: React.FC<Props> = ({
             </div>
           </div>
 
-          {/* ── REFER & EARN (VIP) TOP BANNER (Directly visible without scrolling) ── */}
-          <div className="px-3 mb-3">
-            <button
-              onClick={() => setShowReferralPopup(true)}
-              className="w-full text-left rounded-2xl p-3.5 relative overflow-hidden transition-all active:scale-[0.98] group cursor-pointer"
-              style={{
-                background: 'linear-gradient(135deg, rgba(16,185,129,0.20), rgba(5,150,105,0.08))',
-                border: '1.5px solid rgba(16,185,129,0.45)',
-                boxShadow: '0 4px 20px rgba(16,185,129,0.18)',
-              }}
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 shadow-md relative"
-                  style={{ background: 'linear-gradient(135deg, #10b981, #059669)', border: '1px solid rgba(255,255,255,0.2)' }}>
-                  <Gift size={20} className="text-white" />
-                  <span className="absolute -top-1 -right-1 text-[10px]">👑</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <p className={`text-xs sm:text-sm font-black ${_pTxt}`}>Refer & Earn (VIP)</p>
-                    <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full bg-emerald-500 text-white uppercase tracking-wider shadow-sm">
-                      FREE PASSES ⚡
+          {/* ── REFER & EARN (VIP) SHOWCASE BANNER (NO GREEN - ROYAL INDIGO / PURPLE / AMBER GOLD) ── */}
+          {(() => {
+            const refStats = getReferralStats(user);
+            const activeInvites = refStats.activeCount || 0;
+            const nextTarget = activeInvites < 1 ? 1 : activeInvites < 3 ? 3 : activeInvites < 5 ? 5 : activeInvites < 10 ? 10 : 25;
+            const canClaimAny = [1, 3, 5, 10, 25].some(t => activeInvites >= t && !(user.referralMilestonesClaimed || []).includes(t));
+
+            return (
+              <div className="px-3 mb-3.5">
+                <div
+                  className="w-full text-left rounded-3xl p-4 relative overflow-hidden transition-all shadow-xl border select-none group"
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(88, 28, 135, 0.40) 0%, rgba(49, 46, 129, 0.35) 50%, rgba(120, 53, 15, 0.28) 100%)',
+                    borderColor: 'rgba(192, 132, 252, 0.45)',
+                    boxShadow: '0 8px 28px rgba(76, 29, 149, 0.28), inset 0 1px 1px rgba(255, 255, 255, 0.15)',
+                  }}
+                >
+                  {/* Soft ambient glow accents */}
+                  <div className="absolute -top-10 -right-10 w-36 h-36 bg-amber-400/15 rounded-full blur-2xl pointer-events-none" />
+                  <div className="absolute -bottom-10 -left-10 w-36 h-36 bg-purple-500/20 rounded-full blur-2xl pointer-events-none" />
+
+                  {/* Header Row */}
+                  <div className="relative z-10 flex items-center justify-between gap-2.5 mb-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div
+                        className="w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 shadow-lg relative border border-white/20"
+                        style={{ background: 'linear-gradient(135deg, #7c3aed, #4f46e5)' }}
+                      >
+                        <Gift size={20} className="text-amber-300" />
+                        <span className="absolute -top-1 -right-1 text-[10px]">👑</span>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h3 className={`text-sm sm:text-base font-black ${_pTxt} tracking-tight`}>
+                            Refer & Earn (VIP)
+                          </h3>
+                          <span className="text-[8px] font-black px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-amber-500 text-slate-950 uppercase tracking-wider shadow-sm font-mono">
+                            FREE PASSES ⚡
+                          </span>
+                        </div>
+                        <p className="text-[10.5px] font-medium leading-tight text-purple-200/90 mt-0.5">
+                          Doston ko invite karein aur paayein VIP Passes, Free Royalty & Coins!
+                        </p>
+                      </div>
+                    </div>
+
+                    <span className="text-[11px] font-black px-2.5 py-1 rounded-xl bg-white/10 text-amber-300 border border-amber-400/30 shrink-0 font-mono">
+                      {activeInvites} Active
                     </span>
                   </div>
-                  <p className="text-[10.5px] mt-0.5 font-medium leading-tight" style={{ color: _pTxtMutedColor }}>
-                    Doston ko invite karein aur paayein <span className="text-emerald-400 font-bold">1-Year Free Ultra VIP</span> & Royalty!
-                  </p>
-                </div>
-                <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
-                  style={{ background: 'rgba(16,185,129,0.2)', border: '1px solid rgba(16,185,129,0.4)' }}>
-                  <ChevronRight size={16} className="text-emerald-400 group-hover:translate-x-0.5 transition-transform" />
+
+                  {/* BIG PROMINENT PRIZE / REWARD SHOWCASE BOX */}
+                  <div
+                    className="relative z-10 p-3 sm:p-3.5 rounded-2xl mb-3 flex flex-col xs:flex-row items-start xs:items-center justify-between gap-3 border"
+                    style={{
+                      background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.14) 0%, rgba(124, 58, 237, 0.18) 100%)',
+                      borderColor: 'rgba(251, 191, 36, 0.38)',
+                      boxShadow: 'inset 0 1px 2px rgba(255, 255, 255, 0.1)',
+                    }}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-amber-400 via-amber-300 to-yellow-500 flex items-center justify-center shrink-0 shadow-lg shadow-amber-500/20 text-slate-950 font-black text-xl border border-amber-200">
+                        🎁
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[9px] font-black uppercase tracking-wider text-amber-300 bg-amber-400/15 px-2 py-0.5 rounded border border-amber-400/30">
+                            Prize Box
+                          </span>
+                          <span className="text-[10px] text-purple-200 font-semibold">Target: {nextTarget} Active</span>
+                        </div>
+                        <p className="text-xs sm:text-sm font-black text-white mt-1 leading-snug truncate">
+                          1-Year Ultra VIP Pass 👑 + 5,000🪙 + 500💎
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="shrink-0 flex items-center gap-2">
+                      <div className="text-right hidden xs:block">
+                        <span className="text-[9px] text-slate-300 block">Reward Status</span>
+                        <span className="text-[11px] font-black text-amber-300">
+                          {canClaimAny ? 'Ready to Claim!' : `${activeInvites}/${nextTarget} Active`}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ACTION BUTTONS ROW: "Claim Prize Now" / "Invite Friends" */}
+                  <div className="relative z-10 flex items-center gap-2 pt-0.5">
+                    <button
+                      onClick={() => setShowReferralPopup(true)}
+                      className="flex-1 py-2.5 px-3.5 rounded-xl font-black text-xs flex items-center justify-center gap-2 transition-all active:scale-[0.98] cursor-pointer shadow-lg tracking-wide border border-amber-300"
+                      style={{
+                        background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 50%, #b45309 100%)',
+                        color: '#0f172a',
+                        boxShadow: '0 4px 14px rgba(245, 158, 11, 0.35)',
+                      }}
+                    >
+                      <Gift size={15} strokeWidth={2.6} className="text-slate-950" />
+                      <span>{canClaimAny ? 'Claim VIP Prize Now 🎁' : 'Claim Prizes & Invite Doston 🎁'}</span>
+                    </button>
+
+                    <button
+                      onClick={() => setShowReferralPopup(true)}
+                      className="py-2.5 px-3 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 bg-white/10 hover:bg-white/15 text-purple-200 border border-purple-400/30 transition-all active:scale-95 cursor-pointer shrink-0"
+                    >
+                      <span>Details</span>
+                      <ChevronRight size={14} />
+                    </button>
+                  </div>
                 </div>
               </div>
-            </button>
-          </div>
+            );
+          })()}
 
 
           {/* ── LEVEL ACHIEVEMENTS ── */}
@@ -14929,6 +15077,14 @@ export const StudentDashboard: React.FC<Props> = ({
         <div className="relative z-10 flex items-center justify-between w-full px-2.5 sm:px-3 pt-2.5 pb-1.5 gap-1.5">
           {/* LEFT: logo + app name + verified badge — only the badge tap opens What's New */}
           <div className="flex items-center gap-1.5 shrink-0 min-w-0">
+            <img
+              src={settings?.appLogo || "/pwa-192x192.png"}
+              alt="Logo"
+              className="w-6 h-6 sm:w-7 sm:h-7 rounded-lg object-contain bg-white/10 p-0.5 border border-white/20 shrink-0"
+              onError={(e) => {
+                (e.currentTarget as HTMLElement).style.display = 'none';
+              }}
+            />
             <span className="font-black text-[20px] sm:text-[23px] leading-tight tracking-tight uppercase text-white truncate max-w-[85px] xs:max-w-[120px] sm:max-w-none">
               {settings?.appShortName || settings?.appName || "NSTA"}
             </span>
@@ -15536,118 +15692,236 @@ export const StudentDashboard: React.FC<Props> = ({
               );
             })()}
 
-            {/* Refer & Earn (VIP) Gift Box — tap to open Refer & Earn popup */}
+            {/* Refer & Earn (VIP) Gift Box — tap to open Refer & Earn popup. Hides after 6s on Home page */}
             {(() => {
               const refStats = getReferralStats(user);
               const refCount = refStats.totalInvited || 0;
               const hasUsers = refCount > 0;
+              const isHidden = activeTab === 'HOME' && hideGiftTopBar;
 
               return (
-                <button
-                  id="topbar-referral-gift-btn"
-                  onClick={() => setShowReferralPopup(true)}
-                  className="relative inline-flex items-center justify-center h-7 px-2 rounded-full active:scale-95 transition-all shrink-0 cursor-pointer overflow-hidden border select-none group"
-                  style={{
-                    background: hasUsers
-                      ? 'linear-gradient(135deg, rgba(16,185,129,0.30), rgba(5,150,105,0.18))'
-                      : 'linear-gradient(135deg, rgba(236,72,153,0.22), rgba(168,85,247,0.18))',
-                    borderColor: hasUsers ? 'rgba(16,185,129,0.45)' : 'rgba(236,72,153,0.40)',
-                    boxShadow: hasUsers
-                      ? '0 0 10px rgba(16,185,129,0.25)'
-                      : '0 0 10px rgba(236,72,153,0.22)',
-                  }}
-                  title="Refer & Earn (VIP) — Doston ko jodein aur VIP passes paayein"
-                >
-                  {!hasUsers ? (
-                    /* When no user referred yet: only show animated gift box with sparkles */
-                    <div className="flex items-center gap-1">
-                      <span className="text-[14px] leading-none animate-gift-wiggle">
-                        🎁
-                      </span>
-                      <span className="text-[10px] font-black text-pink-200 tracking-tight hidden xs:inline">
-                        VIP
-                      </span>
-                    </div>
-                  ) : (
-                    /* When users are referred: flip smoothly between gift icon and user count */
-                    <div className="relative h-full flex items-center justify-center min-w-[34px]">
-                      {/* Phase 0: Gift Box */}
-                      <div
-                        className={`flex items-center gap-1 transition-all duration-500 ease-out ${
-                          referralGiftPhase === 0
-                            ? 'opacity-100 translate-y-0 scale-100'
-                            : 'opacity-0 -translate-y-2 scale-90 pointer-events-none absolute'
-                        }`}
-                      >
-                        <span className="text-[13px] leading-none select-none animate-gift-wiggle">🎁</span>
-                        <span className="text-[10px] font-black text-emerald-300">VIP</span>
-                      </div>
-
-                      {/* Phase 1: User Count */}
-                      <div
-                        className={`flex items-center gap-0.5 transition-all duration-500 ease-out ${
-                          referralGiftPhase === 1
-                            ? 'opacity-100 translate-y-0 scale-100'
-                            : 'opacity-0 translate-y-2 scale-90 pointer-events-none absolute'
-                        }`}
-                      >
-                        <Users size={12} className="text-emerald-400 shrink-0" />
-                        <span className="font-black text-[11px] tabular-nums text-emerald-300">
-                          {refCount}
+                <div className={`transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] shrink-0 ${
+                  isHidden
+                    ? 'max-w-0 opacity-0 overflow-hidden scale-[.96] pointer-events-none translate-x-1 m-0 p-0'
+                    : 'max-w-[120px] opacity-100 scale-100'
+                }`}>
+                  <button
+                    id="topbar-referral-gift-btn"
+                    onClick={() => setShowReferralPopup(true)}
+                    className="relative inline-flex items-center justify-center h-7 px-2 rounded-full active:scale-95 transition-all shrink-0 cursor-pointer overflow-hidden border select-none group"
+                    style={{
+                      background: hasUsers
+                        ? 'linear-gradient(135deg, rgba(16,185,129,0.30), rgba(5,150,105,0.18))'
+                        : 'linear-gradient(135deg, rgba(236,72,153,0.22), rgba(168,85,247,0.18))',
+                      borderColor: hasUsers ? 'rgba(16,185,129,0.45)' : 'rgba(236,72,153,0.40)',
+                      boxShadow: hasUsers
+                        ? '0 0 10px rgba(16,185,129,0.25)'
+                        : '0 0 10px rgba(236,72,153,0.22)',
+                    }}
+                    title="Refer & Earn (VIP) — Doston ko jodein aur VIP passes paayein"
+                  >
+                    {!hasUsers ? (
+                      /* When no user referred yet: only show animated gift box with sparkles */
+                      <div className="flex items-center gap-1">
+                        <span className="text-[14px] leading-none animate-gift-wiggle">
+                          🎁
+                        </span>
+                        <span className="text-[10px] font-black text-pink-200 tracking-tight hidden xs:inline">
+                          VIP
                         </span>
                       </div>
-                    </div>
-                  )}
+                    ) : (
+                      /* When users are referred: flip smoothly between gift icon and user count */
+                      <div className="relative h-full flex items-center justify-center min-w-[34px]">
+                        {/* Phase 0: Gift Box */}
+                        <div
+                          className={`flex items-center gap-1 transition-all duration-500 ease-out ${
+                            referralGiftPhase === 0
+                              ? 'opacity-100 translate-y-0 scale-100'
+                              : 'opacity-0 -translate-y-2 scale-90 pointer-events-none absolute'
+                          }`}
+                        >
+                          <span className="text-[13px] leading-none select-none animate-gift-wiggle">🎁</span>
+                          <span className="text-[10px] font-black text-emerald-300">VIP</span>
+                        </div>
 
-                  {/* Gentle pulsing ping dot if milestone is reachable or active users present */}
-                  {hasUsers && (
-                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 animate-ping opacity-75" />
-                  )}
-                </button>
+                        {/* Phase 1: User Count */}
+                        <div
+                          className={`flex items-center gap-0.5 transition-all duration-500 ease-out ${
+                            referralGiftPhase === 1
+                              ? 'opacity-100 translate-y-0 scale-100'
+                              : 'opacity-0 translate-y-2 scale-90 pointer-events-none absolute'
+                          }`}
+                        >
+                          <Users size={12} className="text-emerald-400 shrink-0" />
+                          <span className="font-black text-[11px] tabular-nums text-emerald-300">
+                            {refCount}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Gentle pulsing ping dot if milestone is reachable or active users present */}
+                    {hasUsers && (
+                      <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 animate-ping opacity-75" />
+                    )}
+                  </button>
+                </div>
               );
             })()}
 
-            {/* Streak — tap to see streak popup */}
-            <button
-              id="topbar-streak-btn"
-              onClick={() => setShowStreakPopup(true)}
-              className="inline-flex items-center gap-1 px-1.5 py-1 rounded-lg active:scale-95 text-white hover:text-amber-200 transition-all shrink-0"
-              title="Aapki Study Streak — Tap karke detail dekhein"
-            >
-              <span className="text-[13px] sm:text-[14px] leading-none select-none">🔥</span>
-              <span className="font-black text-[11px] sm:text-xs tabular-nums text-amber-300">
-                {user.streak > 0 ? user.streak : 0}
-              </span>
-            </button>
+            {/* Streak — tap to see streak popup. Hides after 4s on Home page */}
+            <div className={`transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] shrink-0 ${
+              activeTab === 'HOME' && hideStreakTopBar
+                ? 'max-w-0 opacity-0 overflow-hidden scale-[.96] pointer-events-none translate-x-1 m-0 p-0'
+                : 'max-w-[80px] opacity-100 scale-100'
+            }`}>
+              <button
+                id="topbar-streak-btn"
+                onClick={() => setShowStreakPopup(true)}
+                className="inline-flex items-center gap-1 px-1.5 py-1 rounded-lg active:scale-95 text-white hover:text-amber-200 transition-all shrink-0"
+                title="Aapki Study Streak — Tap karke detail dekhein"
+              >
+                <span className="text-[13px] sm:text-[14px] leading-none select-none">🔥</span>
+                <span className="font-black text-[11px] sm:text-xs tabular-nums text-amber-300">
+                  {user.streak > 0 ? user.streak : 0}
+                </span>
+              </button>
+            </div>
 
-            {/* Mail */}
+            {/* Mail — hides after 5s on Home page UNLESS there are unread messages or pending rewards */}
             {(() => {
               const pendingCreditSub = canClaimCreditSubToday(user) ? 1 : 0;
               const pendingDiamondSub = canClaimDiamondSubToday(user) ? 1 : 0;
               const pendingRewards = (user.inbox || []).filter(m => (m.type === 'REWARD' || m.type === 'GIFT') && !m.isClaimed && (!m.expiresAt || new Date(m.expiresAt).getTime() > Date.now())).length + pendingCreditSub + pendingDiamondSub;
               const totalCount = unreadCount + unreadNotifCount + _newContentCount + pendingRewards;
+              const isHidden = activeTab === 'HOME' && hideMailTopBar && totalCount === 0;
+
               return (
-                <button
-                  onClick={() => {
-                    if ((pendingCreditSub > 0 || pendingDiamondSub > 0) && unreadCount === 0 && unreadNotifCount === 0) {
-                      setInboxTab('REWARDS');
-                    } else {
-                      setInboxTab('UPDATES');
-                    }
-                    setShowInbox(true);
-                  }}
-                  className={`p-[3px] rounded-xl transition-colors relative text-white shrink-0 active:scale-95${topBarBtnGlow ? ' nst-topbar-btn-glow' : ''}`}
-                  title="Mail & Notifications"
-                >
-                  <Mail size={19} />
-                  {totalCount > 0 && (
-                    <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-0.5 bg-red-500 rounded-full text-[9px] text-white font-black flex items-center justify-center">
-                      {totalCount > 9 ? '9+' : totalCount}
-                    </span>
-                  )}
-                </button>
+                <div className={`transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] shrink-0 ${
+                  isHidden
+                    ? 'max-w-0 opacity-0 overflow-hidden scale-[.96] pointer-events-none translate-x-1 m-0 p-0'
+                    : 'max-w-[60px] opacity-100 scale-100'
+                }`}>
+                  <button
+                    onClick={() => {
+                      if ((pendingCreditSub > 0 || pendingDiamondSub > 0) && unreadCount === 0 && unreadNotifCount === 0) {
+                        setInboxTab('REWARDS');
+                      } else {
+                        setInboxTab('UPDATES');
+                      }
+                      setShowInbox(true);
+                    }}
+                    className={`p-[3px] rounded-xl transition-colors relative text-white shrink-0 active:scale-95${topBarBtnGlow ? ' nst-topbar-btn-glow' : ''}`}
+                    title="Mail & Notifications"
+                  >
+                    <Mail size={19} />
+                    {totalCount > 0 && (
+                      <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-0.5 bg-red-500 rounded-full text-[9px] text-white font-black flex items-center justify-center">
+                        {totalCount > 9 ? '9+' : totalCount}
+                      </span>
+                    )}
+                  </button>
+                </div>
               );
             })()}
+
+            {/* Store / Credits / Diamonds hand off to Row 1 after the gift collapses.
+                The slot stays mounted so Row 2 can expand into it smoothly. */}
+            <div className={`flex items-center shrink-0 overflow-hidden transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+              activeTab === 'HOME' && hideGiftTopBar
+                ? 'max-w-[104px] opacity-100 translate-x-0 nst-topbar-row1-handoff-active'
+                : 'max-w-0 opacity-0 translate-x-2 pointer-events-none'
+            }`}>
+                <div className="nst-topbar-row1-content relative h-7 w-[96px] sm:w-[104px] overflow-hidden flex items-center justify-center select-none">
+                  {/* 1. STORE BUTTON (Index 0) - Premium Emerald Luxury Glass */}
+                  <button
+                    id="topbar-row1-store-btn"
+                    onClick={() => {
+                      setStoreInitialTier('FREE');
+                      onTabChange("STORE");
+                    }}
+                     className={`absolute top-0.5 bottom-0.5 left-1/2 -translate-x-1/2 w-max max-w-[92px] flex items-center justify-center gap-1 px-1.5 rounded-full border transition-all duration-500 ease-out cursor-pointer active:scale-95 group ${
+                      topBarSwitchIdx === 0
+                        ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto'
+                        : 'opacity-0 -translate-y-2 scale-95 pointer-events-none'
+                    }`}
+                    style={{
+                      background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.32) 0%, rgba(5, 150, 105, 0.22) 100%)',
+                      borderColor: 'rgba(52, 211, 153, 0.50)',
+                       boxShadow: '0 0 7px rgba(16, 185, 129, 0.24), inset 0 1px 1px rgba(255, 255, 255, 0.22)',
+                    }}
+                    title="Store kholein — Subscriptions, Credits aur Offers"
+                  >
+                    <ShoppingBag size={12.5} className="text-emerald-300 group-hover:scale-110 transition-transform shrink-0 drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]" />
+                    <span className="font-black text-[11px] sm:text-[11.5px] text-emerald-100 tracking-wide drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]">
+                      Store
+                    </span>
+                    <span className="text-[8px] font-black px-1.5 py-0.2 rounded-full bg-emerald-400 text-slate-950 font-mono uppercase leading-tight shadow-sm tracking-wider">
+                      VIP
+                    </span>
+                  </button>
+
+                  {/* 2. CREDITS BUTTON (Index 1) - Premium Gold Amber Coin Glass */}
+                  <button
+                    id="topbar-row1-credits-btn"
+                    onClick={() => {
+                      setStoreInitialTier('CREDITS');
+                      onTabChange("STORE");
+                    }}
+                     className={`absolute top-0.5 bottom-0.5 left-1/2 -translate-x-1/2 w-max max-w-[92px] flex items-center justify-center gap-0.5 px-1.5 rounded-full border transition-all duration-500 ease-out cursor-pointer active:scale-95 group ${
+                      topBarSwitchIdx === 1
+                        ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto'
+                        : 'opacity-0 -translate-y-2 scale-95 pointer-events-none'
+                    }`}
+                    style={{
+                      background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.32) 0%, rgba(217, 119, 6, 0.22) 100%)',
+                      borderColor: 'rgba(251, 191, 36, 0.50)',
+                       boxShadow: '0 0 7px rgba(245, 158, 11, 0.24), inset 0 1px 1px rgba(255, 255, 255, 0.22)',
+                    }}
+                    title="Aapke Credits — Tap karke Store se aur paayein"
+                  >
+                    <span className="text-[12px] leading-none shrink-0 select-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]">🪙</span>
+                    <span className="font-black text-[11px] sm:text-[11.5px] tabular-nums text-amber-100 group-hover:text-white truncate max-w-[50px] drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]">
+                      {(user.credits || 0).toLocaleString('en-IN')}
+                    </span>
+                    <span className="w-3.5 h-3.5 rounded-full bg-amber-400/30 flex items-center justify-center text-amber-300 border border-amber-400/40 group-hover:scale-110 transition-transform shrink-0">
+                      <Plus size={8} strokeWidth={3.5} />
+                    </span>
+                  </button>
+
+                  {/* 3. DIAMONDS BUTTON (Index 2) - Premium Cyan Diamond Sapphire Glass */}
+                  <button
+                    id="topbar-row1-diamonds-btn"
+                    onClick={() => {
+                      setStoreInitialTier('DIAMONDS');
+                      onTabChange("STORE");
+                    }}
+                     className={`absolute top-0.5 bottom-0.5 left-1/2 -translate-x-1/2 w-max max-w-[92px] flex items-center justify-center gap-0.5 px-1.5 rounded-full border transition-all duration-500 ease-out cursor-pointer active:scale-95 group ${
+                      topBarSwitchIdx === 2
+                        ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto'
+                        : 'opacity-0 -translate-y-2 scale-95 pointer-events-none'
+                    }`}
+                    style={{
+                      background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.32) 0%, rgba(2, 132, 199, 0.22) 100%)',
+                      borderColor: 'rgba(56, 189, 248, 0.50)',
+                       boxShadow: '0 0 7px rgba(6, 182, 212, 0.25), inset 0 1px 1px rgba(255, 255, 255, 0.22)',
+                    }}
+                    title="Aapke Diamonds — Tap karke Diamond Store kholein"
+                  >
+                    <span className="text-[12px] leading-none shrink-0 select-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]">💎</span>
+                    <span className="font-black text-[11px] sm:text-[11.5px] tabular-nums text-cyan-100 group-hover:text-white truncate max-w-[50px] drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]">
+                      {(user.diamonds ?? 0).toLocaleString('en-IN')}
+                    </span>
+                    <span className="w-3.5 h-3.5 rounded-full bg-cyan-400/30 flex items-center justify-center text-cyan-200 border border-cyan-400/40 group-hover:scale-110 transition-transform shrink-0">
+                      <Plus size={8} strokeWidth={3.5} />
+                    </span>
+                    {canClaimDiamondSubToday(user) && (
+                      <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
+                    )}
+                  </button>
+                </div>
+            </div>
 
             {/* 3-dot menu */}
             <div className="relative shrink-0">
@@ -15810,7 +16084,32 @@ export const StudentDashboard: React.FC<Props> = ({
                         };
 
                         type ListItem = { label: string; right?: string; locked?: boolean; isTheme?: boolean; action: () => void };
+                        const pendingCreditSub = canClaimCreditSubToday(user) ? 1 : 0;
+                        const pendingDiamondSub = canClaimDiamondSubToday(user) ? 1 : 0;
+                        const pendingRewardsCount = (user.inbox || []).filter(m => (m.type === 'REWARD' || m.type === 'GIFT') && !m.isClaimed && (!m.expiresAt || new Date(m.expiresAt).getTime() > Date.now())).length + pendingCreditSub + pendingDiamondSub;
+                        const totalMailBadge = unreadCount + unreadNotifCount + _newContentCount + pendingRewardsCount;
                         const items: ListItem[] = [
+                          {
+                            label: 'Mail Box',
+                            right: totalMailBadge > 0 ? `📬 ${totalMailBadge}` : '✉️',
+                            action: () => {
+                              if ((pendingCreditSub > 0 || pendingDiamondSub > 0) && unreadCount === 0 && unreadNotifCount === 0) {
+                                setInboxTab('REWARDS');
+                              } else {
+                                setInboxTab('UPDATES');
+                              }
+                              setShowInbox(true);
+                              setShowDotsMenu(false);
+                            },
+                          },
+                          {
+                            label: 'Refer & Earn',
+                            right: '🎁 VIP',
+                            action: () => {
+                              setShowReferralPopup(true);
+                              setShowDotsMenu(false);
+                            },
+                          },
                           {
                             label: 'Store',
                             right: '🛍️',
@@ -15956,86 +16255,106 @@ export const StudentDashboard: React.FC<Props> = ({
             settings={settings}
             activeTab={activeTab}
             levelAnimOff={levelAnimOff}
+            isExpanded={activeTab === 'HOME' && hideGiftTopBar}
             onOpenScorePanel={() => setShowScorePanel(true)}
           />
 
-          {/* Right: Rotating button (Store -> Credits -> Diamonds) switching every 3 seconds - background-free */}
-          <div className="flex items-center shrink-0">
-            <div className="relative h-6 w-[88px] sm:w-[98px] overflow-hidden flex items-center justify-center select-none">
-              
-              {/* 1. STORE BUTTON (Index 0) - No Background */}
-              <button
-                id="topbar-row2-store-btn"
-                onClick={() => {
-                  setStoreInitialTier('FREE');
-                  onTabChange("STORE");
-                }}
-                className={`absolute inset-0 flex items-center justify-center gap-1 px-1 w-full h-full transition-all duration-500 ease-out cursor-pointer active:scale-95 group ${
-                  topBarSwitchIdx === 0
-                    ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto'
-                    : 'opacity-0 -translate-y-2 scale-95 pointer-events-none'
-                }`}
-                title="Store kholein — Subscriptions, Credits aur Offers"
-              >
-                <ShoppingBag size={12} className="text-emerald-400 group-hover:scale-110 transition-transform shrink-0" />
-                <span className="font-black text-[10.5px] sm:text-[11px] text-emerald-300 tracking-wide">
-                  Store
-                </span>
-                <span className="text-[8px] font-black px-1 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 uppercase leading-tight">
-                  VIP
-                </span>
-              </button>
+          {/* Right: Rotating button (Store -> Credits -> Diamonds) switching every 3 seconds - hidden when shifted to Row 1 */}
+          <div className={`flex items-center shrink-0 overflow-hidden transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+            activeTab === 'HOME' && hideGiftTopBar
+              ? 'max-w-0 opacity-0 scale-[.96] pointer-events-none'
+              : 'max-w-[104px] opacity-100 scale-100'
+          }`}>
+              <div className="relative h-7 w-[96px] sm:w-[104px] overflow-hidden flex items-center justify-center select-none">
+                
+                {/* 1. STORE BUTTON (Index 0) - Premium Emerald Luxury Glass */}
+                <button
+                  id="topbar-row2-store-btn"
+                  onClick={() => {
+                    setStoreInitialTier('FREE');
+                    onTabChange("STORE");
+                  }}
+                   className={`absolute top-0.5 bottom-0.5 left-1/2 -translate-x-1/2 w-max max-w-[92px] flex items-center justify-center gap-1 px-1.5 rounded-full border transition-all duration-500 ease-out cursor-pointer active:scale-95 group ${
+                    topBarSwitchIdx === 0
+                      ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto'
+                      : 'opacity-0 -translate-y-2 scale-95 pointer-events-none'
+                  }`}
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.32) 0%, rgba(5, 150, 105, 0.22) 100%)',
+                    borderColor: 'rgba(52, 211, 153, 0.50)',
+                     boxShadow: '0 0 7px rgba(16, 185, 129, 0.24), inset 0 1px 1px rgba(255, 255, 255, 0.22)',
+                  }}
+                  title="Store kholein — Subscriptions, Credits aur Offers"
+                >
+                  <ShoppingBag size={12.5} className="text-emerald-300 group-hover:scale-110 transition-transform shrink-0 drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]" />
+                  <span className="font-black text-[11px] sm:text-[11.5px] text-emerald-100 tracking-wide drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]">
+                    Store
+                  </span>
+                  <span className="text-[8px] font-black px-1.5 py-0.2 rounded-full bg-emerald-400 text-slate-950 font-mono uppercase leading-tight shadow-sm tracking-wider">
+                    VIP
+                  </span>
+                </button>
 
-              {/* 2. CREDITS BUTTON (Index 1) - No Background */}
-              <button
-                id="topbar-row2-credits-btn"
-                onClick={() => {
-                  setStoreInitialTier('CREDITS');
-                  onTabChange("STORE");
-                }}
-                className={`absolute inset-0 flex items-center justify-center gap-0.5 sm:gap-1 px-1 w-full h-full transition-all duration-500 ease-out cursor-pointer active:scale-95 group ${
-                  topBarSwitchIdx === 1
-                    ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto'
-                    : 'opacity-0 -translate-y-2 scale-95 pointer-events-none'
-                }`}
-                title="Aapke Credits — Tap karke Store se aur paayein"
-              >
-                <span className="text-[11px] leading-none shrink-0 select-none">🪙</span>
-                <span className="font-black text-[10.5px] tabular-nums text-amber-300 group-hover:text-amber-200 truncate max-w-[50px]">
-                  {(user.credits || 0).toLocaleString('en-IN')}
-                </span>
-                <span className="text-amber-400 group-hover:scale-110 transition-transform shrink-0">
-                  <Plus size={9} strokeWidth={3.5} />
-                </span>
-              </button>
+                {/* 2. CREDITS BUTTON (Index 1) - Premium Gold Amber Coin Glass */}
+                <button
+                  id="topbar-row2-credits-btn"
+                  onClick={() => {
+                    setStoreInitialTier('CREDITS');
+                    onTabChange("STORE");
+                  }}
+                   className={`absolute top-0.5 bottom-0.5 left-1/2 -translate-x-1/2 w-max max-w-[92px] flex items-center justify-center gap-0.5 px-1.5 rounded-full border transition-all duration-500 ease-out cursor-pointer active:scale-95 group ${
+                    topBarSwitchIdx === 1
+                      ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto'
+                      : 'opacity-0 -translate-y-2 scale-95 pointer-events-none'
+                  }`}
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.32) 0%, rgba(217, 119, 6, 0.22) 100%)',
+                    borderColor: 'rgba(251, 191, 36, 0.50)',
+                     boxShadow: '0 0 7px rgba(245, 158, 11, 0.24), inset 0 1px 1px rgba(255, 255, 255, 0.22)',
+                  }}
+                  title="Aapke Credits — Tap karke Store se aur paayein"
+                >
+                  <span className="text-[12px] leading-none shrink-0 select-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]">🪙</span>
+                  <span className="font-black text-[11px] sm:text-[11.5px] tabular-nums text-amber-100 group-hover:text-white truncate max-w-[50px] drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]">
+                    {(user.credits || 0).toLocaleString('en-IN')}
+                  </span>
+                  <span className="w-3.5 h-3.5 rounded-full bg-amber-400/30 flex items-center justify-center text-amber-300 border border-amber-400/40 group-hover:scale-110 transition-transform shrink-0">
+                    <Plus size={8} strokeWidth={3.5} />
+                  </span>
+                </button>
 
-              {/* 3. DIAMONDS BUTTON (Index 2) - No Background */}
-              <button
-                id="topbar-row2-diamonds-btn"
-                onClick={() => {
-                  setStoreInitialTier('DIAMONDS');
-                  onTabChange("STORE");
-                }}
-                className={`absolute inset-0 flex items-center justify-center gap-0.5 sm:gap-1 px-1 w-full h-full transition-all duration-500 ease-out cursor-pointer active:scale-95 group ${
-                  topBarSwitchIdx === 2
-                    ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto'
-                    : 'opacity-0 -translate-y-2 scale-95 pointer-events-none'
-                }`}
-                title="Aapke Diamonds — Tap karke Diamond Store kholein"
-              >
-                <span className="text-[11px] leading-none shrink-0 select-none">💎</span>
-                <span className="font-black text-[10.5px] tabular-nums text-sky-200 group-hover:text-sky-100 truncate max-w-[50px]">
-                  {(user.diamonds ?? 0).toLocaleString('en-IN')}
-                </span>
-                <span className="text-sky-300 group-hover:scale-110 transition-transform shrink-0">
-                  <Plus size={9} strokeWidth={3.5} />
-                </span>
-                {canClaimDiamondSubToday(user) && (
-                  <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
-                )}
-              </button>
+                {/* 3. DIAMONDS BUTTON (Index 2) - Premium Cyan Diamond Sapphire Glass */}
+                <button
+                  id="topbar-row2-diamonds-btn"
+                  onClick={() => {
+                    setStoreInitialTier('DIAMONDS');
+                    onTabChange("STORE");
+                  }}
+                   className={`absolute top-0.5 bottom-0.5 left-1/2 -translate-x-1/2 w-max max-w-[92px] flex items-center justify-center gap-0.5 px-1.5 rounded-full border transition-all duration-500 ease-out cursor-pointer active:scale-95 group ${
+                    topBarSwitchIdx === 2
+                      ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto'
+                      : 'opacity-0 -translate-y-2 scale-95 pointer-events-none'
+                  }`}
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.32) 0%, rgba(2, 132, 199, 0.22) 100%)',
+                    borderColor: 'rgba(56, 189, 248, 0.50)',
+                     boxShadow: '0 0 7px rgba(6, 182, 212, 0.25), inset 0 1px 1px rgba(255, 255, 255, 0.22)',
+                  }}
+                  title="Aapke Diamonds — Tap karke Diamond Store kholein"
+                >
+                  <span className="text-[12px] leading-none shrink-0 select-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]">💎</span>
+                  <span className="font-black text-[11px] sm:text-[11.5px] tabular-nums text-cyan-100 group-hover:text-white truncate max-w-[50px] drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]">
+                    {(user.diamonds ?? 0).toLocaleString('en-IN')}
+                  </span>
+                  <span className="w-3.5 h-3.5 rounded-full bg-cyan-400/30 flex items-center justify-center text-cyan-200 border border-cyan-400/40 group-hover:scale-110 transition-transform shrink-0">
+                    <Plus size={8} strokeWidth={3.5} />
+                  </span>
+                  {canClaimDiamondSubToday(user) && (
+                    <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
+                  )}
+                </button>
 
-            </div>
+              </div>
           </div>
         </div>
       </div>

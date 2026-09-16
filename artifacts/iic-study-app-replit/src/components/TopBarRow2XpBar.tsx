@@ -3,12 +3,24 @@ import { User, SystemSettings } from '../types';
 import { getLevelInfo, getNextLevelInfo, getLevelProgress } from '../utils/levelSystem';
 import { Zap } from 'lucide-react';
 
+export function formatXpDisplay(num: number): string {
+  if (num < 10000) {
+    return num.toString();
+  }
+  const inK = num / 1000;
+  if (num % 1000 === 0) {
+    return `${inK}k`;
+  }
+  return `${inK.toFixed(1).replace(/\.0$/, '')}k`;
+}
+
 interface TopBarRow2XpBarProps {
   user: User;
   settings?: SystemSettings;
   activeTab: string;
   onOpenScorePanel: () => void;
   levelAnimOff?: boolean;
+  isExpanded?: boolean;
 }
 
 export const TopBarRow2XpBar: React.FC<TopBarRow2XpBarProps> = ({
@@ -17,6 +29,7 @@ export const TopBarRow2XpBar: React.FC<TopBarRow2XpBarProps> = ({
   activeTab,
   onOpenScorePanel,
   levelAnimOff: propLevelAnimOff,
+  isExpanded = false,
 }) => {
   const isLevelAnimDisabled = propLevelAnimOff ?? (() => {
     try { return localStorage.getItem('nst_level_anim_off') === '1'; } catch { return false; }
@@ -99,7 +112,9 @@ export const TopBarRow2XpBar: React.FC<TopBarRow2XpBarProps> = ({
   const levelGlow = currentLevelInfo.glowColor || 'rgba(56,189,248,0.75)';
 
   return (
-    <div className="flex items-center gap-1.5 flex-1 min-w-0 max-w-[280px] sm:max-w-[360px] mx-1">
+    <div className={`flex items-center gap-1.5 flex-1 min-w-0 mx-1 transition-all duration-500 ease-out ${
+      isExpanded ? 'max-w-none w-full' : 'max-w-[280px] sm:max-w-[360px]'
+    }`}>
       {/* Embedded CSS for shimmer sweep & pop animation */}
       <style>{`
         @keyframes row2ShimmerSweep {
@@ -153,8 +168,10 @@ export const TopBarRow2XpBar: React.FC<TopBarRow2XpBarProps> = ({
         className="relative flex-1 min-w-[50px] cursor-pointer py-1 group"
         title={`Level ${currentLevelInfo.level} (${currentLevelInfo.label}): ${Math.round(clampedPct)}%`}
       >
-        {/* Track bar */}
-        <div className="relative w-full h-1.5 sm:h-2 rounded-full overflow-hidden bg-white/20 border border-white/25">
+        {/* Track bar - sleek and thin as requested */}
+        <div className={`relative w-full rounded-full overflow-hidden bg-white/20 border border-white/25 transition-all duration-500 ${
+          isExpanded ? 'h-[3px] sm:h-[3.5px]' : 'h-[3.5px] sm:h-1'
+        }`}>
           {/* Filled portion */}
           <div
             className="h-full rounded-full relative"
@@ -190,7 +207,9 @@ export const TopBarRow2XpBar: React.FC<TopBarRow2XpBarProps> = ({
           }}
         >
           <div
-            className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full bg-white border border-amber-300 pointer-events-none"
+            className={`rounded-full bg-white border border-amber-300 pointer-events-none transition-all duration-500 ${
+              isExpanded ? 'w-2 h-2 sm:w-2.5 sm:h-2.5' : 'w-2.5 h-2.5 sm:w-3 sm:h-3'
+            }`}
             style={{
               animation: isLevelAnimDisabled ? 'none' : 'row2BinduPulse 2s infinite ease-in-out',
               boxShadow: isLevelAnimDisabled ? `0 0 4px ${levelGlow}` : undefined,
@@ -205,7 +224,7 @@ export const TopBarRow2XpBar: React.FC<TopBarRow2XpBarProps> = ({
         <button
           id="topbar-row2-total-xp-btn"
           onClick={onOpenScorePanel}
-          className="inline-flex items-center gap-0.5 px-1 py-0.5 select-none active:scale-95 cursor-pointer"
+          className="inline-flex items-center gap-1 px-1 py-0.5 select-none active:scale-95 cursor-pointer"
           style={{
             animation: 'row2GainPop 0.35s ease-out forwards',
           }}
@@ -213,18 +232,29 @@ export const TopBarRow2XpBar: React.FC<TopBarRow2XpBarProps> = ({
         >
           <Zap size={10} className="text-yellow-300 fill-yellow-300 animate-pulse" />
           <span className="font-black text-[11px] text-amber-300 whitespace-nowrap">Lv {levelUpAnim}</span>
+           {isExpanded && (
+             <span className="text-[10px] font-bold text-amber-200/90 whitespace-nowrap tabular-nums">
+               {formatXpDisplay(currentTotalScore)}{nextLevelInfo ? `/${formatXpDisplay(nextLevelInfo.minScore)}` : ''}
+             </span>
+           )}
         </button>
       ) : (
-        /* Level button showing Lv {level} (e.g. Lv 1) - no background */
+         /* Show the level while the top-bar buttons are present; reveal XP
+            after the Store/Credits/Diamonds control moves to Row 1. */
         <button
           id="topbar-row2-total-xp-btn"
           onClick={onOpenScorePanel}
-          className="inline-flex items-center gap-0.5 px-1 py-0.5 active:scale-95 transition-all shrink-0 cursor-pointer group select-none"
-          title={`Level ${currentLevelInfo.level} (${currentLevelInfo.label}) — Tap karke Level details dekhein`}
+          className="inline-flex items-center gap-1 px-1 py-0.5 active:scale-95 transition-all shrink-0 cursor-pointer group select-none"
+          title={`Level ${currentLevelInfo.level} (${currentLevelInfo.label}) — ${currentTotalScore} XP — Tap karke details dekhein`}
         >
           <span className="font-black text-[11px] tabular-nums text-sky-200 group-hover:text-sky-100 whitespace-nowrap tracking-wide">
             Lv {currentLevelInfo.level}
           </span>
+           {isExpanded && (
+             <span className="text-[10px] font-bold text-sky-300/80 group-hover:text-sky-100 whitespace-nowrap tabular-nums">
+               {formatXpDisplay(currentTotalScore)}{nextLevelInfo ? `/${formatXpDisplay(nextLevelInfo.minScore)}` : ''}
+             </span>
+           )}
         </button>
       )}
     </div>

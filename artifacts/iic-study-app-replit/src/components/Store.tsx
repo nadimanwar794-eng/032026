@@ -417,7 +417,7 @@ const compareData = [
     { label: 'Chat Security & Actions', free: '✅ Free', basic: '✅ Free', ultra: '✅ Free' },
   ]},
   { category: 'Customization & Themes', items: [
-    { label: 'Theme Studio Access', free: 'Level 3 Unlock', basic: '✅ Instant Unlock', ultra: '✅ Instant Unlock' },
+    { label: 'Theme Studio Access', free: 'Level 2 Unlock', basic: '✅ Instant Unlock', ultra: '✅ Instant Unlock' },
     { label: 'Score History', free: 'Level 3 Unlock', basic: '✅ Instant Access', ultra: '✅ Instant Access' },
     { label: 'Theme Library Packs', free: 'Free themes only', basic: 'Basic themes free', ultra: 'Ultra themes free' },
     { label: 'Theme Pricing (Rental)', free: '1D: 10🪙, 7D: 50🪙, 30D: 100🪙', basic: '1D: 10🪙, 7D: 50🪙, 30D: 100🪙', ultra: '1D: 10🪙, 7D: 50🪙, 30D: 100🪙' },
