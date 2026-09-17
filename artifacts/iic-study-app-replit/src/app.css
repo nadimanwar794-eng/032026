@@ -224,7 +224,7 @@
   border-color: transparent !important;
 }
 
-/* Rotating conic gradient border beam */
+/* Rotating conic gradient border beam - animation removed for clean card display */
 .global-rotating-border-cards .nst-card::before,
 .global-rotating-border-cards .nst-card-brand::before,
 .global-rotating-border-cards .nst-chapter-card::before,
@@ -233,16 +233,7 @@
 .global-rotating-border-cards .nst-page-card::before,
 .global-rotating-border-cards .topic-card::before,
 .global-rotating-border-cards .nst-card-animated::before {
-  content: '';
-  position: absolute;
-  top: -150%;
-  left: -150%;
-  width: 400%;
-  height: 400%;
-  background: conic-gradient(from 0deg, transparent 0%, var(--nst-rotating-border-color, #00e5ff) 15%, transparent 30%);
-  animation: spin 3s linear infinite;
-  pointer-events: none;
-  z-index: 0;
+  display: none !important;
 }
 
 /* Inner card background */

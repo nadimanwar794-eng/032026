@@ -14,9 +14,7 @@ import {
   CalendarCheck, 
   RotateCcw 
 } from 'lucide-react';
-
-const LOADING_SCREEN_BACKGROUND =
-  'radial-gradient(circle at 50% 18%, #1e1b4b 0%, #0c1033 40%, #030717 100%)';
+import { APP_VERSION } from '../constants';
 
 interface AppLoadingScreenProps {
   onComplete: () => void;
@@ -339,11 +337,10 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({
   }, [isSortMode]);
 
   return (
-     <div
+    <div 
        className="fixed inset-0 z-[99999] w-screen h-screen min-h-screen flex flex-col items-center justify-between px-6 pt-9 pb-7 select-none overflow-hidden font-sans"
       style={{
-         background: LOADING_SCREEN_BACKGROUND,
-         backgroundColor: '#030717',
+         background: 'radial-gradient(circle at 50% 18%, #1e1b4b 0%, #0c1033 40%, #030717 100%)',
       }}
     >
       <style>{`
@@ -420,22 +417,40 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({
 
       {/* ── TOP NSTA BRANDING & FEATURE BADGES ── */}
       <div className="relative z-10 flex flex-col items-center w-full max-w-md">
-        <div className="relative mb-2">
-          <div className="absolute inset-0 rounded-2xl bg-amber-400/20 blur-lg animate-pulse" />
-          <img
-            src="/branding/nsta-logo.png"
-            alt="NSTA Logo"
-            className="relative w-16 h-16 sm:w-20 sm:h-20 object-contain rounded-2xl drop-shadow-[0_0_20px_rgba(245,158,11,0.35)]"
-            onError={(e) => {
-              const target = e.currentTarget as HTMLImageElement;
-              if (!target.src.includes('icon-512.png')) {
-                target.src = '/icons/icon-512.png';
-              }
-            }}
-          />
+        <div className="w-40 h-28 flex items-center justify-center">
+          <svg className="w-full h-full drop-shadow-[0_0_24px_rgba(56,189,248,0.65)]" viewBox="0 0 220 180" fill="none">
+            <defs>
+              <linearGradient id="mainPageLeft" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stopColor="#0284c7" />
+                <stop offset="60%" stopColor="#38bdf8" />
+                <stop offset="100%" stopColor="#818cf8" />
+              </linearGradient>
+              <linearGradient id="mainPageRight" x1="1" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#9333ea" />
+                <stop offset="60%" stopColor="#c084fc" />
+                <stop offset="100%" stopColor="#818cf8" />
+              </linearGradient>
+              <linearGradient id="glowBase" x1="0" y1="1" x2="0" y2="0">
+                <stop offset="0%" stopColor="#38bdf8" />
+                <stop offset="100%" stopColor="#ffffff" />
+              </linearGradient>
+            </defs>
+
+            <path d="M110 148 C65 125 25 138 12 110 C50 102 85 118 110 138 Z" fill="#0369a1" opacity="0.6" />
+            <path d="M110 148 C155 125 195 138 208 110 C170 102 135 118 110 138 Z" fill="#7e22ce" opacity="0.6" />
+            <path d="M110 140 C70 115 32 124 20 100 C56 94 90 108 110 128 Z" fill="url(#mainPageLeft)" />
+            <path d="M110 140 C150 115 188 124 200 100 C164 94 130 108 110 128 Z" fill="url(#mainPageRight)" />
+            <path d="M110 130 C75 105 45 112 35 90 C68 84 95 98 110 118 Z" fill="#e0f2fe" opacity="0.95" />
+            <path d="M110 130 C145 105 175 112 185 90 C152 84 125 98 110 118 Z" fill="#f3e8ff" opacity="0.95" />
+            <path d="M108 152 L112 152 L111 65 L109 65 Z" fill="url(#glowBase)" filter="drop-shadow(0 0 8px #38bdf8)" />
+
+            <path d="M110 40 L160 58 L110 76 L60 58 Z" fill="#1e293b" stroke="#38bdf8" strokeWidth="2" />
+            <path d="M88 68 L88 84 C88 94 132 94 132 84 L132 68 Z" fill="#0f172a" />
+            <path d="M160 58 L170 82 L166 84 L156 60 Z" fill="#fbbf24" />
+          </svg>
         </div>
 
-        <h1 className="text-4xl sm:text-5xl font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-b from-white via-blue-100 to-blue-300 drop-shadow-[0_4px_18px_rgba(255,255,255,0.25)]">
+        <h1 className="text-5xl font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-b from-white via-blue-100 to-blue-300 drop-shadow-[0_4px_18px_rgba(255,255,255,0.25)]">
           NSTA
         </h1>
 
@@ -839,4 +854,3 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({
 };
 
 export default AppLoadingScreen;
-

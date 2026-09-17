@@ -405,11 +405,17 @@ export const DailyEventPage: React.FC<Props> = ({
       if (!subjects.length) return null;
       const si = (cat.currentSubjectIndex || 0) % subjects.length;
       const sub = subjects[si];
-      // Find notes for this subject (same filter as MyRoutine's getNotesForSubject)
+      // Find notes for this subject (only multi-page books, excluding Sar Sangrah)
       const notes = lucentNotes.filter((n: any) => {
         const nb = (n.bookName || '').trim();
         const nc = n.classLevel || '';
         const ns = (n.subject || 'other').toLowerCase().trim();
+        const pCount = Array.isArray(n.pages) ? n.pages.length : (n.pageCount || 0);
+        if (pCount <= 1) return false;
+        const titleLower = (n.lessonTitle || n.title || '').toLowerCase();
+        const bookLower = nb.toLowerCase();
+        if (titleLower.includes('sar sangrah') || titleLower.includes('saar sangrah') || titleLower.includes('sar-sangrah')) return false;
+        if (bookLower.includes('sar sangrah') || bookLower.includes('saar sangrah') || bookLower.includes('sar-sangrah')) return false;
         if (sub.bookName && nb !== sub.bookName) return false;
         if (sub.classLevel && nc !== sub.classLevel) return false;
         return ns === sub.subjectId;
@@ -608,29 +614,9 @@ export const DailyEventPage: React.FC<Props> = ({
   }, [dueNotes]);
 
   const handlePracticeSlotMcq = useCallback((slot: any) => {
-    const lesson = lucentNotes.find((n: any) => n.id === slot.lessonId);
-    const pages = lesson?.pages || [];
-    if (pages.length > 0) {
-      const topics: TopicItem[] = pages.map((p: any, idx: number) => ({
-        id: `${slot.lessonId}_p${idx}`,
-        chapterId: slot.lessonId,
-        chapterName: slot.lessonTitle || slot.lessonId,
-        name: p.topic || `Topic ${idx + 1}`,
-        score: 0,
-        lastAttempt: '',
-        status: 'WEAK' as any,
-        nextRevision: null,
-        mcqDueDate: null,
-        subjectId: slot.subject,
-        subjectName: slot.subject,
-        isSubTopic: true,
-      }));
-      setRevMcqTopics(topics);
-      setRevMcqSessionActive(true);
-    } else {
-      onOpenLesson?.(slot.lessonId);
-    }
-  }, [lucentNotes, onOpenLesson]);
+    // When user taps MCQ in Routine, navigate to the lesson's page list so user can choose pages
+    onOpenLesson?.(slot.lessonId);
+  }, [onOpenLesson]);
 
   // Detect how many Notes/MCQ were completed today using updatedAt timestamp
   const { notesReviewedToday, mcqDoneToday } = useMemo(() => {
@@ -862,67 +848,6 @@ export const DailyEventPage: React.FC<Props> = ({
     <div>
 
       <div className="px-4 pt-4 space-y-4 pb-6">
-
-        {/* ── DAILY CHALLENGE 2.0 ─────────────────────────────────────────── */}
-        {dailyChallenges.length > 0 && (
-          <SectionCard
-            emoji="🚀"
-            title="Daily Challenge 2.0"
-            subtitle="Aaj ka challenge complete karo aur +100 XP pao"
-            accent="#7c3aed"
-          >
-            <div className="space-y-2.5">
-              {dailyChallenges.map((challenge) => {
-                const status = dailyChallengeStatuses.get(challenge.id) || { completed: false, claimed: false };
-                const isClaiming = claimingChallengeId === challenge.id;
-                return (
-                <div key={challenge.id} className="relative overflow-hidden rounded-2xl border border-violet-200 bg-gradient-to-r from-violet-50 to-purple-50 p-3.5">
-                  <Rocket size={58} className="absolute -right-3 -top-3 text-violet-200 opacity-70" />
-                  <div className="relative z-10">
-                    <p className="text-[13px] font-black text-violet-900">{challenge.title}</p>
-                    {challenge.description && (
-                      <p className="mt-0.5 text-[10px] text-slate-500">{challenge.description}</p>
-                    )}
-                    <div className="mt-2.5 flex items-center gap-2 text-[10px] font-black text-slate-600">
-                      <span className="rounded-full bg-white/80 px-2 py-1">{challenge.questions.length} Questions</span>
-                      <span className="rounded-full bg-white/80 px-2 py-1">Max 60 min</span>
-                      <span className="rounded-full bg-amber-100 px-2 py-1 text-amber-700">+100 XP</span>
-                    </div>
-                    {status.completed ? (
-                      status.claimed ? (
-                        <div className="mt-3 w-full rounded-xl border border-emerald-200 bg-emerald-50 py-2.5 text-center text-xs font-black text-emerald-700">
-                          ✅ +100 XP Claim Ho Gaya
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            void handleChallengeClaim(challenge);
-                          }}
-                          disabled={!onClaimChallenge20 || isClaiming}
-                          className="mt-3 w-full rounded-xl bg-amber-500 py-2.5 text-center text-xs font-black text-white shadow-md shadow-amber-200 transition-colors hover:bg-amber-600 active:scale-[.98] disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {isClaiming ? 'Claim ho raha hai…' : '🎁 Claim +100 XP'}
-                        </button>
-                      )
-                    ) : (
-                      <button
-                        onClick={() => onStartChallenge20?.(challenge)}
-                        disabled={!onStartChallenge20}
-                        className="mt-3 w-full rounded-xl bg-violet-600 py-2.5 text-center text-xs font-black text-white shadow-md shadow-violet-200 transition-colors hover:bg-violet-700 active:scale-[.98] disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        Start Challenge
-                      </button>
-                    )}
-                  </div>
-                </div>
-                );
-              })}
-            </div>
-          </SectionCard>
-        )}
 
         {/* ── 1. ROUTINE ─────────────────────────────────────────────────── */}
         <SectionCard

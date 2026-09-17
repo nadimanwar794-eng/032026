@@ -143,9 +143,24 @@ function getSlotEmoji(subjectId: string): string {
   return SLOT_EMOJI[subjectId.toLowerCase()] || '📚';
 }
 
+// ── Helper: verify a note is eligible for Routine (multi-page only, no Sar Sangrah) ──
+function isMultiPageRoutineNote(n: any): boolean {
+  if (!n) return false;
+  const pCount = Array.isArray(n.pages) ? n.pages.length : (n.pageCount || 0);
+  if (pCount <= 1) return false;
+  const title = (n.lessonTitle || n.title || '').toLowerCase();
+  const book = ((n as any).bookName || '').toLowerCase();
+  const sub = (n.subject || '').toLowerCase();
+  if (title.includes('sar sangrah') || title.includes('saar sangrah') || title.includes('sar-sangrah')) return false;
+  if (book.includes('sar sangrah') || book.includes('saar sangrah') || book.includes('sar-sangrah')) return false;
+  if (sub.includes('sar sangrah') || sub.includes('saar sangrah')) return false;
+  return true;
+}
+
 // ── Filter notes for a routine slot ──────────────────────────────────────────
 function getNotesForSlot(slot: RoutineSlot, allNotes: LucentEntry[]): LucentEntry[] {
   return allNotes.filter(n => {
+    if (!isMultiPageRoutineNote(n)) return false;
     const nb = (n as any).bookName?.trim() || '';
     const nc = (n as any).classLevel || '';
     const ns = (n.subject || 'other').toLowerCase().trim();
@@ -158,6 +173,7 @@ function getNotesForSlot(slot: RoutineSlot, allNotes: LucentEntry[]): LucentEntr
 // ── Filter notes for a category subject ──────────────────────────────────────
 function getNotesForSubject(sub: RoutineCategorySubject, allNotes: LucentEntry[]): LucentEntry[] {
   return allNotes.filter(n => {
+    if (!isMultiPageRoutineNote(n)) return false;
     const nb = (n as any).bookName?.trim() || '';
     const nc = (n as any).classLevel || '';
     const ns = (n.subject || 'other').toLowerCase().trim();
@@ -1302,10 +1318,11 @@ function RoutineSetupSheet({ allNotes, currentMode, currentBoard, currentClass, 
   const availableBooks = useMemo(() => {
     const s = new Set<string>();
     allNotes.forEach(n => {
+      if (!isMultiPageRoutineNote(n)) return;
       const bk = (n as any).bookName?.trim();
       if (bk) {
           const bkLower = bk.toLowerCase();
-          if (bkLower !== 'speedy science' && bkLower !== 'speedy social science' && bkLower !== 'sar sangrah' && bkLower !== 'mcq practice') {
+          if (bkLower !== 'speedy science' && bkLower !== 'speedy social science' && !bkLower.includes('sar sangrah') && !bkLower.includes('saar sangrah') && bkLower !== 'mcq practice') {
               s.add(bk);
           }
       } else if ((n as any).classLevel === 'COMPETITION') {
@@ -1313,8 +1330,8 @@ function RoutineSetupSheet({ allNotes, currentMode, currentBoard, currentClass, 
       }
     });
 
-    // Ensure Lucent is included if there's any competition note, as fallback
-    if (allNotes.some(n => (n as any).classLevel === 'COMPETITION')) {
+    // Ensure Lucent is included if there's any valid multi-page competition note, as fallback
+    if (allNotes.some(n => (n as any).classLevel === 'COMPETITION' && isMultiPageRoutineNote(n))) {
        s.add('Lucent');
     }
 
@@ -2096,12 +2113,13 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
     return ensureTodayClaimEntry(reset, getUserSubTier(user));
   });
 
-  // In SCHOOL mode (class 6–12), exclude Competition-level notes so they never
-  // leak into school routine slots — even for "default" subjects that have no
-  // classLevel filter of their own.
+  // Routine notes must strictly be multi-page books, excluding Sar Sangrah
+  // and respecting the user's selected book(s) and board/class.
   const routineNotes = useMemo(() => {
-    if (data.routineMode === 'SCHOOL') {
-      return allNotes.filter(n => {
+    return allNotes.filter(n => {
+      if (!isMultiPageRoutineNote(n)) return false;
+
+      if (data.routineMode === 'SCHOOL') {
         if ((n as any).classLevel === 'COMPETITION') return false;
 
         // Filter by user's selected board
@@ -2109,11 +2127,23 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
            const noteBoard = (n as any).board;
            if (noteBoard && noteBoard !== data.selectedBoard && noteBoard !== 'ALL_BOARDS') return false;
         }
-        return true;
-      });
-    }
-    return allNotes;
-  }, [allNotes, data.routineMode, data.selectedBoard]);
+
+        // Filter by user's selected class
+        if (data.selectedClass && (n as any).classLevel && (n as any).classLevel !== data.selectedClass) {
+          return false;
+        }
+      } else if (data.routineMode === 'COMPETITION') {
+        // In competition mode, only show chosen books
+        const noteBook = ((n as any).bookName || '').trim();
+        if (data.selectedBooks && data.selectedBooks.length > 0) {
+          if (!data.selectedBooks.includes(noteBook)) return false;
+        } else if (data.selectedBook) {
+          if (noteBook !== data.selectedBook) return false;
+        }
+      }
+      return true;
+    });
+  }, [allNotes, data.routineMode, data.selectedBoard, data.selectedClass, data.selectedBooks, data.selectedBook]);
   const [showCatManager, setShowCatManager] = useState(false);
   const [showAddCat, setShowAddCat] = useState(false);
   const [editingCatId, setEditingCatId] = useState<string | null>(null);

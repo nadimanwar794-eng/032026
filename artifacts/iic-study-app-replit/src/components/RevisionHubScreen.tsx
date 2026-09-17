@@ -2,8 +2,9 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
   ArrowLeft, BookOpen, RotateCcw, Clock, BarChart2, ChevronRight,
-  CheckCircle, XCircle, Zap, Calendar, BrainCircuit, Trophy, Plus, List,
+  CheckCircle, XCircle, Zap, Calendar, BrainCircuit, Trophy, Plus, List, Slash, Bookmark,
 } from 'lucide-react';
+import { playSoundCorrect, playSoundWrong, playSoundClick } from '../utils/soundEffects';
 import type { User, StudentTab, SystemSettings } from '../types';
 import { RevisionHubV2 } from './RevisionHubV2';
 import { McqReviewHub } from './McqReviewHub';
@@ -106,6 +107,9 @@ export const RevisionHubScreen: React.FC<Props> = ({
   const [showFeedback, setShowFeedback]     = useState(false);
   const [sessionMcqs, setSessionMcqs]       = useState<any[]>([]);
   const [showSessionNavigator, setShowSessionNavigator] = useState(false);
+  const [sessionBookmarks, setSessionBookmarks] = useState<Set<number>>(new Set());
+  const [sessionEliminated, setSessionEliminated] = useState<Record<number, Set<number>>>({});
+  const [showEliminateTool, setShowEliminateTool] = useState(false);
   const [coinModal, setCoinModal] = useState<{
     title: string;
     cost: number;
@@ -314,9 +318,14 @@ export const RevisionHubScreen: React.FC<Props> = ({
   function handleOptionSelect(optIdx: number) {
     // Only record if not already answered for this question
     if (sessionAnswers[sessionQIndex] !== null && sessionAnswers[sessionQIndex] !== undefined) return;
+    const isCorrect = optIdx === (sessionMcqs[sessionQIndex]?.correctAnswer);
+    if (isCorrect) {
+      playSoundCorrect();
+    } else {
+      playSoundWrong();
+    }
     // Apply level-based daily MCQ limit (if parent provides the tracker)
     if (onMcqAnswer) {
-      const isCorrect = optIdx === (sessionMcqs[sessionQIndex]?.correctAnswer);
       if (!onMcqAnswer(isCorrect)) return;
     }
     setSelectedOption(optIdx);
@@ -487,7 +496,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
     : 0;
 
   return (
-    <div className="fixed inset-0 z-[150] flex flex-col bg-white" style={{ height: '100dvh' }}>
+    <div className="fixed inset-0 z-[350] flex flex-col bg-white" style={{ height: '100dvh' }}>
 
       {/* ── Top Bar ── */}
       <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-slate-100 shadow-sm shrink-0">
@@ -573,10 +582,12 @@ export const RevisionHubScreen: React.FC<Props> = ({
                   .map((answer, index) => [index, answer])
                   .filter(([, answer]) => answer !== null && answer !== undefined),
               )}
+              bookmarked={sessionBookmarks}
               onJump={(index) => {
                 setSessionQIndex(index);
                 setSelectedOption(sessionAnswers[index] ?? null);
                 setShowFeedback(false);
+                playSoundClick();
               }}
             />
           </div>
@@ -603,6 +614,21 @@ export const RevisionHubScreen: React.FC<Props> = ({
               <span className="text-[10px] font-black uppercase tracking-wider bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">
                 {currentQ.topic || 'General'}
               </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEliminateTool(e => !e);
+                  playSoundClick();
+                }}
+                className={`text-[10px] font-black px-2 py-0.5 rounded-full border transition-all flex items-center gap-1 ${
+                  showEliminateTool
+                    ? 'bg-purple-100 text-purple-700 border-purple-300'
+                    : 'bg-slate-100 text-slate-500 border-slate-200 hover:text-slate-700'
+                }`}
+                title="50:50 Option Elimination Mode"
+              >
+                <Slash size={10} /> 50:50
+              </button>
               <span className="text-[10px] text-slate-400 ml-auto">{sessionQIndex + 1}/{sessionMcqs.length}</span>
               <div className="flex items-center gap-1.5">
                 <span className="text-[10px] font-black bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full flex items-center gap-1">
@@ -620,6 +646,28 @@ export const RevisionHubScreen: React.FC<Props> = ({
                selectedOption={selectedOption}
                answered={isAnswered}
                onSelect={handleOptionSelect}
+               isBookmarked={sessionBookmarks.has(sessionQIndex)}
+               onToggleBookmark={() => {
+                 setSessionBookmarks(prev => {
+                   const next = new Set(prev);
+                   if (next.has(sessionQIndex)) next.delete(sessionQIndex);
+                   else next.add(sessionQIndex);
+                   return next;
+                 });
+                 playSoundClick();
+               }}
+               eliminatedOptions={sessionEliminated[sessionQIndex]}
+               onToggleEliminate={(oi) => {
+                 setSessionEliminated(prev => {
+                   const cur = prev[sessionQIndex] || new Set<number>();
+                   const next = new Set(cur);
+                   if (next.has(oi)) next.delete(oi);
+                   else next.add(oi);
+                   return { ...prev, [sessionQIndex]: next };
+                 });
+                 playSoundClick();
+               }}
+               showEliminateTool={showEliminateTool}
                actions={onSendToMcqCommunity ? (
                  <button
                    onClick={(e) => {

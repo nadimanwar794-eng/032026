@@ -517,6 +517,17 @@ export const ALL_FEATURES: Feature[] = [
         color: 'purple'
     },
     {
+        id: 'ADMIN_PLAN_COMPARE',
+        label: 'Compare',
+        group: 'CORE',
+        surfaceLevel: 3,
+        adminVisible: true,
+        adminTab: 'PLAN_COMPARISON_MANAGER',
+        requiredPermission: 'MANAGE_SETTINGS',
+        icon: 'SlidersHorizontal',
+        color: 'sky'
+    },
+    {
         id: 'ADMIN_NOTIFY',
         label: 'Notify Users',
         group: 'REQUESTS',
@@ -710,6 +721,17 @@ export const ALL_FEATURES: Feature[] = [
         requiredPermission: 'MANAGE_SETTINGS',
         icon: 'Trophy',
         color: 'yellow'
+    },
+    {
+        id: 'ADMIN_REFERRAL_PRIZES',
+        label: 'Refer & Earn Prizes',
+        group: 'GAME',
+        surfaceLevel: 2,
+        adminVisible: true,
+        adminTab: 'REFERRAL_PRIZES_MANAGER',
+        requiredPermission: 'MANAGE_SETTINGS',
+        icon: 'Gift',
+        color: 'amber'
     },
     {
         id: 'ADMIN_CHALLENGE',

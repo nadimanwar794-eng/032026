@@ -403,38 +403,7 @@ const App: React.FC = () => {
   // Card Rotating Border Animation Handler (Global Admin toggle + Student Profile preference + Theme color awareness)
   useEffect(() => {
       const updateBorderAnim = () => {
-          const adminEnabled = state.settings?.cardBorderAnimation !== false; // Active by default
-          const studentOff = localStorage.getItem('nst_card_border_anim_off') === '1';
-          if (adminEnabled && !studentOff) {
-              document.documentElement.classList.add('global-rotating-border-cards');
-          } else {
-              document.documentElement.classList.remove('global-rotating-border-cards');
-          }
-
-          const isBlue = document.documentElement.classList.contains('dark-mode-blue');
-          const isDark = document.documentElement.classList.contains('dark-mode') || document.documentElement.classList.contains('dark-mode-black');
-          const color = isBlue
-            ? (state.settings?.blueThemeColor || '#38bdf8')
-            : isDark
-            ? (state.settings?.darkThemeColor || '#00e5ff')
-            : (state.settings?.lightThemeColor || '#3b82f6');
-          document.documentElement.style.setProperty('--nst-rotating-border-color', color);
-          document.documentElement.style.setProperty('--nst-card-inner-bg', isBlue ? (state.settings?.blueThemeCardBg || '#071224') : isDark ? (state.settings?.darkThemeCardBg || '#0b0f17') : (state.settings?.lightThemeCardBg || '#ffffff'));
-      };
-
-      updateBorderAnim();
-      window.addEventListener('nst-card-border-anim-change', updateBorderAnim);
-      window.addEventListener('nst-dark-theme-change', updateBorderAnim);
-      return () => {
-          window.removeEventListener('nst-card-border-anim-change', updateBorderAnim);
-          window.removeEventListener('nst-dark-theme-change', updateBorderAnim);
-      };
-  }, [state.settings?.cardBorderAnimation, state.settings?.lightThemeColor, state.settings?.darkThemeColor, state.settings?.blueThemeColor, state.settings?.lightThemeCardBg, state.settings?.darkThemeCardBg, state.settings?.blueThemeCardBg]);
-
-  // Card Rotating Border Animation Handler (Global Admin toggle + Student Profile preference + Theme color awareness)
-  useEffect(() => {
-      const updateBorderAnim = () => {
-          const adminEnabled = state.settings?.cardBorderAnimation !== false; // Active by default
+          const adminEnabled = state.settings?.cardBorderAnimation === true; // Disabled by default
           const studentOff = localStorage.getItem('nst_card_border_anim_off') === '1';
           if (adminEnabled && !studentOff) {
               document.documentElement.classList.add('global-rotating-border-cards');
@@ -1952,44 +1921,9 @@ const App: React.FC = () => {
             setTimeout(() => setShowDailyRankCard(true), 800);
         }
 
-        // Weekly challenge is available once per local calendar week. It is
-        // intentionally not tied to Sunday: a student opening the app later
-        // in the week still gets this week's challenge.
-        const weekKey = getChallengeWeekKey();
-        const lastWeeklyAuto = localStorage.getItem('nst_last_weekly_auto_week');
-        if (lastWeeklyAuto !== weekKey) {
-            const classLevel = state.user.classLevel || '10';
-            const board = state.user.board || 'CBSE';
-            generateDailyChallengeQuestions(
-                classLevel,
-                board,
-                state.user.stream || null,
-                state.settings,
-                state.user.id,
-                'WEEKLY',
-            ).then((result) => {
-                if (!result || result.questions.length === 0) return;
-                const weeklyTest: WeeklyTest = {
-                    id: result.id,
-                    name: result.name,
-                    description: "Is hafte ka weekly challenge — syllabus ke sabhi chapters se!",
-                    isActive: true,
-                    classLevel,
-                    questions: result.questions,
-                    totalQuestions: result.questions.length,
-                    passingScore: Math.ceil(0.6 * result.questions.length),
-                    createdAt: new Date().toISOString(),
-                    durationMinutes: result.durationMinutes,
-                    autoSubmitEnabled: true,
-                };
-                localStorage.setItem('nst_last_weekly_auto_week', weekKey);
-                // Keep the old key harmlessly readable for older sessions.
-                localStorage.setItem('nst_last_weekly_auto_date', getChallengeDateKey());
-                setTimeout(() => setActiveWeeklyTest(weeklyTest), 1500);
-            }).catch((error) => {
-                console.warn('[IIC] Weekly challenge generation skipped:', error);
-            });
-        }
+        // Weekly challenge is manual access only per user requirement.
+        // User opens it from the routine page or challenge section when they want.
+        // Automatic popup/auto-open has been disabled.
     }
   }, [state.user?.id, state.view, state.settings]);
 

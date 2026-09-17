@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import { LessonContent, Subject, ClassLevel, Chapter, MCQItem, ContentType, User, SystemSettings } from '../types';
-import { ArrowLeft, Clock, AlertTriangle, ExternalLink, CheckCircle, XCircle, Trophy, BookOpen, Play, Lock, ChevronRight, ChevronLeft, Save, X, Maximize, Minimize2, Volume2, Square, Zap, StopCircle, Globe, Lightbulb, FileText, BrainCircuit, Grip, CheckSquare, List, Download, BarChart3, RotateCcw, Monitor, CloudOff, MoreVertical, EyeOff, Eye, LayoutGrid, Pencil, Send, Plus, Tv, SkipForward } from 'lucide-react';
+import { ArrowLeft, Clock, AlertTriangle, ExternalLink, CheckCircle, XCircle, Trophy, BookOpen, Play, Lock, ChevronRight, ChevronLeft, Save, X, Maximize, Minimize2, Volume2, VolumeX, Square, Zap, StopCircle, Globe, Lightbulb, FileText, BrainCircuit, Grip, CheckSquare, List, Download, BarChart3, RotateCcw, Monitor, CloudOff, MoreVertical, EyeOff, Eye, LayoutGrid, Pencil, Send, Plus, Tv, SkipForward } from 'lucide-react';
 import { CustomConfirm, CustomAlert } from './CustomDialogs';
 import { CreditConfirmationModal } from './CreditConfirmationModal';
 import { CustomPlayer } from './CustomPlayer';
@@ -23,6 +23,8 @@ import { renderMathInHtml, formatExplanationHtml } from '../utils/mathUtils';
 import McqQuestionDisplay from './McqQuestionDisplay';
 import McqPracticeCard from './McqPracticeCard';
 import McqQuestionNavigator from './McqQuestionNavigator';
+import { hapticCorrect, hapticWrong } from '../utils/haptic';
+import { playSoundClick, playSoundCorrect, playSoundWrong, playSoundVictory, isSoundEnabled, setSoundEnabled } from '../utils/soundEffects';
 import { stopSpeaking } from '../utils/ttsHighlighter';
 import { speakText, stripHtml } from '../utils/textToSpeech';
 import jsPDF from 'jspdf';
@@ -111,6 +113,14 @@ export const LessonView: React.FC<Props> = ({
   const appTheme = useAppTheme();
   const [mcqState, setMcqState] = useState<Record<number, number | null>>({});
   const [mcqStreak, setMcqStreak] = useState(0);
+  const [soundActive, setSoundActive] = useState<boolean>(() => isSoundEnabled());
+
+  const toggleSound = () => {
+    const next = !soundActive;
+    setSoundActive(next);
+    setSoundEnabled(next);
+    if (next) playSoundClick();
+  };
   const [mcqScorePopup, setMcqScorePopup] = useState<number | null>(null);
   const [mcqScoreVisible, setMcqScoreVisible] = useState(false);
   const mcqPopupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -789,6 +799,20 @@ export const LessonView: React.FC<Props> = ({
       }
       setIsProjectorFullscreen(false);
   }, [isProjectorMode]);
+
+  // Keyboard shortcut for Projector Mode (M for sound mute/unmute)
+  useEffect(() => {
+      if (!isProjectorMode) return;
+      const handleKeyDown = (e: KeyboardEvent) => {
+          if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+          if (e.key === 'm' || e.key === 'M') {
+              e.preventDefault();
+              toggleSound();
+          }
+      };
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isProjectorMode, soundActive]);
 
   // TIMER STATE
   const [sessionTime, setSessionTime] = useState(0); // Total seconds
@@ -1897,6 +1921,7 @@ export const LessonView: React.FC<Props> = ({
       const canGoNext = currentBatchAttemptedCount >= 1;
 
       const nextQuestion = () => {
+          playSoundClick();
           setBatchIndex(prev => prev + 1);
           const container = document.querySelector('.mcq-container');
           if (container) container.scrollTop = 0;
@@ -1912,6 +1937,14 @@ export const LessonView: React.FC<Props> = ({
               return next;
           });
           const isCorrect = oIdx === displayData[qIdx].correctAnswer;
+
+          if (isCorrect) {
+              playSoundCorrect();
+              hapticCorrect();
+          } else {
+              playSoundWrong();
+              hapticWrong();
+          }
 
           // ── MCQ Scoring: +2 correct, -1 wrong, streak bonuses ────────────────
           if (user?.id && !showResults && !wasAnswered) {
@@ -2007,6 +2040,7 @@ export const LessonView: React.FC<Props> = ({
 
     const handleConfirmSubmit = () => {
         setShowSubmitModal(false);
+        playSoundVictory();
         const key = `nst_mcq_progress_${chapter.id}`;
         storage.removeItem(key);
         
@@ -2438,13 +2472,16 @@ export const LessonView: React.FC<Props> = ({
                    </div>
                )}
 
-               {/* Question Drawer Overlay */}
-               {showQuestionDrawer && (
-                   <div className="fixed inset-0 z-[60] bg-slate-900/50 backdrop-blur-sm flex justify-end" onClick={() => setShowQuestionDrawer(false)}>
-                        <div className="w-80 bg-white h-full shadow-2xl animate-in slide-in-from-right duration-200 flex flex-col" onClick={e => e.stopPropagation()}>
+               {/* ── RESPONSIVE MCQ WRAPPER ── */}
+               <div className="flex-1 flex overflow-hidden relative w-full">
+
+                   {/* Question Drawer Overlay / Sidebar */}
+                   {showQuestionDrawer && (
+                       <div className="fixed inset-0 z-[60] bg-slate-900/50 backdrop-blur-sm flex justify-start landscape:static landscape:z-10 landscape:bg-transparent landscape:w-[320px] landscape:border-r landscape:border-slate-200 landscape:backdrop-blur-none" onClick={() => setShowQuestionDrawer(false)}>
+                            <div className="w-80 landscape:w-full bg-white h-full shadow-2xl landscape:shadow-none animate-in slide-in-from-left duration-200 flex flex-col" onClick={e => e.stopPropagation()}>
                             <div className="p-4 border-b flex items-center justify-between bg-[#FDFBF7] shadow-sm rounded-t-xl border-amber-100">
                                 <h3 className="font-bold text-amber-900 flex items-center gap-2 text-lg"><Grip size={20} className="text-amber-500"/> Question Palette</h3>
-                                <button onClick={() => setShowQuestionDrawer(false)} className="px-3 py-1.5 flex items-center gap-1.5 bg-amber-50 text-amber-700 hover:bg-amber-100 rounded-lg font-medium transition-colors border border-amber-200 shadow-sm"><X size={16}/> Back</button>
+                                <button onClick={() => setShowQuestionDrawer(false)} className="px-3 py-1.5 flex items-center gap-1.5 bg-amber-50 text-amber-700 hover:bg-amber-100 rounded-lg font-medium transition-colors border border-amber-200 shadow-sm landscape:hidden"><X size={16}/> Back</button>
                             </div>
                             <div className="flex-1 overflow-y-auto p-5 bg-gradient-to-b from-white to-slate-50">
                                 <div className="grid grid-cols-5 gap-3">
@@ -2468,7 +2505,9 @@ export const LessonView: React.FC<Props> = ({
                                                 key={idx}
                                                 onClick={() => {
                                                     setBatchIndex(idx);
-                                                    setShowQuestionDrawer(false);
+                                                    if (window.matchMedia("(orientation: portrait)").matches) {
+                                                        setShowQuestionDrawer(false);
+                                                    }
                                                 }}
                                                 className={btnClass}
                                             >
@@ -2524,6 +2563,15 @@ export const LessonView: React.FC<Props> = ({
                                 <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
                                     <button
                                         type="button"
+                                        onClick={toggleSound}
+                                        aria-label={soundActive ? 'Mute sound effects' : 'Enable sound effects'}
+                                        title={soundActive ? 'Sound Effects: ON (M to mute)' : 'Sound Effects: OFF (M to unmute)'}
+                                        style={{ width:34, height:34, border:`1px solid ${soundActive ? '#a7f3d0' : '#e2e8f0'}`, borderRadius:12, background:soundActive ? '#ecfdf5' : '#f8fafc', color:soundActive ? '#059669' : '#64748b', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}
+                                    >
+                                        {soundActive ? <Volume2 size={16} /> : <VolumeX size={16} />}
+                                    </button>
+                                    <button
+                                        type="button"
                                         onClick={handleRotate}
                                         aria-label="Rotate screen"
                                         title="Landscape / Rotate screen"
@@ -2564,6 +2612,7 @@ export const LessonView: React.FC<Props> = ({
                                                 answers={projectorSelections}
                                                 skipped={projectorSkipped}
                                                 onJump={(index) => {
+                                                    playSoundClick();
                                                     setProjectorQIndex(index);
                                                     setProjectorSelected(projectorSelections[index] ?? null);
                                                     setProjectorReveal(false);
@@ -2583,6 +2632,14 @@ export const LessonView: React.FC<Props> = ({
                                         fontSize={28}
                                         onSelect={(oi) => {
                                             if (projectorReveal || projectorShowReview) return;
+                                            const isCorrect = oi === pq.correctAnswer;
+                                            if (isCorrect) {
+                                                playSoundCorrect();
+                                                hapticCorrect();
+                                            } else {
+                                                playSoundWrong();
+                                                hapticWrong();
+                                            }
                                             setProjectorSelected(oi);
                                             setProjectorSelections(prev => ({ ...prev, [projectorQIndex]: oi }));
                                             setProjectorSkipped(prev => {
@@ -2753,6 +2810,16 @@ export const LessonView: React.FC<Props> = ({
                            </span>
                        </div>
                    </div>
+                   {/* Sound toggle button */}
+                   <button
+                       type="button"
+                       onClick={toggleSound}
+                       className={`shrink-0 p-2 rounded-xl border transition-colors active:scale-90 ${soundActive ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border-emerald-400/30' : 'bg-white/10 hover:bg-white/20 text-white/50 border-white/20'}`}
+                       title={soundActive ? 'Sound Effects: ON (Click to Mute)' : 'Sound Effects: OFF (Click to Unmute)'}
+                       aria-label={soundActive ? 'Mute sound effects' : 'Enable sound effects'}
+                   >
+                       {soundActive ? <Volume2 size={17} /> : <VolumeX size={17} />}
+                   </button>
                    {/* Projector Mode button — admin/subadmin only */}
                    {isAdmin && (
                    <button onClick={() => { setProjectorQIndex(0); setProjectorReveal(false); setProjectorSelected(null); setProjectorSelections({}); setProjectorSkipped(new Set()); setProjectorNavigatorOpen(false); setProjectorShowReview(false); setIsProjectorMode(true); }}
@@ -2804,6 +2871,11 @@ export const LessonView: React.FC<Props> = ({
                                    <Volume2 size={15} className={`shrink-0 ${autoReadEnabled ? 'text-indigo-500' : 'text-slate-400'}`} />
                                    Auto-Read {autoReadEnabled ? '(ON)' : ''}
                                </button>
+                               <button onClick={() => { toggleSound(); setShowMoreMenu(false); }}
+                                   className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold transition-colors hover:bg-slate-50 ${soundActive ? 'text-emerald-600' : 'text-slate-700'}`}>
+                                   {soundActive ? <Volume2 size={15} className="text-emerald-500 shrink-0" /> : <VolumeX size={15} className="text-slate-400 shrink-0" />}
+                                   Sound Effects {soundActive ? '(ON)' : '(OFF)'}
+                               </button>
                                <button onClick={() => { handleRotate(); setShowMoreMenu(false); }}
                                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 font-semibold transition-colors">
                                    <RotateCcw size={15} className="text-slate-400 shrink-0" /> Screen Rotate
@@ -2836,7 +2908,7 @@ export const LessonView: React.FC<Props> = ({
                    </div>
                </div>
                
-               <div className="flex-1 overflow-y-auto p-4 space-y-6 w-full mx-auto w-full pb-4 mcq-container">
+               <div className={`flex-1 overflow-y-auto p-4 space-y-6 mx-auto pb-4 mcq-container ${showQuestionDrawer ? 'landscape:w-[calc(100%-320px)]' : 'w-full'}`}>
                    {/* 1. TOPIC HEADER (ANALYSIS ONLY) */}
                    {showResults && content.type === 'MCQ_ANALYSIS' && (
                        <div className="mb-4">
@@ -3661,6 +3733,7 @@ export const LessonView: React.FC<Props> = ({
                         )}
                     </div>
                 </div>
+                   </div>
           </div>
       );
   }

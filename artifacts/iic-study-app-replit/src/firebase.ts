@@ -6,13 +6,14 @@ import { storage } from "./utils/storage";
 
 // --- FIREBASE CONFIGURATION ---
 const firebaseConfig = {
-apiKey: "AIzaSyDyYNuSJr72nC52MinT0rt6jbDae8HLCts",
-authDomain: "project-1959318394445181665.firebaseapp.com",
-databaseURL: "https://project-1959318394445181665-default-rtdb.asia-southeast1.firebasedatabase.app",
-projectId: "project-1959318394445181665",
-storageBucket: "project-1959318394445181665.firebasestorage.app",
-messagingSenderId: "130030264192",
-appId: "1:130030264192:web:1b8a53d694b15c8ef1eb65"
+  apiKey: "AIzaSyBEDKZVPgwOPCccjWdKSShfvSqC3REDa0c",
+  authDomain: "iic-nst.firebaseapp.com",
+  databaseURL: "https://iic-nst-default-rtdb.firebaseio.com",
+  projectId: "iic-nst",
+  storageBucket: "iic-nst.firebasestorage.app",
+  messagingSenderId: "984309241322",
+  appId: "1:984309241322:web:4dae35987732d630e64e93",
+  measurementId: "G-QX0XT7RSQX"
 };
 
 // ── Stale IndexedDB guard ──────────────────────────────────────────────────
@@ -36,18 +37,15 @@ try { localStorage.setItem(_FSP_KEY, firebaseConfig.projectId); } catch {}
 // If the assertion error slips through (e.g. mid-session project switch),
 // delete all Firebase IndexedDB databases and hard-reload automatically.
 if (typeof window !== 'undefined') {
-  window.addEventListener('unhandledrejection', (event) => {
-    const msg = String(event?.reason?.message || event?.reason || '');
+  const handleQuotaOrNetwork = (msg: string, event: Event) => {
     if (msg.includes('analytics') || msg.includes('@firebase/analytics')) {
-      // Suppress benign Firebase Analytics fetch failures in sandboxed/restricted environments
       event.preventDefault();
-      return;
+      return true;
     }
-    if (msg.includes('resource-exhausted') || msg.includes('Write stream exhausted')) {
-      // Suppress benign Firestore write stream backpressure warnings; throttled writes will sync on backoff
+    if (msg.includes('resource-exhausted') || msg.includes('Quota exceeded') || msg.includes('Write stream exhausted')) {
       event.preventDefault();
-      console.warn('[IIC] Firestore write stream reached backpressure limit — throttled writes will sync on backoff.');
-      return;
+      console.warn('[IIC] Firestore write stream / quota limit — falling back to RTDB and local cache seamlessly.');
+      return true;
     }
     if (
       msg.includes('Could not reach Cloud Firestore backend') ||
@@ -56,6 +54,19 @@ if (typeof window !== 'undefined') {
     ) {
       event.preventDefault();
       console.warn('[IIC] Firestore operating in offline cache mode.');
+      return true;
+    }
+    return false;
+  };
+
+  window.addEventListener('error', (event) => {
+    const msg = String(event?.message || (event as any)?.error?.message || '');
+    handleQuotaOrNetwork(msg, event);
+  });
+
+  window.addEventListener('unhandledrejection', (event) => {
+    const msg = String(event?.reason?.message || event?.reason || '');
+    if (handleQuotaOrNetwork(msg, event)) {
       return;
     }
     if (msg.includes('FIRESTORE') && msg.includes('INTERNAL ASSERTION FAILED')) {
@@ -86,7 +97,7 @@ let app;
 let db: any;
 
 try {
-  setLogLevel('error');
+  setLogLevel('silent');
 } catch {}
 
 if (!getApps().length) {

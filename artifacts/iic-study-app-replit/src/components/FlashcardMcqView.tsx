@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, ChevronRight, ChevronLeft, RotateCw, Volume2, Square, Shuffle, Lightbulb, Edit2, X, MoreVertical, RefreshCw, BookOpen, Tv, CheckCircle, Maximize2, Minimize2, LayoutGrid, Users, Radio } from 'lucide-react';
+import {
+  ArrowLeft, ChevronRight, ChevronLeft, RotateCw, Volume2, Square, Shuffle,
+  Lightbulb, Edit2, X, MoreVertical, RefreshCw, BookOpen, Tv, CheckCircle,
+  Maximize2, Minimize2, LayoutGrid, Users, Radio, Sun, Moon, Scroll,
+  Timer, VolumeX, Eye, EyeOff, Slash, HelpCircle, Sparkles, Award, Bookmark
+} from 'lucide-react';
 import type { MCQItem } from '../types';
 import type { User, SystemSettings } from '../types';
 import { speakText, stopSpeech } from '../utils/textToSpeech';
@@ -23,6 +28,8 @@ import McqPracticeCard from './McqPracticeCard';
 import McqQuestionNavigator from './McqQuestionNavigator';
 import { deferMcqCreditsFromXp } from '../utils/studyRewards';
 import { McqAnalysisOverlay } from './McqAnalysisOverlay';
+import { hapticCorrect, hapticWrong, hapticLight } from '../utils/haptic';
+import { playSoundClick, playSoundCorrect, playSoundWrong, playSoundVictory, isSoundEnabled, setSoundEnabled } from '../utils/soundEffects';
 
 interface Props {
   questions: MCQItem[];
@@ -135,6 +142,90 @@ export const FlashcardMcqView: React.FC<Props> = ({
   const [projectorNavigatorOpen, setProjectorNavigatorOpen] = useState(false);
   // Review screen — shown after Submit
   const [projectorShowReview, setProjectorShowReview] = useState(false);
+
+  // ── Projector Mode Mature Enhancements ──
+  const [projectorTheme, setProjectorTheme] = useState<'light' | 'dark' | 'sepia'>(() => {
+    try {
+      return (localStorage.getItem('nst_projector_theme') as any) || 'dark';
+    } catch {
+      return 'dark';
+    }
+  });
+  const handleSetProjectorTheme = (theme: 'light' | 'dark' | 'sepia') => {
+    setProjectorTheme(theme);
+    try { localStorage.setItem('nst_projector_theme', theme); } catch {}
+  };
+
+  // Sound effects toggle
+  const [soundActive, setSoundActive] = useState<boolean>(() => isSoundEnabled());
+  const handleToggleSound = () => {
+    const next = !soundActive;
+    setSoundActive(next);
+    setSoundEnabled(next);
+    playSoundClick();
+  };
+
+  // Bookmarking
+  const [projectorBookmarked, setProjectorBookmarked] = useState<Set<number>>(new Set());
+  const toggleBookmark = (idx: number) => {
+    setProjectorBookmarked(prev => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+    playSoundClick();
+  };
+
+  // Option Elimination (50-50 / Strike-through)
+  const [projectorEliminated, setProjectorEliminated] = useState<Record<number, Set<number>>>({});
+  const [showEliminateTool, setShowEliminateTool] = useState(false);
+  const toggleEliminateOption = (qIdx: number, optIdx: number) => {
+    setProjectorEliminated(prev => {
+      const currentSet = prev[qIdx] || new Set<number>();
+      const nextSet = new Set(currentSet);
+      if (nextSet.has(optIdx)) nextSet.delete(optIdx);
+      else nextSet.add(optIdx);
+      return { ...prev, [qIdx]: nextSet };
+    });
+    playSoundClick();
+  };
+
+  // Classroom Drill Timer ('off' | 'stopwatch' | '30s' | '45s' | '60s')
+  type TimerMode = 'off' | 'stopwatch' | '30s' | '45s' | '60s';
+  const [drillTimerMode, setDrillTimerMode] = useState<TimerMode>('off');
+  const [drillTimeRemaining, setDrillTimeRemaining] = useState<number>(0);
+  const [drillStopwatchSec, setDrillStopwatchSec] = useState<number>(0);
+  const [showShortcutsModal, setShowShortcutsModal] = useState(false);
+
+  // Drill Timer Countdown & Stopwatch Loop
+  useEffect(() => {
+    if (!isProjectorMode || drillTimerMode === 'off' || projectorShowReview) return;
+    const interval = setInterval(() => {
+      if (drillTimerMode === 'stopwatch') {
+        setDrillStopwatchSec(s => s + 1);
+      } else {
+        setDrillTimeRemaining(r => {
+          if (r <= 1) {
+            setProjectorReveal(true);
+            playSoundWrong();
+            return 0;
+          }
+          return r - 1;
+        });
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isProjectorMode, drillTimerMode, projectorQIndex, projectorShowReview]);
+
+  // Reset drill timer when question changes
+  useEffect(() => {
+    if (drillTimerMode === '30s') setDrillTimeRemaining(30);
+    else if (drillTimerMode === '45s') setDrillTimeRemaining(45);
+    else if (drillTimerMode === '60s') setDrillTimeRemaining(60);
+    else if (drillTimerMode === 'stopwatch') setDrillStopwatchSec(0);
+  }, [projectorQIndex, drillTimerMode]);
+
   // Snapshot of question data captured at submit time so the review never
   // depends on a potentially-stale `questions` prop or closure.
   const [reviewSnapshot, setReviewSnapshot] = useState<{
@@ -516,7 +607,153 @@ export const FlashcardMcqView: React.FC<Props> = ({
   }
 
   const isLast = pos >= total - 1;
+
+  const handleProjectorOptionSelect = useCallback((oi: number) => {
+    if (projectorShowReview) return;
+    const pq = questions[projectorQIndex];
+    if (!pq) return;
+    const previousSelection = projectorSelections[projectorQIndex];
+    if (previousSelection === oi) return;
+    setProjectorSelected(oi);
+    setProjectorSelections(prev => ({ ...prev, [projectorQIndex]: oi }));
+    setProjectorSkipped(prev => {
+      const next = new Set(prev);
+      next.delete(projectorQIndex);
+      return next;
+    });
+    const isCorrect = oi === pq.correctAnswer;
+    if (isCorrect) {
+      playSoundCorrect();
+      hapticCorrect();
+    } else {
+      playSoundWrong();
+      hapticWrong();
+    }
+    if (previousSelection === undefined) {
+      const newAnswered = new Set(projectorAnswered);
+      newAnswered.add(projectorQIndex);
+      setProjectorAnswered(newAnswered);
+    } else {
+      const wasCorrect = previousSelection === pq.correctAnswer;
+      if (wasCorrect !== isCorrect) {
+        if (isCorrect) {
+          setProjectorCorrect(c => c + 1);
+          setProjectorWrong(w => Math.max(0, w - 1));
+        } else {
+          setProjectorCorrect(c => Math.max(0, c - 1));
+          setProjectorWrong(w => w + 1);
+        }
+      }
+    }
+    const elapsedSec = Math.round((Date.now() - projectorQStartTimeRef.current) / 1000);
+    if (previousSelection === undefined && user?.id && sourceKey) {
+      recordProjectorAnswer(user.id, sourceKey, `proj_${projectorQIndex}`, isCorrect, elapsedSec);
+    }
+    if (previousSelection === undefined && isCorrect) {
+      setProjectorCorrect(c => c + 1);
+      if (user?.id && !isAdmin) {
+        const pts = tryEarnScore(user.id, 1, userTier, userTier !== 'FREE', 0, 'FLASHCARD_MCQ_CORRECT');
+        if (pts > 0) {
+          showMcqScore(pts);
+          if (onUpdateUser) {
+            const _routineOn = loadRoutineData(user.id).enabled;
+            deferMcqCreditsFromXp(user.id, pts, _routineOn);
+            const updated = { ...user, totalScore: (user.totalScore || 0) + pts };
+            onUpdateUser(updated);
+            saveUserToLive(updated);
+          }
+        }
+      }
+    } else if (previousSelection === undefined) {
+      setProjectorWrong(w => w + 1);
+    }
+  }, [projectorShowReview, questions, projectorQIndex, projectorSelections, projectorAnswered, user, sourceKey, isAdmin, userTier, onUpdateUser]);
+
+  const toggleProjectorNativeFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+      } else {
+        await document.exitFullscreen();
+      }
+    } catch {
+      setProjectorFocused(f => !f);
+    }
+  };
+
+  useEffect(() => {
+    if (!isProjectorMode || projectorShowReview) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) return;
+
+      if (e.key === 'ArrowRight' || e.key === ' ') {
+        e.preventDefault();
+        if (projectorQIndex < questions.length - 1) {
+          const nextIdx = projectorQIndex + 1;
+          setProjectorQIndex(nextIdx);
+          setProjectorReveal(false);
+          setProjectorSelected(projectorSelections[nextIdx] ?? null);
+          playSoundClick();
+        }
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        if (projectorQIndex > 0) {
+          const prevIdx = projectorQIndex - 1;
+          setProjectorQIndex(prevIdx);
+          setProjectorReveal(false);
+          setProjectorSelected(projectorSelections[prevIdx] ?? null);
+          playSoundClick();
+        }
+      } else if (['1', '2', '3', '4', 'a', 'b', 'c', 'd', 'A', 'B', 'C', 'D'].includes(e.key)) {
+        e.preventDefault();
+        const map: Record<string, number> = {
+          '1': 0, 'a': 0, 'A': 0,
+          '2': 1, 'b': 1, 'B': 1,
+          '3': 2, 'c': 2, 'C': 2,
+          '4': 3, 'd': 3, 'D': 3,
+        };
+        const optIdx = map[e.key];
+        if (optIdx !== undefined) {
+          handleProjectorOptionSelect(optIdx);
+        }
+      } else if (e.key === 'r' || e.key === 'R') {
+        e.preventDefault();
+        setProjectorReveal(prev => !prev);
+        playSoundClick();
+      } else if (e.key === 't' || e.key === 'T') {
+        e.preventDefault();
+        handleSetProjectorTheme(
+          projectorTheme === 'dark' ? 'light' : projectorTheme === 'light' ? 'sepia' : 'dark'
+        );
+        playSoundClick();
+      } else if (e.key === 'f' || e.key === 'F') {
+        e.preventDefault();
+        toggleProjectorNativeFullscreen();
+      } else if (e.key === 'm' || e.key === 'M') {
+        e.preventDefault();
+        handleToggleSound();
+      } else if (e.key === 's' || e.key === 'S') {
+        e.preventDefault();
+        if (projectorQIndex < questions.length - 1) {
+          setProjectorSkipped(prev => new Set([...prev, projectorQIndex]));
+          const nextIdx = projectorQIndex + 1;
+          setProjectorQIndex(nextIdx);
+          setProjectorSelected(projectorSelections[nextIdx] ?? null);
+          playSoundClick();
+        }
+      } else if (e.key === '?') {
+        e.preventDefault();
+        setShowShortcutsModal(prev => !prev);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isProjectorMode, projectorShowReview, projectorQIndex, questions.length, projectorSelections, projectorTheme, handleProjectorOptionSelect]);
+
   const submitProjectorQuiz = () => {
+    playSoundVictory();
     const answered = Array.from(projectorAnswered).sort((a, b) => a - b);
     const correct = answered.filter(index => projectorSelections[index] === questions[index]?.correctAnswer).length;
     setProjectorCorrect(correct);
@@ -1026,63 +1263,134 @@ export const FlashcardMcqView: React.FC<Props> = ({
       </div>
     </div>
 
-      {/* ── Projector Mode Overlay ── */}
+      {/* ── Projector Mode Overlay (Mature Classroom / TV Presentation Engine) ── */}
       {isProjectorMode && questions.length > 0 && (() => {
         const pq = questions[projectorQIndex] ?? null;
         if (!pq) return null;
         const total = questions.length;
-        const optionLetters = ['A','B','C','D','E'];
         const projectorCurrentSelection = projectorSelections[projectorQIndex] ?? null;
+
+        const isThemeDark = projectorTheme === 'dark';
+        const isThemeSepia = projectorTheme === 'sepia';
+
+        const canvasBg = isThemeDark ? '#090d16' : isThemeSepia ? '#fbf8f2' : '#f8fafc';
+        const headerBg = isThemeDark ? '#0f172a' : isThemeSepia ? '#fefce8' : '#ffffff';
+        const headerBorder = isThemeDark ? '#1e293b' : isThemeSepia ? '#fde68a' : '#e2e8f0';
+        const headerText = isThemeDark ? '#f8fafc' : isThemeSepia ? '#451a03' : '#0f172a';
+        const headerSubtext = isThemeDark ? '#94a3b8' : isThemeSepia ? '#92400e' : '#64748b';
+        const pillBg = isThemeDark ? '#1e293b' : isThemeSepia ? '#fef3c7' : '#f1f5f9';
+        const pillBorder = isThemeDark ? '#334155' : isThemeSepia ? '#fde68a' : '#e2e8f0';
+        const pillText = isThemeDark ? '#e2e8f0' : isThemeSepia ? '#78350f' : '#334155';
+        const footerBg = isThemeDark ? '#0f172a' : isThemeSepia ? '#fefce8' : '#ffffff';
+        const footerBorder = isThemeDark ? '#1e293b' : isThemeSepia ? '#fde68a' : '#e2e8f0';
+
+        const totalTimerSec = drillTimerMode === '30s' ? 30 : drillTimerMode === '45s' ? 45 : drillTimerMode === '60s' ? 60 : 0;
+        const timerProgressPercent = totalTimerSec > 0 ? (drillTimeRemaining / totalTimerSec) * 100 : 0;
+        const timerColor = drillTimeRemaining <= 5 ? '#ef4444' : drillTimeRemaining <= 15 ? '#f59e0b' : '#10b981';
+
+        const cycleTimerMode = () => {
+          const modes: TimerMode[] = ['off', '30s', '45s', '60s', 'stopwatch'];
+          const nextIdx = (modes.indexOf(drillTimerMode) + 1) % modes.length;
+          setDrillTimerMode(modes[nextIdx]);
+          playSoundClick();
+        };
+
+        const cycleTheme = () => {
+          const nextTheme: 'light' | 'dark' | 'sepia' =
+            projectorTheme === 'dark' ? 'light' : projectorTheme === 'light' ? 'sepia' : 'dark';
+          handleSetProjectorTheme(nextTheme);
+          playSoundClick();
+        };
 
         const overlayStyle: React.CSSProperties = {
           position: 'fixed',
           inset: 0,
           zIndex: 99999,
-          background: '#ffffff',
+          background: canvasBg,
+          color: headerText,
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
+          transition: 'background 0.25s, color 0.25s',
         };
+
+        const submitThreshold = 1;
+        const canSubmit = projectorAnswered.size >= submitThreshold;
 
         return createPortal(
           <div style={overlayStyle}>
             {tabBar}
-             {projectorFocused && (
-               <div style={{ position:'absolute', top:12, right:12, zIndex:30, display:'flex', alignItems:'center', gap:8 }}>
-                 <button
-                   onClick={async () => {
-                     const result = await rotateScreen();
-                     if (result !== null) { setProjectorRotated(result === 'landscape'); }
-                     else { alert('📱 Phone ko physically rotate karein — landscape ke liye sideways, portrait ke liye seedha.'); }
-                   }}
-                   title={projectorRotated ? 'Portrait mode' : 'Landscape mode'}
-                   aria-label={projectorRotated ? 'Portrait mode' : 'Landscape mode'}
-                   style={{ width:36, height:36, background:'rgba(248,250,252,0.94)', border: projectorRotated ? '1px solid #c4b5fd' : '1px solid #e2e8f0', borderRadius:12, color: projectorRotated ? '#7c3aed' : '#64748b', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 4px 14px rgba(15,23,42,0.12)' }}>
-                   <RotateCw size={15} />
-                 </button>
-                 <button
-                   onClick={() => setProjectorNavigatorOpen(open => !open)}
-                   title="All Questions"
-                   aria-label="All Questions"
-                   style={{ width:36, height:36, background: projectorNavigatorOpen ? '#e0e7ff' : 'rgba(248,250,252,0.94)', border: projectorNavigatorOpen ? '1px solid #a5b4fc' : '1px solid #e2e8f0', borderRadius:12, color:'#4338ca', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 4px 14px rgba(15,23,42,0.12)' }}>
-                   <LayoutGrid size={17} />
-                 </button>
-                 {onOpenGroupStudy && (
-                   <button
-                     onClick={onOpenGroupStudy}
-                     title="Live Class Room"
-                     aria-label="Live Class Room"
-                     style={{ height:36, padding:'0 10px', background:'#fdf2f8', border:'1px solid #f472b6', borderRadius:12, color:'#db2777', cursor:'pointer', display:'flex', alignItems:'center', gap:5, fontWeight:900, fontSize:11, boxShadow:'0 4px 14px rgba(15,23,42,0.12)' }}>
-                     <Radio size={13} className="animate-pulse text-pink-600" />
-                     <span>LIVE</span>
-                   </button>
-                 )}
-               </div>
-             )}
-            {/* Header — hidden in focus mode */}
+
+            {/* Focus Mode Floating Corner Island */}
+            {projectorFocused && (
+              <div style={{ position:'absolute', top:12, right:12, zIndex:30, display:'flex', alignItems:'center', gap:8 }}>
+                {/* Timer pill in focus mode */}
+                {drillTimerMode !== 'off' && (
+                  <div style={{ height:36, padding:'0 12px', background: isThemeDark ? 'rgba(15,23,42,0.9)' : 'rgba(255,255,255,0.94)', border: `1px solid ${pillBorder}`, borderRadius:12, color: timerColor, display:'flex', alignItems:'center', gap:6, fontSize:12, fontWeight:900, backdropFilter:'blur(8px)', boxShadow:'0 4px 14px rgba(0,0,0,0.15)' }}>
+                    <Timer size={14} className={drillTimeRemaining <= 5 && drillTimerMode !== 'stopwatch' ? 'animate-pulse' : ''} />
+                    <span>{drillTimerMode === 'stopwatch' ? `${drillStopwatchSec}s` : `${drillTimeRemaining}s`}</span>
+                  </div>
+                )}
+                {/* Reveal Answer pill */}
+                <button
+                  onClick={() => { setProjectorReveal(r => !r); playSoundClick(); }}
+                  title={projectorReveal ? 'Hide Answer' : 'Reveal Answer'}
+                  aria-label={projectorReveal ? 'Hide Answer' : 'Reveal Answer'}
+                  style={{ height:36, padding:'0 10px', background: projectorReveal ? '#10b981' : isThemeDark ? 'rgba(15,23,42,0.9)' : 'rgba(255,255,255,0.94)', border: `1px solid ${projectorReveal ? '#059669' : pillBorder}`, borderRadius:12, color: projectorReveal ? '#ffffff' : pillText, cursor:'pointer', display:'flex', alignItems:'center', gap:5, fontSize:12, fontWeight:800, backdropFilter:'blur(8px)', boxShadow:'0 4px 14px rgba(0,0,0,0.15)' }}>
+                  {projectorReveal ? <EyeOff size={15} /> : <Eye size={15} />}
+                  <span className="hidden sm:inline">{projectorReveal ? 'Ans Shown' : 'Ans'}</span>
+                </button>
+                {/* Theme Cycle */}
+                <button
+                  onClick={cycleTheme}
+                  title="Switch Theme"
+                  aria-label="Switch Theme"
+                  style={{ width:36, height:36, background: isThemeDark ? 'rgba(15,23,42,0.9)' : 'rgba(255,255,255,0.94)', border: `1px solid ${pillBorder}`, borderRadius:12, color: pillText, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', backdropFilter:'blur(8px)', boxShadow:'0 4px 14px rgba(0,0,0,0.15)' }}>
+                  {isThemeDark ? <Moon size={15} /> : isThemeSepia ? <Scroll size={15} /> : <Sun size={15} />}
+                </button>
+                {/* Rotate Screen */}
+                <button
+                  onClick={async () => {
+                    const result = await rotateScreen();
+                    if (result !== null) { setProjectorRotated(result === 'landscape'); }
+                    else { alert('📱 Phone ko physically rotate karein — landscape ke liye sideways, portrait ke liye seedha.'); }
+                  }}
+                  title={projectorRotated ? 'Portrait mode' : 'Landscape mode'}
+                  aria-label={projectorRotated ? 'Portrait mode' : 'Landscape mode'}
+                  style={{ width:36, height:36, background: isThemeDark ? 'rgba(15,23,42,0.9)' : 'rgba(255,255,255,0.94)', border: `1px solid ${pillBorder}`, borderRadius:12, color: projectorRotated ? '#a855f7' : pillText, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', backdropFilter:'blur(8px)', boxShadow:'0 4px 14px rgba(0,0,0,0.15)' }}>
+                  <RotateCw size={15} />
+                </button>
+                {/* Navigator */}
+                <button
+                  onClick={() => { setProjectorNavigatorOpen(open => !open); playSoundClick(); }}
+                  title="All Questions"
+                  aria-label="All Questions"
+                  style={{ width:36, height:36, background: projectorNavigatorOpen ? '#6366f1' : isThemeDark ? 'rgba(15,23,42,0.9)' : 'rgba(255,255,255,0.94)', border: `1px solid ${projectorNavigatorOpen ? '#4f46e5' : pillBorder}`, borderRadius:12, color: projectorNavigatorOpen ? '#ffffff' : pillText, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', backdropFilter:'blur(8px)', boxShadow:'0 4px 14px rgba(0,0,0,0.15)' }}>
+                  <LayoutGrid size={16} />
+                </button>
+                {/* Sound Toggle */}
+                <button
+                  onClick={handleToggleSound}
+                  title={soundActive ? 'Mute Audio' : 'Unmute Audio'}
+                  aria-label="Toggle Sound"
+                  style={{ width:36, height:36, background: isThemeDark ? 'rgba(15,23,42,0.9)' : 'rgba(255,255,255,0.94)', border: `1px solid ${pillBorder}`, borderRadius:12, color: soundActive ? '#10b981' : '#94a3b8', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', backdropFilter:'blur(8px)', boxShadow:'0 4px 14px rgba(0,0,0,0.15)' }}>
+                  {soundActive ? <Volume2 size={15} /> : <VolumeX size={15} />}
+                </button>
+                {/* Exit Focus */}
+                <button
+                  onClick={() => setProjectorFocused(false)}
+                  title="Exit Focus Mode"
+                  aria-label="Exit Focus Mode"
+                  style={{ width:36, height:36, background:'#ef4444', border:'1px solid #dc2626', borderRadius:12, color:'#ffffff', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', backdropFilter:'blur(8px)', boxShadow:'0 4px 14px rgba(0,0,0,0.15)' }}>
+                  <Minimize2 size={16} />
+                </button>
+              </div>
+            )}
+
+            {/* Standard Comprehensive Top Bar (Hidden only in full focus mode) */}
             {!projectorFocused && (
-              <div style={{ display:'flex', alignItems:'center', gap:8, padding:'10px 12px', borderBottom:'1px solid #f1f5f9', background:'#ffffff', flexShrink:0, boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
-                {/* Back button */}
+              <div style={{ display:'flex', alignItems:'center', gap:8, padding:'9px 14px', borderBottom:`1px solid ${headerBorder}`, background:headerBg, flexShrink:0, boxShadow:'0 1px 6px rgba(0,0,0,0.06)', zIndex:20 }}>
+                {/* Back Button */}
                 <button
                   onClick={() => {
                     stopSpeech();
@@ -1096,44 +1404,162 @@ export const FlashcardMcqView: React.FC<Props> = ({
                       onProjectorModeChange?.(false);
                     }
                   }}
-                  style={{ flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', width:36, height:36, background:'#f1f5f9', border:'1px solid #e2e8f0', borderRadius:10, color:'#475569', cursor:'pointer' }}
+                  style={{ flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', width:36, height:36, background:pillBg, border:`1px solid ${pillBorder}`, borderRadius:10, color:pillText, cursor:'pointer' }}
                   title="Back"
                   aria-label="Back"
                 >
                   <ChevronLeft size={18} />
                 </button>
-                {/* Title block */}
+
+                {/* Title and Projector Badge */}
                 <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontSize:13, fontWeight:900, color:'#1e293b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', lineHeight:1.2 }}>
+                  <div style={{ fontSize:13, fontWeight:900, color:headerText, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', lineHeight:1.2 }}>
                     {sourceMeta?.lessonTitle || title || 'MCQ Practice'}
                   </div>
-                  {!hideProjectorLabel && !tabBar && (
-                    <div style={{ fontSize:10, fontWeight:700, color:'#d97706', textTransform:'uppercase', letterSpacing:'0.05em', lineHeight:1.2, display:'flex', alignItems:'center', gap:4 }}>
-                      <Tv size={10} /> PROJECTOR MODE
-                    </div>
+                  <div style={{ fontSize:10, fontWeight:800, color: isThemeDark ? '#fbbf24' : '#d97706', textTransform:'uppercase', letterSpacing:'0.05em', lineHeight:1.2, display:'flex', alignItems:'center', gap:4, marginTop:1 }}>
+                    <Tv size={11} /> <span>PREMIUM MCQ • PROJECTOR</span>
+                  </div>
+                </div>
+
+                {/* Live Accuracy HUD */}
+                <div className="hidden md:flex" style={{ flexShrink:0, alignItems:'center', gap:6, background:pillBg, border:`1px solid ${pillBorder}`, borderRadius:12, padding:'5px 10px', fontSize:11, fontWeight:800 }}>
+                  <span style={{ color:'#10b981' }}>✓ {projectorCorrect}</span>
+                  <span style={{ color:headerSubtext }}>·</span>
+                  <span style={{ color:'#ef4444' }}>✗ {projectorWrong}</span>
+                  {projectorAnswered.size > 0 && (
+                    <>
+                      <span style={{ color:headerSubtext }}>·</span>
+                      <span style={{ color:headerText }}>{Math.round((projectorCorrect / projectorAnswered.size) * 100)}%</span>
+                    </>
                   )}
                 </div>
-                {/* Q counter pill */}
-                <div style={{ flexShrink:0, display:'flex', alignItems:'center', gap:4, background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:12, padding:'6px 10px' }}>
-                  <span style={{ fontSize:11, fontWeight:900, color:'#1e293b' }}>{projectorQIndex + 1}</span>
-                  <span style={{ fontSize:10, color:'#94a3b8', fontWeight:700 }}>/ {total}</span>
+
+                {/* Question Counter Pill */}
+                <div style={{ flexShrink:0, display:'flex', alignItems:'center', gap:4, background:pillBg, border:`1px solid ${pillBorder}`, borderRadius:12, padding:'6px 10px' }}>
+                  <span style={{ fontSize:12, fontWeight:900, color:headerText }}>{projectorQIndex + 1}</span>
+                  <span style={{ fontSize:10, color:headerSubtext, fontWeight:700 }}>/ {total}</span>
                 </div>
-                {/* Font size controls */}
+
+                {/* Drill Timer Toggle */}
                 <button
-                  onClick={() => changeProjFont(-1)}
-                  disabled={projectorFontIdx === 0}
-                  title="Text chhota karo"
-                  style={{ flexShrink:0, padding:'7px 10px', background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:12, color: projectorFontIdx === 0 ? '#cbd5e1' : '#475569', fontSize:13, fontWeight:900, cursor: projectorFontIdx === 0 ? 'not-allowed' : 'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:1, minWidth:36 }}>
-                  <span style={{ lineHeight:1 }}>A−</span>
+                  onClick={cycleTimerMode}
+                  title="Classroom Drill Timer: Off / 30s / 45s / 60s / Stopwatch"
+                  aria-label="Classroom Drill Timer"
+                  style={{
+                    flexShrink:0,
+                    height:36,
+                    padding:'0 10px',
+                    background: drillTimerMode !== 'off' ? (isThemeDark ? '#1e1b4b' : '#eef2ff') : pillBg,
+                    border: `1px solid ${drillTimerMode !== 'off' ? '#818cf8' : pillBorder}`,
+                    borderRadius:12,
+                    color: drillTimerMode !== 'off' ? '#6366f1' : pillText,
+                    fontSize:11,
+                    fontWeight:900,
+                    cursor:'pointer',
+                    display:'flex',
+                    alignItems:'center',
+                    gap:5,
+                  }}
+                >
+                  <Timer size={14} className={drillTimeRemaining <= 5 && drillTimerMode !== 'stopwatch' && drillTimerMode !== 'off' ? 'animate-pulse text-red-500' : ''} />
+                  <span className="hidden sm:inline">
+                    {drillTimerMode === 'off' ? 'Timer' : drillTimerMode === 'stopwatch' ? `${drillStopwatchSec}s` : `${drillTimeRemaining}s`}
+                  </span>
                 </button>
+
+                {/* Teacher Reveal Answer Toggle */}
                 <button
-                  onClick={() => changeProjFont(1)}
-                  disabled={projectorFontIdx === PROJ_FONT_SIZES.length - 1}
-                  title="Text bada karo"
-                  style={{ flexShrink:0, padding:'7px 10px', background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:12, color: projectorFontIdx === PROJ_FONT_SIZES.length - 1 ? '#cbd5e1' : '#475569', fontSize:13, fontWeight:900, cursor: projectorFontIdx === PROJ_FONT_SIZES.length - 1 ? 'not-allowed' : 'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:1, minWidth:36 }}>
-                  <span style={{ lineHeight:1 }}>A+</span>
+                  onClick={() => { setProjectorReveal(r => !r); playSoundClick(); }}
+                  title="Teacher Answer Key: Show/Hide Answer & Explanation without selecting"
+                  aria-label="Reveal Answer Key"
+                  style={{
+                    flexShrink:0,
+                    height:36,
+                    padding:'0 10px',
+                    background: projectorReveal ? (isThemeDark ? '#064e3b' : '#dcfce7') : pillBg,
+                    border: `1px solid ${projectorReveal ? '#10b981' : pillBorder}`,
+                    borderRadius:12,
+                    color: projectorReveal ? '#10b981' : pillText,
+                    fontSize:11,
+                    fontWeight:900,
+                    cursor:'pointer',
+                    display:'flex',
+                    alignItems:'center',
+                    gap:5,
+                  }}
+                >
+                  {projectorReveal ? <EyeOff size={14} /> : <Eye size={14} />}
+                  <span className="hidden sm:inline">{projectorReveal ? 'Hide Ans' : 'Show Ans'}</span>
                 </button>
-                 {/* Rotate button — icon-only to keep the projector toolbar compact */}
+
+                {/* Theme Switcher Button */}
+                <button
+                  onClick={cycleTheme}
+                  title={`Current Theme: ${projectorTheme.toUpperCase()}. Click to switch.`}
+                  aria-label="Toggle Projector Theme"
+                  style={{
+                    flexShrink:0,
+                    height:36,
+                    padding:'0 10px',
+                    background: pillBg,
+                    border: `1px solid ${pillBorder}`,
+                    borderRadius:12,
+                    color: pillText,
+                    fontSize:11,
+                    fontWeight:800,
+                    cursor:'pointer',
+                    display:'flex',
+                    alignItems:'center',
+                    gap:5,
+                  }}
+                >
+                  {isThemeDark ? <Moon size={14} /> : isThemeSepia ? <Scroll size={14} /> : <Sun size={14} />}
+                  <span className="hidden xl:inline">{isThemeDark ? 'Dark Board' : isThemeSepia ? 'Warm Sepia' : 'Daylight'}</span>
+                </button>
+
+                {/* Sound Toggle */}
+                <button
+                  onClick={handleToggleSound}
+                  title={soundActive ? 'Sound Effects Enabled (Click to Mute)' : 'Sound Effects Muted (Click to Enable)'}
+                  aria-label="Toggle Sound"
+                  style={{
+                    flexShrink:0,
+                    width:36,
+                    height:36,
+                    background: pillBg,
+                    border: `1px solid ${pillBorder}`,
+                    borderRadius:12,
+                    color: soundActive ? '#10b981' : '#94a3b8',
+                    cursor:'pointer',
+                    display:'flex',
+                    alignItems:'center',
+                    justifyContent:'center',
+                  }}
+                >
+                  {soundActive ? <Volume2 size={15} /> : <VolumeX size={15} />}
+                </button>
+
+                {/* Font Size Adjusters */}
+                <div style={{ display:'flex', alignItems:'center', gap:2, flexShrink:0 }}>
+                  <button
+                    onClick={() => changeProjFont(-1)}
+                    disabled={projectorFontIdx === 0}
+                    title="Font Chhota Karo"
+                    style={{ padding:'6px 8px', background:pillBg, border:`1px solid ${pillBorder}`, borderRadius:'10px 0 0 10px', color: projectorFontIdx === 0 ? '#94a3b8' : pillText, fontSize:12, fontWeight:900, cursor: projectorFontIdx === 0 ? 'not-allowed' : 'pointer' }}
+                  >
+                    A−
+                  </button>
+                  <button
+                    onClick={() => changeProjFont(1)}
+                    disabled={projectorFontIdx === PROJ_FONT_SIZES.length - 1}
+                    title="Font Bada Karo"
+                    style={{ padding:'6px 8px', background:pillBg, border:`1px solid ${pillBorder}`, borderRadius:'0 10px 10px 0', color: projectorFontIdx === PROJ_FONT_SIZES.length - 1 ? '#94a3b8' : pillText, fontSize:12, fontWeight:900, cursor: projectorFontIdx === PROJ_FONT_SIZES.length - 1 ? 'not-allowed' : 'pointer' }}
+                  >
+                    A+
+                  </button>
+                </div>
+
+                {/* Rotate Screen */}
                 <button
                   onClick={async () => {
                     const result = await rotateScreen();
@@ -1141,209 +1567,271 @@ export const FlashcardMcqView: React.FC<Props> = ({
                     else { alert('📱 Phone ko physically rotate karein — landscape ke liye sideways, portrait ke liye seedha.'); }
                   }}
                   title={projectorRotated ? 'Portrait mode' : 'Landscape mode'}
-                   aria-label={projectorRotated ? 'Portrait mode' : 'Landscape mode'}
-                   style={{ flexShrink:0, width:36, height:36, background: projectorRotated ? '#ede9fe' : '#f8fafc', border: projectorRotated ? '1px solid #c4b5fd' : '1px solid #e2e8f0', borderRadius:12, color: projectorRotated ? '#7c3aed' : '#64748b', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                  <RotateCw size={13} />
+                  aria-label={projectorRotated ? 'Portrait mode' : 'Landscape mode'}
+                  style={{ flexShrink:0, width:36, height:36, background: projectorRotated ? (isThemeDark ? '#3b0764' : '#ede9fe') : pillBg, border: `1px solid ${projectorRotated ? '#a855f7' : pillBorder}`, borderRadius:12, color: projectorRotated ? '#a855f7' : pillText, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}
+                >
+                  <RotateCw size={14} />
                 </button>
-                 {/* All questions — compact 9-dot button beside rotate */}
-                 <button
-                   onClick={() => setProjectorNavigatorOpen(open => !open)}
-                   title="All Questions"
-                   aria-label="All Questions"
-                   style={{ flexShrink:0, width:36, height:36, background: projectorNavigatorOpen ? '#e0e7ff' : '#f8fafc', border: projectorNavigatorOpen ? '1px solid #a5b4fc' : '1px solid #e2e8f0', borderRadius:12, color:'#4338ca', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                   <LayoutGrid size={17} />
-                 </button>
-                 {/* Focus / fullscreen button */}
-                 <button
-                   onClick={() => setProjectorFocused(true)}
-                   title="Focus Mode"
-                   aria-label="Open Focus Mode"
-                   style={{ flexShrink:0, width:36, height:36, background:'#f0fdf4', border:'2px solid #bbf7d0', borderRadius:12, color:'#16a34a', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                   <Maximize2 size={18} />
-                 </button>
-                 {/* Live Class / Group Study */}
-                 {onOpenGroupStudy && (
-                   <button
-                     onClick={onOpenGroupStudy}
-                     title="Live Class Room"
-                     aria-label="Live Class Room"
-                     style={{ flexShrink:0, height:36, padding:'0 10px', background:'#fdf2f8', border:'1.5px solid #f472b6', borderRadius:12, color:'#db2777', cursor:'pointer', display:'flex', alignItems:'center', gap:5, fontWeight:900, fontSize:11 }}>
-                     <Radio size={14} className="animate-pulse text-pink-600" />
-                     <span>LIVE</span>
-                   </button>
-                 )}
+
+                {/* Question Navigator (9-dot grid) */}
+                <button
+                  onClick={() => { setProjectorNavigatorOpen(open => !open); playSoundClick(); }}
+                  title="Question Palette & Navigator"
+                  aria-label="Question Palette"
+                  style={{ flexShrink:0, width:36, height:36, background: projectorNavigatorOpen ? '#6366f1' : pillBg, border: `1px solid ${projectorNavigatorOpen ? '#4f46e5' : pillBorder}`, borderRadius:12, color: projectorNavigatorOpen ? '#ffffff' : pillText, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}
+                >
+                  <LayoutGrid size={16} />
+                </button>
+
+                {/* Keyboard Shortcuts Help Button */}
+                <button
+                  onClick={() => { setShowShortcutsModal(true); playSoundClick(); }}
+                  title="Remote & Keyboard Shortcuts (?)"
+                  aria-label="Keyboard Shortcuts"
+                  style={{ flexShrink:0, width:36, height:36, background:pillBg, border:`1px solid ${pillBorder}`, borderRadius:12, color:pillText, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}
+                >
+                  <HelpCircle size={15} />
+                </button>
+
+                {/* Fullscreen / Focus Mode */}
+                <button
+                  onClick={toggleProjectorNativeFullscreen}
+                  title="Native Fullscreen (F)"
+                  aria-label="Native Fullscreen"
+                  style={{ flexShrink:0, width:36, height:36, background: isThemeDark ? '#064e3b' : '#f0fdf4', border: '1px solid #10b981', borderRadius:12, color:'#10b981', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}
+                >
+                  <Maximize2 size={16} />
+                </button>
+
+                {/* Live Class Room */}
+                {onOpenGroupStudy && (
+                  <button
+                    onClick={onOpenGroupStudy}
+                    title="Live Class Room"
+                    aria-label="Live Class Room"
+                    style={{ flexShrink:0, height:36, padding:'0 10px', background:'#fdf2f8', border:'1.5px solid #f472b6', borderRadius:12, color:'#db2777', cursor:'pointer', display:'flex', alignItems:'center', gap:5, fontWeight:900, fontSize:11 }}
+                  >
+                    <Radio size={14} className="animate-pulse text-pink-600" />
+                    <span>LIVE</span>
+                  </button>
+                )}
               </div>
             )}
-            {/* Scrollable content — shared Revision Hub card, scaled for projection */}
-            <div style={{ flex:1, overflowY:'auto', padding: projectorFocused ? '24px 24px 24px' : '18px 24px 12px', minHeight:0 }}>
+
+            {/* Drill Timer Animated Countdown Bar */}
+            {!projectorFocused && drillTimerMode !== 'off' && drillTimerMode !== 'stopwatch' && (
+              <div style={{ height:4, width:'100%', background: isThemeDark ? '#1e293b' : '#e2e8f0', overflow:'hidden', flexShrink:0 }}>
+                <div style={{ height:'100%', width:`${timerProgressPercent}%`, background:timerColor, transition:'width 1s linear, background 0.3s' }} />
+              </div>
+            )}
+
+            {/* Scrollable Content: MCQ Practice Card scaled & themed */}
+            <div style={{ flex:1, overflowY:'auto', padding: projectorFocused ? '24px' : '20px 24px 16px', minHeight:0 }}>
               <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-                 {projectorNavigatorOpen && (
-                   <div style={projectorFocused
-                     ? { position:'absolute', top:58, right:12, zIndex:40, width:'min(360px, calc(100% - 24px))', padding:10, background:'#ffffff', border:'1px solid #c7d2fe', borderRadius:16, boxShadow:'0 12px 32px rgba(15,23,42,0.18)' }
-                     : { marginBottom:14 }}>
-                     <McqQuestionNavigator
-                       total={total}
-                       currentIndex={projectorQIndex}
-                       answers={projectorSelections}
-                       skipped={projectorSkipped}
-                       onJump={(index) => {
-                         setProjectorQIndex(index);
-                         setProjectorSelected(projectorSelections[index] ?? null);
-                         setProjectorNavigatorOpen(false);
-                       }}
-                     />
-                   </div>
-                 )}
+                {projectorNavigatorOpen && (
+                  <div style={projectorFocused
+                    ? { position:'absolute', top:58, right:12, zIndex:40, width:'min(380px, calc(100% - 24px))', padding:12, background:headerBg, border:`1px solid ${pillBorder}`, borderRadius:16, boxShadow:'0 16px 40px rgba(0,0,0,0.3)' }
+                    : { marginBottom:16 }}>
+                    <McqQuestionNavigator
+                      total={total}
+                      currentIndex={projectorQIndex}
+                      answers={projectorSelections}
+                      skipped={projectorSkipped}
+                      bookmarked={projectorBookmarked}
+                      themeMode={projectorTheme}
+                      onJump={(index) => {
+                        setProjectorQIndex(index);
+                        setProjectorReveal(false);
+                        setProjectorSelected(projectorSelections[index] ?? null);
+                        setProjectorNavigatorOpen(false);
+                        playSoundClick();
+                      }}
+                    />
+                  </div>
+                )}
+
                 <McqPracticeCard
                   q={pq}
                   questionNumber={pq.questionNumber ?? projectorQIndex + 1}
                   selectedOption={projectorCurrentSelection}
-                  answered={projectorCurrentSelection !== null}
-                   // Premium MCQ gives instant feedback after each selection.
-                   // The final submit still opens the Full Analysis overlay below.
-                   showResult={projectorCurrentSelection !== null}
+                  answered={projectorCurrentSelection !== null || projectorReveal}
+                  showResult={projectorCurrentSelection !== null || projectorReveal}
                   variant="projector"
                   fontSize={projectorFontSize}
-                  onSelect={(oi) => {
-                    if (projectorShowReview) return;
-                    const previousSelection = projectorSelections[projectorQIndex];
-                    if (previousSelection === oi) return;
-                    setProjectorSelected(oi);
-                    setProjectorSelections(prev => ({ ...prev, [projectorQIndex]: oi }));
-                    setProjectorSkipped(prev => {
-                      const next = new Set(prev);
-                      next.delete(projectorQIndex);
-                      return next;
-                    });
-                    const isCorrect = oi === pq.correctAnswer;
-                    if (previousSelection === undefined) {
-                      const newAnswered = new Set(projectorAnswered);
-                      newAnswered.add(projectorQIndex);
-                      setProjectorAnswered(newAnswered);
-                    } else {
-                      const wasCorrect = previousSelection === pq.correctAnswer;
-                      if (wasCorrect !== isCorrect) {
-                        if (isCorrect) {
-                          setProjectorCorrect(c => c + 1);
-                          setProjectorWrong(w => Math.max(0, w - 1));
-                        } else {
-                          setProjectorCorrect(c => Math.max(0, c - 1));
-                          setProjectorWrong(w => w + 1);
-                        }
-                      }
-                    }
-                    const elapsedSec = Math.round((Date.now() - projectorQStartTimeRef.current) / 1000);
-                    if (previousSelection === undefined && user?.id && sourceKey) {
-                      recordProjectorAnswer(user.id, sourceKey, `proj_${projectorQIndex}`, isCorrect, elapsedSec);
-                    }
-                    if (previousSelection === undefined && isCorrect) {
-                      setProjectorCorrect(c => c + 1);
-                      if (user?.id && !isAdmin) {
-                        const pts = tryEarnScore(user.id, 1, userTier, userTier !== 'FREE', 0, 'FLASHCARD_MCQ_CORRECT');
-                        if (pts > 0) {
-                          showMcqScore(pts);
-                          if (onUpdateUser) {
-                            const _routineOn  = loadRoutineData(user.id).enabled;
-                            deferMcqCreditsFromXp(user.id, pts, _routineOn);
-                            const updated = { ...user, totalScore: (user.totalScore || 0) + pts };
-                            onUpdateUser(updated);
-                            saveUserToLive(updated);
-                          }
-                        }
-                      }
-                    } else if (previousSelection === undefined) {
-                      setProjectorWrong(w => w + 1);
-                    }
-                  }}
+                  themeMode={projectorTheme}
+                  isBookmarked={projectorBookmarked.has(projectorQIndex)}
+                  onToggleBookmark={() => toggleBookmark(projectorQIndex)}
+                  eliminatedOptions={projectorEliminated[projectorQIndex]}
+                  onToggleEliminate={(oi) => toggleEliminateOption(projectorQIndex, oi)}
+                  showEliminateTool={showEliminateTool}
+                  onSelect={handleProjectorOptionSelect}
                 />
               </div>
-              {/* Explanation after answering */}
-              {projectorCurrentSelection !== null && pq.explanation && (
-                <div style={{ background:'#fefce8', border:'2px solid #fde047', borderRadius:12, padding:'14px 18px', fontSize: projectorFontSize, color:'#713f12', lineHeight:1.5, flexShrink:0 }}>
-                  💡 <strong>Explanation:</strong> <span dangerouslySetInnerHTML={{ __html: formatExplanationHtml(pq.explanation) }} />
+
+              {/* Comprehensive Teacher / Student Explanation */}
+              {(projectorCurrentSelection !== null || projectorReveal) && pq.explanation && (
+                <div style={{
+                  maxWidth: 1200,
+                  margin: '18px auto 0',
+                  background: isThemeDark ? '#0f1d32' : isThemeSepia ? '#fef3c7' : '#fefce8',
+                  border: `2px solid ${isThemeDark ? '#0284c7' : isThemeSepia ? '#f59e0b' : '#fde047'}`,
+                  borderRadius: 16,
+                  padding: '16px 20px',
+                  fontSize: projectorFontSize,
+                  color: isThemeDark ? '#e0f2fe' : isThemeSepia ? '#78350f' : '#713f12',
+                  lineHeight: 1.55,
+                  boxShadow: '0 4px 16px rgba(0,0,0,0.06)'
+                }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6, fontWeight:900, color: isThemeDark ? '#38bdf8' : isThemeSepia ? '#b45309' : '#a16207' }}>
+                    <Lightbulb size={18} />
+                    <span>Solution & Explanation:</span>
+                  </div>
+                  <div dangerouslySetInnerHTML={{ __html: formatExplanationHtml(pq.explanation) }} />
                 </div>
               )}
             </div>
-            {/* Bottom bar — hidden in focus mode */}
-            {!projectorFocused && (() => {
-               // Projector quiz can be submitted after any one answered MCQ.
-               const submitThreshold = 1;
-              const canSubmit = projectorAnswered.size >= submitThreshold;
-              return (
-                <div style={{ display:'flex', alignItems:'center', padding:'10px 20px', borderTop:'3px solid #e2e8f0', background:'#f8fafc', flexShrink:0, gap:10 }}>
-                  <button onClick={() => {
-                    const index = Math.max(0, projectorQIndex - 1);
-                    setProjectorQIndex(index);
-                    setProjectorReveal(false);
-                    setProjectorSelected(projectorSelections[index] ?? null);
-                  }}
-                    disabled={projectorQIndex === 0}
-                    style={{ background: projectorQIndex===0 ? '#e2e8f0' : '#3b82f6', color: projectorQIndex===0 ? '#94a3b8' : '#fff', border:'none', borderRadius:10, padding:'10px 18px', fontSize:15, fontWeight:900, cursor: projectorQIndex===0 ? 'not-allowed' : 'pointer', display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
-                    <ChevronLeft size={18} /> Prev
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (projectorQIndex < total - 1) {
-                        setProjectorSkipped(prev => new Set([...prev, projectorQIndex]));
-                        const index = projectorQIndex + 1;
-                        setProjectorQIndex(index);
-                        setProjectorSelected(projectorSelections[index] ?? null);
-                      } else if (projectorCurrentSelection === null) {
-                        setProjectorSkipped(prev => new Set([...prev, projectorQIndex]));
-                      }
-                    }}
-                    disabled={projectorShowReview || (projectorQIndex === total - 1 && projectorCurrentSelection !== null)}
-                    style={{ background:'#fffbeb', color:'#b45309', border:'1px solid #fcd34d', borderRadius:10, padding:'10px 12px', fontSize:12, fontWeight:900, cursor:'pointer', flexShrink:0 }}
-                  >
-                    Skip
-                  </button>
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {canSubmit ? (
-                      <button onClick={() => {
-                        submitProjectorQuiz();
-                      }}
-                        style={{ width: '100%', background:'linear-gradient(135deg,#16a34a,#15803d)', color:'#fff', border:'none', borderRadius:10, padding:'10px 18px', fontSize:15, fontWeight:900, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:8, boxShadow:'0 2px 12px rgba(22,163,74,0.35)' }}>
-                        <CheckCircle size={18} /> Submit ({projectorAnswered.size})
-                      </button>
-                    ) : (
-                      <div style={{ width: '100%', display:'flex', flexDirection:'column', alignItems:'center', gap:4, padding: '4px 0' }}>
-                        <div style={{ width:'100%', height:8, background:'#e2e8f0', borderRadius:99, overflow:'hidden' }}>
-                          <div style={{ height:'100%', background:'#3b82f6', borderRadius:99, width:`${(projectorAnswered.size / submitThreshold) * 100}%`, transition:'width 0.3s' }} />
-                        </div>
-                        <span style={{ fontSize:11, fontWeight:700, color:'#64748b' }}>{projectorAnswered.size}/{submitThreshold} to Submit</span>
-                      </div>
-                    )}
-                  </div>
-                  <button onClick={() => {
-                    const index = Math.min(total - 1, projectorQIndex + 1);
-                    setProjectorQIndex(index);
-                    setProjectorReveal(false);
-                    setProjectorSelected(projectorSelections[index] ?? null);
-                  }}
-                    disabled={projectorQIndex === total-1}
-                    style={{ background: projectorQIndex===total-1 ? '#e2e8f0' : '#3b82f6', color: projectorQIndex===total-1 ? '#94a3b8' : '#fff', border:'none', borderRadius:10, padding:'10px 18px', fontSize:15, fontWeight:900, cursor: projectorQIndex===total-1 ? 'not-allowed' : 'pointer', display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
-                    Next <ChevronRight size={18} />
-                  </button>
-                </div>
-              );
-            })()}
-            {/* Focus mode: floating nav + cancel — shown only in focus mode */}
-            {projectorFocused && (
-              <div style={{ position:'absolute', bottom:16, left:'50%', transform:'translateX(-50%)', display:'flex', alignItems:'center', gap:12, zIndex:20 }}>
+
+            {/* Standard Bottom Navigation Bar (Hidden in focus mode) */}
+            {!projectorFocused && (
+              <div style={{ display:'flex', alignItems:'center', padding:'10px 20px', borderTop:`2px solid ${footerBorder}`, background:footerBg, flexShrink:0, gap:10 }}>
+                {/* Prev Question */}
                 <button
                   onClick={() => {
                     const index = Math.max(0, projectorQIndex - 1);
                     setProjectorQIndex(index);
                     setProjectorReveal(false);
                     setProjectorSelected(projectorSelections[index] ?? null);
+                    playSoundClick();
                   }}
                   disabled={projectorQIndex === 0}
-                  style={{ background: projectorQIndex===0 ? 'rgba(30,41,59,0.4)' : 'rgba(30,41,59,0.85)', color: projectorQIndex===0 ? 'rgba(255,255,255,0.3)' : '#fff', border:'none', borderRadius:10, padding:'10px 20px', fontSize:15, fontWeight:900, cursor: projectorQIndex===0 ? 'not-allowed' : 'pointer', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', gap:6 }}>
+                  style={{
+                    background: projectorQIndex === 0 ? (isThemeDark ? '#1e293b' : '#e2e8f0') : '#3b82f6',
+                    color: projectorQIndex === 0 ? (isThemeDark ? '#64748b' : '#94a3b8') : '#ffffff',
+                    border: 'none',
+                    borderRadius: 12,
+                    padding: '10px 18px',
+                    fontSize: 14,
+                    fontWeight: 900,
+                    cursor: projectorQIndex === 0 ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    flexShrink: 0
+                  }}
+                >
+                  <ChevronLeft size={18} /> Prev
+                </button>
+
+                {/* Skip Question */}
+                <button
+                  onClick={() => {
+                    if (projectorQIndex < total - 1) {
+                      setProjectorSkipped(prev => new Set([...prev, projectorQIndex]));
+                      const index = projectorQIndex + 1;
+                      setProjectorQIndex(index);
+                      setProjectorReveal(false);
+                      setProjectorSelected(projectorSelections[index] ?? null);
+                      playSoundClick();
+                    }
+                  }}
+                  disabled={projectorShowReview || (projectorQIndex === total - 1 && projectorCurrentSelection !== null)}
+                  style={{
+                    background: isThemeDark ? '#1e293b' : '#fffbeb',
+                    color: isThemeDark ? '#fbbf24' : '#b45309',
+                    border: `1px solid ${isThemeDark ? '#334155' : '#fcd34d'}`,
+                    borderRadius: 12,
+                    padding: '10px 14px',
+                    fontSize: 13,
+                    fontWeight: 900,
+                    cursor: 'pointer',
+                    flexShrink: 0
+                  }}
+                >
+                  Skip
+                </button>
+
+                {/* Submit Quiz or Progress */}
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {canSubmit ? (
+                    <button
+                      onClick={submitProjectorQuiz}
+                      style={{
+                        width: '100%',
+                        background: 'linear-gradient(135deg,#10b981,#059669)',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: 12,
+                        padding: '10px 18px',
+                        fontSize: 14,
+                        fontWeight: 900,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 8,
+                        boxShadow: '0 4px 16px rgba(16,185,129,0.35)'
+                      }}
+                    >
+                      <CheckCircle size={18} /> Submit Quiz ({projectorAnswered.size}/{total})
+                    </button>
+                  ) : (
+                    <div style={{ width: '100%', display:'flex', flexDirection:'column', alignItems:'center', gap:4, padding:'4px 0' }}>
+                      <div style={{ width:'100%', height:7, background:pillBg, borderRadius:99, overflow:'hidden', border:`1px solid ${pillBorder}` }}>
+                        <div style={{ height:'100%', background:'#3b82f6', borderRadius:99, width:`${(projectorAnswered.size / submitThreshold) * 100}%`, transition:'width 0.3s' }} />
+                      </div>
+                      <span style={{ fontSize:11, fontWeight:700, color:headerSubtext }}>{projectorAnswered.size}/{submitThreshold} MCQ to Submit</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Next Question */}
+                <button
+                  onClick={() => {
+                    const index = Math.min(total - 1, projectorQIndex + 1);
+                    setProjectorQIndex(index);
+                    setProjectorReveal(false);
+                    setProjectorSelected(projectorSelections[index] ?? null);
+                    playSoundClick();
+                  }}
+                  disabled={projectorQIndex === total - 1}
+                  style={{
+                    background: projectorQIndex === total - 1 ? (isThemeDark ? '#1e293b' : '#e2e8f0') : '#3b82f6',
+                    color: projectorQIndex === total - 1 ? (isThemeDark ? '#64748b' : '#94a3b8') : '#ffffff',
+                    border: 'none',
+                    borderRadius: 12,
+                    padding: '10px 18px',
+                    fontSize: 14,
+                    fontWeight: 900,
+                    cursor: projectorQIndex === total - 1 ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    flexShrink: 0
+                  }}
+                >
+                  Next <ChevronRight size={18} />
+                </button>
+              </div>
+            )}
+
+            {/* Focus Mode Floating Bottom Bar */}
+            {projectorFocused && (
+              <div style={{ position:'absolute', bottom:20, left:'50%', transform:'translateX(-50%)', display:'flex', alignItems:'center', gap:12, zIndex:20 }}>
+                <button
+                  onClick={() => {
+                    const index = Math.max(0, projectorQIndex - 1);
+                    setProjectorQIndex(index);
+                    setProjectorReveal(false);
+                    setProjectorSelected(projectorSelections[index] ?? null);
+                    playSoundClick();
+                  }}
+                  disabled={projectorQIndex === 0}
+                  style={{ background: projectorQIndex===0 ? 'rgba(30,41,59,0.4)' : 'rgba(30,41,59,0.85)', color: projectorQIndex===0 ? 'rgba(255,255,255,0.3)' : '#fff', border:'none', borderRadius:12, padding:'11px 22px', fontSize:14, fontWeight:900, cursor: projectorQIndex===0 ? 'not-allowed' : 'pointer', backdropFilter:'blur(8px)', display:'flex', alignItems:'center', gap:6, boxShadow:'0 8px 24px rgba(0,0,0,0.3)' }}>
                   <ChevronLeft size={18} /> Prev
                 </button>
                 <button
                   onClick={() => setProjectorFocused(false)}
-                  style={{ background:'rgba(239,68,68,0.9)', color:'#fff', border:'2px solid #fca5a5', borderRadius:10, padding:'10px 14px', fontSize:15, fontWeight:900, cursor:'pointer', backdropFilter:'blur(6px)', display:'flex', alignItems:'center' }}>
+                  style={{ background:'rgba(239,68,68,0.9)', color:'#fff', border:'2px solid #fca5a5', borderRadius:12, padding:'11px 16px', fontSize:14, fontWeight:900, cursor:'pointer', backdropFilter:'blur(8px)', display:'flex', alignItems:'center', boxShadow:'0 8px 24px rgba(0,0,0,0.3)' }}>
                   <Minimize2 size={16} />
                 </button>
                 {projectorQIndex < total - 1 ? (
@@ -1356,28 +1844,76 @@ export const FlashcardMcqView: React.FC<Props> = ({
                       setProjectorQIndex(index);
                       setProjectorReveal(false);
                       setProjectorSelected(projectorSelections[index] ?? null);
+                      playSoundClick();
                     }}
-                    style={{ background: 'rgba(30,41,59,0.85)', color: '#fff', border:'none', borderRadius:10, padding:'10px 20px', fontSize:15, fontWeight:900, cursor: 'pointer', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', gap:6 }}>
+                    style={{ background: 'rgba(30,41,59,0.85)', color: '#fff', border:'none', borderRadius:12, padding:'11px 22px', fontSize:14, fontWeight:900, cursor: 'pointer', backdropFilter:'blur(8px)', display:'flex', alignItems:'center', gap:6, boxShadow:'0 8px 24px rgba(0,0,0,0.3)' }}>
                     Next <ChevronRight size={18} />
                   </button>
                 ) : (
                   <button
                     onClick={() => {
-                       const submitThreshold = 1;
-                       if (projectorAnswered.size >= submitThreshold) {
+                      if (projectorAnswered.size >= 1) {
                         submitProjectorQuiz();
                       } else {
                         setProjectorFocused(false);
                       }
                     }}
-                    style={{ background: 'rgba(30,41,59,0.85)', color: '#fff', border:'none', borderRadius:10, padding:'10px 20px', fontSize:15, fontWeight:900, cursor: 'pointer', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', gap:6 }}>
-                     {projectorAnswered.size >= 1 ? (
+                    style={{ background: 'linear-gradient(135deg,#10b981,#059669)', color: '#fff', border:'none', borderRadius:12, padding:'11px 22px', fontSize:14, fontWeight:900, cursor: 'pointer', backdropFilter:'blur(8px)', display:'flex', alignItems:'center', gap:6, boxShadow:'0 8px 24px rgba(16,185,129,0.3)' }}>
+                    {projectorAnswered.size >= 1 ? (
                       <><CheckCircle size={18} /> Submit</>
                     ) : (
-                      <><Minimize2 size={18} /> Exit Focus</>
+                      <><Minimize2 size={18} /> Exit</>
                     )}
                   </button>
                 )}
+              </div>
+            )}
+
+            {/* Remote & Keyboard Shortcuts Modal Dialog */}
+            {showShortcutsModal && (
+              <div style={{ position:'fixed', inset:0, zIndex:100001, background:'rgba(0,0,0,0.6)', backdropFilter:'blur(4px)', display:'flex', alignItems:'center', justifyContent:'center', padding:16 }}>
+                <div style={{ background: isThemeDark ? '#0f172a' : '#ffffff', color: isThemeDark ? '#f8fafc' : '#0f172a', border:`1px solid ${pillBorder}`, borderRadius:20, width:'min(480px, 100%)', padding:'24px', boxShadow:'0 24px 64px rgba(0,0,0,0.4)' }}>
+                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:18 }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                      <Tv size={20} className="text-amber-500" />
+                      <h3 style={{ fontSize:17, fontWeight:900 }}>Remote & Keyboard Shortcuts</h3>
+                    </div>
+                    <button
+                      onClick={() => setShowShortcutsModal(false)}
+                      style={{ padding:6, background:pillBg, border:`1px solid ${pillBorder}`, borderRadius:10, color:pillText, cursor:'pointer' }}
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+
+                  <div style={{ display:'flex', flexDirection:'column', gap:10, fontSize:13 }}>
+                    {[
+                      { key: '→ / Space', desc: 'Agla Sawal (Next Question)' },
+                      { key: '←', desc: 'Pichhla Sawal (Previous Question)' },
+                      { key: '1 / 2 / 3 / 4 (or A / B / C / D)', desc: 'Option Chuno (Select Choice)' },
+                      { key: 'R', desc: 'Jawab Dikhao / Chhupao (Reveal / Hide Answer)' },
+                      { key: 'T', desc: 'Theme Badlo (Dark Board / Daylight / Sepia)' },
+                      { key: 'F', desc: 'Fullscreen Mode Toggle' },
+                      { key: 'S', desc: 'Sawal Skip Karo' },
+                      { key: 'M', desc: 'Sound Mute / Unmute' },
+                      { key: '?', desc: 'Ye Shortcuts Guide Box' },
+                    ].map((item, idx) => (
+                      <div key={idx} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'8px 12px', background:pillBg, borderRadius:10 }}>
+                        <kbd style={{ background: isThemeDark ? '#334155' : '#e2e8f0', color: isThemeDark ? '#f8fafc' : '#0f172a', padding:'3px 8px', borderRadius:6, fontWeight:800, fontSize:12, fontFamily:'monospace' }}>
+                          {item.key}
+                        </kbd>
+                        <span style={{ fontWeight:600, color:headerSubtext }}>{item.desc}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={() => setShowShortcutsModal(false)}
+                    style={{ width:'100%', marginTop:18, background:'#3b82f6', color:'#ffffff', border:'none', borderRadius:12, padding:'11px', fontSize:14, fontWeight:900, cursor:'pointer' }}
+                  >
+                    Got It (Band Karo)
+                  </button>
+                </div>
               </div>
             )}
           </div>,

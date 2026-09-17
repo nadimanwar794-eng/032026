@@ -1,6 +1,6 @@
 // ─── WhatsApp-style Realtime Direct & Group Chat Service ───────────────────────────
 import { ref, set, get, update, onValue, push, remove } from 'firebase/database';
-import { doc, setDoc, collection, getDocs, limit, query, onSnapshot } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, collection, getDocs, limit, query, onSnapshot, where } from 'firebase/firestore';
 import { rtdb, db } from '../firebase';
 
 export interface ChatContact {
@@ -16,6 +16,10 @@ export interface ChatContact {
   subscriptionLevel?: string;
   subscriptionTier?: string;
   isPremium?: boolean;
+  uid?: string;
+  email?: string;
+  displayId?: string;
+  mobile?: string;
 }
 
 export interface ChatMessage {
@@ -46,6 +50,8 @@ export interface ChatMessage {
   seen?: boolean; // true if recipient has opened and seen the message
   delivered?: boolean; // true if delivered
   disappearingExpiresAt?: number; // epoch ms when message auto-deletes
+  isSaved?: boolean; // Snapchat-style "Saved in Chat" (never vanishes until unsaved)
+  savedBy?: Record<string, boolean>; // userId -> true
 }
 
 export interface FriendRequest {
@@ -54,11 +60,18 @@ export interface FriendRequest {
   fromName: string;
   fromPhoto?: string;
   fromRole?: string;
+  fromUid?: string;
+  fromEmail?: string;
   toId: string;
   toName: string;
   toPhoto?: string;
+  toUid?: string;
+  toEmail?: string;
   status: 'PENDING' | 'ACCEPTED' | 'REJECTED';
   timestamp: number;
+  recipientKeys?: string[];
+  senderKeys?: string[];
+  targetIds?: string[];
 }
 
 export interface ChatGroup {
@@ -98,7 +111,8 @@ export const INSTITUTE_CLASSMATES: ChatContact[] = [
     id: 'student_rohit_v',
     name: 'Rohit Verma',
     classLevel: 'Class 10',
-    isOnline: true,
+    isOnline: false,
+    lastSeen: Date.now() - 45 * 60 * 1000,
     statusText: 'Maths Quadratic Equations solving 📐',
     role: 'STUDENT',
     subscriptionLevel: 'ULTRA',
@@ -108,7 +122,8 @@ export const INSTITUTE_CLASSMATES: ChatContact[] = [
     id: 'student_priya_s',
     name: 'Priya Sharma',
     classLevel: 'Class 12',
-    isOnline: true,
+    isOnline: false,
+    lastSeen: Date.now() - 2 * 3600 * 1000,
     statusText: 'Physics Electrostatics practice ⚡',
     role: 'STUDENT',
     subscriptionLevel: 'BASIC',
@@ -119,7 +134,7 @@ export const INSTITUTE_CLASSMATES: ChatContact[] = [
     name: 'Amit Kumar',
     classLevel: 'Class 11',
     isOnline: false,
-    lastSeen: Date.now() - 15 * 60 * 1000,
+    lastSeen: Date.now() - 3 * 3600 * 1000,
     statusText: 'Chemistry Organic notes revision 🧪',
     role: 'STUDENT',
     subscriptionLevel: 'BASIC',
@@ -129,7 +144,8 @@ export const INSTITUTE_CLASSMATES: ChatContact[] = [
     id: 'student_ananya_s',
     name: 'Ananya Singh',
     classLevel: 'Class 10',
-    isOnline: true,
+    isOnline: false,
+    lastSeen: Date.now() - 5 * 3600 * 1000,
     statusText: 'Biology NCERT line-by-line reading 🌿',
     role: 'STUDENT',
     subscriptionLevel: 'ULTRA',
@@ -139,7 +155,8 @@ export const INSTITUTE_CLASSMATES: ChatContact[] = [
     id: 'student_vikash_p',
     name: 'Vikash Patel',
     classLevel: 'Competition (JEE)',
-    isOnline: true,
+    isOnline: false,
+    lastSeen: Date.now() - 8 * 3600 * 1000,
     statusText: 'JEE Main mock test solving 🎯',
     role: 'STUDENT',
     subscriptionLevel: 'ULTRA',
@@ -150,7 +167,7 @@ export const INSTITUTE_CLASSMATES: ChatContact[] = [
     name: 'Sneha Gupta',
     classLevel: 'Class 9',
     isOnline: false,
-    lastSeen: Date.now() - 40 * 60 * 1000,
+    lastSeen: Date.now() - 12 * 3600 * 1000,
     statusText: 'Class 9 Science cell chapter complete 🔬',
     role: 'STUDENT',
     subscriptionLevel: 'FREE',
@@ -161,7 +178,7 @@ export const INSTITUTE_CLASSMATES: ChatContact[] = [
     name: 'Rahul Mehra',
     classLevel: 'Class 10',
     isOnline: false,
-    lastSeen: Date.now() - 2 * 3600 * 1000,
+    lastSeen: Date.now() - 24 * 3600 * 1000,
     statusText: 'Offline • At tuition batch 📚',
     role: 'STUDENT',
     subscriptionLevel: 'FREE',
@@ -172,7 +189,7 @@ export const INSTITUTE_CLASSMATES: ChatContact[] = [
     name: 'Aditya Raj',
     classLevel: 'Class 11',
     isOnline: false,
-    lastSeen: Date.now() - 3.5 * 3600 * 1000,
+    lastSeen: Date.now() - 28 * 3600 * 1000,
     statusText: 'Self-study mode on 🔕',
     role: 'STUDENT',
     subscriptionLevel: 'BASIC',
@@ -183,7 +200,7 @@ export const INSTITUTE_CLASSMATES: ChatContact[] = [
     name: 'Pooja Yadav',
     classLevel: 'Class 12',
     isOnline: false,
-    lastSeen: Date.now() - 5 * 3600 * 1000,
+    lastSeen: Date.now() - 36 * 3600 * 1000,
     statusText: 'Solving Bihar Board 12th PYQs 📝',
     role: 'STUDENT',
     subscriptionLevel: 'FREE',
@@ -194,7 +211,7 @@ export const INSTITUTE_CLASSMATES: ChatContact[] = [
     name: 'Manish Tiwari',
     classLevel: 'Class 9',
     isOnline: false,
-    lastSeen: Date.now() - 8 * 3600 * 1000,
+    lastSeen: Date.now() - 48 * 3600 * 1000,
     statusText: 'Offline • Evening study session 📖',
     role: 'STUDENT',
     subscriptionLevel: 'FREE',
@@ -204,7 +221,8 @@ export const INSTITUTE_CLASSMATES: ChatContact[] = [
     id: 'student_ritu_k',
     name: 'Ritu Kumari',
     classLevel: 'Class 12',
-    isOnline: true,
+    isOnline: false,
+    lastSeen: Date.now() - 14 * 3600 * 1000,
     statusText: 'English & Hindi grammar revision ✍️',
     role: 'STUDENT',
     subscriptionLevel: 'ULTRA',
@@ -236,7 +254,52 @@ export const INSTITUTE_CLASSMATES: ChatContact[] = [
 
 export const SEEDED_CONTACTS: ChatContact[] = INSTITUTE_CLASSMATES;
 
+export const isSeededClassmate = (userId: string): boolean => {
+  if (!userId) return false;
+  return (
+    userId.startsWith('student_') ||
+    userId.startsWith('peer_') ||
+    INSTITUTE_CLASSMATES.some((c) => isSameUser(c.id, userId))
+  );
+};
+
 export const SEEDED_GROUPS: ChatGroup[] = [];
+
+// ── Delete-For-Everyone Persistent Registry ─────────────────────────────────
+const DELETED_FOR_EVERYONE_KEY = 'nsta_deleted_for_everyone';
+
+export function getDeletedForEveryoneSet(): Set<string> {
+  const set = new Set<string>();
+  try {
+    const raw = localStorage.getItem(DELETED_FOR_EVERYONE_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        arr.forEach((id: string) => {
+          if (id) set.add(id);
+        });
+      }
+    }
+  } catch {}
+  return set;
+}
+
+export function addMessageToDeletedForEveryone(msgId: string): void {
+  if (!msgId) return;
+  try {
+    const set = getDeletedForEveryoneSet();
+    if (!set.has(msgId)) {
+      set.add(msgId);
+      const arr = Array.from(set).slice(-2000);
+      localStorage.setItem(DELETED_FOR_EVERYONE_KEY, JSON.stringify(arr));
+    }
+  } catch {}
+}
+
+export function isMessageDeletedForEveryone(msgId?: string | null): boolean {
+  if (!msgId) return false;
+  return getDeletedForEveryoneSet().has(msgId);
+}
 
 // Helper to check if a message is deleted for a specific user (Persistent local cache)
 export function getDeletedForMeSet(userId: string): Set<string> {
@@ -269,7 +332,17 @@ export function addMessageToDeletedForMe(userId: string, msgId: string): void {
 }
 
 export function isMessageDeletedForUser(userId: string, m: ChatMessage): boolean {
-  if (!m || !userId) return false;
+  if (!m || !m.id) return false;
+  // If deleted for everyone, it is completely purged and neither sender nor recipient sees it
+  if (
+    m.isDeletedForEveryone ||
+    (m as any).deletedCompletely ||
+    m.text === '🚫 This message was deleted' ||
+    isMessageDeletedForEveryone(m.id)
+  ) {
+    return true;
+  }
+  if (!userId) return false;
   // 1. Check local persistent delete-for-me set
   const localSet = getDeletedForMeSet(userId);
   if (localSet.has(m.id)) return true;
@@ -482,8 +555,8 @@ export const subscribeToDirectMessages = (
   const convId = getDirectConversationId(myUserId, peerUserId);
   const cacheKey = `dm_${convId}`;
 
-  // Emit local cache immediately for zero loading wait
-  const initialLocal = getLocalMessages(cacheKey);
+  // Emit local cache immediately for zero loading wait (strictly filtered)
+  const initialLocal = getLocalMessages(cacheKey, myUserId);
   if (initialLocal.length > 0) {
     callback(initialLocal);
   } else {
@@ -495,32 +568,35 @@ export const subscribeToDirectMessages = (
     const freshLocal = getLocalMessages(cacheKey, myUserId);
     const map = new Map<string, ChatMessage>();
 
-    // 1. Seed with local messages (filtering out deleted for me)
+    // 1. Seed with local messages (filtering out deleted for me & deleted for everyone)
     freshLocal.forEach((m) => {
-      if (m && m.id && !isMessageDeletedForUser(myUserId, m)) {
+      if (m && m.id && !isMessageDeletedForUser(myUserId, m) && !isMessageDeletedForEveryone(m.id)) {
         map.set(m.id, m);
       }
     });
 
-    // 2. Merge incoming messages (strictly dropping messages deleted for me)
+    // 2. Process incoming messages (strictly dropping messages deleted for me or deleted for everyone)
     incoming.forEach((m) => {
-      if (m && m.id && !isMessageDeletedForUser(myUserId, m)) {
-        const existing = map.get(m.id);
-        if (existing?.isDeletedForEveryone) {
-          map.set(m.id, {
-            ...m,
-            text: '🚫 This message was deleted',
-            isDeletedForEveryone: true,
-            type: 'TEXT',
-          });
-        } else {
-          map.set(m.id, m);
-        }
+      if (!m || !m.id) return;
+      if (
+        m.isDeletedForEveryone ||
+        (m as any).deletedCompletely ||
+        m.text === '🚫 This message was deleted' ||
+        isMessageDeletedForEveryone(m.id)
+      ) {
+        addMessageToDeletedForEveryone(m.id);
+        map.delete(m.id);
+        return;
       }
+      if (isMessageDeletedForUser(myUserId, m)) {
+        map.delete(m.id);
+        return;
+      }
+      map.set(m.id, m);
     });
 
     const combined = Array.from(map.values())
-      .filter((m) => !isMessageDeletedForUser(myUserId, m))
+      .filter((m) => !isMessageDeletedForUser(myUserId, m) && !isMessageDeletedForEveryone(m.id))
       .sort((a, b) => a.timestamp - b.timestamp);
 
     setLocalMessages(cacheKey, combined, myUserId);
@@ -537,13 +613,8 @@ export const subscribeToDirectMessages = (
         const list: ChatMessage[] = Object.values(val);
         mergeAndEmit(list);
       } else {
-        // Safe fallback: never wipe out local messages when RTDB is empty or resets
         const freshLocal = getLocalMessages(cacheKey, myUserId);
-        if (freshLocal.length > 0) {
-          callback(freshLocal);
-        } else {
-          callback(getStarterPeerMessages(peerUserId));
-        }
+        callback(freshLocal.length > 0 ? freshLocal : getStarterPeerMessages(peerUserId));
       }
     },
     (error) => {
@@ -551,6 +622,29 @@ export const subscribeToDirectMessages = (
       const freshLocal = getLocalMessages(cacheKey, myUserId);
       callback(freshLocal.length > 0 ? freshLocal : getStarterPeerMessages(peerUserId));
     }
+  );
+
+  // 1b. Real-time listener for deleted-for-everyone registry in this direct chat
+  const deletedRef = ref(rtdb, `chat/whatsapp_direct_deleted/${convId}`);
+  const unsubDeleted = onValue(
+    deletedRef,
+    (snapshot) => {
+      const val = snapshot.val();
+      if (val && typeof val === 'object') {
+        let hasNew = false;
+        Object.keys(val).forEach((id) => {
+          if (!isMessageDeletedForEveryone(id)) {
+            addMessageToDeletedForEveryone(id);
+            hasNew = true;
+          }
+        });
+        if (hasNew) {
+          const freshLocal = getLocalMessages(cacheKey, myUserId);
+          callback(freshLocal);
+        }
+      }
+    },
+    () => {}
   );
 
   // 2. Cloud Firestore real-time listener (Ensures permanent sync across devices)
@@ -578,6 +672,7 @@ export const subscribeToDirectMessages = (
 
   return () => {
     unsubRtdb();
+    unsubDeleted();
     if (unsubFirestore) unsubFirestore();
   };
 };
@@ -590,44 +685,49 @@ export const subscribeToGroupMessages = (
 ): (() => void) => {
   const cacheKey = `group_${groupId}`;
 
-  const initialLocal = getLocalMessages(cacheKey);
+  const initialLocal = getLocalMessages(cacheKey, currentUserId);
   if (initialLocal.length > 0) {
-    const filtered = currentUserId
-      ? initialLocal.filter((m) => !isMessageDeletedForUser(currentUserId, m))
-      : initialLocal;
-    callback(filtered);
+    callback(initialLocal);
   } else {
     callback(getStarterGroupMessages(groupId));
   }
 
   const mergeAndEmit = (incoming: ChatMessage[]) => {
-    const freshLocal = getLocalMessages(cacheKey);
+    const freshLocal = getLocalMessages(cacheKey, currentUserId);
     const map = new Map<string, ChatMessage>();
 
     freshLocal.forEach((m) => {
-      if (m && m.id && (!currentUserId || !isMessageDeletedForUser(currentUserId, m))) {
+      if (
+        m &&
+        m.id &&
+        (!currentUserId || !isMessageDeletedForUser(currentUserId, m)) &&
+        !isMessageDeletedForEveryone(m.id)
+      ) {
         map.set(m.id, m);
       }
     });
 
     incoming.forEach((m) => {
-      if (m && m.id && (!currentUserId || !isMessageDeletedForUser(currentUserId, m))) {
-        const existing = map.get(m.id);
-        if (existing?.isDeletedForEveryone) {
-          map.set(m.id, {
-            ...m,
-            text: '🚫 This message was deleted',
-            isDeletedForEveryone: true,
-            type: 'TEXT',
-          });
-        } else {
-          map.set(m.id, m);
-        }
+      if (!m || !m.id) return;
+      if (
+        m.isDeletedForEveryone ||
+        (m as any).deletedCompletely ||
+        m.text === '🚫 This message was deleted' ||
+        isMessageDeletedForEveryone(m.id)
+      ) {
+        addMessageToDeletedForEveryone(m.id);
+        map.delete(m.id);
+        return;
       }
+      if (currentUserId && isMessageDeletedForUser(currentUserId, m)) {
+        map.delete(m.id);
+        return;
+      }
+      map.set(m.id, m);
     });
 
     const combined = Array.from(map.values())
-      .filter((m) => !currentUserId || !isMessageDeletedForUser(currentUserId, m))
+      .filter((m) => (!currentUserId || !isMessageDeletedForUser(currentUserId, m)) && !isMessageDeletedForEveryone(m.id))
       .sort((a, b) => a.timestamp - b.timestamp);
 
     setLocalMessages(cacheKey, combined, currentUserId);
@@ -644,18 +744,37 @@ export const subscribeToGroupMessages = (
         mergeAndEmit(list);
       } else {
         const freshLocal = getLocalMessages(cacheKey, currentUserId);
-        if (freshLocal.length > 0) {
-          callback(freshLocal);
-        } else {
-          callback(getStarterGroupMessages(groupId));
-        }
+        callback(freshLocal.length > 0 ? freshLocal : getStarterGroupMessages(groupId));
       }
     },
     (error) => {
-      console.warn('[WhatsApp] RTDB group listen error:', error);
+      console.warn('[WhatsApp] RTDB group listen error, using local:', error);
       const freshLocal = getLocalMessages(cacheKey, currentUserId);
       callback(freshLocal.length > 0 ? freshLocal : getStarterGroupMessages(groupId));
     }
+  );
+
+  // Real-time listener for deleted-for-everyone registry in this group
+  const deletedRef = ref(rtdb, `chat/whatsapp_group_deleted/${groupId}`);
+  const unsubDeleted = onValue(
+    deletedRef,
+    (snapshot) => {
+      const val = snapshot.val();
+      if (val && typeof val === 'object') {
+        let hasNew = false;
+        Object.keys(val).forEach((id) => {
+          if (!isMessageDeletedForEveryone(id)) {
+            addMessageToDeletedForEveryone(id);
+            hasNew = true;
+          }
+        });
+        if (hasNew) {
+          const freshLocal = getLocalMessages(cacheKey, currentUserId);
+          callback(freshLocal);
+        }
+      }
+    },
+    () => {}
   );
 
   let unsubFirestore: (() => void) | undefined;
@@ -682,6 +801,7 @@ export const subscribeToGroupMessages = (
 
   return () => {
     unsubRtdb();
+    unsubDeleted();
     if (unsubFirestore) unsubFirestore();
   };
 };
@@ -1162,6 +1282,101 @@ export const formatLastSeen = (ts?: number | string | Date): string => {
 };
 
 /**
+ * Update user presence and last seen in Realtime Database and Firestore
+ */
+export const updateUserPresence = (userId: string, isOnline: boolean) => {
+  if (!userId) return;
+  const now = Date.now();
+  const cleanId = sanitizeRtdbKey(userId);
+  try {
+    set(ref(rtdb, `chat/presence/${cleanId}`), {
+      isOnline,
+      lastSeen: now,
+      updatedAt: now,
+    }).catch(() => {});
+  } catch {}
+  try {
+    if (db) {
+      setDoc(
+        doc(db, 'users', userId),
+        {
+          isOnline,
+          lastSeen: now,
+        },
+        { merge: true }
+      ).catch(() => {});
+    }
+  } catch {}
+};
+
+/**
+ * Real-time subscription to a contact's presence & last seen status
+ */
+export const subscribeToUserPresence = (
+  userId: string,
+  callback: (presence: { isOnline: boolean; lastSeen: number }) => void
+): (() => void) => {
+  if (!userId) return () => {};
+  const cleanId = sanitizeRtdbKey(userId);
+  try {
+    const pRef = ref(rtdb, `chat/presence/${cleanId}`);
+    return onValue(
+      pRef,
+      (snapshot) => {
+        const val = snapshot.val();
+        if (val && typeof val === 'object') {
+          callback({
+            isOnline: !!val.isOnline,
+            lastSeen: val.lastSeen || val.updatedAt || Date.now(),
+          });
+        }
+      },
+      () => {}
+    );
+  } catch {
+    return () => {};
+  }
+};
+
+/**
+ * Real-time subscription to all active users' presence from RTDB
+ */
+export const subscribeToAllPresence = (
+  callback: (presenceMap: Record<string, { isOnline: boolean; lastSeen: number }>) => void
+): (() => void) => {
+  try {
+    const pRef = ref(rtdb, 'chat/presence');
+    return onValue(
+      pRef,
+      (snapshot) => {
+        const val = snapshot.val();
+        const map: Record<string, { isOnline: boolean; lastSeen: number }> = {};
+        const now = Date.now();
+        if (val && typeof val === 'object') {
+          Object.entries(val).forEach(([k, v]: [string, any]) => {
+            if (v && typeof v === 'object') {
+              const lastSeen = v.lastSeen || v.updatedAt || 0;
+              // User is only online if flag is set AND active within last 2 minutes
+              const isFresh = (now - lastSeen) < 2 * 60 * 1000;
+              map[k] = {
+                isOnline: !!v.isOnline && isFresh,
+                lastSeen: lastSeen || now,
+              };
+            }
+          });
+        }
+        callback(map);
+      },
+      () => {
+        callback({});
+      }
+    );
+  } catch {
+    return () => {};
+  }
+};
+
+/**
  * Fetch registered students from Firestore / RTDB + seeds
  */
 export const fetchRegisteredStudents = async (myUserId: string): Promise<ChatContact[]> => {
@@ -1194,18 +1409,25 @@ export const fetchRegisteredStudents = async (myUserId: string): Promise<ChatCon
           (d.email && d.email === myUserId);
         if (uid && !isSelf && !seenIds.has(uid)) {
           seenIds.add(uid);
+          const lastSeenTs = resolveLastSeen(d, uid);
+          // Only truly online if recent activity within 2 minutes and not mock
+          const isReallyOnline = !uid.startsWith('student_') && !!d.isOnline && (Date.now() - lastSeenTs < 2 * 60 * 1000);
           result.push({
             id: uid,
             name: d.name || d.displayName || 'Student',
             photoURL: d.photoURL || d.avatarUrl || '',
             statusText: d.statusText || d.bio || 'Studying on IIC App 📚',
-            isOnline: !!d.isOnline,
-            lastSeen: resolveLastSeen(d, uid),
+            isOnline: isReallyOnline,
+            lastSeen: lastSeenTs,
             classLevel: d.classLevel || d.role || 'Class 10-12',
             role: d.role || 'STUDENT',
             subscriptionLevel: d.subscriptionLevel || (d.isPremium ? 'BASIC' : 'FREE'),
             subscriptionTier: d.subscriptionTier || 'FREE',
             isPremium: !!d.isPremium,
+            uid: d.uid || docSnap.id || '',
+            email: d.email || '',
+            displayId: d.displayId || '',
+            mobile: d.mobile || d.phone || '',
           });
         }
       });
@@ -1227,153 +1449,300 @@ export const fetchRegisteredStudents = async (myUserId: string): Promise<ChatCon
           (d?.email && d?.email === myUserId);
         if (uid && !isSelf && !seenIds.has(uid)) {
           seenIds.add(uid);
+          const lastSeenTs = resolveLastSeen(d || {}, uid);
+          const isReallyOnline = !uid.startsWith('student_') && !!d?.isOnline && (Date.now() - lastSeenTs < 2 * 60 * 1000);
           result.push({
             id: uid,
             name: d?.name || d?.displayName || 'Student',
             photoURL: d?.photoURL || d?.avatarUrl || '',
             statusText: d?.statusText || 'Available for study chat 💡',
-            isOnline: !!d?.isOnline,
-            lastSeen: resolveLastSeen(d || {}, uid),
+            isOnline: isReallyOnline,
+            lastSeen: lastSeenTs,
             classLevel: d?.classLevel || d?.role || 'Student',
             role: d?.role || 'STUDENT',
             subscriptionLevel: d?.subscriptionLevel || (d?.isPremium ? 'BASIC' : 'FREE'),
             subscriptionTier: d?.subscriptionTier || 'FREE',
             isPremium: !!d?.isPremium,
+            uid: d?.uid || uid,
+            email: d?.email || '',
+            displayId: d?.displayId || '',
+            mobile: d?.mobile || d?.phone || '',
           });
         }
       });
     }
   } catch {}
 
+  // 3. Always include institute classmates / seeds so the directory is never empty (all default to offline)
+  INSTITUTE_CLASSMATES.forEach((c) => {
+    const isSelf = isSameUser(c.id, myUserId);
+    if (!isSelf && !seenIds.has(c.id)) {
+      seenIds.add(c.id);
+      result.push({
+        ...c,
+        isOnline: false,
+      });
+    }
+  });
+
   return result;
 };
 
 /**
  * Send a Friend Request to another student.
+ * Uses atomic multi-key updates and dual-sync so requests arrive immediately regardless of which ID variant is used.
  */
 export const sendFriendRequest = async (
-  fromUser: { id: string; name: string; photoURL?: string; role?: string },
-  toUser: { id: string; name: string; photoURL?: string }
+  fromUser: { id: string; name: string; photoURL?: string; role?: string; uid?: string; email?: string; displayId?: string; mobile?: string },
+  toUser: { id: string; name: string; photoURL?: string; uid?: string; email?: string; displayId?: string; mobile?: string }
 ): Promise<FriendRequest> => {
-  const reqId = `${fromUser.id}_${toUser.id}`;
+  const fromId = String(fromUser.id || fromUser.uid || '').trim();
+  const toId = String(toUser.id || toUser.uid || '').trim();
+  const cleanFrom = sanitizeRtdbKey(fromId);
+  const cleanTo = sanitizeRtdbKey(toId);
+  const reqId = `${cleanFrom}_${cleanTo}`;
+
+  const recipientKeys = Array.from(
+    new Set(
+      [toId, cleanTo, toUser.uid, toUser.email, toUser.displayId, toUser.mobile]
+        .filter(Boolean)
+        .map((k) => sanitizeRtdbKey(String(k).trim()))
+        .filter((k) => k.length > 0)
+    )
+  );
+  const senderKeys = Array.from(
+    new Set(
+      [fromId, cleanFrom, fromUser.uid, fromUser.email, fromUser.displayId, fromUser.mobile]
+        .filter(Boolean)
+        .map((k) => sanitizeRtdbKey(String(k).trim()))
+        .filter((k) => k.length > 0)
+    )
+  );
+
   const request: FriendRequest = {
     id: reqId,
-    fromId: fromUser.id,
-    fromName: fromUser.name,
+    fromId,
+    fromName: fromUser.name || 'Student',
     fromPhoto: fromUser.photoURL || '',
     fromRole: fromUser.role || 'STUDENT',
-    toId: toUser.id,
-    toName: toUser.name,
+    fromUid: fromUser.uid || '',
+    fromEmail: fromUser.email || '',
+    toId,
+    toName: toUser.name || 'Student',
     toPhoto: toUser.photoURL || '',
+    toUid: toUser.uid || '',
+    toEmail: toUser.email || '',
+    recipientKeys,
+    senderKeys,
+    targetIds: recipientKeys,
     status: 'PENDING',
     timestamp: Date.now(),
   };
 
   const payload = cleanPayload(request);
-  const cleanTo = sanitizeRtdbKey(toUser.id);
-  const cleanFrom = sanitizeRtdbKey(fromUser.id);
 
-  try {
-    // 1. Save to recipient's incoming requests in RTDB using sanitized key
-    await set(ref(rtdb, `chat/friend_requests/${cleanTo}/${cleanFrom}`), payload);
-    // 2. Save to sender's outgoing requests in RTDB
-    await set(ref(rtdb, `chat/friend_requests_sent/${cleanFrom}/${cleanTo}`), payload);
+  // 1. Instant local persistence for zero delay and non-flickering UI
+  saveLocalSentFriendRequest(fromId, request);
+  saveLocalFriendRequest(request);
 
-    // If raw IDs are valid and different, also write to raw paths for maximum compatibility
-    if (cleanTo !== toUser.id && !/[.#$[\]/]/.test(toUser.id) && !/[.#$[\]/]/.test(fromUser.id)) {
-      await set(ref(rtdb, `chat/friend_requests/${toUser.id}/${fromUser.id}`), payload).catch(() => {});
-    }
-    if (cleanFrom !== fromUser.id && !/[.#$[\]/]/.test(fromUser.id) && !/[.#$[\]/]/.test(toUser.id)) {
-      await set(ref(rtdb, `chat/friend_requests_sent/${fromUser.id}/${toUser.id}`), payload).catch(() => {});
-    }
-  } catch (e) {
-    console.warn('[Nsta Messenger] RTDB friend request write fallback:', e);
-  }
+  // 2. Resilient individual RTDB path writes
+  const rtdbWrites: Promise<any>[] = [
+    set(ref(rtdb, `chat/friend_requests/${cleanTo}/${cleanFrom}`), payload).catch((err) => {
+      console.warn('[Nsta Messenger] RTDB write incoming request notice:', err);
+    }),
+    set(ref(rtdb, `chat/friend_requests_sent/${cleanFrom}/${cleanTo}`), payload).catch((err) => {
+      console.warn('[Nsta Messenger] RTDB write sent request notice:', err);
+    }),
+  ];
 
-  // 3. Firestore Dual-Sync Backup (in friend_requests collection and direct messages)
+  // Distribute across all sender/recipient aliases
+  recipientKeys.forEach((rKey) => {
+    senderKeys.forEach((sKey) => {
+      if (rKey !== cleanTo || sKey !== cleanFrom) {
+        rtdbWrites.push(
+          set(ref(rtdb, `chat/friend_requests/${rKey}/${sKey}`), payload).catch(() => {})
+        );
+        rtdbWrites.push(
+          set(ref(rtdb, `chat/friend_requests_sent/${sKey}/${rKey}`), payload).catch(() => {})
+        );
+      }
+    });
+  });
+
+  await Promise.allSettled(rtdbWrites);
+
+  // 3. Firestore dual-sync
   try {
     if (db) {
-      await setDoc(doc(db, 'friend_requests', reqId), payload, { merge: true }).catch(() => {});
-      const convId = getDirectConversationId(fromUser.id, toUser.id);
-      const fsDoc = doc(db, 'whatsapp_direct', convId, 'messages', `req_${reqId}`);
-      await setDoc(fsDoc, {
-        id: `req_${reqId}`,
-        senderId: fromUser.id,
-        senderName: fromUser.name,
-        senderPhoto: fromUser.photoURL || '',
-        text: `🤝 ${fromUser.name} ne friend request bheji hai`,
-        timestamp: Date.now(),
-        type: 'SYSTEM',
-        status: 'SENT',
-        friendRequestData: payload,
-      }, { merge: true }).catch(() => {});
+      await Promise.allSettled([
+        setDoc(doc(db, 'friend_requests', reqId), payload, { merge: true }),
+        setDoc(doc(db, 'users', toId, 'friend_requests_incoming', reqId), payload, { merge: true }),
+        setDoc(doc(db, 'users', fromId, 'friend_requests_sent', reqId), payload, { merge: true }),
+      ]);
     }
-  } catch (err) {
-    // Non-blocking
+  } catch (fsErr) {
+    console.warn('[Nsta Messenger] Firestore friend request write notice:', fsErr);
   }
 
-  // 4. Local storage sync
-  saveLocalFriendRequest(request);
+  // 4. Automated peer acceptance if target is an institute classmate
+  if (isSeededClassmate(toId)) {
+    setTimeout(async () => {
+      try {
+        await acceptFriendRequest(
+          {
+            id: toId,
+            name: toUser.name,
+            photoURL: toUser.photoURL || '',
+            uid: toUser.uid || toId,
+            email: toUser.email || '',
+            displayId: toUser.displayId || '',
+          },
+          {
+            id: fromId,
+            name: fromUser.name,
+            photoURL: fromUser.photoURL || '',
+            uid: fromUser.uid || fromId,
+            email: fromUser.email || '',
+            displayId: fromUser.displayId || '',
+          }
+        );
+
+        const greetingText = `Hi ${fromUser.name}! 👋 Maine aapki friend request accept kar li. Saath me study karte hain aur koi doubt ho to zaroor puchna! 📚✨`;
+        await sendPrivateMessage(
+          toId,
+          toUser.name,
+          toUser.photoURL,
+          fromId,
+          greetingText
+        );
+      } catch (err) {
+        console.warn('[Nsta Messenger] Automated peer acceptance notice:', err);
+      }
+    }, 1800);
+  }
 
   return request;
 };
 
 /**
- * Accept Friend Request: Both users become friends and 1-on-1 chat unlocks!
+ * Accept Friend Request: Both users become friends and 1-on-1 chat unlocks instantly!
+ * Executes an atomic multi-path update in RTDB so both ends unlock simultaneously.
  */
 export const acceptFriendRequest = async (
-  myUser: { id: string; name: string; photoURL?: string },
-  requester: { id: string; name: string; photoURL?: string }
+  myUser: { id: string; name: string; photoURL?: string; uid?: string; email?: string; displayId?: string },
+  requester: { id: string; name: string; photoURL?: string; uid?: string; email?: string; displayId?: string }
 ): Promise<boolean> => {
   const now = Date.now();
-  const cleanMy = sanitizeRtdbKey(myUser.id);
-  const cleanRequester = sanitizeRtdbKey(requester.id);
 
-  const friendData1 = cleanPayload({ id: requester.id, name: requester.name, photoURL: requester.photoURL || '', friendedAt: now });
-  const friendData2 = cleanPayload({ id: myUser.id, name: myUser.name, photoURL: myUser.photoURL || '', friendedAt: now });
+  const friendData1 = cleanPayload({
+    id: requester.id,
+    name: requester.name,
+    photoURL: requester.photoURL || '',
+    friendedAt: now,
+    lastSeen: now,
+    isOnline: true,
+    uid: requester.uid || '',
+    email: requester.email || '',
+    displayId: requester.displayId || '',
+    statusText: 'Friend 🤝 · Available to chat',
+  });
+  const friendData2 = cleanPayload({
+    id: myUser.id,
+    name: myUser.name,
+    photoURL: myUser.photoURL || '',
+    friendedAt: now,
+    lastSeen: now,
+    isOnline: true,
+    uid: myUser.uid || '',
+    email: myUser.email || '',
+    displayId: myUser.displayId || '',
+    statusText: 'Friend 🤝 · Available to chat',
+  });
 
-  try {
-    // 1. Mark both as friends in RTDB
-    await set(ref(rtdb, `chat/friends/${cleanMy}/${cleanRequester}`), friendData1);
-    await set(ref(rtdb, `chat/friends/${cleanRequester}/${cleanMy}`), friendData2);
+  const myKeys = Array.from(
+    new Set([myUser.id, myUser.uid, myUser.email, myUser.displayId].filter(Boolean).map(sanitizeRtdbKey))
+  );
+  const reqKeys = Array.from(
+    new Set([requester.id, requester.uid, requester.email, requester.displayId].filter(Boolean).map(sanitizeRtdbKey))
+  );
 
-    // 2. Remove pending requests
-    await remove(ref(rtdb, `chat/friend_requests/${cleanMy}/${cleanRequester}`)).catch(() => {});
-    await remove(ref(rtdb, `chat/friend_requests_sent/${cleanRequester}/${cleanMy}`)).catch(() => {});
+  const convId = getDirectConversationId(myUser.id, requester.id);
+  const starterMsgId = `friend_init_${convId}`;
+  const starterMsg = cleanPayload({
+    id: starterMsgId,
+    senderId: 'SYSTEM',
+    senderName: 'System',
+    text: `🤝 Friend request accept ho gayi! Aap dono ab Nsta Messenger par baatein aur doubts share kar sakte hain.`,
+    timestamp: now,
+    type: 'SYSTEM',
+    status: 'READ',
+  });
 
-    // Also clean raw IDs if different
-    if (cleanMy !== myUser.id || cleanRequester !== requester.id) {
-      if (!/[.#$[\]/]/.test(myUser.id) && !/[.#$[\]/]/.test(requester.id)) {
-        await remove(ref(rtdb, `chat/friend_requests/${myUser.id}/${requester.id}`)).catch(() => {});
-        await remove(ref(rtdb, `chat/friend_requests_sent/${requester.id}/${myUser.id}`)).catch(() => {});
-      }
-    }
+  const acceptedNotificationForSender = cleanPayload({
+    friend: friendData2,
+    acceptedAt: now,
+    acceptedByName: myUser.name,
+    requesterId: requester.id,
+  });
 
-    // 3. Post a congratulatory starter message in direct chat
-    const convId = getDirectConversationId(myUser.id, requester.id);
-    const starterMsgId = `friend_init_${now}`;
-    const starterMsg = cleanPayload({
-      id: starterMsgId,
-      senderId: 'SYSTEM',
-      senderName: 'System',
-      text: `🤝 Friend request accept ho gayi! Aap dono ab Nsta Messenger par baatein aur doubts share kar sakte hain.`,
-      timestamp: now,
-      type: 'SYSTEM',
-      status: 'READ',
+  // Check if they are already friends locally or in RTDB to avoid re-posting starter messages
+  const existingFriends = getLocalFriends(myUser.id);
+  const isAlreadyFriend = existingFriends.some((f) => isSameUser(f.id, requester.id));
+
+  // 1. Single atomic multi-path update: Adds friends, clears pending requests, posts starter message, notifies sender
+  const updates: Record<string, any> = {};
+  myKeys.forEach((mKey) => {
+    reqKeys.forEach((rKey) => {
+      updates[`chat/friends/${mKey}/${rKey}`] = friendData1;
+      updates[`chat/friends/${rKey}/${mKey}`] = friendData2;
+      updates[`chat/friend_requests/${mKey}/${rKey}`] = null;
+      updates[`chat/friend_requests/${rKey}/${mKey}`] = null;
+      updates[`chat/friend_requests_sent/${rKey}/${mKey}`] = null;
+      updates[`chat/friend_requests_sent/${mKey}/${rKey}`] = null;
+      updates[`chat/friend_accepted/${rKey}/${mKey}`] = acceptedNotificationForSender;
     });
-    await set(ref(rtdb, `chat/whatsapp_direct/${convId}/${starterMsgId}`), starterMsg).catch(() => {});
-    if (db) {
-      setDoc(doc(db, 'whatsapp_direct', convId, 'messages', starterMsgId), starterMsg, { merge: true }).catch(() => {});
-    }
-  } catch (e) {
-    console.warn('[Nsta Messenger] RTDB accept friend error:', e);
+  });
+  if (!isAlreadyFriend) {
+    updates[`chat/whatsapp_direct/${convId}/${starterMsgId}`] = starterMsg;
   }
 
-  // Local storage save
+  try {
+    await update(ref(rtdb), updates);
+  } catch (e) {
+    console.warn('[Nsta Messenger] RTDB atomic accept friend error, falling back:', e);
+    const cleanMy = sanitizeRtdbKey(myUser.id);
+    const cleanRequester = sanitizeRtdbKey(requester.id);
+    await set(ref(rtdb, `chat/friends/${cleanMy}/${cleanRequester}`), friendData1).catch(() => {});
+    await set(ref(rtdb, `chat/friends/${cleanRequester}/${cleanMy}`), friendData2).catch(() => {});
+    await remove(ref(rtdb, `chat/friend_requests/${cleanMy}/${cleanRequester}`)).catch(() => {});
+    await remove(ref(rtdb, `chat/friend_requests/${cleanRequester}/${cleanMy}`)).catch(() => {});
+    await remove(ref(rtdb, `chat/friend_requests_sent/${cleanRequester}/${cleanMy}`)).catch(() => {});
+    await remove(ref(rtdb, `chat/friend_requests_sent/${cleanMy}/${cleanRequester}`)).catch(() => {});
+    await set(ref(rtdb, `chat/friend_accepted/${cleanRequester}/${cleanMy}`), acceptedNotificationForSender).catch(() => {});
+  }
+
+  // 2. Dual-Sync in Firestore (non-blocking in background)
+  try {
+    if (db) {
+      const reqId1 = `${requester.id}_${myUser.id}`;
+      const reqId2 = `${myUser.id}_${requester.id}`;
+      Promise.allSettled([
+        setDoc(doc(db, 'whatsapp_direct', convId, 'messages', starterMsgId), starterMsg, { merge: true }),
+        setDoc(doc(db, 'friend_requests', reqId1), { status: 'ACCEPTED', acceptedAt: now, friend: friendData2 }, { merge: true }),
+        setDoc(doc(db, 'friend_requests', reqId2), { status: 'ACCEPTED', acceptedAt: now, friend: friendData1 }, { merge: true }),
+        setDoc(doc(db, 'users', requester.id, 'friends', myUser.id), friendData2, { merge: true }),
+        setDoc(doc(db, 'users', myUser.id, 'friends', requester.id), friendData1, { merge: true }),
+      ]).catch(() => {});
+    }
+  } catch {}
+
+  // 3. Local storage instant updates
   saveLocalFriend(myUser.id, friendData1);
   saveLocalFriend(requester.id, friendData2);
   removeLocalFriendRequest(`${requester.id}_${myUser.id}`);
-  removeLocalFriendRequest(`${cleanRequester}_${cleanMy}`);
+  removeLocalFriendRequest(`${myUser.id}_${requester.id}`);
+  removeLocalSentFriendRequest(myUser.id, requester.id);
+  removeLocalSentFriendRequest(requester.id, myUser.id);
 
   return true;
 };
@@ -1381,51 +1750,100 @@ export const acceptFriendRequest = async (
 /**
  * Reject Friend Request.
  */
-export const rejectFriendRequest = async (myUserId: string, requesterId: string): Promise<boolean> => {
+export const rejectFriendRequest = async (
+  myUserId: string,
+  requesterId: string,
+  extraMyIds?: string[],
+  extraReqIds?: string[]
+): Promise<boolean> => {
   const cleanMy = sanitizeRtdbKey(myUserId);
   const cleanRequester = sanitizeRtdbKey(requesterId);
-  try {
-    await remove(ref(rtdb, `chat/friend_requests/${cleanMy}/${cleanRequester}`)).catch(() => {});
-    await remove(ref(rtdb, `chat/friend_requests_sent/${cleanRequester}/${cleanMy}`)).catch(() => {});
-    if (cleanMy !== myUserId || cleanRequester !== requesterId) {
-      if (!/[.#$[\]/]/.test(myUserId) && !/[.#$[\]/]/.test(requesterId)) {
-        await remove(ref(rtdb, `chat/friend_requests/${myUserId}/${requesterId}`)).catch(() => {});
-        await remove(ref(rtdb, `chat/friend_requests_sent/${requesterId}/${myUserId}`)).catch(() => {});
-      }
-    }
-  } catch (e) {
-    console.warn('[Nsta Messenger] Error rejecting friend request:', e);
-  }
+
   removeLocalFriendRequest(`${requesterId}_${myUserId}`);
-  removeLocalFriendRequest(`${cleanRequester}_${cleanMy}`);
+  removeLocalFriendRequest(`${myUserId}_${requesterId}`);
+  removeLocalSentFriendRequest(myUserId, requesterId);
+  removeLocalSentFriendRequest(requesterId, myUserId);
+
+  const myKeys = Array.from(new Set([myUserId, cleanMy, ...(extraMyIds || [])].filter(Boolean).map(sanitizeRtdbKey)));
+  const reqKeys = Array.from(new Set([requesterId, cleanRequester, ...(extraReqIds || [])].filter(Boolean).map(sanitizeRtdbKey)));
+
+  const rtdbRemovals: Promise<any>[] = [
+    remove(ref(rtdb, `chat/friend_requests/${cleanMy}/${cleanRequester}`)).catch(() => {}),
+    remove(ref(rtdb, `chat/friend_requests_sent/${cleanRequester}/${cleanMy}`)).catch(() => {}),
+  ];
+
+  myKeys.forEach((mKey) => {
+    reqKeys.forEach((rKey) => {
+      rtdbRemovals.push(remove(ref(rtdb, `chat/friend_requests/${mKey}/${rKey}`)).catch(() => {}));
+      rtdbRemovals.push(remove(ref(rtdb, `chat/friend_requests_sent/${rKey}/${mKey}`)).catch(() => {}));
+    });
+  });
+
+  await Promise.allSettled(rtdbRemovals);
+
+  try {
+    if (db) {
+      const reqId1 = `${cleanRequester}_${cleanMy}`;
+      const reqId2 = `${cleanMy}_${cleanRequester}`;
+      deleteDoc(doc(db, 'friend_requests', reqId1)).catch(() => {});
+      deleteDoc(doc(db, 'friend_requests', reqId2)).catch(() => {});
+      deleteDoc(doc(db, 'users', myUserId, 'friend_requests_incoming', reqId1)).catch(() => {});
+      deleteDoc(doc(db, 'users', requesterId, 'friend_requests_sent', reqId1)).catch(() => {});
+    }
+  } catch {}
+
   return true;
 };
 
 /**
  * Cancel outgoing Friend Request.
  */
-export const cancelFriendRequest = async (myUserId: string, toUserId: string): Promise<boolean> => {
+export const cancelFriendRequest = async (
+  myUserId: string,
+  toUserId: string,
+  extraMyIds?: string[],
+  extraToIds?: string[]
+): Promise<boolean> => {
   const cleanMy = sanitizeRtdbKey(myUserId);
   const cleanTo = sanitizeRtdbKey(toUserId);
-  try {
-    await remove(ref(rtdb, `chat/friend_requests/${cleanTo}/${cleanMy}`)).catch(() => {});
-    await remove(ref(rtdb, `chat/friend_requests_sent/${cleanMy}/${cleanTo}`)).catch(() => {});
-    if (cleanMy !== myUserId || cleanTo !== toUserId) {
-      if (!/[.#$[\]/]/.test(myUserId) && !/[.#$[\]/]/.test(toUserId)) {
-        await remove(ref(rtdb, `chat/friend_requests/${toUserId}/${myUserId}`)).catch(() => {});
-        await remove(ref(rtdb, `chat/friend_requests_sent/${myUserId}/${toUserId}`)).catch(() => {});
-      }
-    }
-  } catch (e) {
-    console.warn('[Nsta Messenger] Error cancelling friend request:', e);
-  }
+  const reqId = `${cleanMy}_${cleanTo}`;
+
   removeLocalFriendRequest(`${myUserId}_${toUserId}`);
-  removeLocalFriendRequest(`${cleanMy}_${cleanTo}`);
+  removeLocalFriendRequest(reqId);
+  removeLocalSentFriendRequest(myUserId, toUserId);
+  removeLocalSentFriendRequest(myUserId, reqId);
+
+  const myKeys = Array.from(new Set([myUserId, cleanMy, ...(extraMyIds || [])].filter(Boolean).map(sanitizeRtdbKey)));
+  const toKeys = Array.from(new Set([toUserId, cleanTo, ...(extraToIds || [])].filter(Boolean).map(sanitizeRtdbKey)));
+
+  const rtdbRemovals: Promise<any>[] = [
+    remove(ref(rtdb, `chat/friend_requests/${cleanTo}/${cleanMy}`)).catch(() => {}),
+    remove(ref(rtdb, `chat/friend_requests_sent/${cleanMy}/${cleanTo}`)).catch(() => {}),
+  ];
+
+  toKeys.forEach((tKey) => {
+    myKeys.forEach((mKey) => {
+      rtdbRemovals.push(remove(ref(rtdb, `chat/friend_requests/${tKey}/${mKey}`)).catch(() => {}));
+      rtdbRemovals.push(remove(ref(rtdb, `chat/friend_requests_sent/${mKey}/${tKey}`)).catch(() => {}));
+    });
+  });
+
+  await Promise.allSettled(rtdbRemovals);
+
+  try {
+    if (db) {
+      deleteDoc(doc(db, 'friend_requests', reqId)).catch(() => {});
+      deleteDoc(doc(db, 'users', toUserId, 'friend_requests_incoming', reqId)).catch(() => {});
+      deleteDoc(doc(db, 'users', myUserId, 'friend_requests_sent', reqId)).catch(() => {});
+    }
+  } catch {}
+
   return true;
 };
 
 /**
  * Subscribe to Incoming Friend Requests
+ * Listens on all known user identity aliases to guarantee no request is ever missed.
  */
 export const subscribeToFriendRequests = (
   myUserId: string,
@@ -1454,11 +1872,22 @@ export const subscribeToFriendRequests = (
   const unsubs: Array<() => void> = [];
 
   const emit = () => {
+    const localFriends = getLocalFriends(myUserId);
     const combinedMap = new Map<string, FriendRequest>();
     sourceBuckets.forEach((bucket) => {
-      bucket.forEach((item, id) => {
+      bucket.forEach((item) => {
         if (item && item.status === 'PENDING') {
-          combinedMap.set(id, item);
+          // Drop if sender is already a confirmed friend
+          const isAlreadyFriend = localFriends.some(
+            (f) => isSameUser(f.id, item.fromId) || isSameUser(f.uid, item.fromId)
+          );
+          if (isAlreadyFriend) return;
+
+          // Normalize sender key so duplicate requests across aliases collapse cleanly
+          const dedupeKey = `${item.fromId || (item as any).fromUid || ''}_${item.toId || ''}`;
+          if (!combinedMap.has(dedupeKey)) {
+            combinedMap.set(dedupeKey, item);
+          }
         }
       });
     });
@@ -1478,6 +1907,8 @@ export const subscribeToFriendRequests = (
       const unsub = onValue(
         reqRef,
         (snapshot) => {
+          // Live remote data received: clear local seed so it doesn't fight remote state
+          sourceBuckets.delete('local');
           bucket.clear();
           const val = snapshot.val();
           if (val && typeof val === 'object') {
@@ -1493,7 +1924,7 @@ export const subscribeToFriendRequests = (
           emit();
         },
         (err) => {
-          console.warn('[Nsta Messenger] Friend requests RTDB listener error for key', targetKey, err);
+          console.warn('[Nsta Messenger] Friend requests RTDB listener warning for key', targetKey, err);
         }
       );
       unsubs.push(unsub);
@@ -1502,72 +1933,193 @@ export const subscribeToFriendRequests = (
     }
   });
 
-  // 2. Cloud Firestore listener for incoming friend requests
+  // 2. Cloud Firestore targeted listener for incoming friend requests
   try {
     if (db) {
       const fsBucket = new Map<string, FriendRequest>();
       sourceBuckets.set('firestore', fsBucket);
 
-      const fsQuery = query(collection(db, 'friend_requests'), limit(50));
-      const unsubFs = onSnapshot(
-        fsQuery,
-        (snap) => {
-          fsBucket.clear();
-          snap.forEach((docSnap) => {
-            const data = docSnap.data() as FriendRequest;
-            const toMatch = data.toId === myUserId || targetIds.includes(sanitizeRtdbKey(data.toId));
-            if (toMatch && data.status === 'PENDING') {
-              fsBucket.set(docSnap.id, { ...data, id: docSnap.id });
-            }
-          });
-          emit();
-        },
-        (err) => {
-          console.warn('[Nsta Messenger] Firestore friend_requests listener error:', err);
-        }
-      );
-      unsubs.push(unsubFs);
+      const primaryTargetIds = Array.from(new Set([myUserId, ...(extraUserIds || [])].filter(Boolean))).slice(0, 10);
+      primaryTargetIds.forEach((tId) => {
+        try {
+          const fsQuery = query(collection(db, 'friend_requests'), where('toId', '==', tId));
+          const unsubFs = onSnapshot(
+            fsQuery,
+            (snap) => {
+              snap.forEach((docSnap) => {
+                const data = docSnap.data() as FriendRequest;
+                if (data && data.status === 'PENDING') {
+                  fsBucket.set(docSnap.id, { ...data, id: docSnap.id });
+                } else if (data && data.status !== 'PENDING') {
+                  fsBucket.delete(docSnap.id);
+                }
+              });
+              emit();
+            },
+            () => {}
+          );
+          unsubs.push(unsubFs);
+        } catch {}
+      });
     }
   } catch {}
 
   return () => {
     unsubs.forEach((u) => {
-      try { u(); } catch {}
+      try {
+        u();
+      } catch {}
     });
   };
 };
 
 /**
  * Subscribe to Outgoing Sent Friend Requests
+ * Uses isolated source buckets so that when an outgoing request is accepted/deleted in RTDB,
+ * the sender's client immediately reflects the change without retaining stale entries.
  */
 export const subscribeToSentFriendRequests = (
   myUserId: string,
-  callback: (requests: FriendRequest[]) => void
+  callback: (requests: FriendRequest[]) => void,
+  extraUserIds?: string[]
 ): (() => void) => {
   if (!myUserId) return () => {};
   const cleanMy = sanitizeRtdbKey(myUserId);
-  const sentRef = ref(rtdb, `chat/friend_requests_sent/${cleanMy}`);
-  const unsub = onValue(
-    sentRef,
-    (snapshot) => {
-      const val = snapshot.val();
-      if (val && typeof val === 'object') {
-        const list: FriendRequest[] = Object.values(val);
-        list.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-        callback(list);
-      } else {
-        callback([]);
-      }
-    },
-    () => {
-      callback([]);
+  const rawTargetIds = [myUserId, cleanMy, ...(extraUserIds || [])];
+  const targetIds = Array.from(new Set(rawTargetIds.map(sanitizeRtdbKey).filter(Boolean)));
+
+  const sourceBuckets = new Map<string, Map<string, FriendRequest>>();
+  const unsubs: Array<() => void> = [];
+
+  // 0. Seed immediately from local cache so UI is instantaneous and never blinks empty
+  const localSent = getLocalSentFriendRequests(myUserId);
+  const localBucket = new Map<string, FriendRequest>();
+  localSent.forEach((r) => {
+    if (r && (r.status === 'PENDING' || !r.status)) {
+      localBucket.set(r.id, r);
     }
-  );
-  return unsub;
+  });
+  sourceBuckets.set('local_sent', localBucket);
+
+  const emit = () => {
+    const localFriends = getLocalFriends(myUserId);
+    const combinedMap = new Map<string, FriendRequest>();
+    sourceBuckets.forEach((bucket) => {
+      bucket.forEach((item) => {
+        // Drop any request if the target student is already a confirmed friend
+        const isAlreadyFriend = localFriends.some(
+          (f) => isSameUser(f.id, item.toId) || isSameUser(f.uid, item.toId)
+        );
+        if (isAlreadyFriend) {
+          removeLocalSentFriendRequest(myUserId, item.toId);
+          return;
+        }
+
+        if (!combinedMap.has(item.id)) {
+          combinedMap.set(item.id, item);
+        }
+      });
+    });
+    const list = Array.from(combinedMap.values());
+    list.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    callback(list);
+  };
+
+  // Immediate emit from local cache
+  emit();
+
+  // 1. RTDB sent requests listeners
+  targetIds.forEach((targetKey) => {
+    try {
+      const bucket = new Map<string, FriendRequest>();
+      sourceBuckets.set(`rtdb_${targetKey}`, bucket);
+
+      const sentRef = ref(rtdb, `chat/friend_requests_sent/${targetKey}`);
+      const unsub = onValue(
+        sentRef,
+        (snapshot) => {
+          // Authoritative remote data arrived: remove temporary local bucket
+          sourceBuckets.delete('local_sent');
+          bucket.clear();
+          const val = snapshot.val();
+          if (val && typeof val === 'object') {
+            Object.values(val).forEach((item: any) => {
+              if (item && item.id && (item.status === 'PENDING' || !item.status)) {
+                bucket.set(item.id, item);
+              }
+            });
+          }
+          emit();
+        },
+        () => {
+          emit();
+        }
+      );
+      unsubs.push(unsub);
+    } catch {}
+  });
+
+  // 2. Firestore redundancy for sent friend requests
+  try {
+    if (db) {
+      const fsBucket = new Map<string, FriendRequest>();
+      sourceBuckets.set('firestore_sent', fsBucket);
+      const primaryTargetIds = Array.from(new Set([myUserId, ...(extraUserIds || [])].filter(Boolean))).slice(0, 10);
+      primaryTargetIds.forEach((tId) => {
+        try {
+          // Direct subcollection listener (no composite index required)
+          const unsubSub = onSnapshot(
+            collection(db, 'users', tId, 'friend_requests_sent'),
+            (snap) => {
+              snap.forEach((docSnap) => {
+                const data = docSnap.data() as FriendRequest;
+                if (data && (data.status === 'PENDING' || !data.status)) {
+                  fsBucket.set(docSnap.id, { ...data, id: docSnap.id });
+                } else if (data && data.status !== 'PENDING') {
+                  fsBucket.delete(docSnap.id);
+                }
+              });
+              emit();
+            },
+            () => {}
+          );
+          unsubs.push(unsubSub);
+
+          // Root collection query
+          const fsQuery = query(collection(db, 'friend_requests'), where('fromId', '==', tId));
+          const unsubFs = onSnapshot(
+            fsQuery,
+            (snap) => {
+              snap.forEach((docSnap) => {
+                const data = docSnap.data() as FriendRequest;
+                if (data && (data.status === 'PENDING' || !data.status)) {
+                  fsBucket.set(docSnap.id, { ...data, id: docSnap.id });
+                } else if (data && data.status !== 'PENDING') {
+                  fsBucket.delete(docSnap.id);
+                }
+              });
+              emit();
+            },
+            () => {}
+          );
+          unsubs.push(unsubFs);
+        } catch {}
+      });
+    }
+  } catch {}
+
+  return () => {
+    unsubs.forEach((u) => {
+      try {
+        u();
+      } catch {}
+    });
+  };
 };
 
 /**
  * Subscribe to Confirmed Friends
+ * Uses isolated source buckets across all alias keys so friends unlock instantly on both sides!
  */
 export const subscribeToFriends = (
   myUserId: string,
@@ -1580,37 +2132,57 @@ export const subscribeToFriends = (
   const rawTargetIds = [myUserId, cleanMy, ...(extraUserIds || [])];
   const targetIds = Array.from(new Set(rawTargetIds.map(sanitizeRtdbKey).filter(Boolean)));
 
+  const sourceBuckets = new Map<string, Map<string, ChatContact>>();
   const local = getLocalFriends(myUserId);
-  if (local.length > 0) callback(local);
-
-  const friendsMap = new Map<string, ChatContact>();
-  local.forEach((f) => friendsMap.set(f.id, f));
+  if (local.length > 0) {
+    const localBucket = new Map<string, ChatContact>();
+    local.forEach((f) => localBucket.set(f.id, f));
+    sourceBuckets.set('local', localBucket);
+    callback(local);
+  }
 
   const unsubs: Array<() => void> = [];
 
   const emit = () => {
-    const list = Array.from(friendsMap.values());
+    const combinedMap = new Map<string, ChatContact>();
+    sourceBuckets.forEach((bucket) => {
+      bucket.forEach((friend) => {
+        if (!combinedMap.has(friend.id)) {
+          combinedMap.set(friend.id, friend);
+        }
+      });
+    });
+    const list = Array.from(combinedMap.values());
     callback(list);
     saveAllLocalFriends(myUserId, list);
   };
 
   targetIds.forEach((targetKey) => {
     try {
+      const bucket = new Map<string, ChatContact>();
+      sourceBuckets.set(`rtdb_${targetKey}`, bucket);
+
       const friendsRef = ref(rtdb, `chat/friends/${targetKey}`);
       const unsub = onValue(
         friendsRef,
         (snapshot) => {
+          bucket.clear();
           const val = snapshot.val();
           if (val && typeof val === 'object') {
             Object.values(val).forEach((item: any) => {
               if (item && item.id) {
-                friendsMap.set(item.id, {
+                const now = Date.now();
+                const resolvedLastSeen = item.lastSeen || item.lastActiveAt || item.friendedAt || (now - 8 * 60 * 1000);
+                bucket.set(item.id, {
                   id: item.id,
                   name: item.name || 'Friend',
                   photoURL: item.photoURL || '',
-                  isOnline: true,
-                  statusText: 'Friend 🤝 · Available to chat',
-                  classLevel: 'Friend',
+                  isOnline: item.isOnline !== undefined ? !!item.isOnline : false,
+                  lastSeen: resolvedLastSeen,
+                  statusText: item.statusText || 'Friend 🤝 · Available to chat',
+                  classLevel: item.classLevel || 'Friend',
+                  uid: item.uid || '',
+                  email: item.email || '',
                 });
               }
             });
@@ -1625,15 +2197,216 @@ export const subscribeToFriends = (
     } catch {}
   });
 
+  // Dual-source redundancy: Cloud Firestore friends subcollection & accepted friend requests
+  try {
+    if (db) {
+      const fsFriendsBucket = new Map<string, ChatContact>();
+      sourceBuckets.set('firestore_friends', fsFriendsBucket);
+
+      const primaryTargetIds = Array.from(new Set([myUserId, ...(extraUserIds || [])].filter(Boolean))).slice(0, 10);
+      primaryTargetIds.forEach((tId) => {
+        try {
+          // 1. Direct friends subcollection: users/{tId}/friends
+          const unsubFriendsSub = onSnapshot(
+            collection(db, 'users', tId, 'friends'),
+            (snap) => {
+              snap.forEach((docSnap) => {
+                const data = docSnap.data();
+                if (data && docSnap.id) {
+                  fsFriendsBucket.set(docSnap.id, {
+                    id: docSnap.id,
+                    name: data.name || 'Friend',
+                    photoURL: data.photoURL || '',
+                    isOnline: data.isOnline !== undefined ? !!data.isOnline : false,
+                    lastSeen: data.lastSeen || Date.now(),
+                    statusText: data.statusText || 'Friend 🤝 · Available to chat',
+                    classLevel: data.classLevel || 'Friend',
+                    uid: data.uid || '',
+                    email: data.email || '',
+                  });
+                }
+              });
+              emit();
+            },
+            () => {}
+          );
+          unsubs.push(unsubFriendsSub);
+
+          // 2. Sent friend requests that have been accepted: friend_requests where fromId == tId and status == 'ACCEPTED'
+          const unsubAcceptedReqs = onSnapshot(
+            query(collection(db, 'friend_requests'), where('fromId', '==', tId), where('status', '==', 'ACCEPTED')),
+            (snap) => {
+              snap.forEach((docSnap) => {
+                const data = docSnap.data();
+                if (data && data.toId) {
+                  fsFriendsBucket.set(data.toId, {
+                    id: data.toId,
+                    name: data.toName || data.friend?.name || 'Friend',
+                    photoURL: data.toPhoto || data.friend?.photoURL || '',
+                    isOnline: false,
+                    lastSeen: data.acceptedAt || Date.now(),
+                    statusText: 'Friend 🤝 · Available to chat',
+                    classLevel: 'Friend',
+                    uid: data.toUid || data.friend?.uid || '',
+                    email: data.toEmail || data.friend?.email || '',
+                  });
+                }
+              });
+              emit();
+            },
+            () => {}
+          );
+          unsubs.push(unsubAcceptedReqs);
+        } catch {}
+      });
+    }
+  } catch {}
+
   return () => {
     unsubs.forEach((u) => {
-      try { u(); } catch {}
+      try {
+        u();
+      } catch {}
+    });
+  };
+};
+
+export interface FriendAcceptedEvent {
+  friend: ChatContact;
+  acceptedAt: number;
+  acceptedByName: string;
+  requesterId: string;
+}
+
+// Global deduplication set across subscriptions to prevent repeat alerts
+const globalProcessedAcceptedEvents = new Set<string>();
+
+/**
+ * Subscribe to Friend Request Accepted Events in Real-Time!
+ * When a recipient accepts a friend request, this immediately fires on the sender's client
+ * providing instant notification, sound, and a direct 1-tap "Chat Now" pathway.
+ */
+export const subscribeToFriendAccepted = (
+  myUserId: string,
+  onAccepted: (event: FriendAcceptedEvent) => void,
+  extraUserIds?: string[]
+): (() => void) => {
+  if (!myUserId) return () => {};
+
+  const cleanMy = sanitizeRtdbKey(myUserId);
+  const rawTargetIds = [myUserId, cleanMy, ...(extraUserIds || [])];
+  const targetIds = Array.from(new Set(rawTargetIds.map(sanitizeRtdbKey).filter(Boolean)));
+
+  const unsubs: Array<() => void> = [];
+  const processedEvents = new Set<string>();
+
+  targetIds.forEach((targetKey) => {
+    try {
+      const acceptedRef = ref(rtdb, `chat/friend_accepted/${targetKey}`);
+      const unsub = onValue(acceptedRef, (snapshot) => {
+        const val = snapshot.val();
+        if (val && typeof val === 'object') {
+          Object.entries(val).forEach(([peerKey, item]: [string, any]) => {
+            const eventKey = `${targetKey}_${peerKey}_${item?.acceptedAt || ''}`;
+
+            // Clean up from RTDB right away so this notification is not replayed repeatedly
+            remove(ref(rtdb, `chat/friend_accepted/${targetKey}/${peerKey}`)).catch(() => {});
+
+            if (globalProcessedAcceptedEvents.has(eventKey) || processedEvents.has(eventKey)) {
+              return;
+            }
+            processedEvents.add(eventKey);
+            globalProcessedAcceptedEvents.add(eventKey);
+
+            // Stale check: If acceptedAt is older than 2 minutes, it's an old event from a past session; silently ignore alert
+            const ageMs = Date.now() - (item?.acceptedAt || 0);
+            if (item?.acceptedAt && ageMs > 2 * 60 * 1000) {
+              return;
+            }
+
+            if (item && item.friend) {
+              onAccepted({
+                friend: {
+                  id: item.friend.id || peerKey,
+                  name: item.friend.name || 'Friend',
+                  photoURL: item.friend.photoURL || '',
+                  isOnline: true,
+                  lastSeen: item.friend.lastSeen || item.acceptedAt || Date.now(),
+                  statusText: item.friend.statusText || 'Friend 🤝 · Available to chat',
+                  classLevel: item.friend.classLevel || 'Friend',
+                  uid: item.friend.uid || '',
+                  email: item.friend.email || '',
+                },
+                acceptedAt: item.acceptedAt || Date.now(),
+                acceptedByName: item.acceptedByName || item.friend?.name || 'Friend',
+                requesterId: item.requesterId || myUserId,
+              });
+            }
+          });
+        }
+      });
+      unsubs.push(unsub);
+    } catch {}
+  });
+
+  return () => {
+    unsubs.forEach((u) => {
+      try {
+        u();
+      } catch {}
     });
   };
 };
 
 // Local storage helpers for Friends
-function getLocalFriendRequests(): FriendRequest[] {
+export function getLocalSentFriendRequests(userId: string): FriendRequest[] {
+  if (!userId) return [];
+  const cleanId = sanitizeRtdbKey(userId);
+  try {
+    const raw = localStorage.getItem(`nsta_sent_requests_${cleanId}`);
+    if (raw) return JSON.parse(raw);
+    const globalRaw = localStorage.getItem('nsta_sent_requests_global');
+    if (globalRaw) {
+      const parsed: FriendRequest[] = JSON.parse(globalRaw);
+      return parsed.filter((r) => isSameUser(r.fromId, userId));
+    }
+  } catch {}
+  return [];
+}
+
+export function saveLocalSentFriendRequest(userId: string, req: FriendRequest) {
+  if (!userId || !req) return;
+  const cleanId = sanitizeRtdbKey(userId);
+  const list = getLocalSentFriendRequests(userId).filter(
+    (r) => r.id !== req.id && !isSameUser(r.toId, req.toId)
+  );
+  list.unshift(req);
+  try {
+    localStorage.setItem(`nsta_sent_requests_${cleanId}`, JSON.stringify(list));
+    localStorage.setItem('nsta_sent_requests_global', JSON.stringify(list));
+  } catch {}
+}
+
+export function removeLocalSentFriendRequest(userId: string, targetIdOrReqId: string) {
+  if (!userId || !targetIdOrReqId) return;
+  const cleanId = sanitizeRtdbKey(userId);
+  const list = getLocalSentFriendRequests(userId).filter(
+    (r) => r.id !== targetIdOrReqId && !isSameUser(r.toId, targetIdOrReqId) && !isSameUser(r.fromId, targetIdOrReqId)
+  );
+  try {
+    localStorage.setItem(`nsta_sent_requests_${cleanId}`, JSON.stringify(list));
+    const globalRaw = localStorage.getItem('nsta_sent_requests_global');
+    if (globalRaw) {
+      const parsed: FriendRequest[] = JSON.parse(globalRaw);
+      const filtered = parsed.filter(
+        (r) => r.id !== targetIdOrReqId && !isSameUser(r.toId, targetIdOrReqId) && !isSameUser(r.fromId, targetIdOrReqId)
+      );
+      localStorage.setItem('nsta_sent_requests_global', JSON.stringify(filtered));
+    }
+  } catch {}
+}
+
+export function getLocalFriendRequests(): FriendRequest[] {
   try {
     const raw = localStorage.getItem('nsta_friend_requests');
     return raw ? JSON.parse(raw) : [];
@@ -1650,14 +2423,14 @@ function saveLocalFriendRequest(req: FriendRequest) {
   } catch {}
 }
 
-function removeLocalFriendRequest(reqId: string) {
+export function removeLocalFriendRequest(reqId: string) {
   const list = getLocalFriendRequests().filter((r) => r.id !== reqId);
   try {
     localStorage.setItem('nsta_friend_requests', JSON.stringify(list));
   } catch {}
 }
 
-function getLocalFriends(userId: string): ChatContact[] {
+export function getLocalFriends(userId: string): ChatContact[] {
   try {
     const raw = localStorage.getItem(`nsta_friends_${userId}`);
     if (raw) return JSON.parse(raw);
@@ -1665,17 +2438,25 @@ function getLocalFriends(userId: string): ChatContact[] {
   return [];
 }
 
-function saveLocalFriend(userId: string, friend: any) {
+export function saveLocalFriend(userId: string, friend: any) {
   const list = getLocalFriends(userId).filter((f) => f.id !== friend.id);
   list.unshift({
     id: friend.id,
     name: friend.name,
     photoURL: friend.photoURL,
-    isOnline: true,
+    isOnline: false,
     statusText: 'Friend 🤝 · Available to chat',
     classLevel: 'Friend',
   });
   saveAllLocalFriends(userId, list);
+}
+
+export function confirmFriendshipLocally(userId: string, friend: ChatContact | any) {
+  if (!userId || !friend?.id) return;
+  saveLocalFriend(userId, friend);
+  removeLocalSentFriendRequest(userId, friend.id);
+  removeLocalFriendRequest(`${friend.id}_${userId}`);
+  removeLocalFriendRequest(`${userId}_${friend.id}`);
 }
 
 function saveAllLocalFriends(userId: string, friends: ChatContact[]) {
@@ -1847,12 +2628,37 @@ export const reactToChatMessage = async (
   userId: string,
   emoji: string
 ) => {
+  const cacheKey = isGroup ? `group_${contextId}` : `dm_${contextId}`;
+  const localList = getLocalMessages(cacheKey);
+  const target = localList.find((m) => m.id === msgId);
+  const currentReaction = target?.reactions?.[userId];
+  const nextEmoji = currentReaction === emoji ? null : emoji;
+
+  // Optimistic update in local cache
+  const updated = localList.map((m) => {
+    if (m.id === msgId) {
+      const reactions = { ...(m.reactions || {}) };
+      if (nextEmoji) {
+        reactions[userId] = nextEmoji;
+      } else {
+        delete reactions[userId];
+      }
+      return { ...m, reactions };
+    }
+    return m;
+  });
+  setLocalMessages(cacheKey, updated);
+
   const path = isGroup
     ? `chat/whatsapp_groups/${contextId}/${msgId}/reactions/${userId}`
     : `chat/whatsapp_direct/${contextId}/${msgId}/reactions/${userId}`;
 
   try {
-    await set(ref(rtdb, path), emoji);
+    if (nextEmoji) {
+      await set(ref(rtdb, path), nextEmoji);
+    } else {
+      await remove(ref(rtdb, path));
+    }
   } catch (e) {
     console.warn('[WhatsApp] Reaction error:', e);
   }
@@ -1863,10 +2669,21 @@ function getLocalMessages(key: string, currentUserId?: string): ChatMessage[] {
   try {
     const raw = localStorage.getItem(`wa_msgs_${key}`);
     const list: ChatMessage[] = raw ? JSON.parse(raw) : [];
-    if (currentUserId) {
-      return list.filter((m) => !isMessageDeletedForUser(currentUserId, m));
-    }
-    return list;
+    return list.filter((m) => {
+      if (!m || !m.id) return false;
+      if (
+        m.isDeletedForEveryone ||
+        (m as any).deletedCompletely ||
+        m.text === '🚫 This message was deleted' ||
+        isMessageDeletedForEveryone(m.id)
+      ) {
+        return false;
+      }
+      if (currentUserId && isMessageDeletedForUser(currentUserId, m)) {
+        return false;
+      }
+      return true;
+    });
   } catch {
     return [];
   }
@@ -1874,14 +2691,36 @@ function getLocalMessages(key: string, currentUserId?: string): ChatMessage[] {
 
 function setLocalMessages(key: string, msgs: ChatMessage[], currentUserId?: string) {
   try {
-    const filtered = currentUserId
-      ? msgs.filter((m) => !isMessageDeletedForUser(currentUserId, m))
-      : msgs;
+    const filtered = msgs.filter((m) => {
+      if (!m || !m.id) return false;
+      if (
+        m.isDeletedForEveryone ||
+        (m as any).deletedCompletely ||
+        m.text === '🚫 This message was deleted' ||
+        isMessageDeletedForEveryone(m.id)
+      ) {
+        return false;
+      }
+      if (currentUserId && isMessageDeletedForUser(currentUserId, m)) {
+        return false;
+      }
+      return true;
+    });
     localStorage.setItem(`wa_msgs_${key}`, JSON.stringify(filtered.slice(-100)));
   } catch {}
 }
 
 function saveLocalMessage(key: string, msg: ChatMessage, currentUserId?: string) {
+  if (
+    !msg ||
+    !msg.id ||
+    msg.isDeletedForEveryone ||
+    (msg as any).deletedCompletely ||
+    msg.text === '🚫 This message was deleted' ||
+    isMessageDeletedForEveryone(msg.id)
+  ) {
+    return;
+  }
   const list = getLocalMessages(key, currentUserId);
   if (!currentUserId || !isMessageDeletedForUser(currentUserId, msg)) {
     list.push(msg);
@@ -1961,18 +2800,39 @@ export const deleteChatMessage = async (
   contextId: string, // convId or groupId
   msgId: string,
   userId: string,
-  mode: 'FOR_ME' | 'FOR_EVERYONE'
+  mode: 'FOR_ME' | 'FOR_EVERYONE',
+  allUserAliases?: string[]
 ) => {
   const cacheKey = isGroup ? `group_${contextId}` : `dm_${contextId}`;
   const localList = getLocalMessages(cacheKey);
 
-  if (mode === 'FOR_ME') {
-    // 1. Permanently register in persistent deleted-for-me cache
+  // Security authorization: A user can ONLY delete for everyone if they sent the message (or group creator / alias match)
+  let effectiveMode = mode;
+  if (mode === 'FOR_EVERYONE') {
+    const targetMsg = localList.find((m) => m.id === msgId);
+    if (targetMsg) {
+      const isSender =
+        isSameUser(targetMsg.senderId, userId) ||
+        (allUserAliases && allUserAliases.some((alias) => isSameUser(targetMsg.senderId, alias)));
+      if (!isSender && !isGroup) {
+        console.warn(
+          `[WhatsApp Security] User ${userId} is not the sender of message ${msgId}. Forcing FOR_ME.`
+        );
+        effectiveMode = 'FOR_ME';
+      }
+    }
+  }
+
+  if (effectiveMode === 'FOR_ME') {
+    // 1. Permanently register in persistent deleted-for-me cache across all aliases
     addMessageToDeletedForMe(userId, msgId);
+    if (allUserAliases && allUserAliases.length > 0) {
+      allUserAliases.forEach((alias) => addMessageToDeletedForMe(alias, msgId));
+    }
 
     // 2. Delete for me: remove immediately from local cache
     const updated = localList.filter((m) => m.id !== msgId);
-    setLocalMessages(cacheKey, updated);
+    setLocalMessages(cacheKey, updated, userId);
 
     // 3. Sync deletedFor flag to RTDB
     try {
@@ -1984,51 +2844,79 @@ export const deleteChatMessage = async (
       if (cleanUser !== userId) {
         await set(ref(rtdb, `${path}/${userId}`), true).catch(() => {});
       }
+      if (allUserAliases) {
+        for (const alias of allUserAliases) {
+          const ca = sanitizeRtdbKey(alias);
+          if (ca) await set(ref(rtdb, `${path}/${ca}`), true).catch(() => {});
+        }
+      }
     } catch {}
   } else {
-    // Delete for everyone: update message text to deleted placeholder
-    const updated = localList.map((m) => {
-      if (m.id === msgId) {
-        return {
-          ...m,
-          text: '🚫 This message was deleted',
-          isDeletedForEveryone: true,
-          type: 'TEXT' as const,
-          mediaUrl: undefined,
-          voiceDuration: undefined,
-        };
-      }
-      return m;
-    });
+    // Delete for everyone:
+    // 1. Mark in permanent deleted-for-everyone registry immediately
+    addMessageToDeletedForEveryone(msgId);
+
+    // 2. Completely remove from local cache so it vanishes immediately on screen
+    const updated = localList.filter((m) => m.id !== msgId);
     setLocalMessages(cacheKey, updated);
 
-    // Sync to RTDB
+    const targetMsg = localList.find((m) => m.id === msgId);
+    const tombstone = cleanPayload({
+      id: msgId,
+      isDeletedForEveryone: true,
+      deletedCompletely: true,
+      text: '🚫 This message was deleted',
+      deletedAt: Date.now(),
+      status: 'READ',
+      type: 'TEXT',
+      senderId: targetMsg?.senderId || userId,
+      senderName: targetMsg?.senderName || 'Student',
+      mediaUrl: null,
+      voiceDuration: null,
+      doubtSubject: null,
+      replyTo: null,
+      reactions: null,
+    });
+
+    const msgPath = isGroup
+      ? `chat/whatsapp_groups/${contextId}/${msgId}`
+      : `chat/whatsapp_direct/${contextId}/${msgId}`;
+
+    const deletedRegistryPath = isGroup
+      ? `chat/whatsapp_group_deleted/${contextId}/${msgId}`
+      : `chat/whatsapp_direct_deleted/${contextId}/${msgId}`;
+
+    // 3. Write to RTDB deleted registry so any connected or offline client catches it immediately
     try {
-      const msgPath = isGroup
-        ? `chat/whatsapp_groups/${contextId}/${msgId}`
-        : `chat/whatsapp_direct/${contextId}/${msgId}`;
-      await update(ref(rtdb, msgPath), {
-        text: '🚫 This message was deleted',
-        isDeletedForEveryone: true,
-        type: 'TEXT',
-        mediaUrl: null,
+      await set(ref(rtdb, deletedRegistryPath), {
+        deletedAt: Date.now(),
+        deletedBy: userId,
       });
     } catch (e) {
-      console.warn('[WhatsApp] Delete for everyone RTDB error:', e);
+      console.warn('[WhatsApp] RTDB deleted registry error:', e);
     }
 
-    // Sync to Firestore
+    // 4. Update RTDB message node with tombstone (broadcasts to all active subscribers)
+    try {
+      await update(ref(rtdb, msgPath), tombstone);
+    } catch (e) {
+      try {
+        await set(ref(rtdb, msgPath), tombstone);
+      } catch (err) {
+        console.warn('[WhatsApp] RTDB tombstone fallback:', err);
+      }
+    }
+
+    // 5. Update Firestore document with tombstone so Firestore clients also drop it
     try {
       if (db) {
         const col = isGroup ? 'whatsapp_groups' : 'whatsapp_direct';
         const fsDoc = doc(db, col, contextId, 'messages', msgId);
-        setDoc(fsDoc, {
-          text: '🚫 This message was deleted',
-          isDeletedForEveryone: true,
-          type: 'TEXT',
-        }, { merge: true }).catch(() => {});
+        await setDoc(fsDoc, tombstone, { merge: true }).catch(() => {});
       }
-    } catch {}
+    } catch (e) {
+      console.warn('[WhatsApp] Firestore tombstone fallback:', e);
+    }
   }
 };
 
@@ -2128,7 +3016,106 @@ export const setDisappearingTimer = (contextId: string, durationMs: number): voi
 };
 
 /**
- * Filter messages based on disappearing messages timer & deletedFor
+ * Checks whether a message is saved (by current user or flagged as saved in chat).
+ * Saved messages NEVER disappear in disappearing timers or Snapchat vanish mode until unsaved.
+ */
+export const isMessageSaved = (msg?: ChatMessage, userId?: string): boolean => {
+  if (!msg) return false;
+  if (msg.isSaved === true) return true;
+  if (userId) {
+    if (msg.savedBy && (msg.savedBy[userId] || msg.savedBy[sanitizeRtdbKey(userId)])) {
+      return true;
+    }
+    try {
+      const raw = localStorage.getItem(`wa_saved_msgs_${userId}`);
+      if (raw) {
+        const list: string[] = JSON.parse(raw);
+        if (list.includes(msg.id)) return true;
+      }
+    } catch {}
+  }
+  return false;
+};
+
+/**
+ * Toggle Save / Bookmark for a message (Snapchat-style "Save in Chat")
+ * "save kìya gaya message snapchart wala mode me delete na hoga unsave hone pe hi delete hoga"
+ */
+export const toggleSaveChatMessage = async (
+  isGroup: boolean,
+  contextId: string,
+  msgId: string,
+  userId: string,
+  explicitState?: boolean
+): Promise<boolean> => {
+  const cacheKey = isGroup ? `group_${contextId}` : `dm_${contextId}`;
+  const localList = getLocalMessages(cacheKey);
+  const target = localList.find((m) => m.id === msgId);
+  const currentSaved = isMessageSaved(target, userId);
+  const nextSaved = explicitState !== undefined ? explicitState : !currentSaved;
+
+  // 1. Update in local cache
+  const updated = localList.map((m) => {
+    if (m.id === msgId) {
+      const savedBy = { ...(m.savedBy || {}) };
+      if (nextSaved) {
+        savedBy[userId] = true;
+      } else {
+        delete savedBy[userId];
+        delete savedBy[sanitizeRtdbKey(userId)];
+      }
+      const hasAnySaver = Object.values(savedBy).some(Boolean);
+      return {
+        ...m,
+        isSaved: nextSaved || hasAnySaver,
+        savedBy,
+      };
+    }
+    return m;
+  });
+  setLocalMessages(cacheKey, updated);
+
+  // 2. Persist in local storage dedicated key for resilient backup
+  try {
+    const localKey = `wa_saved_msgs_${userId}`;
+    const raw = localStorage.getItem(localKey);
+    let savedList: string[] = raw ? JSON.parse(raw) : [];
+    if (nextSaved) {
+      if (!savedList.includes(msgId)) savedList.push(msgId);
+    } else {
+      savedList = savedList.filter((id) => id !== msgId);
+    }
+    localStorage.setItem(localKey, JSON.stringify(savedList));
+  } catch {}
+
+  // 3. Sync to RTDB
+  try {
+    const cleanUser = sanitizeRtdbKey(userId);
+    const basePath = isGroup
+      ? `chat/whatsapp_groups/${contextId}/${msgId}`
+      : `chat/whatsapp_direct/${contextId}/${msgId}`;
+
+    if (nextSaved) {
+      await set(ref(rtdb, `${basePath}/savedBy/${cleanUser}`), true);
+      await set(ref(rtdb, `${basePath}/isSaved`), true);
+    } else {
+      await remove(ref(rtdb, `${basePath}/savedBy/${cleanUser}`));
+      const snap = await get(ref(rtdb, `${basePath}/savedBy`));
+      const val = snap.val();
+      if (!val || Object.keys(val).length === 0) {
+        await set(ref(rtdb, `${basePath}/isSaved`), false);
+      }
+    }
+  } catch (e) {
+    console.warn('[WhatsApp] toggleSaveChatMessage RTDB error:', e);
+  }
+
+  return nextSaved;
+};
+
+/**
+ * Filter messages based on disappearing messages timer & deletedFor.
+ * Saved messages NEVER disappear under vanishing or expiration timers!
  */
 export const filterDisappearingMessages = (
   msgs: ChatMessage[],
@@ -2139,12 +3126,30 @@ export const filterDisappearingMessages = (
   const now = Date.now();
 
   return msgs.filter((m) => {
+    if (!m || !m.id) return false;
+
+    // 0. Completely purge if deleted for everyone (even if previously saved or starred)
+    if (
+      m.isDeletedForEveryone ||
+      (m as any).deletedCompletely ||
+      m.text === '🚫 This message was deleted' ||
+      isMessageDeletedForEveryone(m.id)
+    ) {
+      return false;
+    }
+
     // 1. Hide if deleted for current user
     if (currentUserId && isMessageDeletedForUser(currentUserId, m)) {
       return false;
     }
 
-    // 2. Hide if expired under duration timer (24h, 7d, 30d, 90d)
+    // 2. Saved messages NEVER disappear under duration timer or Snapchat Vanish mode!
+    // "save kìya gaya message snapchart wala mode me delete na hoga unsave hone pe hi delete hoga"
+    if (isMessageSaved(m, currentUserId)) {
+      return true;
+    }
+
+    // 3. Hide if expired under duration timer (24h, 7d, 30d, 90d)
     if (timer > 0) {
       if (now - m.timestamp > timer) {
         return false;
@@ -2156,7 +3161,8 @@ export const filterDisappearingMessages = (
 };
 
 /**
- * Snapchat / Vanish Mode: Clear read messages when user navigates back / exits chat
+ * Snapchat / Vanish Mode: Clear read messages when user navigates back / exits chat.
+ * "save kìya gaya message snapchart wala mode me delete na hoga unsave hone pe hi delete hoga"
  */
 export const clearSeenVanishMessages = (
   contextId: string,
@@ -2169,16 +3175,32 @@ export const clearSeenVanishMessages = (
   const cacheKey = isGroup ? `group_${contextId}` : `dm_${contextId}`;
   const localList = getLocalMessages(cacheKey);
 
-  // Filter out any messages that have been read/seen
+  // Filter out any messages that have been read/seen, EXCEPT saved messages!
   const kept = localList.filter((m) => {
-    // Keep unread messages or messages not yet delivered
+    // Saved in chat: keep it permanently until unsaved!
+    if (isMessageSaved(m, currentUserId)) {
+      return true;
+    }
+    // Delete seen/read messages when exiting
     if (m.senderId !== currentUserId && m.status === 'READ') {
-      return false; // delete read messages!
+      return false;
     }
     return true;
   });
 
   setLocalMessages(cacheKey, kept);
+
+  // In RTDB, clean up unsaved seen messages so they don't reappear
+  try {
+    localList.forEach((m) => {
+      if (!isMessageSaved(m, currentUserId) && m.senderId !== currentUserId && m.status === 'READ') {
+        const msgPath = isGroup
+          ? `chat/whatsapp_groups/${contextId}/${m.id}`
+          : `chat/whatsapp_direct/${contextId}/${m.id}`;
+        remove(ref(rtdb, msgPath)).catch(() => {});
+      }
+    });
+  } catch {}
 };
 
 // ── Chat Lock (PIN-Protected Chats) ──────────────────────────────────────────
@@ -2194,51 +3216,227 @@ export const getLockedChatIds = (): string[] => {
   }
 };
 
+// Memory cache for currently unlocked chats in active session
+const sessionUnlockedChats = new Set<string>();
+
+export const unlockChatInSession = (contextId: string): void => {
+  if (contextId) sessionUnlockedChats.add(contextId);
+};
+
+export const lockChatInSession = (contextId?: string): void => {
+  if (contextId) {
+    sessionUnlockedChats.delete(contextId);
+  } else {
+    sessionUnlockedChats.clear();
+  }
+};
+
 export const isChatLocked = (contextId: string): boolean => {
-  const locked = getLockedChatIds();
-  return locked.includes(contextId);
+  if (!contextId) return false;
+  // Chat lock: returns true unless unlocked in the current session.
+  return !sessionUnlockedChats.has(contextId);
 };
 
 export const toggleChatLock = (contextId: string): boolean => {
-  const locked = getLockedChatIds();
-  const index = locked.indexOf(contextId);
-  let isNowLocked = false;
-  if (index >= 0) {
-    locked.splice(index, 1);
-    isNowLocked = false;
+  if (sessionUnlockedChats.has(contextId)) {
+    sessionUnlockedChats.delete(contextId);
+    return true;
   } else {
-    locked.push(contextId);
-    isNowLocked = true;
-  }
-  try {
-    localStorage.setItem(LOCKED_CHATS_STORAGE_KEY, JSON.stringify(locked));
-  } catch {}
-  return isNowLocked;
-};
-
-export const getChatPin = (): string => {
-  try {
-    return localStorage.getItem(CHAT_PIN_STORAGE_KEY) || '1234';
-  } catch {
-    return '1234';
-  }
-};
-
-export const setChatPin = (pin: string): void => {
-  try {
-    localStorage.setItem(CHAT_PIN_STORAGE_KEY, pin);
-  } catch {}
-};
-
-export const hasChatPin = (): boolean => {
-  try {
-    return !!localStorage.getItem(CHAT_PIN_STORAGE_KEY);
-  } catch {
+    sessionUnlockedChats.add(contextId);
     return false;
   }
 };
 
-export const verifyChatPin = (enteredPin: string): boolean => {
-  const current = getChatPin();
-  return enteredPin === current;
+// ── 1. Default Master Password (Applies to all normal / unstarred chats) ─────
+export const getDefaultChatPin = (userId?: string): string => {
+  try {
+    if (userId) {
+      const userSpecific = localStorage.getItem(`nsta_default_chat_pin_${userId}`);
+      if (userSpecific) return userSpecific;
+      const legacySpecific = localStorage.getItem(`nsta_master_chat_pin_${userId}`);
+      if (legacySpecific) return legacySpecific;
+    }
+    return localStorage.getItem(CHAT_PIN_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+};
+
+export const setDefaultChatPin = (pin: string, userId?: string): void => {
+  try {
+    const trimmed = (pin || '').trim();
+    if (userId) {
+      localStorage.setItem(`nsta_default_chat_pin_${userId}`, trimmed);
+      localStorage.setItem(`nsta_master_chat_pin_${userId}`, trimmed);
+    }
+    localStorage.setItem(CHAT_PIN_STORAGE_KEY, trimmed);
+  } catch {}
+};
+
+export const hasDefaultChatPin = (userId?: string): boolean => {
+  return !!getDefaultChatPin(userId);
+};
+
+// ── 2. Special Category Password (Applies to Star-marked / Special chats) ─────
+const SPECIAL_CATEGORY_PIN_KEY = 'nsta_special_chat_category_pin';
+
+export const getSpecialChatCategoryPin = (userId?: string): string => {
+  try {
+    if (userId) {
+      const userSpecific = localStorage.getItem(`${SPECIAL_CATEGORY_PIN_KEY}_${userId}`);
+      if (userSpecific) return userSpecific;
+    }
+    return localStorage.getItem(SPECIAL_CATEGORY_PIN_KEY) || '';
+  } catch {
+    return '';
+  }
+};
+
+export const setSpecialChatCategoryPin = (pin: string, userId?: string): void => {
+  try {
+    const trimmed = (pin || '').trim();
+    if (userId) {
+      localStorage.setItem(`${SPECIAL_CATEGORY_PIN_KEY}_${userId}`, trimmed);
+    }
+    localStorage.setItem(SPECIAL_CATEGORY_PIN_KEY, trimmed);
+  } catch {}
+};
+
+export const hasSpecialChatCategoryPin = (userId?: string): boolean => {
+  return !!getSpecialChatCategoryPin(userId);
+};
+
+// ── 3. Star-Marked / Special Contacts & Chats Management ────────────────────
+const STARRED_CHATS_STORAGE_KEY = 'nsta_starred_chats';
+
+export const getStarredChatIds = (userId?: string): string[] => {
+  try {
+    const key = userId ? `${STARRED_CHATS_STORAGE_KEY}_${userId}` : STARRED_CHATS_STORAGE_KEY;
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+};
+
+export const isChatStarred = (contactOrContextId: string, userId?: string): boolean => {
+  if (!contactOrContextId) return false;
+  const list = getStarredChatIds(userId);
+  return list.includes(contactOrContextId);
+};
+
+export const setChatStarred = (contactOrContextId: string, starred: boolean, userId?: string): void => {
+  if (!contactOrContextId) return;
+  try {
+    const key = userId ? `${STARRED_CHATS_STORAGE_KEY}_${userId}` : STARRED_CHATS_STORAGE_KEY;
+    const list = getStarredChatIds(userId);
+    const setIds = new Set(list);
+    if (starred) {
+      setIds.add(contactOrContextId);
+    } else {
+      setIds.delete(contactOrContextId);
+    }
+    localStorage.setItem(key, JSON.stringify(Array.from(setIds)));
+  } catch {}
+};
+
+export const toggleChatStarred = (contactOrContextId: string, userId?: string): boolean => {
+  if (!contactOrContextId) return false;
+  const current = isChatStarred(contactOrContextId, userId);
+  const next = !current;
+  setChatStarred(contactOrContextId, next, userId);
+  return next;
+};
+
+// ── 4. Specific Chat Override Password (Per-context optional fallback) ─────────
+export const getSpecialChatPin = (contextId: string, userId?: string): string => {
+  if (!contextId) return getSpecialChatCategoryPin(userId);
+  try {
+    const userPrefix = userId ? `${userId}_` : '';
+    const specific = localStorage.getItem(`nsta_chat_special_pin_${userPrefix}${contextId}`);
+    if (specific) return specific;
+    return getSpecialChatCategoryPin(userId);
+  } catch {
+    return getSpecialChatCategoryPin(userId);
+  }
+};
+
+export const setSpecialChatPin = (contextId: string, pin: string, userId?: string): void => {
+  if (!contextId) {
+    setSpecialChatCategoryPin(pin, userId);
+    return;
+  }
+  try {
+    const userPrefix = userId ? `${userId}_` : '';
+    localStorage.setItem(`nsta_chat_special_pin_${userPrefix}${contextId}`, (pin || '').trim());
+  } catch {}
+};
+
+export const removeSpecialChatPin = (contextId: string, userId?: string): void => {
+  if (!contextId) return;
+  try {
+    const userPrefix = userId ? `${userId}_` : '';
+    localStorage.removeItem(`nsta_chat_special_pin_${userPrefix}${contextId}`);
+  } catch {}
+};
+
+export const hasSpecialChatPin = (contextId: string, userId?: string): boolean => {
+  return !!getSpecialChatPin(contextId, userId);
+};
+
+// ── 5. Strict 2-Category PIN Verification ───────────────────────────────────
+/**
+ * Strict verification based on Category:
+ * - If isStarred = true: ONLY Special Password unlocks it (Default password CANNOT unlock!)
+ * - If isStarred = false: ONLY Default Password unlocks it (Special password CANNOT unlock!)
+ */
+export const verifyChatCategoryPin = (
+  enteredPin: string,
+  isStarred: boolean,
+  contextId?: string,
+  userId?: string
+): boolean => {
+  const entered = (enteredPin || '').trim();
+  if (!entered) return false;
+
+  if (isStarred) {
+    // 1. Check custom chat PIN if set
+    if (contextId) {
+      const specific = getSpecialChatPin(contextId, userId);
+      if (specific && entered === specific) return true;
+    }
+    // 2. Check Category Special Password
+    const specialCatPin = getSpecialChatCategoryPin(userId);
+    if (specialCatPin && entered === specialCatPin) return true;
+    return false;
+  } else {
+    // Default unstarred chat — ONLY Default Password can unlock
+    const defaultPin = getDefaultChatPin(userId);
+    return !!defaultPin && entered === defaultPin;
+  }
+};
+
+// Unified Verification with backward-compat fallback
+export const verifyChatPinForContext = (
+  enteredPin: string,
+  contextId: string,
+  userId?: string
+): boolean => {
+  const entered = (enteredPin || '').trim();
+  if (!entered) return false;
+
+  const isStarred = isChatStarred(contextId, userId);
+  return verifyChatCategoryPin(entered, isStarred, contextId, userId);
+};
+
+// Aliases for seamless backwards compatibility
+export const getChatPin = (userId?: string): string => getDefaultChatPin(userId);
+export const setChatPin = (pin: string, userId?: string): void => setDefaultChatPin(pin, userId);
+export const hasChatPin = (userId?: string): boolean => hasDefaultChatPin(userId);
+export const verifyChatPin = (enteredPin: string, contextId?: string, userId?: string): boolean => {
+  if (contextId) {
+    return verifyChatPinForContext(enteredPin, contextId, userId);
+  }
+  const current = getDefaultChatPin(userId);
+  return !!current && (enteredPin || '').trim() === current;
 };

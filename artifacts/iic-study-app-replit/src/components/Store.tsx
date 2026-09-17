@@ -1,13 +1,15 @@
 // @ts-nocheck
 import React, { useState, useEffect } from 'react';
-import { User, CreditPackage, SystemSettings } from '../types';
+import { User, CreditPackage, SystemSettings, PlanCompareGroup } from '../types';
+import { DEFAULT_PLAN_COMPARE_GROUPS } from '../constants/planComparisonDefaults';
+import { db, saveUserToLive } from '../firebase';
+import { doc, updateDoc } from 'firebase/firestore';
 import {
   Sparkles, Check, MessageSquare, Lock, Ticket, ShieldCheck, Star,
   ChevronRight, ChevronDown, Flame, BadgeCheck, History, TrendingDown,
   Calendar, Clock, Crown, DollarSign, ArrowLeft, Zap, Gift, Coins,
   Package, Wallet, X, ArrowLeftRight
 } from 'lucide-react';
-import { saveUserToLive } from '../firebase';
 import { getLevelInfo, getScoreDiscountFromScore, getNextLevelInfo, getLevelProgress, getLevelDailyLimitsWithOverride, UNLIMITED } from '../utils/levelSystem';
 import { SCORE_MULTIPLIERS, getDailyScoreLimit, getUserScoreMultiplier } from '../utils/scoreSystem';
 import { addSubscription, isSubscriptionFromCoins } from '../utils/subscriptionUtils';
@@ -380,58 +382,155 @@ function TierDailyClaimCard({
 
 
 
-const compareData = [
-  { category: 'Account & Limits', items: [
-    { label: 'Leaderboard Unlock', free: 'Level 2 Unlock', basic: 'Instant (Level 1)', ultra: 'Instant (Level 1)' },
-    { label: 'Daily MCQ Limit', free: '300 / day', basic: '1,500 / day', ultra: '3,000 / day' },
-    { label: 'Daily XP Cap', free: '1,500 XP', basic: '2,500 XP', ultra: '3,500 XP' },
-    { label: 'XP Multiplier', free: '1.0x', basic: '1.5x', ultra: '2.0x' },
-    { label: 'Store Discount (Credits)', free: '0%', basic: '5%', ultra: '10%' },
-    { label: 'Daily Store Rewards', free: '—', basic: '50 Credits / day', ultra: '5 Diamonds / day' },
-    { label: 'Profile Name Change', free: '100 🪙 or 20 💎', basic: '100 🪙 or 20 💎', ultra: '100 🪙 or 20 💎' },
-  ]},
-  { category: 'Study Content & Modes', items: [
-    { label: 'PDF Notes / Material', free: '5 💎', basic: '✅ Free Included', ultra: '✅ Free Included' },
-    { label: 'Flashcard & Video', free: '5 💎', basic: '5 💎', ultra: '✅ Free / Unlocked' },
-    { label: 'Study Modes (Read/Write/etc)', free: '20 🪙 or 5 💎', basic: '20 🪙 or 5 💎', ultra: '20 🪙 or 5 💎' },
-    { label: 'MCQ Full Analysis', free: '20 🪙 or 5 💎', basic: '20 🪙 or 5 💎', ultra: '20 🪙 or 5 💎' },
-    { label: 'MCQ Marksheet & Solution', free: '✅ Free', basic: '✅ Free', ultra: '✅ Free' },
-    { label: 'Editor / Study Utilities', free: '❌ Locked', basic: '✅ Enabled', ultra: '✅ Enabled' },
-    { label: 'Revision Hub', free: '100 🪙 or 20 💎', basic: '100 🪙 or 20 💎', ultra: '100 🪙 or 20 💎' },
-  ]},
-  { category: 'Routine Engine', items: [
-    { label: 'Routine Default Slots', free: '2 Slots', basic: '3 Slots', ultra: '4 Slots' },
-    { label: 'Routine Books Selection', free: 'Lucent Only', basic: 'Lucent Only', ultra: 'Multiple Books Allowed' },
-    { label: 'Routine Penalty (Inactive)', free: 'Credits Rate Reduced', basic: 'No Penalty', ultra: 'No Penalty' },
-    { label: 'Routine Progression Slots', free: '+1 (Lvl 5), +1 (Lvl 8)', basic: '+1 (Lvl 5), +1 (Lvl 8)', ultra: '+1 (Lvl 5), +1 (Lvl 8)' },
-    { label: 'Routine Paid Slot', free: '100 🪙 / slot', basic: '100 🪙 / slot', ultra: '100 🪙 / slot' },
-  ]},
-  { category: 'Community & Chat', items: [
-    { label: 'Global Chat', free: 'View & Like Only', basic: 'View & Like Only', ultra: '✅ Send Messages Allowed' },
-    { label: 'MCQ Sharing', free: 'Solve Only', basic: '✅ Post MCQs Allowed', ultra: '✅ Post MCQs Allowed' },
-    { label: 'Admin Support', free: '10 🪙 or 5 💎 / msg', basic: '✅ Free', ultra: '✅ Free' },
-    { label: 'Messenger Friend Limit', free: '10 Friends', basic: '30 Friends', ultra: '60 Friends' },
-    { label: 'Messenger Expansion', free: 'Up to 50 max', basic: 'Up to 50+', ultra: 'Unlimited' },
-    { label: 'Daily Message Limit', free: '50 / day', basic: '100 / day', ultra: '300 / day' },
-    { label: 'Message Limit Extension', free: '+50 first, +100 next', basic: '+100 per upgrade', ultra: '+100 per upgrade' },
-    { label: 'Chat Security & Actions', free: '✅ Free', basic: '✅ Free', ultra: '✅ Free' },
-  ]},
-  { category: 'Customization & Themes', items: [
-    { label: 'Theme Studio Access', free: 'Level 2 Unlock', basic: '✅ Instant Unlock', ultra: '✅ Instant Unlock' },
-    { label: 'Score History', free: 'Level 3 Unlock', basic: '✅ Instant Access', ultra: '✅ Instant Access' },
-    { label: 'Theme Library Packs', free: 'Free themes only', basic: 'Basic themes free', ultra: 'Ultra themes free' },
-    { label: 'Theme Pricing (Rental)', free: '1D: 10🪙, 7D: 50🪙, 30D: 100🪙', basic: '1D: 10🪙, 7D: 50🪙, 30D: 100🪙', ultra: '1D: 10🪙, 7D: 50🪙, 30D: 100🪙' },
-  ]}
-];
+interface CompareMatrixProps {
+  user: User;
+  settings?: SystemSettings;
+  onUserUpdate: (user: User) => void;
+  onGoToSubscription: () => void;
+}
 
-const CompareMatrix = () => {
+const CompareMatrix: React.FC<CompareMatrixProps> = ({
+  user,
+  settings,
+  onUserUpdate,
+  onGoToSubscription,
+}) => {
+  const [isUpdatingSeq, setIsUpdatingSeq] = useState(false);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+
+  const groups: PlanCompareGroup[] =
+    settings?.planComparisonData && settings.planComparisonData.length > 0
+      ? settings.planComparisonData
+      : DEFAULT_PLAN_COMPARE_GROUPS;
+
+  const isBasic = Boolean(user?.isPremium && user?.subscriptionLevel === 'BASIC');
+  const isUltra = Boolean(user?.isPremium && user?.subscriptionLevel === 'ULTRA');
+  const isVip = isBasic || isUltra;
+  const isSeqActive = isVip ? !user?.sequentialReadingDisabled : true;
+
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), 3200);
+  };
+
+  const handleToggleSequential = async () => {
+    if (!isVip) {
+      showToast('🔒 Sequential Reading Free users ke liye hamesha ON rehta hai!');
+      return;
+    }
+    try {
+      setIsUpdatingSeq(true);
+      const nextDisabled = !user.sequentialReadingDisabled;
+      const uRef = doc(db, 'users', user.id);
+      await updateDoc(uRef, { sequentialReadingDisabled: nextDisabled });
+      const updated = { ...user, sequentialReadingDisabled: nextDisabled };
+      onUserUpdate(updated);
+      showToast(
+        nextDisabled
+          ? '🔓 Sequential Reading OFF: Free Page Navigation active!'
+          : '🔒 Sequential Reading ON: Sequence lock enabled!'
+      );
+    } catch (err) {
+      console.error(err);
+      showToast('❌ Setting update nahi ho payi.');
+    } finally {
+      setIsUpdatingSeq(false);
+    }
+  };
+
   return (
     <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      {/* ── TOAST NOTIFICATION ── */}
+      {toastMsg && (
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 backdrop-blur-md text-white px-4 py-2.5 rounded-2xl text-xs font-bold shadow-2xl border border-sky-400/50 flex items-center gap-2 animate-in slide-in-from-top-2">
+          <span className="text-sky-400">⚡</span>
+          <span>{toastMsg}</span>
+        </div>
+      )}
+
+      {/* ── SEQUENTIAL PAGE READING CONTROL CARD ── */}
+      <div className="rounded-3xl p-5 border border-sky-500/30 bg-gradient-to-br from-sky-950/60 via-slate-900/70 to-slate-950/90 shadow-2xl relative overflow-hidden backdrop-blur-md">
+        <div className="absolute -top-12 -right-12 w-36 h-36 bg-sky-500/15 rounded-full blur-2xl pointer-events-none" />
+        
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div
+              className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-xl shrink-0 border ${
+                isSeqActive
+                  ? 'bg-sky-500/20 text-sky-400 border-sky-400/30 shadow-[0_0_15px_rgba(56,189,248,0.2)]'
+                  : 'bg-emerald-500/20 text-emerald-400 border-emerald-400/30 shadow-[0_0_15px_rgba(52,211,153,0.2)]'
+              }`}
+            >
+              {isSeqActive ? '📖' : '📑'}
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-sm sm:text-base font-black text-white">Sequential Page Reading</h3>
+                {isVip ? (
+                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-400/30">
+                    {user?.subscriptionLevel} VIP Control ⚙️
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/30">
+                    🔒 Always ON (Free Plan)
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                {isVip
+                  ? isSeqActive
+                    ? 'Sequence lock active — Pehle ka page poora padhne ke baad hi agla page unlock hoga.'
+                    : 'Sequence lock disabled — Free page navigation active! Aap kisi bhi page par direct ja sakte hain.'
+                  : 'Free account me Page 1 poora padhne ke baad hi Page 2 unlock hota hai. Isko apni marzi se band karne ke liye Basic ya Ultra plan lijiye.'}
+              </p>
+            </div>
+          </div>
+
+          {/* Interactive Switch or Upgrade Action */}
+          <div className="flex items-center gap-3 shrink-0 self-end sm:self-center">
+            {isVip ? (
+              <button
+                onClick={handleToggleSequential}
+                disabled={isUpdatingSeq}
+                className={`px-4 py-2.5 rounded-2xl text-xs font-black flex items-center gap-2.5 transition active:scale-95 shadow-lg border ${
+                  isSeqActive
+                    ? 'bg-sky-500/20 text-sky-300 border-sky-400/40 hover:bg-sky-500/30'
+                    : 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40 hover:bg-emerald-500/30'
+                }`}
+              >
+                <div
+                  className={`w-8 h-4 rounded-full relative transition-colors ${
+                    isSeqActive ? 'bg-sky-500' : 'bg-slate-700'
+                  }`}
+                >
+                  <div
+                    className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${
+                      isSeqActive ? 'right-0.5' : 'left-0.5'
+                    }`}
+                  />
+                </div>
+                <span>{isSeqActive ? 'Lock: ON' : 'Lock: OFF (Free Jump)'}</span>
+              </button>
+            ) : (
+              <button
+                onClick={onGoToSubscription}
+                className="px-4 py-2.5 rounded-2xl text-xs font-black bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-lg transition active:scale-95 flex items-center gap-1.5"
+              >
+                <span>⚡ Upgrade Plan</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── COMPARISON MATRIX TABLE ── */}
       <div className="rounded-3xl p-5 border border-sky-400/20 bg-sky-950/20 shadow-xl overflow-hidden relative">
         <div className="absolute -top-10 -right-10 w-32 h-32 bg-sky-500/10 rounded-full blur-2xl pointer-events-none" />
         
         <div className="text-center mb-6">
-          <span className="inline-block px-3 py-1 rounded-full bg-sky-500/20 text-sky-400 text-[10px] font-black uppercase tracking-widest mb-2 border border-sky-400/20">Full Transparency</span>
+          <span className="inline-block px-3 py-1 rounded-full bg-sky-500/20 text-sky-400 text-[10px] font-black uppercase tracking-widest mb-2 border border-sky-400/20">
+            Full Transparency
+          </span>
           <h2 className="text-xl font-black text-white">Feature Comparison Matrix</h2>
           <p className="text-xs text-slate-400 mt-1">See exactly what you get across Free, Basic, and Ultra tiers</p>
         </div>
@@ -440,56 +539,122 @@ const CompareMatrix = () => {
           <table className="w-full text-left min-w-[700px] border-collapse">
             <thead>
               <tr>
-                <th className="p-3 border-b-2 border-white/10 text-xs font-black text-slate-300 w-[28%]">Feature / Module</th>
+                <th className="p-3 border-b-2 border-white/10 text-xs font-black text-slate-300 w-[28%]">
+                  Feature / Module
+                </th>
                 <th className="p-3 border-b-2 border-slate-700 text-center w-[24%] bg-slate-900/40 rounded-tl-xl border-l border-t border-slate-700/50">
                   <div className="text-[10px] uppercase text-slate-400 font-bold">Standard</div>
                   <div className="text-sm font-black text-slate-200 mt-0.5">Free User</div>
                 </th>
                 <th className="p-3 border-b-2 border-sky-500/40 text-center w-[24%] bg-sky-900/20 border-l border-t border-sky-500/20">
-                  <div className="text-[10px] uppercase text-sky-400 font-bold flex justify-center gap-1"><span>⭐</span> Pro</div>
+                  <div className="text-[10px] uppercase text-sky-400 font-bold flex justify-center gap-1">
+                    <span>⭐</span> Pro
+                  </div>
                   <div className="text-sm font-black text-sky-300 mt-0.5">Basic User</div>
                 </th>
                 <th className="p-3 border-b-2 border-purple-500/50 text-center w-[24%] bg-purple-900/30 rounded-tr-xl border-l border-t border-r border-purple-500/30">
-                  <div className="text-[10px] uppercase text-purple-300 font-bold flex justify-center gap-1"><span>👑</span> Max</div>
+                  <div className="text-[10px] uppercase text-purple-300 font-bold flex justify-center gap-1">
+                    <span>👑</span> Max
+                  </div>
                   <div className="text-sm font-black text-purple-200 mt-0.5">Ultra User</div>
                 </th>
               </tr>
             </thead>
             <tbody>
-              {compareData.map((group, gIdx) => (
-                <React.Fragment key={gIdx}>
+              {groups.map((group, gIdx) => (
+                <React.Fragment key={group.id || gIdx}>
                   {/* Category Header */}
                   <tr>
                     <td colSpan={4} className="py-4 px-2 pt-6">
                       <div className="flex items-center gap-2">
                         <div className="h-px bg-slate-700 flex-1" />
-                        <span className="text-xs font-black text-slate-400 uppercase tracking-widest">{group.category}</span>
+                        <span className="text-xs font-black text-slate-400 uppercase tracking-widest">
+                          {group.category}
+                        </span>
                         <div className="h-px bg-slate-700 flex-1" />
                       </div>
                     </td>
                   </tr>
                   
                   {/* Items */}
-                  {group.items.map((item, iIdx) => (
-                    <tr key={iIdx} className="group hover:bg-white/[0.02] transition-colors">
-                      <td className="p-3 border-b border-white/5 text-xs text-slate-300 font-medium group-hover:text-white transition-colors">{item.label}</td>
-                      
-                      {/* Free Col */}
-                      <td className="p-3 border-b border-l border-white/5 text-center text-xs text-slate-400 bg-slate-900/20">
-                        <span className={item.free.includes('❌') ? 'text-rose-400/80' : item.free.includes('✅') ? 'text-emerald-400/80 font-bold' : ''}>{item.free}</span>
-                      </td>
-                      
-                      {/* Basic Col */}
-                      <td className="p-3 border-b border-l border-sky-500/10 text-center text-xs text-sky-200/80 bg-sky-900/10 group-hover:bg-sky-900/20 transition-colors">
-                        <span className={item.basic.includes('❌') ? 'text-rose-400' : item.basic.includes('✅') ? 'text-emerald-400 font-bold' : ''}>{item.basic}</span>
-                      </td>
-                      
-                      {/* Ultra Col */}
-                      <td className="p-3 border-b border-l border-r border-purple-500/20 text-center text-xs text-purple-200/90 bg-purple-900/20 group-hover:bg-purple-900/30 transition-colors">
-                        <span className={item.ultra.includes('❌') ? 'text-rose-400' : item.ultra.includes('✅') ? 'text-emerald-400 font-bold' : item.ultra.includes('Unlimited') || item.ultra.includes('Instant') ? 'text-amber-300 font-bold' : ''}>{item.ultra}</span>
-                      </td>
-                    </tr>
-                  ))}
+                  {group.items.map((item, iIdx) => {
+                    const isSequential = item.id === 'SEQ_READING' || item.label.toLowerCase().includes('sequential');
+
+                    return (
+                      <tr
+                        key={item.id || iIdx}
+                        className={`group transition-colors ${
+                          isSequential
+                            ? 'bg-sky-500/10 hover:bg-sky-500/15 border-l-2 border-sky-400'
+                            : 'hover:bg-white/[0.02]'
+                        }`}
+                      >
+                        <td className="p-3 border-b border-white/5 text-xs text-slate-300 font-medium group-hover:text-white transition-colors">
+                          <div className="flex items-center gap-1.5">
+                            <span>{item.label}</span>
+                            {item.highlight && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-sky-400/20 text-sky-300 font-bold border border-sky-400/30">
+                                POPULAR
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        
+                        {/* Free Col */}
+                        <td className="p-3 border-b border-l border-white/5 text-center text-xs text-slate-400 bg-slate-900/20">
+                          <span
+                            className={
+                              item.free.includes('❌')
+                                ? 'text-rose-400/80'
+                                : item.free.includes('✅')
+                                ? 'text-emerald-400/80 font-bold'
+                                : item.free.includes('🔒')
+                                ? 'text-amber-400/90 font-bold'
+                                : ''
+                            }
+                          >
+                            {item.free}
+                          </span>
+                        </td>
+                        
+                        {/* Basic Col */}
+                        <td className="p-3 border-b border-l border-sky-500/10 text-center text-xs text-sky-200/80 bg-sky-900/10 group-hover:bg-sky-900/20 transition-colors">
+                          <span
+                            className={
+                              item.basic.includes('❌')
+                                ? 'text-rose-400'
+                                : item.basic.includes('✅')
+                                ? 'text-emerald-400 font-bold'
+                                : item.basic.includes('⚙️')
+                                ? 'text-sky-300 font-bold'
+                                : ''
+                            }
+                          >
+                            {item.basic}
+                          </span>
+                        </td>
+                        
+                        {/* Ultra Col */}
+                        <td className="p-3 border-b border-l border-r border-purple-500/20 text-center text-xs text-purple-200/90 bg-purple-900/20 group-hover:bg-purple-900/30 transition-colors">
+                          <span
+                            className={
+                              item.ultra.includes('❌')
+                                ? 'text-rose-400'
+                                : item.ultra.includes('✅')
+                                ? 'text-emerald-400 font-bold'
+                                : item.ultra.includes('⚙️')
+                                ? 'text-purple-300 font-bold'
+                                : item.ultra.includes('Unlimited') || item.ultra.includes('Instant')
+                                ? 'text-amber-300 font-bold'
+                                : ''
+                            }
+                          >
+                            {item.ultra}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </React.Fragment>
               ))}
             </tbody>
@@ -1348,7 +1513,14 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
 
         
         {/* ── COMPARE MATRIX ── */}
-        {tierType === 'COMPARE' && <CompareMatrix />}
+        {tierType === 'COMPARE' && (
+          <CompareMatrix
+            user={user}
+            settings={settings}
+            onUserUpdate={onUserUpdate}
+            onGoToSubscription={() => setTierType('SUBSCRIPTION')}
+          />
+        )}
 
         {/* ── 2. VIP SUBSCRIPTIONS (CLEAN PRO & MAX PASS CARDS) ── */}
         {tierType === 'SUBSCRIPTION' && (
@@ -1973,7 +2145,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
                           className="w-full py-2.5 rounded-xl font-black text-xs text-slate-950 bg-gradient-to-r from-amber-400 to-yellow-300 hover:opacity-95 active:scale-[0.98] transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
                         >
                           <Gift size={14} />
-                          {claimingStorePass ? 'Claim Ho Raha Hai...' : `Aaj Ke +${sub.dailyCredits} Credits Claim Karein 🪙`}
+                          {claimingStorePass ? 'Claim Ho Raha Hai...' : `Aaj Ke +${sub.dailyCredits} Credits Claim Karein ������`}
                         </button>
                       ) : (
                         <div className="py-2 px-3 rounded-xl bg-amber-900/40 border border-amber-400/20 text-center text-xs font-bold text-amber-300 flex items-center justify-center gap-1.5">

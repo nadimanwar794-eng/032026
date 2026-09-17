@@ -26,8 +26,73 @@ export const WeeklyTestView: React.FC<Props> = ({ test, onComplete, onExit }) =>
   const [postAlertAction, setPostAlertAction] = useState<() => void>(() => {});
   const [currentIndex, setCurrentIndex] = useState(0);
   const [skipped, setSkipped] = useState<Set<number>>(new Set());
+  const [showResumeModal, setShowResumeModal] = useState<{
+    savedAnswers: Record<number, number>;
+    savedIndex: number;
+    savedTimeLeft?: number;
+    count: number;
+  } | null>(null);
 
   const safeQuestions = Array.isArray(test.questions) ? test.questions : [];
+
+  // Check saved progress on mount
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(`weekly_test_progress_${test.id}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const count = Object.keys(parsed.answers || {}).length;
+        if (count > 0) {
+          setShowResumeModal({
+            savedAnswers: parsed.answers,
+            savedIndex: parsed.currentIndex || 0,
+            savedTimeLeft: parsed.timeLeft,
+            count,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Error reading test progress', e);
+    }
+  }, [test.id]);
+
+  const handleResume = () => {
+    if (!showResumeModal) return;
+    setAnswers(showResumeModal.savedAnswers);
+    setCurrentIndex(showResumeModal.savedIndex);
+    if (typeof showResumeModal.savedTimeLeft === 'number' && showResumeModal.savedTimeLeft > 0) {
+      setTimeLeft(showResumeModal.savedTimeLeft);
+    }
+    setShowResumeModal(null);
+  };
+
+  const handleRestart = () => {
+    try {
+      localStorage.removeItem(`weekly_test_progress_${test.id}`);
+      localStorage.removeItem(`weekly_test_start_${test.id}`);
+    } catch {}
+    setAnswers({});
+    setCurrentIndex(0);
+    setSkipped(new Set());
+    setShowResumeModal(null);
+  };
+
+  const handleBack = () => {
+    const answeredCount = Object.keys(answers).length;
+    if (answeredCount > 0) {
+      try {
+        localStorage.setItem(`weekly_test_progress_${test.id}`, JSON.stringify({
+          answers,
+          currentIndex,
+          timeLeft,
+          savedAt: Date.now(),
+        }));
+      } catch (e) {
+        console.warn('Failed to save test progress', e);
+      }
+    }
+    onExit();
+  };
 
   // Initialize Timer
   useEffect(() => {
@@ -80,10 +145,6 @@ export const WeeklyTestView: React.FC<Props> = ({ test, onComplete, onExit }) =>
     });
 
     // ── MY MISTAKE BANK ──────────────────────────────────────────────
-    // Push every wrong-answered question into the persistent mistake bank
-    // so the My Mistake page can show & replay them. Right-answered ones
-    // are removed (so once student fixes a mistake it disappears).
-    // Mirrors the same flow McqView uses for school MCQs.
     try {
       const wrongPayload = safeQuestions
         .map((q, idx) => {
@@ -105,7 +166,6 @@ export const WeeklyTestView: React.FC<Props> = ({ test, onComplete, onExit }) =>
         })
         .filter((x): x is NonNullable<typeof x> => x !== null);
       if (wrongPayload.length > 0) addMistakes(wrongPayload);
-      // Remove correctly-answered mistakes from the bank.
       safeQuestions.forEach((q, idx) => {
         if (answers[idx] !== undefined && answers[idx] === q.correctAnswer) {
           removeMistakeByQuestion(q.question, q.correctAnswer);
@@ -114,7 +174,10 @@ export const WeeklyTestView: React.FC<Props> = ({ test, onComplete, onExit }) =>
     } catch (err) { console.warn('mistakeBank update failed:', err); }
 
     // Clear local storage for this test
-    localStorage.removeItem(`weekly_test_start_${test.id}`);
+    try {
+      localStorage.removeItem(`weekly_test_start_${test.id}`);
+      localStorage.removeItem(`weekly_test_progress_${test.id}`);
+    } catch {}
     
     if (auto) {
         setPostAlertAction(() => () => onComplete(score, safeQuestions.length, answers));
@@ -152,11 +215,55 @@ export const WeeklyTestView: React.FC<Props> = ({ test, onComplete, onExit }) =>
           }}
           onCancel={() => setConfirmConfig(prev => ({...prev, isOpen: false}))}
       />
+      {/* Resume / Restart Progress Dialog */}
+      {showResumeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center border border-slate-100 animate-in fade-in zoom-in-95 duration-200">
+            <div className="w-14 h-14 mx-auto mb-3 rounded-full bg-indigo-50 border-2 border-indigo-200 flex items-center justify-center text-indigo-600">
+              <Trophy size={28} />
+            </div>
+            <h3 className="text-lg font-black text-slate-800 mb-1">Pehle Ki Progress Mili!</h3>
+            <p className="text-sm text-slate-600 mb-5 leading-relaxed">
+              Aapne is test me <span className="font-bold text-indigo-600">{showResumeModal.count} / {safeQuestions.length}</span> sawal banaye hain.
+              <br />
+              Kya aap wahin se <span className="font-semibold text-slate-800">Resume</span> karna chahte hain ya fir se <span className="font-semibold text-slate-800">Restart</span> karenge?
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={handleRestart}
+                className="w-full py-2.5 px-4 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-100 font-bold text-xs active:scale-95 transition"
+              >
+                🔄 Restart Karein
+              </button>
+              <button
+                type="button"
+                onClick={handleResume}
+                className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs active:scale-95 transition shadow-md shadow-indigo-600/20"
+              >
+                ▶️ Resume Karein
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="bg-white border-b border-slate-200 p-4 shadow-sm flex items-center justify-between sticky top-0 z-10">
-        <div>
-          <h2 className="font-bold text-slate-800">{test.name}</h2>
-          <p className="text-xs text-slate-600">Total Questions: {safeQuestions.length}</p>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handleBack}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition active:scale-95 border border-slate-200"
+            title="Wapas jayein (Progress save rahegi)"
+          >
+            <ArrowLeft size={16} />
+            <span>Back</span>
+          </button>
+          <div>
+            <h2 className="font-bold text-slate-800 leading-tight">{test.name}</h2>
+            <p className="text-xs text-slate-600">Total Questions: {safeQuestions.length}</p>
+          </div>
         </div>
         
         <div className={`flex items-center gap-2 font-mono font-bold text-lg px-4 py-2 rounded-lg ${timeLeft < 300 ? 'bg-red-100 text-red-600 animate-pulse' : 'bg-blue-50 text-blue-600'}`}>
@@ -257,20 +364,32 @@ export const WeeklyTestView: React.FC<Props> = ({ test, onComplete, onExit }) =>
           {Object.keys(answers).length} of {safeQuestions.length} Answered
         </div>
         </div>
-        <button
-          onClick={() => {
-              setConfirmConfig({
-                  isOpen: true,
-                  title: "Submit Test?",
-                  message: "Are you sure you want to submit the test?",
-                  onConfirm: () => handleSubmit(false)
-              });
-          }}
-          disabled={isSubmitting}
-          className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-xl shadow-lg transition-all active:scale-95 flex items-center gap-2"
-        >
-          <Trophy size={18} /> Submit Test
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleBack}
+            disabled={isSubmitting}
+            className="px-4 py-3 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-100 font-bold text-sm transition active:scale-95 flex items-center gap-1.5"
+            title="Wapas jayein (Progress save rahegi)"
+          >
+            <ArrowLeft size={16} />
+            <span>Back</span>
+          </button>
+          <button
+            onClick={() => {
+                setConfirmConfig({
+                    isOpen: true,
+                    title: "Submit Test?",
+                    message: "Are you sure you want to submit the test?",
+                    onConfirm: () => handleSubmit(false)
+                });
+            }}
+            disabled={isSubmitting}
+            className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-xl shadow-lg transition-all active:scale-95 flex items-center gap-2"
+          >
+            <Trophy size={18} /> Submit Test
+          </button>
+        </div>
       </div>
     </div>
   );

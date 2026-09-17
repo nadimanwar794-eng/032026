@@ -2,10 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { User } from '../types';
 import { buildSubColorsFromHex } from '../utils/tierTheme';
 import { useAppTheme } from '../utils/themeContext';
-import { Send, MessageSquare, Shield, Users, X, Trash2, Crown, Zap, Lock, Megaphone, BookOpen, CheckCircle, ThumbsUp, ThumbsDown, Award, Flag, ChevronDown, ChevronUp, MessageCircle } from 'lucide-react';
+import { Send, MessageSquare, Shield, Users, X, Trash2, Crown, Zap, Lock, Megaphone, BookOpen, CheckCircle, ThumbsUp, ThumbsDown, Award, Flag, ChevronDown, ChevronUp, MessageCircle, Globe } from 'lucide-react';
 import { ref, onValue, query, limitToLast, remove, set, get } from 'firebase/database';
 import { rtdb } from '../firebase';
 import { TopBarEffectsLayer } from '../utils/topBarEffects';
+import { CommunityPostFeed } from './CommunityPostFeed';
 
 interface Props {
     user: User;
@@ -493,15 +494,15 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                 {/* Header */}
                 <div className="text-white p-4 flex items-center justify-between shrink-0" style={{ background: appTheme.topBarGrad || '#0f172a' }}>
                     <div className="flex items-center gap-3">
-                        <div className={`p-2 rounded-lg ${activeTab === 'GLOBAL' ? 'bg-blue-600' : activeTab === 'MCQ' ? '' : 'bg-green-600'}`} style={activeTab === 'MCQ' || roomId ? { background: subColor } : {}}>
-                            {roomId ? <MessageSquare size={18} /> : activeTab === 'GLOBAL' ? <Users size={18} /> : activeTab === 'MCQ' ? <BookOpen size={18} /> : <Shield size={18} />}
+                        <div className={`p-2 rounded-lg ${activeTab === 'GLOBAL' ? 'bg-purple-600' : activeTab === 'MCQ' ? '' : 'bg-green-600'}`} style={activeTab === 'MCQ' || roomId ? { background: subColor } : {}}>
+                            {roomId ? <MessageSquare size={18} /> : activeTab === 'GLOBAL' ? <Globe size={18} /> : activeTab === 'MCQ' ? <BookOpen size={18} /> : <Shield size={18} />}
                         </div>
                         <div>
                             <h3 className="font-bold text-sm">
-                                {roomId ? roomName : activeTab === 'GLOBAL' ? 'Global Chat' : activeTab === 'MCQ' ? 'MCQ Community' : isAdmin ? `Chat — ${targetUser?.name || 'User'}` : 'Admin Support'}
+                                {roomId ? roomName : activeTab === 'GLOBAL' ? 'Community Posts Feed' : activeTab === 'MCQ' ? 'MCQ Community' : isAdmin ? `Chat — ${targetUser?.name || 'User'}` : 'Admin Support'}
                             </h3>
                             <p className="text-[10px] text-slate-400">
-                                {activeTab === 'GLOBAL' ? 'Sabhi users dekh sakte hain' : activeTab === 'MCQ' ? `Aaj bheje: ${mcqDailyCount}/10 MCQ${!isAdminOrSub ? ` • ${Math.max(0, 10 - mcqDailyCount)} bache` : ''}` : 'Sirf Admin/Mod dekh sakta hai'}
+                                {activeTab === 'GLOBAL' ? 'Ultra, Free & Basic — Sabhi students post, like & comment kar sakte hain' : activeTab === 'MCQ' ? `Aaj bheje: ${mcqDailyCount}/10 MCQ${!isAdminOrSub ? ` • ${Math.max(0, 10 - mcqDailyCount)} bache` : ''}` : 'Sirf Admin/Mod dekh sakta hai'}
                             </p>
                         </div>
                     </div>
@@ -517,16 +518,12 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                         {!hideGlobalTab && (
                         <button
                             onClick={() => {
-                                if (!isUltraChatUser) {
-                                    alert('🔒 Global Chat is exclusive to ULTRA members! Upgrade to Ultra to join Global Chat.');
-                                    return;
-                                }
                                 setActiveTab('GLOBAL');
                             }}
-                            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1 ${activeTab === 'GLOBAL' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${activeTab === 'GLOBAL' ? 'bg-white shadow text-purple-600' : 'text-slate-500 hover:text-slate-700'}`}
                         >
-                            <Users size={12} /> Global
-                            {!isUltraChatUser && <span className="text-[10px]">🔒</span>}
+                            <Globe size={13} />
+                            <span>Posts Feed</span>
                         </button>
                         )}
                         <button
@@ -548,8 +545,12 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                     </div>
                 )}
 
-                {/* Admin support with no target user */}
-                {activeTab === 'SUPPORT' && isAdmin && !targetUser && !roomId ? (
+                {/* Content: Community Post Feed (replaces Global Chat) */}
+                {activeTab === 'GLOBAL' && !roomId ? (
+                    <div className="flex-1 overflow-hidden">
+                        <CommunityPostFeed user={user} isAdmin={isAdminOrSub} onClose={onClose} />
+                    </div>
+                ) : activeTab === 'SUPPORT' && isAdmin && !targetUser && !roomId ? (
                     <div className="flex-1 flex flex-col items-center justify-center text-slate-500 p-6 text-center">
                         <Shield size={40} className="mb-3 opacity-40" />
                         <p className="font-bold text-sm">Koi user select nahi hua</p>

@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { User, MCQItem, MCQResult, TopicItem, SystemSettings } from '../types';
-import { X, CheckCircle, ArrowRight, Loader2, BrainCircuit, AlertCircle, List, Tag, Trophy, TrendingDown, Minus, TrendingUp, Star, Calendar, ChevronRight, Tv, RotateCw, Maximize2, Minimize2 } from 'lucide-react';
+import { X, CheckCircle, ArrowRight, Loader2, BrainCircuit, AlertCircle, List, Tag, Trophy, TrendingDown, Minus, TrendingUp, Star, Calendar, ChevronRight, Tv, RotateCw, Maximize2, Minimize2, LayoutGrid, Volume2, VolumeX } from 'lucide-react';
 import { renderMathInHtml, formatExplanationHtml } from '../utils/mathUtils';
 import { rotateScreen } from '../utils/displayPrefs';
 import { getChapterData, saveUserToLive, saveTestResult, saveUserHistory, saveDemand } from '../firebase';
@@ -15,6 +15,7 @@ import { getEffectiveDailyLimit, getLevelInfo, UNLIMITED } from '../utils/levelS
 import { SubscriptionEngine } from '../utils/engines/subscriptionEngine';
 import { tryEarnScore, subtractDailyScore, getMcqStreakBonus } from '../utils/scoreSystem';
 import { hapticCorrect, hapticWrong } from '../utils/haptic';
+import { playSoundClick, playSoundCorrect, playSoundWrong, playSoundVictory, isSoundEnabled, setSoundEnabled } from '../utils/soundEffects';
 import { loadRoutineData } from '../utils/routineStorage';
 import { deferStudyCoins } from '../utils/studyRewards';
 import McqQuestionNavigator from './McqQuestionNavigator';
@@ -91,6 +92,14 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
     };
 
     const [mcqStreak, setMcqStreak] = useState(0);
+    const [soundActive, setSoundActive] = useState<boolean>(() => isSoundEnabled());
+
+    const toggleSound = () => {
+        const next = !soundActive;
+        setSoundActive(next);
+        setSoundEnabled(next);
+        if (next) playSoundClick();
+    };
 
     // ── Projector Mode ─────────────────────────────────────────────────────────
     const [isProjectorMode, setIsProjectorMode] = useState(false);
@@ -101,6 +110,21 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
     const [projectorWrong, setProjectorWrong] = useState(0);
     const [projectorRotated, setProjectorRotated] = useState(false);
     const [projectorFocused, setProjectorFocused] = useState(false);
+    const [projectorNavigatorOpen, setProjectorNavigatorOpen] = useState(false);
+
+    // Keyboard shortcuts in Projector Mode (M for mute/unmute)
+    useEffect(() => {
+        if (!isProjectorMode) return;
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+            if (e.key === 'm' || e.key === 'M') {
+                e.preventDefault();
+                toggleSound();
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isProjectorMode, soundActive]);
 
     // Timer
     useEffect(() => {
@@ -219,6 +243,7 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
             const _tier = _subValid && user.subscriptionLevel === 'ULTRA' ? 'ULTRA' :
                           _subValid && user.subscriptionLevel === 'BASIC' ? 'BASIC' : 'FREE';
             if (isCorrect) {
+                playSoundCorrect();
                 hapticCorrect();
                 const newStreak = mcqStreak + 1;
                 setMcqStreak(newStreak);
@@ -246,6 +271,7 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                     showMcqScore(totalPts, _creditsEarned);
                 }
             } else {
+                playSoundWrong();
                 hapticWrong();
                 setMcqStreak(0);
                 subtractDailyScore(user.id, 1);
@@ -526,6 +552,7 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
 
         // Store results + show summary screen instead of immediately closing
         pendingCompleteRef.current = { results: [megaResult], questions: interleavedQuestions };
+        playSoundVictory();
         setSessionSummary(topicSummary);
     };
 
@@ -852,6 +879,19 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                         <Tv size={15} />
                     </button>
                     <button
+                        type="button"
+                        onClick={toggleSound}
+                        aria-label={soundActive ? 'Mute sound effects' : 'Enable sound effects'}
+                        title={soundActive ? 'Sound Effects: ON (Click to Mute)' : 'Sound Effects: OFF (Click to Unmute)'}
+                        className={`w-8 h-8 flex items-center justify-center rounded-xl border transition-all active:scale-90 shrink-0 ${
+                            soundActive
+                                ? 'bg-emerald-50 border-emerald-300 text-emerald-600'
+                                : 'bg-slate-100 border-slate-200 text-slate-400'
+                        }`}
+                    >
+                        {soundActive ? <Volume2 size={15} /> : <VolumeX size={15} />}
+                    </button>
+                    <button
                         onClick={() => finishSession(answers)}
                         className="bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow hover:bg-green-700"
                     >
@@ -963,9 +1003,24 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                                         </span>
                                     )}
                                     <button
+                                        onClick={() => { setProjectorNavigatorOpen(v => !v); playSoundClick(); }}
+                                        title="All Questions"
+                                        style={{ background: projectorNavigatorOpen ? '#6366f1' : '#334155', color:'#fff', border:'none', borderRadius:8, padding:'6px 10px', fontSize:12, fontWeight:700, cursor:'pointer', display:'flex', alignItems:'center', gap:5 }}>
+                                        <LayoutGrid size={14} />
+                                        Palette
+                                    </button>
+                                    <button
+                                        onClick={toggleSound}
+                                        title={soundActive ? 'Sound Effects: ON (M to mute)' : 'Sound Effects: OFF (M to unmute)'}
+                                        style={{ background: soundActive ? '#059669' : '#334155', color:'#fff', border:'none', borderRadius:8, padding:'6px 10px', fontSize:12, fontWeight:700, cursor:'pointer', display:'flex', alignItems:'center', gap:5 }}>
+                                        {soundActive ? <Volume2 size={14} /> : <VolumeX size={14} />}
+                                        {soundActive ? 'Sound ON' : 'Muted'}
+                                    </button>
+                                    <button
                                         onClick={async () => {
                                             const result = await rotateScreen();
                                             setProjectorRotated(result === 'landscape');
+                                            playSoundClick();
                                         }}
                                         title={projectorRotated ? 'Mobile mode' : 'Desktop/Laptop mode'}
                                         style={{ background: projectorRotated ? '#6366f1' : '#334155', color:'#fff', border:'none', borderRadius:8, padding:'6px 10px', fontSize:12, fontWeight:700, cursor:'pointer', display:'flex', alignItems:'center', gap:5 }}>
@@ -979,6 +1034,22 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                             </div>
                         )}
                         <div style={{ flex:1, overflowY:'auto', padding: projectorFocused ? '24px' : '18px 24px 12px', display:'flex', flexDirection:'column', gap:14, minHeight:0 }}>
+                            {projectorNavigatorOpen && (
+                                <div style={{ marginBottom: 16 }}>
+                                    <McqQuestionNavigator
+                                        total={total}
+                                        currentIndex={projectorQIdx}
+                                        answers={Object.fromEntries(Array.from(projectorAnswered).map(i => [i, 0]))}
+                                        themeMode="light"
+                                        onJump={(index) => {
+                                            setProjectorQIdx(index);
+                                            setProjectorSelected(null);
+                                            setProjectorNavigatorOpen(false);
+                                            playSoundClick();
+                                        }}
+                                    />
+                                </div>
+                            )}
                             <div style={{ display:'flex', alignItems:'flex-start', gap:12 }}>
                                 <span style={{ background:'#3b82f6', color:'#fff', borderRadius:999, width:36, height:36, display:'flex', alignItems:'center', justifyContent:'center', fontSize:16, fontWeight:900, flexShrink:0 }}>{projectorQIdx + 1}</span>
                                 <p style={{ fontSize:20, fontWeight:800, color:'#1e293b', lineHeight:1.45, flex:1 }} dangerouslySetInnerHTML={{ __html: renderMathInHtml(pq.question) }} />
@@ -1000,7 +1071,15 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                                                 if (answered || projectorAnswered.has(projectorQIdx)) return;
                                                 setProjectorSelected(oi);
                                                 const newA = new Set(projectorAnswered); newA.add(projectorQIdx); setProjectorAnswered(newA);
-                                                if (isCorrect) setProjectorCorrect(c => c + 1); else setProjectorWrong(w => w + 1);
+                                                if (isCorrect) {
+                                                    playSoundCorrect();
+                                                    hapticCorrect();
+                                                    setProjectorCorrect(c => c + 1);
+                                                } else {
+                                                    playSoundWrong();
+                                                    hapticWrong();
+                                                    setProjectorWrong(w => w + 1);
+                                                }
                                             }}
                                             style={{ textAlign:'left', padding:'12px 16px', borderRadius:14, border:`1px solid ${borderCol}`, background:bg, color, fontSize:17, fontWeight:500, cursor: answered ? 'default' : 'pointer', display:'flex', alignItems:'center', gap:12, transition:'all 0.15s' }}>
                                             <span style={{ width:22, height:22, borderRadius:'50%', border:`2px solid ${radioBorder}`, background: radioFill, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center' }}>
@@ -1018,18 +1097,18 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                         {/* Nav footer */}
                         {!projectorFocused && (
                             <div style={{ display:'flex', gap:12, padding:'12px 20px', borderTop:'2px solid #e2e8f0', background:'#f8fafc', flexShrink:0, alignItems: 'center' }}>
-                                <button onClick={() => { setProjectorQIdx(i => Math.max(0, i-1)); setProjectorSelected(null); }} disabled={projectorQIdx === 0}
+                                <button onClick={() => { setProjectorQIdx(i => Math.max(0, i-1)); setProjectorSelected(null); playSoundClick(); }} disabled={projectorQIdx === 0}
                                     style={{ flex:1, padding:'12px', borderRadius:12, border:'2px solid #e2e8f0', background:'#fff', fontWeight:800, fontSize:15, cursor: projectorQIdx === 0 ? 'not-allowed' : 'pointer', opacity: projectorQIdx === 0 ? 0.4 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
                                     <ChevronLeft size={18} /> Pichla
                                 </button>
                                 <button
-                                    onClick={() => setProjectorFocused(true)}
+                                    onClick={() => { setProjectorFocused(true); playSoundClick(); }}
                                     title="Focus Mode"
                                     style={{ background:'#f0fdf4', border:'2px solid #bbf7d0', borderRadius:12, color:'#16a34a', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', padding: '12px 14px', flexShrink: 0 }}>
                                     <Maximize2 size={20} />
                                 </button>
                                 {projectorQIdx < total - 1 ? (
-                                    <button onClick={() => { setProjectorQIdx(i => i+1); setProjectorSelected(null); }}
+                                    <button onClick={() => { setProjectorQIdx(i => i+1); setProjectorSelected(null); playSoundClick(); }}
                                         style={{ flex:1, padding:'12px', borderRadius:12, border:'none', background:'#1e293b', color:'#fff', fontWeight:800, fontSize:15, cursor:'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
                                         Agla <ChevronRight size={18} />
                                     </button>
@@ -1045,13 +1124,13 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                         {projectorFocused && (
                             <div style={{ position:'absolute', bottom:16, left:'50%', transform:'translateX(-50%)', display:'flex', alignItems:'center', gap:12, zIndex:20 }}>
                                 <button
-                                    onClick={() => { setProjectorQIdx(i => Math.max(0, i-1)); setProjectorSelected(null); }}
+                                    onClick={() => { setProjectorQIdx(i => Math.max(0, i-1)); setProjectorSelected(null); playSoundClick(); }}
                                     disabled={projectorQIdx === 0}
                                     style={{ background: projectorQIdx===0 ? 'rgba(30,41,59,0.4)' : 'rgba(30,41,59,0.85)', color: projectorQIdx===0 ? 'rgba(255,255,255,0.3)' : '#fff', border:'none', borderRadius:10, padding:'10px 20px', fontSize:15, fontWeight:900, cursor: projectorQIdx===0 ? 'not-allowed' : 'pointer', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', gap:6 }}>
                                     <ChevronLeft size={18} /> Pichla
                                 </button>
                                 <button
-                                    onClick={() => setProjectorFocused(false)}
+                                    onClick={() => { setProjectorFocused(false); playSoundClick(); }}
                                     style={{ background:'rgba(239,68,68,0.9)', color:'#fff', border:'2px solid #fca5a5', borderRadius:10, padding:'10px 14px', fontSize:15, fontWeight:900, cursor:'pointer', backdropFilter:'blur(6px)', display:'flex', alignItems:'center' }}>
                                     <Minimize2 size={16} />
                                 </button>
@@ -1059,6 +1138,7 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                                     onClick={() => {
                                         if (projectorQIdx < total - 1) {
                                             setProjectorQIdx(i => i+1); setProjectorSelected(null);
+                                            playSoundClick();
                                         } else {
                                             closeProjector();
                                         }

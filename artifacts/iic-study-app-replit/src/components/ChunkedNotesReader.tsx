@@ -1214,7 +1214,7 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
               <button
                 type="button"
                 onClick={handleRotate}
-                className="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-100 border border-slate-200 text-slate-600 active:scale-90 transition shrink-0"
+                className="w-8 h-8 flex items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-indigo-600 active:scale-95 shadow-sm transition-all shrink-0"
                 title="Screen rotate karo"
               >
                 <RotateCcw size={13} />
@@ -1278,14 +1278,14 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
           this bar always sits above scrolled content.
           When hideTopBar=true, only the READ ALL button is shown (compact sticky bar). */}
       {!hideTopBar && (
-        <div ref={toolbarRef} className="sticky top-0 z-20 bg-white mb-3" style={{ width: '100vw', marginLeft: 'calc(-1 * (100vw - 100%) / 2)', boxShadow: '0 2px 8px rgba(0,0,0,0.07)' }}>
+        <div ref={toolbarRef} className="sticky top-0 z-20 bg-white/80 backdrop-blur-xl mb-3 border-b border-slate-100" style={{ width: '100vw', marginLeft: 'calc(-1 * (100vw - 100%) / 2)', boxShadow: '0 2px 8px rgba(0,0,0,0.07)' }}>
           {/* ── Slim bar — back + counter + icons ── */}
           <div className="flex items-center gap-1.5 px-2 py-1.5">
             {onBack && (
               <button
                 type="button"
                 onClick={onBack}
-                className="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-100 border border-slate-200 text-slate-600 active:scale-90 transition shrink-0"
+                className="w-8 h-8 flex items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-indigo-600 active:scale-95 shadow-sm transition-all shrink-0"
                 title="Back"
               >
                 <ChevronRight size={15} className="rotate-180" />
@@ -1395,7 +1395,7 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                     setTimeout(() => setCopiedAll(false), 2000);
                   }).catch(() => {});
                 }}
-                className={`w-7 h-7 flex items-center justify-center rounded-lg border active:scale-90 transition shrink-0 ${
+                className={`w-8 h-8 flex items-center justify-center rounded-xl border shadow-sm active:scale-95 transition-all shrink-0 ${
                   copiedAll
                     ? 'bg-green-100 border-green-400 text-green-600'
                     : 'bg-slate-100 border-slate-200 text-slate-500 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-600'
@@ -1410,7 +1410,7 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
               <button
                 type="button"
                 onClick={onMoreOptions}
-                className="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-100 border border-slate-200 text-slate-500 active:scale-90 transition shrink-0"
+                className="w-8 h-8 flex items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-indigo-600 active:scale-95 shadow-sm transition-all shrink-0"
                 title="More options"
               >
                 <LayoutGrid size={14} />
@@ -1421,7 +1421,7 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
               <button
                 type="button"
                 onClick={() => setShowAdminBoard(v => !v)}
-                className={`w-7 h-7 flex items-center justify-center rounded-lg border active:scale-90 transition shrink-0 ${showAdminBoard ? 'bg-orange-100 border-orange-300 text-orange-600' : 'bg-slate-100 border-slate-200 text-slate-500'}`}
+                className={`w-8 h-8 flex items-center justify-center rounded-xl border shadow-sm active:scale-95 transition-all shrink-0 ${showAdminBoard ? 'bg-orange-100 border-orange-300 text-orange-600' : 'bg-slate-100 border-slate-200 text-slate-500'}`}
                 title="WhiteBoard (Admin)"
               >
                 <Presentation size={14} />
@@ -1443,7 +1443,7 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
             <button
               type="button"
               onClick={() => setShowControls(s => !s)}
-              className={`w-7 h-7 flex items-center justify-center rounded-lg border active:scale-90 transition shrink-0 ${showControls ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-slate-100 border-slate-200 text-slate-500'}`}
+              className={`w-8 h-8 flex items-center justify-center rounded-xl border shadow-sm active:scale-95 transition-all shrink-0 ${showControls ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-slate-100 border-slate-200 text-slate-500'}`}
               title="Controls"
             >
               <MoreVertical size={14} />

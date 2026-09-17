@@ -222,15 +222,38 @@ export const getReferrerRoyaltyRate = (level?: number): number => {
 };
 
 /**
+ * Returns either admin-configured referral milestones or the default milestone list.
+ */
+export const getEffectiveReferralMilestones = (
+  customOrSettings?: ReferralMilestone[] | { referralMilestones?: ReferralMilestone[] } | null
+): ReferralMilestone[] => {
+  if (Array.isArray(customOrSettings) && customOrSettings.length > 0) {
+    return customOrSettings;
+  }
+  if (
+    customOrSettings &&
+    typeof customOrSettings === 'object' &&
+    'referralMilestones' in customOrSettings &&
+    Array.isArray((customOrSettings as any).referralMilestones) &&
+    (customOrSettings as any).referralMilestones.length > 0
+  ) {
+    return (customOrSettings as any).referralMilestones;
+  }
+  return REFERRAL_MILESTONES;
+};
+
+/**
  * Claims a milestone reward for the user.
  * Guarantees that claimed milestones are recorded in claimedReferralMilestones
  * so duplicate rewards can NEVER be re-claimed if active count drops and rises again.
  */
 export const claimReferralMilestoneReward = (
   user: User,
-  target: number
+  target: number,
+  customMilestones?: ReferralMilestone[]
 ): { success: boolean; message: string; updatedUser: User } => {
-  const milestone = REFERRAL_MILESTONES.find((m) => m.target === target);
+  const milestoneList = getEffectiveReferralMilestones(customMilestones);
+  const milestone = milestoneList.find((m) => m.target === target);
   if (!milestone) {
     return { success: false, message: 'Invalid milestone', updatedUser: user };
   }

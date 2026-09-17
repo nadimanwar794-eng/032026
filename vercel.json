@@ -2,7 +2,7 @@
   "buildCommand": "npm run build --workspace=artifacts/iic-study-app-replit",
   "outputDirectory": "dist",
   "framework": "vite",
-  "installCommand": "npm ci",
+  "installCommand": "npm install",
   "rewrites": [
     {
       "source": "/(.*)",

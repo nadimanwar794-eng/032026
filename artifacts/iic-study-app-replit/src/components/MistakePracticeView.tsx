@@ -6,6 +6,8 @@ import { saveMistakeSession } from '../utils/mistakeAnalytics';
 import type { User } from '../types';
 import { tryEarnScore, subtractDailyScore, getMcqStreakBonus } from '../utils/scoreSystem';
 import { renderMathInHtml, formatExplanationHtml } from '../utils/mathUtils';
+import { playSoundClick, playSoundCorrect, playSoundWrong, playSoundVictory } from '../utils/soundEffects';
+import { hapticCorrect, hapticWrong } from '../utils/haptic';
 
 interface Props {
   mistakes: MistakeEntry[];
@@ -85,6 +87,8 @@ export const MistakePracticeView: React.FC<Props> = ({ mistakes, onClose, onComp
     setSelected(optIdx);
     setRevealed(true);
     if (optIdx === current.correctAnswer) {
+      playSoundCorrect();
+      hapticCorrect();
       setCorrectIds(prev => prev.includes(current.id) ? prev : [...prev, current.id]);
       const newStreak = streak + 1;
       setStreak(newStreak);
@@ -107,6 +111,8 @@ export const MistakePracticeView: React.FC<Props> = ({ mistakes, onClose, onComp
         }
       }
     } else {
+      playSoundWrong();
+      hapticWrong();
       setWrongCount(c => c + 1);
       setStreak(0);
       // ── Wrong answer: -1 penalty ────────────────────────────────────────────
@@ -117,6 +123,7 @@ export const MistakePracticeView: React.FC<Props> = ({ mistakes, onClose, onComp
 
   const handleNext = () => {
     if (idx + 1 >= total) {
+      playSoundVictory();
       const durationSec = Math.round((Date.now() - sessionStartRef.current) / 1000);
       saveMistakeSession({
         total,
@@ -131,11 +138,15 @@ export const MistakePracticeView: React.FC<Props> = ({ mistakes, onClose, onComp
       });
       return;
     }
+    playSoundClick();
     goTo(idx + 1);
   };
 
   const handleBack = () => {
-    if (idx > 0) goTo(idx - 1);
+    if (idx > 0) {
+      playSoundClick();
+      goTo(idx - 1);
+    }
   };
 
   if (total === 0) {

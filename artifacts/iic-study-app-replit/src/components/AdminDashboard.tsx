@@ -4,7 +4,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { User, ViewState, SystemSettings, Subject, Chapter, MCQItem, RecoveryRequest, ActivityLogEntry, LeaderboardEntry, RecycleBinItem, Stream, Board, ClassLevel, GiftCode, SubscriptionPlan, CreditPackage, CreditSubscriptionPlan, UserCreditSubscription, SpinReward, SpinGameType, HtmlModule, PremiumNoteSlot, ContentInfoConfig, ContentInfoItem, SubscriptionHistoryEntry, UniversalAnalysisLog, ContentType, LessonContent, DeepDiveEntry, AdditionalNoteEntry, TeacherStorePlan, TeacherCode, HomeworkItem, LucentNoteEntry, LucentPageNote, AppNotification, BroadcastRedeemCode, LoginBonusRandomGiftOption } from '../types';
 import { DEFAULT_CREDIT_SUB_PLANS, PRESET_CREDIT_SUB_TEMPLATES, grantCreditSubscription, cancelCreditSubscription, getCreditSubPlanMultiplier } from '../utils/creditSubscriptionUtils';
 import { activateDiamondSub, cancelDiamondSub, isDiamondSubActive, getDiamondSubDaysRemaining } from '../utils/diamondUtils';
-import { List, GraduationCap, LayoutDashboard, Users, Search, Trash2, Save, X, Eye, EyeOff, Shield, Megaphone, CheckCircle, ListChecks, Database, FileText, Monitor, Sparkles, Banknote, BrainCircuit, AlertOctagon, ArrowLeft, ArrowRight, Key, Bell, ShieldCheck, Lock, Globe, Layers, Zap, PenTool, RefreshCw, RotateCcw, Plus, LogOut, Download, Upload, CreditCard, Ticket, Video, Image as ImageIcon, Type, Link, FileJson, Activity, AlertTriangle, Gift, Book, Mail, Edit3, MessageSquare, ShoppingBag, Cloud, Rocket, Code2, Layers as LayersIcon, Wifi, WifiOff, Copy, Crown, Gamepad2, Calendar, BookOpen, Image, HelpCircle, Youtube, Play, Star, Trophy, Palette, Settings, Headphones, Layout, Bot, LayoutDashboard as DashboardIcon, Loader2, Gauge, LayoutGrid, ArrowUpCircle, KeyRound, Award, Send, GitCompare, Lightbulb, ThumbsUp, ThumbsDown, Building2, TrendingUp, Coins } from 'lucide-react';
+import { List, GraduationCap, LayoutDashboard, Users, Search, Trash2, Save, X, Eye, EyeOff, Shield, Megaphone, CheckCircle, ListChecks, Database, FileText, Monitor, Sparkles, Banknote, BrainCircuit, AlertOctagon, ArrowLeft, ArrowRight, Key, Bell, ShieldCheck, Lock, Globe, Layers, Zap, PenTool, RefreshCw, RotateCcw, Plus, LogOut, Download, Upload, CreditCard, Ticket, Video, Image as ImageIcon, Type, Link, FileJson, Activity, AlertTriangle, Gift, Book, Mail, Edit3, MessageSquare, ShoppingBag, Cloud, Rocket, Code2, Layers as LayersIcon, Wifi, WifiOff, Copy, Crown, Gamepad2, Calendar, BookOpen, Image, HelpCircle, Youtube, Play, Star, Trophy, Palette, Settings, Headphones, Layout, Bot, LayoutDashboard as DashboardIcon, Loader2, Gauge, LayoutGrid, ArrowUpCircle, KeyRound, Award, Send, GitCompare, Lightbulb, ThumbsUp, ThumbsDown, Building2, TrendingUp, Coins, SlidersHorizontal } from 'lucide-react';
 import { getSubjectsList, DEFAULT_SUBJECTS, DEFAULT_APP_FEATURES, ALL_APP_FEATURES, STUDENT_APP_FEATURES, DEFAULT_CONTENT_INFO_CONFIG, ADMIN_PERMISSIONS, APP_VERSION, STATIC_SYLLABUS, LEVEL_UNLOCKABLE_FEATURES, LUCENT_SUBJECT_OPTIONS_BASE, getClassSubjectOptions, SUPPORT_PHONE } from '../constants';
 import { AdminClassMcqManager } from './AdminClassMcqManager';
 import { AdminCompetitionMcqManager } from './AdminCompetitionMcqManager';
@@ -44,6 +44,8 @@ import { ALL_FEATURES } from '../utils/featureRegistry';
 import { HOME_SECTION_REGISTRY } from '../utils/homeSections';
 import { SPLASH_FONTS, getSplashFontById, ensureGoogleFontLoaded } from '../utils/splashFonts';
 import { NstaFeatureManager } from './admin/NstaFeatureManager';
+import { ReferralPrizesManager } from './admin/ReferralPrizesManager';
+import { PlanComparisonManager } from './admin/PlanComparisonManager';
 // @ts-ignore
 import JSZip from 'jszip';
 import { Document, Page, pdfjs } from 'react-pdf';
@@ -138,6 +140,8 @@ type AdminTab =
   | 'SUBSCRIPTION_PLANS_EDITOR'
   | 'CONFIG_REWARDS'
   | 'CONFIG_PRIZES' // NEW: Prize Configuration
+  | 'REFERRAL_PRIZES_MANAGER' // NEW: Refer & Earn Prizes Manager
+  | 'PLAN_COMPARISON_MANAGER' // NEW: Compare (Plan Comparison Matrix Manager)
   | 'FEATURED_CONTENT'
   | 'CONFIG_CHAT'
   | 'UNIVERSAL_PLAYLIST'
@@ -5014,591 +5018,640 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
       )}
 
             {/* --- STORE MANAGER TAB --- */}
-      {activeTab === 'STORE_MANAGER' && (
-          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 animate-in slide-in-from-right">
-              <div className="flex items-center gap-4 mb-6 border-b pb-4">
-                  <button onClick={() => setActiveTab('DASHBOARD')} className="bg-slate-100 p-2 rounded-full hover:bg-slate-200"><ArrowLeft size={20} /></button>
-                  <h3 className="text-xl font-black text-slate-800">Store Manager</h3>
-              </div>
+      {activeTab === 'STORE_MANAGER' && (() => {
+          const safeStoreDateString = (val: any): string => {
+              if (!val) return '';
+              try {
+                  let d: Date;
+                  if (typeof val === 'object' && val !== null && 'seconds' in val) {
+                      d = new Date(val.seconds * 1000);
+                  } else {
+                      d = new Date(val);
+                  }
+                  if (isNaN(d.getTime())) return '';
+                  return d.toISOString().slice(0, 16);
+              } catch {
+                  return '';
+              }
+          };
 
-              {/* STORE EVENTS & POPUPS */}
-              <div className="mb-8 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                  <h4 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Zap size={18} className="text-yellow-500" /> Advanced Store Events & Logic</h4>
+          return (
+            <ErrorBoundary fallbackLabel="Store Manager" compact>
+              <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 animate-in slide-in-from-right">
+                  <div className="flex items-center gap-4 mb-6 border-b pb-4">
+                      <button onClick={() => setActiveTab('DASHBOARD')} className="bg-slate-100 p-2 rounded-full hover:bg-slate-200"><ArrowLeft size={20} /></button>
+                      <h3 className="text-xl font-black text-slate-800">Store Manager</h3>
+                  </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-                      {/* Revision Logic Toggle */}
-                      <div className="flex flex-col gap-2 bg-white p-3 rounded-lg border border-slate-200">
-                          <div className="flex items-center justify-between">
-                              <span className="text-xs font-bold text-slate-700">Revision Engine</span>
-                              <input
-                                  type="checkbox"
-                                  checked={localSettings.revisionConfig?.trackWrongAnswers ?? true}
-                                  onChange={e => setLocalSettings({...localSettings, revisionConfig: {...localSettings.revisionConfig, trackWrongAnswers: e.target.checked}})}
-                                  className="w-5 h-5 accent-blue-600"
-                              />
+                  {/* PLAN COMPARE MATRIX SHORTCUT */}
+                  <div className="mb-6 bg-gradient-to-r from-sky-500/10 via-indigo-500/10 to-purple-500/10 p-4 sm:p-5 rounded-2xl border border-sky-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="flex items-center gap-3.5">
+                          <div className="w-12 h-12 rounded-2xl bg-sky-600 text-white flex items-center justify-center font-black shadow-md shrink-0">
+                              <SlidersHorizontal size={24} />
                           </div>
-                          <p className="text-[10px] text-slate-600 leading-tight">
-                              Enable/Disable Revision Hub tracking globally.
-                          </p>
-                      </div>
-
-                      {/* Credit Free Event Toggle */}
-                      <div className="flex flex-col gap-2 bg-white p-3 rounded-lg border border-slate-200">
-                          <div className="flex items-center justify-between">
-                              <span className="text-xs font-bold text-slate-700">Credit Free Event</span>
-                              <input
-                                  type="checkbox"
-                                  checked={localSettings.isCreditFreeEvent || false}
-                                  onChange={e => setLocalSettings({...localSettings, isCreditFreeEvent: e.target.checked})}
-                                  className="w-5 h-5 accent-blue-600"
-                              />
-                          </div>
-                          {localSettings.isCreditFreeEvent && (
-                              <p className="text-[10px] text-slate-600 leading-tight">
-                                  All content normally requiring credits will be completely free.
-                              </p>
-                          )}
-                      </div>
-
-                      {/* Global Free Access Toggle */}
-                      <div className="flex flex-col gap-2 bg-white p-3 rounded-lg border border-slate-200">
-                          <div className="flex items-center justify-between">
-                              <span className="text-xs font-bold text-slate-700">Global Free Access</span>
-                              <input
-                                  type="checkbox"
-                                  checked={localSettings.isGlobalFreeMode || false}
-                                  onChange={e => setLocalSettings({...localSettings, isGlobalFreeMode: e.target.checked})}
-                                  className="w-5 h-5 accent-blue-600"
-                              />
-                          </div>
-                          {localSettings.isGlobalFreeMode && (
-                              <p className="text-[10px] text-slate-600 leading-tight">
-                                  Overrides all subscriptions. Every user gets Ultra Access.
-                              </p>
-                          )}
-                      </div>
-
-                      {/* Discount Event Toggle */}
-                      <div className="flex flex-col gap-2 bg-white p-3 rounded-lg border border-slate-200">
-                          <div className="flex items-center justify-between">
-                              <span className="text-xs font-bold text-slate-700">Discount Sale Event</span>
-                              <input
-                                  type="checkbox"
-                                  checked={localSettings.specialDiscountEvent?.enabled || false}
-                                  onChange={e => setLocalSettings({...localSettings, specialDiscountEvent: {...(localSettings.specialDiscountEvent || {} as any), enabled: e.target.checked}})}
-                                  className="w-5 h-5 accent-blue-600"
-                              />
-                          </div>
-                      </div>
-
-                      {/* Score Boost Event Toggle */}
-                      <div className="flex flex-col gap-2 bg-white p-3 rounded-lg border border-orange-200">
-                          <div className="flex items-center justify-between">
-                              <div>
-                                  <span className="text-xs font-bold text-orange-700">🚀 Score Boost Event</span>
-                                  <p className="text-[10px] text-slate-500 mt-0.5">Sabhi users ka score boost</p>
+                          <div>
+                              <div className="flex items-center gap-2">
+                                  <h4 className="font-black text-slate-900 text-sm sm:text-base">Plan Compare Matrix (Compare)</h4>
+                                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 border border-sky-200">
+                                      Full Customizer
+                                  </span>
                               </div>
-                              <input
-                                  type="checkbox"
-                                  checked={(localSettings as any).scoreBoostEvent?.enabled || false}
-                                  onChange={e => setLocalSettings({...localSettings, scoreBoostEvent: {...((localSettings as any).scoreBoostEvent || {}), enabled: e.target.checked}} as any)}
-                                  className="w-5 h-5 accent-orange-600"
-                              />
+                              <p className="text-xs text-slate-600 mt-0.5">
+                                  Free, Basic & Ultra plans comparison table, sequential reading rules aur limits edit karein.
+                              </p>
                           </div>
-                          {(localSettings as any).scoreBoostEvent?.enabled && (
-                              <div className="mt-2 space-y-2 pt-2 border-t border-orange-100">
+                      </div>
+                      <button
+                          onClick={() => setActiveTab('PLAN_COMPARISON_MANAGER')}
+                          className="px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white font-black text-xs rounded-xl shadow-md transition-all active:scale-95 flex items-center justify-center gap-2 shrink-0"
+                      >
+                          <SlidersHorizontal size={15} /> Open Compare Manager
+                      </button>
+                  </div>
+
+                  {/* STORE EVENTS & POPUPS */}
+                  <div className="mb-8 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                      <h4 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Zap size={18} className="text-yellow-500" /> Advanced Store Events & Logic</h4>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+                          {/* Revision Logic Toggle */}
+                          <div className="flex flex-col gap-2 bg-white p-3 rounded-lg border border-slate-200">
+                              <div className="flex items-center justify-between">
+                                  <span className="text-xs font-bold text-slate-700">Revision Engine</span>
+                                  <input
+                                      type="checkbox"
+                                      checked={localSettings.revisionConfig?.trackWrongAnswers ?? true}
+                                      onChange={e => setLocalSettings({...localSettings, revisionConfig: {...localSettings.revisionConfig, trackWrongAnswers: e.target.checked}})}
+                                      className="w-5 h-5 accent-blue-600"
+                                  />
+                              </div>
+                              <p className="text-[10px] text-slate-600 leading-tight">
+                                  Enable/Disable Revision Hub tracking globally.
+                              </p>
+                          </div>
+
+                          {/* Credit Free Event Toggle */}
+                          <div className="flex flex-col gap-2 bg-white p-3 rounded-lg border border-slate-200">
+                              <div className="flex items-center justify-between">
+                                  <span className="text-xs font-bold text-slate-700">Credit Free Event</span>
+                                  <input
+                                      type="checkbox"
+                                      checked={localSettings.isCreditFreeEvent || false}
+                                      onChange={e => setLocalSettings({...localSettings, isCreditFreeEvent: e.target.checked})}
+                                      className="w-5 h-5 accent-blue-600"
+                                  />
+                              </div>
+                              {localSettings.isCreditFreeEvent && (
+                                  <p className="text-[10px] text-slate-600 leading-tight">
+                                      All content normally requiring credits will be completely free.
+                                  </p>
+                              )}
+                          </div>
+
+                          {/* Global Free Access Toggle */}
+                          <div className="flex flex-col gap-2 bg-white p-3 rounded-lg border border-slate-200">
+                              <div className="flex items-center justify-between">
+                                  <span className="text-xs font-bold text-slate-700">Global Free Access</span>
+                                  <input
+                                      type="checkbox"
+                                      checked={localSettings.isGlobalFreeMode || false}
+                                      onChange={e => setLocalSettings({...localSettings, isGlobalFreeMode: e.target.checked})}
+                                      className="w-5 h-5 accent-blue-600"
+                                  />
+                              </div>
+                              {localSettings.isGlobalFreeMode && (
+                                  <p className="text-[10px] text-slate-600 leading-tight">
+                                      Overrides all subscriptions. Every user gets Ultra Access.
+                                  </p>
+                              )}
+                          </div>
+
+                          {/* Discount Event Toggle */}
+                          <div className="flex flex-col gap-2 bg-white p-3 rounded-lg border border-slate-200">
+                              <div className="flex items-center justify-between">
+                                  <span className="text-xs font-bold text-slate-700">Discount Sale Event</span>
+                                  <input
+                                      type="checkbox"
+                                      checked={localSettings.specialDiscountEvent?.enabled || false}
+                                      onChange={e => setLocalSettings({...localSettings, specialDiscountEvent: {...(localSettings.specialDiscountEvent || {} as any), enabled: e.target.checked}})}
+                                      className="w-5 h-5 accent-blue-600"
+                                  />
+                              </div>
+                          </div>
+
+                          {/* Score Boost Event Toggle */}
+                          <div className="flex flex-col gap-2 bg-white p-3 rounded-lg border border-orange-200">
+                              <div className="flex items-center justify-between">
+                                  <div>
+                                      <span className="text-xs font-bold text-orange-700">🚀 Score Boost Event</span>
+                                      <p className="text-[10px] text-slate-500 mt-0.5">Sabhi users ka score boost</p>
+                                  </div>
+                                  <input
+                                      type="checkbox"
+                                      checked={(localSettings as any).scoreBoostEvent?.enabled || false}
+                                      onChange={e => setLocalSettings({...localSettings, scoreBoostEvent: {...((localSettings as any).scoreBoostEvent || {}), enabled: e.target.checked}} as any)}
+                                      className="w-5 h-5 accent-orange-600"
+                                  />
+                              </div>
+                              {(localSettings as any).scoreBoostEvent?.enabled && (
+                                  <div className="mt-2 space-y-2 pt-2 border-t border-orange-100">
+                                      <div className="grid grid-cols-2 gap-2">
+                                          <div>
+                                              <label className="text-[10px] font-bold text-slate-600 block mb-1">Event Name</label>
+                                              <input
+                                                  type="text"
+                                                  placeholder="e.g. Diwali Score Blast"
+                                                  value={(localSettings as any).scoreBoostEvent?.eventName || ''}
+                                                  onChange={e => setLocalSettings({...localSettings, scoreBoostEvent: {...((localSettings as any).scoreBoostEvent || {}), eventName: e.target.value}} as any)}
+                                                  className="w-full p-2 border rounded text-xs"
+                                              />
+                                          </div>
+                                          <div>
+                                              <label className="text-[10px] font-bold text-slate-600 block mb-1">Score Boost %</label>
+                                              <input
+                                                  type="number"
+                                                  min={0}
+                                                  max={500}
+                                                  placeholder="e.g. 50"
+                                                  value={(localSettings as any).scoreBoostEvent?.boostPercent || 0}
+                                                  onChange={e => setLocalSettings({...localSettings, scoreBoostEvent: {...((localSettings as any).scoreBoostEvent || {}), boostPercent: Number(e.target.value)}} as any)}
+                                                  className="w-full p-2 border rounded text-xs"
+                                              />
+                                          </div>
+                                      </div>
+                                      <div className="grid grid-cols-2 gap-2">
+                                          <div>
+                                              <label className="text-[10px] font-bold text-slate-600 block mb-1">Start Date/Time</label>
+                                              <input
+                                                  type="datetime-local"
+                                                  value={safeStoreDateString((localSettings as any).scoreBoostEvent?.startsAt)}
+                                                  onChange={e => setLocalSettings({...localSettings, scoreBoostEvent: {...((localSettings as any).scoreBoostEvent || {}), startsAt: e.target.value ? new Date(e.target.value).toISOString() : undefined}} as any)}
+                                                  className="w-full p-2 border rounded text-xs"
+                                              />
+                                          </div>
+                                          <div>
+                                              <label className="text-[10px] font-bold text-slate-600 block mb-1">End Date/Time</label>
+                                              <input
+                                                  type="datetime-local"
+                                                  value={safeStoreDateString((localSettings as any).scoreBoostEvent?.endsAt)}
+                                                  onChange={e => setLocalSettings({...localSettings, scoreBoostEvent: {...((localSettings as any).scoreBoostEvent || {}), endsAt: e.target.value ? new Date(e.target.value).toISOString() : undefined}} as any)}
+                                                  className="w-full p-2 border rounded text-xs"
+                                              />
+                                          </div>
+                                      </div>
+                                  </div>
+                              )}
+                          </div>
+                      </div>
+
+                      {/* EVENT DETAILED SETTINGS */}
+                      {localSettings.specialDiscountEvent?.enabled && (
+                          <div className="bg-white p-4 rounded-xl border border-blue-200 shadow-inner mb-4 animate-in fade-in slide-in-from-top-2">
+                              <h5 className="font-bold text-blue-800 mb-3 flex items-center gap-2"><Ticket size={16}/> Discount Event Configuration</h5>
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                  <div>
+                                      <label className="text-[10px] font-bold text-slate-600 block">Event Name</label>
+                                      <input
+                                          type="text"
+                                          value={localSettings.specialDiscountEvent?.eventName || ''}
+                                          onChange={e => setLocalSettings({...localSettings, specialDiscountEvent: {...(localSettings.specialDiscountEvent || {} as any), eventName: e.target.value}})}
+                                          className="w-full p-2 border rounded text-sm"
+                                          placeholder="e.g. Diwali Mega Sale"
+                                      />
+                                  </div>
+                                  <div>
+                                      <label className="text-[10px] font-bold text-slate-600 block">Discount %</label>
+                                      <input
+                                          type="number"
+                                          value={localSettings.specialDiscountEvent?.discountPercent || 0}
+                                          onChange={e => setLocalSettings({...localSettings, specialDiscountEvent: {...(localSettings.specialDiscountEvent || {} as any), discountPercent: Number(e.target.value)}})}
+                                          className="w-full p-2 border rounded text-sm"
+                                      />
+                                  </div>
+                                  <div>
+                                      <label className="text-[10px] font-bold text-slate-600 block">Renewal Bonus % (Extra)</label>
+                                      <input
+                                          type="number"
+                                          value={localSettings.specialDiscountEvent?.renewalDiscountPercent || 0}
+                                          onChange={e => setLocalSettings({...localSettings, specialDiscountEvent: {...(localSettings.specialDiscountEvent || {} as any), renewalDiscountPercent: Number(e.target.value)}})}
+                                          className="w-full p-2 border rounded text-sm"
+                                      />
+                                  </div>
+                                  <div className="md:col-span-3">
+                                      <label className="text-[10px] font-bold text-rose-600 block">🎟️ Discount Coupon Code (Mailbox mein bheja jayega)</label>
+                                      <p className="text-[10px] text-slate-500 mb-1">Yeh code student ke Mailbox mein automatically aayega jab woh Store visit kare aur subscription na ho. Student ise Redeem tab mein enter kare.</p>
+                                      <input
+                                          type="text"
+                                          value={localSettings.specialDiscountEvent?.couponCode || ''}
+                                          onChange={e => setLocalSettings({...localSettings, specialDiscountEvent: {...(localSettings.specialDiscountEvent || {} as any), couponCode: e.target.value?.toUpperCase()}})}
+                                          className="w-full p-2 border-2 border-rose-200 rounded text-sm font-mono font-bold text-rose-700 bg-rose-50"
+                                          placeholder="e.g. DIWALI20"
+                                      />
+                                      <p className="text-[10px] text-slate-400 mt-1">⚠️ Pehle iss code ko Redeem Code system mein DISCOUNT type ke saath create karo.</p>
+                                  </div>
+                                  <div>
+                                      <label className="text-[10px] font-bold text-slate-600 block">Start Date/Time</label>
+                                      <input
+                                          type="datetime-local"
+                                          value={safeStoreDateString(localSettings.specialDiscountEvent?.startsAt)}
+                                          onChange={e => setLocalSettings({...localSettings, specialDiscountEvent: {...(localSettings.specialDiscountEvent || {} as any), startsAt: e.target.value ? new Date(e.target.value).toISOString() : undefined}})}
+                                          className="w-full p-2 border rounded text-sm"
+                                      />
+                                  </div>
+                                  <div>
+                                      <label className="text-[10px] font-bold text-slate-600 block">End Date/Time</label>
+                                      <input
+                                          type="datetime-local"
+                                          value={safeStoreDateString(localSettings.specialDiscountEvent?.endsAt)}
+                                          onChange={e => setLocalSettings({...localSettings, specialDiscountEvent: {...(localSettings.specialDiscountEvent || {} as any), endsAt: e.target.value ? new Date(e.target.value).toISOString() : undefined}})}
+                                          className="w-full p-2 border rounded text-sm"
+                                      />
+                                  </div>
+                              </div>
+
+                              <div className="flex items-center gap-4 mt-4">
+                                   <label className="flex items-center gap-2 text-xs font-bold text-slate-700">
+                                      <input type="checkbox" checked={localSettings.specialDiscountEvent?.showToFreeUsers ?? true} onChange={e => setLocalSettings({...localSettings, specialDiscountEvent: {...(localSettings.specialDiscountEvent || {} as any), showToFreeUsers: e.target.checked}})} className="accent-blue-600" /> Show to Free Users
+                                   </label>
+                                   <label className="flex items-center gap-2 text-xs font-bold text-slate-700">
+                                      <input type="checkbox" checked={localSettings.specialDiscountEvent?.showToPremiumUsers ?? true} onChange={e => setLocalSettings({...localSettings, specialDiscountEvent: {...(localSettings.specialDiscountEvent || {} as any), showToPremiumUsers: e.target.checked}})} className="accent-blue-600" /> Show to Premium Users
+                                   </label>
+                              </div>
+                          </div>
+                      )}
+
+                      {/* POPUP CONFIGURATIONS */}
+                      <h5 className="font-bold text-slate-800 mt-6 mb-3 border-t pt-4">Automatic Popup Triggers</h5>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {/* Expiry Warning Popup */}
+                          <div className="bg-white p-4 rounded-xl border border-slate-200">
+                              <div className="flex items-center justify-between mb-3">
+                                  <span className="text-xs font-bold text-red-600 flex items-center gap-1"><AlertOctagon size={14}/> Expiry Warning</span>
+                                  <input
+                                      type="checkbox"
+                                      checked={localSettings.popupConfigs?.isExpiryWarningEnabled ?? true}
+                                      onChange={e => setLocalSettings({...localSettings, popupConfigs: {...(localSettings.popupConfigs || {} as any), isExpiryWarningEnabled: e.target.checked}})}
+                                      className="w-4 h-4 accent-red-600"
+                                  />
+                              </div>
+                              {localSettings.popupConfigs?.isExpiryWarningEnabled !== false && (
                                   <div className="grid grid-cols-2 gap-2">
                                       <div>
-                                          <label className="text-[10px] font-bold text-slate-600 block mb-1">Event Name</label>
-                                          <input
-                                              type="text"
-                                              placeholder="e.g. Diwali Score Blast"
-                                              value={(localSettings as any).scoreBoostEvent?.eventName || ''}
-                                              onChange={e => setLocalSettings({...localSettings, scoreBoostEvent: {...((localSettings as any).scoreBoostEvent || {}), eventName: e.target.value}} as any)}
-                                              className="w-full p-2 border rounded text-xs"
-                                          />
-                                      </div>
-                                      <div>
-                                          <label className="text-[10px] font-bold text-slate-600 block mb-1">Score Boost %</label>
+                                          <label className="text-[10px] text-slate-600">Trigger (Hours before)</label>
                                           <input
                                               type="number"
-                                              min={0}
-                                              max={500}
-                                              placeholder="e.g. 50"
-                                              value={(localSettings as any).scoreBoostEvent?.boostPercent || 0}
-                                              onChange={e => setLocalSettings({...localSettings, scoreBoostEvent: {...((localSettings as any).scoreBoostEvent || {}), boostPercent: Number(e.target.value)}} as any)}
-                                              className="w-full p-2 border rounded text-xs"
-                                          />
-                                      </div>
-                                  </div>
-                                  <div className="grid grid-cols-2 gap-2">
-                                      <div>
-                                          <label className="text-[10px] font-bold text-slate-600 block mb-1">Start Date/Time</label>
-                                          <input
-                                              type="datetime-local"
-                                              value={(localSettings as any).scoreBoostEvent?.startsAt ? new Date((localSettings as any).scoreBoostEvent.startsAt).toISOString().slice(0, 16) : ''}
-                                              onChange={e => setLocalSettings({...localSettings, scoreBoostEvent: {...((localSettings as any).scoreBoostEvent || {}), startsAt: e.target.value ? new Date(e.target.value).toISOString() : undefined}} as any)}
-                                              className="w-full p-2 border rounded text-xs"
+                                              value={localSettings.popupConfigs?.expiryWarningHours ?? 24}
+                                              onChange={e => setLocalSettings({...localSettings, popupConfigs: {...(localSettings.popupConfigs || {} as any), expiryWarningHours: Number(e.target.value)}})}
+                                              className="w-full p-1.5 border rounded text-xs"
                                           />
                                       </div>
                                       <div>
-                                          <label className="text-[10px] font-bold text-slate-600 block mb-1">End Date/Time</label>
+                                          <label className="text-[10px] text-slate-600">Interval (Minutes)</label>
                                           <input
-                                              type="datetime-local"
-                                              value={(localSettings as any).scoreBoostEvent?.endsAt ? new Date((localSettings as any).scoreBoostEvent.endsAt).toISOString().slice(0, 16) : ''}
-                                              onChange={e => setLocalSettings({...localSettings, scoreBoostEvent: {...((localSettings as any).scoreBoostEvent || {}), endsAt: e.target.value ? new Date(e.target.value).toISOString() : undefined}} as any)}
-                                              className="w-full p-2 border rounded text-xs"
+                                              type="number"
+                                              value={localSettings.popupConfigs?.expiryWarningIntervalMinutes ?? 60}
+                                              onChange={e => setLocalSettings({...localSettings, popupConfigs: {...(localSettings.popupConfigs || {} as any), expiryWarningIntervalMinutes: Number(e.target.value)}})}
+                                              className="w-full p-1.5 border rounded text-xs"
                                           />
                                       </div>
                                   </div>
-                              </div>
-                          )}
-                      </div>
-                  </div>
-
-                  {/* EVENT DETAILED SETTINGS */}
-                  {localSettings.specialDiscountEvent?.enabled && (
-                      <div className="bg-white p-4 rounded-xl border border-blue-200 shadow-inner mb-4 animate-in fade-in slide-in-from-top-2">
-                          <h5 className="font-bold text-blue-800 mb-3 flex items-center gap-2"><Ticket size={16}/> Discount Event Configuration</h5>
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                              <div>
-                                  <label className="text-[10px] font-bold text-slate-600 block">Event Name</label>
-                                  <input
-                                      type="text"
-                                      value={localSettings.specialDiscountEvent?.eventName || ''}
-                                      onChange={e => setLocalSettings({...localSettings, specialDiscountEvent: {...(localSettings.specialDiscountEvent || {} as any), eventName: e.target.value}})}
-                                      className="w-full p-2 border rounded text-sm"
-                                      placeholder="e.g. Diwali Mega Sale"
-                                  />
-                              </div>
-                              <div>
-                                  <label className="text-[10px] font-bold text-slate-600 block">Discount %</label>
-                                  <input
-                                      type="number"
-                                      value={localSettings.specialDiscountEvent?.discountPercent || 0}
-                                      onChange={e => setLocalSettings({...localSettings, specialDiscountEvent: {...(localSettings.specialDiscountEvent || {} as any), discountPercent: Number(e.target.value)}})}
-                                      className="w-full p-2 border rounded text-sm"
-                                  />
-                              </div>
-                              <div>
-                                  <label className="text-[10px] font-bold text-slate-600 block">Renewal Bonus % (Extra)</label>
-                                  <input
-                                      type="number"
-                                      value={localSettings.specialDiscountEvent?.renewalDiscountPercent || 0}
-                                      onChange={e => setLocalSettings({...localSettings, specialDiscountEvent: {...(localSettings.specialDiscountEvent || {} as any), renewalDiscountPercent: Number(e.target.value)}})}
-                                      className="w-full p-2 border rounded text-sm"
-                                  />
-                              </div>
-                              <div className="md:col-span-3">
-                                  <label className="text-[10px] font-bold text-rose-600 block">🎟️ Discount Coupon Code (Mailbox mein bheja jayega)</label>
-                                  <p className="text-[10px] text-slate-500 mb-1">Yeh code student ke Mailbox mein automatically aayega jab woh Store visit kare aur subscription na ho. Student ise Redeem tab mein enter kare.</p>
-                                  <input
-                                      type="text"
-                                      value={localSettings.specialDiscountEvent?.couponCode || ''}
-                                      onChange={e => setLocalSettings({...localSettings, specialDiscountEvent: {...(localSettings.specialDiscountEvent || {} as any), couponCode: e.target.value?.toUpperCase()}})}
-                                      className="w-full p-2 border-2 border-rose-200 rounded text-sm font-mono font-bold text-rose-700 bg-rose-50"
-                                      placeholder="e.g. DIWALI20"
-                                  />
-                                  <p className="text-[10px] text-slate-400 mt-1">⚠️ Pehle iss code ko Redeem Code system mein DISCOUNT type ke saath create karo.</p>
-                              </div>
-                              <div>
-                                  <label className="text-[10px] font-bold text-slate-600 block">Start Date/Time</label>
-                                  <input
-                                      type="datetime-local"
-                                      value={localSettings.specialDiscountEvent?.startsAt ? new Date(localSettings.specialDiscountEvent.startsAt).toISOString().slice(0, 16) : ''}
-                                      onChange={e => setLocalSettings({...localSettings, specialDiscountEvent: {...(localSettings.specialDiscountEvent || {} as any), startsAt: e.target.value ? new Date(e.target.value).toISOString() : undefined}})}
-                                      className="w-full p-2 border rounded text-sm"
-                                  />
-                              </div>
-                              <div>
-                                  <label className="text-[10px] font-bold text-slate-600 block">End Date/Time</label>
-                                  <input
-                                      type="datetime-local"
-                                      value={localSettings.specialDiscountEvent?.endsAt ? new Date(localSettings.specialDiscountEvent.endsAt).toISOString().slice(0, 16) : ''}
-                                      onChange={e => setLocalSettings({...localSettings, specialDiscountEvent: {...(localSettings.specialDiscountEvent || {} as any), endsAt: e.target.value ? new Date(e.target.value).toISOString() : undefined}})}
-                                      className="w-full p-2 border rounded text-sm"
-                                  />
-                              </div>
+                              )}
                           </div>
 
-                          <div className="flex items-center gap-4 mt-4">
-                               <label className="flex items-center gap-2 text-xs font-bold text-slate-700">
-                                  <input type="checkbox" checked={localSettings.specialDiscountEvent?.showToFreeUsers ?? true} onChange={e => setLocalSettings({...localSettings, specialDiscountEvent: {...(localSettings.specialDiscountEvent || {} as any), showToFreeUsers: e.target.checked}})} className="accent-blue-600" /> Show to Free Users
-                               </label>
-                               <label className="flex items-center gap-2 text-xs font-bold text-slate-700">
-                                  <input type="checkbox" checked={localSettings.specialDiscountEvent?.showToPremiumUsers ?? true} onChange={e => setLocalSettings({...localSettings, specialDiscountEvent: {...(localSettings.specialDiscountEvent || {} as any), showToPremiumUsers: e.target.checked}})} className="accent-blue-600" /> Show to Premium Users
-                               </label>
-                          </div>
-                      </div>
-                  )}
-
-                  {/* POPUP CONFIGURATIONS */}
-                  <h5 className="font-bold text-slate-800 mt-6 mb-3 border-t pt-4">Automatic Popup Triggers</h5>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* Expiry Warning Popup */}
-                      <div className="bg-white p-4 rounded-xl border border-slate-200">
-                          <div className="flex items-center justify-between mb-3">
-                              <span className="text-xs font-bold text-red-600 flex items-center gap-1"><AlertOctagon size={14}/> Expiry Warning</span>
-                              <input
-                                  type="checkbox"
-                                  checked={localSettings.popupConfigs?.isExpiryWarningEnabled ?? true}
-                                  onChange={e => setLocalSettings({...localSettings, popupConfigs: {...(localSettings.popupConfigs || {} as any), isExpiryWarningEnabled: e.target.checked}})}
-                                  className="w-4 h-4 accent-red-600"
-                              />
-                          </div>
-                          {localSettings.popupConfigs?.isExpiryWarningEnabled !== false && (
-                              <div className="grid grid-cols-2 gap-2">
+                          {/* Upsell Popup */}
+                          <div className="bg-white p-4 rounded-xl border border-slate-200">
+                              <div className="flex items-center justify-between mb-3">
+                                  <span className="text-xs font-bold text-green-600 flex items-center gap-1"><ArrowUpCircle size={14}/> Upsell Promotion</span>
+                                  <input
+                                      type="checkbox"
+                                      checked={localSettings.popupConfigs?.isUpsellEnabled ?? true}
+                                      onChange={e => setLocalSettings({...localSettings, popupConfigs: {...(localSettings.popupConfigs || {} as any), isUpsellEnabled: e.target.checked}})}
+                                      className="w-4 h-4 accent-green-600"
+                                  />
+                              </div>
+                              {localSettings.popupConfigs?.isUpsellEnabled !== false && (
                                   <div>
-                                      <label className="text-[10px] text-slate-600">Trigger (Hours before)</label>
+                                      <label className="text-[10px] text-slate-600">Show Interval (Minutes)</label>
                                       <input
                                           type="number"
-                                          value={localSettings.popupConfigs?.expiryWarningHours ?? 24}
-                                          onChange={e => setLocalSettings({...localSettings, popupConfigs: {...(localSettings.popupConfigs || {} as any), expiryWarningHours: Number(e.target.value)}})}
+                                          value={localSettings.popupConfigs?.upsellPopupIntervalMinutes ?? 120}
+                                          onChange={e => setLocalSettings({...localSettings, popupConfigs: {...(localSettings.popupConfigs || {} as any), upsellPopupIntervalMinutes: Number(e.target.value)}})}
                                           className="w-full p-1.5 border rounded text-xs"
                                       />
                                   </div>
-                                  <div>
-                                      <label className="text-[10px] text-slate-600">Interval (Minutes)</label>
-                                      <input
-                                          type="number"
-                                          value={localSettings.popupConfigs?.expiryWarningIntervalMinutes ?? 60}
-                                          onChange={e => setLocalSettings({...localSettings, popupConfigs: {...(localSettings.popupConfigs || {} as any), expiryWarningIntervalMinutes: Number(e.target.value)}})}
-                                          className="w-full p-1.5 border rounded text-xs"
-                                      />
-                                  </div>
-                              </div>
-                          )}
-                      </div>
-
-                      {/* Upsell Popup */}
-                      <div className="bg-white p-4 rounded-xl border border-slate-200">
-                          <div className="flex items-center justify-between mb-3">
-                              <span className="text-xs font-bold text-green-600 flex items-center gap-1"><ArrowUpCircle size={14}/> Upsell Promotion</span>
-                              <input
-                                  type="checkbox"
-                                  checked={localSettings.popupConfigs?.isUpsellEnabled ?? true}
-                                  onChange={e => setLocalSettings({...localSettings, popupConfigs: {...(localSettings.popupConfigs || {} as any), isUpsellEnabled: e.target.checked}})}
-                                  className="w-4 h-4 accent-green-600"
-                              />
+                              )}
                           </div>
-                          {localSettings.popupConfigs?.isUpsellEnabled !== false && (
-                              <div>
-                                  <label className="text-[10px] text-slate-600">Show Interval (Minutes)</label>
-                                  <input
-                                      type="number"
-                                      value={localSettings.popupConfigs?.upsellPopupIntervalMinutes ?? 120}
-                                      onChange={e => setLocalSettings({...localSettings, popupConfigs: {...(localSettings.popupConfigs || {} as any), upsellPopupIntervalMinutes: Number(e.target.value)}})}
-                                      className="w-full p-1.5 border rounded text-xs"
-                                  />
-                              </div>
-                          )}
                       </div>
                   </div>
-              </div>
 
-              {/* NEW SUBSCRIPTION PLAN EDITOR (Full Control) */}
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mt-4 overflow-hidden">
-                  <div className="flex items-center justify-between mb-4">
-                      <h4 className="font-bold text-slate-800 flex items-center gap-2"><Crown size={18} className="text-yellow-500" /> Subscription Plans (Store View)</h4>
-                      <button
-                          onClick={() => {
-                              const newPlan = {
-                                  id: `plan-${Date.now()}`,
-                                  name: 'New Plan',
-                                  duration: '30 days',
-                                  basicPrice: 99,
-                                  basicOriginalPrice: 199,
-                                  ultraPrice: 149,
-                                  ultraOriginalPrice: 299,
-                                  features: ['New Feature'],
-                                  popular: false
+                  {/* NEW SUBSCRIPTION PLAN EDITOR (Full Control) */}
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mt-4 overflow-hidden">
+                      <div className="flex items-center justify-between mb-4">
+                          <h4 className="font-bold text-slate-800 flex items-center gap-2"><Crown size={18} className="text-yellow-500" /> Subscription Plans (Store View)</h4>
+                          <button
+                              onClick={() => {
+                                  const newPlan = {
+                                      id: `plan-${Date.now()}`,
+                                      name: 'New Plan',
+                                      duration: '30 days',
+                                      basicPrice: 99,
+                                      basicOriginalPrice: 199,
+                                      ultraPrice: 149,
+                                      ultraOriginalPrice: 299,
+                                      features: ['New Feature'],
+                                      popular: false
+                                  };
+                                  const current = Array.isArray(localSettings.subscriptionPlans) ? localSettings.subscriptionPlans : [];
+                                  setLocalSettings({...localSettings, subscriptionPlans: [...current, newPlan]});
+                              }}
+                              className="bg-slate-800 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-slate-700 transition-colors flex items-center gap-1"
+                          >
+                              <Plus size={14} /> Add Plan
+                          </button>
+                      </div>
+                      <div className="space-y-4">
+                          {(Array.isArray(localSettings.subscriptionPlans) ? localSettings.subscriptionPlans : []).map((plan, idx) => {
+                              const updatePlan = (field: string, value: any) => {
+                                  const current = Array.isArray(localSettings.subscriptionPlans) ? localSettings.subscriptionPlans : [];
+                                  const newPlans = [...current];
+                                  newPlans[idx] = { ...newPlans[idx], [field]: value };
+                                  setLocalSettings({...localSettings, subscriptionPlans: newPlans});
                               };
-                              setLocalSettings({...localSettings, subscriptionPlans: [...(localSettings.subscriptionPlans || []), newPlan]});
-                          }}
-                          className="bg-slate-800 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-slate-700 transition-colors flex items-center gap-1"
-                      >
-                          <Plus size={14} /> Add Plan
-                      </button>
-                  </div>
-                  <div className="space-y-4">
-                      {(localSettings.subscriptionPlans || []).map((plan, idx) => {
-                          const updatePlan = (field: string, value: any) => {
-                              const newPlans = [...localSettings.subscriptionPlans!];
-                              newPlans[idx] = { ...newPlans[idx], [field]: value };
-                              setLocalSettings({...localSettings, subscriptionPlans: newPlans});
-                          };
 
-                          return (
-                              <div key={plan.id} className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm relative group transition-all hover:border-blue-200">
-                                  <button
-                                      onClick={() => {
-                                          if(confirm("Delete this plan?")) {
-                                              const newPlans = localSettings.subscriptionPlans!.filter(p => p.id !== plan.id);
-                                              setLocalSettings({...localSettings, subscriptionPlans: newPlans});
-                                          }
-                                      }}
-                                      className="absolute top-4 right-4 text-red-400 hover:text-red-600 bg-red-50 p-1.5 rounded opacity-0 group-hover:opacity-100 transition-opacity"
-                                  >
-                                      <Trash2 size={16} />
-                                  </button>
+                              return (
+                                  <div key={plan.id} className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm relative group transition-all hover:border-blue-200">
+                                      <button
+                                          onClick={() => {
+                                              if(confirm("Delete this plan?")) {
+                                                  const current = Array.isArray(localSettings.subscriptionPlans) ? localSettings.subscriptionPlans : [];
+                                                  const newPlans = current.filter(p => p.id !== plan.id);
+                                                  setLocalSettings({...localSettings, subscriptionPlans: newPlans});
+                                              }
+                                          }}
+                                          className="absolute top-4 right-4 text-red-400 hover:text-red-600 bg-red-50 p-1.5 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                                      >
+                                          <Trash2 size={16} />
+                                      </button>
 
-                                  <div className="grid grid-cols-2 gap-4 mb-4 pr-10">
-                                      <div>
-                                          <label className="text-[10px] font-bold text-slate-600 uppercase">Plan Name</label>
-                                          <input type="text" value={plan.name} onChange={e => updatePlan('name', e.target.value)} className="w-full p-2 border rounded font-bold" placeholder="e.g. Monthly" />
-                                      </div>
-                                      <div>
-                                          <label className="text-[10px] font-bold text-slate-600 uppercase">Duration Label</label>
-                                          <input type="text" value={plan.duration} onChange={e => updatePlan('duration', e.target.value)} className="w-full p-2 border rounded font-medium text-slate-600" placeholder="e.g. 30 days" />
-                                      </div>
-                                  </div>
-
-                                  <div className="grid grid-cols-2 gap-4">
-                                      {/* BASIC TIER CONFIG */}
-                                      <div className="bg-blue-50/50 p-3 rounded-xl border border-blue-100">
-                                          <h5 className="text-xs font-black text-blue-800 mb-2 flex items-center justify-between">BASIC (PRO) TIER</h5>
-                                          <div className="flex gap-2">
-                                              <div className="flex-1">
-                                                  <label className="text-[9px] font-bold text-slate-600 block">Dummy Price (₹)</label>
-                                                  <input type="number" value={plan.basicOriginalPrice} onChange={e => updatePlan('basicOriginalPrice', Number(e.target.value))} className="w-full p-1.5 border rounded text-xs line-through text-slate-500" />
-                                              </div>
-                                              <div className="flex-1">
-                                                  <label className="text-[9px] font-bold text-blue-600 block">Selling Price (₹)</label>
-                                                  <input type="number" value={plan.basicPrice} onChange={e => updatePlan('basicPrice', Number(e.target.value))} className="w-full p-1.5 border border-blue-300 rounded text-xs font-bold text-blue-700 bg-blue-50" />
-                                              </div>
+                                      <div className="grid grid-cols-2 gap-4 mb-4 pr-10">
+                                          <div>
+                                              <label className="text-[10px] font-bold text-slate-600 uppercase">Plan Name</label>
+                                              <input type="text" value={plan.name} onChange={e => updatePlan('name', e.target.value)} className="w-full p-2 border rounded font-bold" placeholder="e.g. Monthly" />
                                           </div>
-                                          <div className="mt-2">
-                                              <label className="text-[9px] font-bold text-amber-700 block">🪙 Pro Credit Price (CR)</label>
-                                              <input type="number" placeholder="Default duration price use hogi" value={plan.creditPriceBasic ?? ''} onChange={e => updatePlan('creditPriceBasic', e.target.value === '' ? undefined : Number(e.target.value))} className="w-full p-1.5 border border-amber-300 rounded text-xs font-bold text-amber-900 bg-amber-50/70" />
+                                          <div>
+                                              <label className="text-[10px] font-bold text-slate-600 uppercase">Duration Label</label>
+                                              <input type="text" value={plan.duration} onChange={e => updatePlan('duration', e.target.value)} className="w-full p-2 border rounded font-medium text-slate-600" placeholder="e.g. 30 days" />
                                           </div>
                                       </div>
 
-                                      {/* ULTRA TIER CONFIG */}
-                                      <div className="bg-purple-50/50 p-3 rounded-xl border border-purple-100">
-                                          <h5 className="text-xs font-black text-purple-800 mb-2 flex items-center justify-between">ULTRA (MAX) TIER</h5>
-                                          <div className="flex gap-2">
-                                              <div className="flex-1">
-                                                  <label className="text-[9px] font-bold text-slate-600 block">Dummy Price (₹)</label>
-                                                  <input type="number" value={plan.ultraOriginalPrice} onChange={e => updatePlan('ultraOriginalPrice', Number(e.target.value))} className="w-full p-1.5 border rounded text-xs line-through text-slate-500" />
+                                      <div className="grid grid-cols-2 gap-4">
+                                          {/* BASIC TIER CONFIG */}
+                                          <div className="bg-blue-50/50 p-3 rounded-xl border border-blue-100">
+                                              <h5 className="text-xs font-black text-blue-800 mb-2 flex items-center justify-between">BASIC (PRO) TIER</h5>
+                                              <div className="flex gap-2">
+                                                  <div className="flex-1">
+                                                      <label className="text-[9px] font-bold text-slate-600 block">Dummy Price (₹)</label>
+                                                      <input type="number" value={plan.basicOriginalPrice} onChange={e => updatePlan('basicOriginalPrice', Number(e.target.value))} className="w-full p-1.5 border rounded text-xs line-through text-slate-500" />
+                                                  </div>
+                                                  <div className="flex-1">
+                                                      <label className="text-[9px] font-bold text-blue-600 block">Selling Price (₹)</label>
+                                                      <input type="number" value={plan.basicPrice} onChange={e => updatePlan('basicPrice', Number(e.target.value))} className="w-full p-1.5 border border-blue-300 rounded text-xs font-bold text-blue-700 bg-blue-50" />
+                                                  </div>
                                               </div>
-                                              <div className="flex-1">
-                                                  <label className="text-[9px] font-bold text-purple-600 block">Selling Price (₹)</label>
-                                                  <input type="number" value={plan.ultraPrice} onChange={e => updatePlan('ultraPrice', Number(e.target.value))} className="w-full p-1.5 border border-purple-300 rounded text-xs font-bold text-purple-700 bg-purple-50" />
+                                              <div className="mt-2">
+                                                  <label className="text-[9px] font-bold text-amber-700 block">🪙 Pro Credit Price (CR)</label>
+                                                  <input type="number" placeholder="Default duration price use hogi" value={plan.creditPriceBasic ?? ''} onChange={e => updatePlan('creditPriceBasic', e.target.value === '' ? undefined : Number(e.target.value))} className="w-full p-1.5 border border-amber-300 rounded text-xs font-bold text-amber-900 bg-amber-50/70" />
                                               </div>
                                           </div>
-                                          <div className="mt-2">
-                                              <label className="text-[9px] font-bold text-amber-700 block">🪙 Max Credit Price (CR)</label>
-                                              <input type="number" placeholder="Default duration price use hogi" value={plan.creditPriceUltra ?? ''} onChange={e => updatePlan('creditPriceUltra', e.target.value === '' ? undefined : Number(e.target.value))} className="w-full p-1.5 border border-amber-300 rounded text-xs font-bold text-amber-900 bg-amber-50/70" />
+
+                                          {/* ULTRA TIER CONFIG */}
+                                          <div className="bg-purple-50/50 p-3 rounded-xl border border-purple-100">
+                                              <h5 className="text-xs font-black text-purple-800 mb-2 flex items-center justify-between">ULTRA (MAX) TIER</h5>
+                                              <div className="flex gap-2">
+                                                  <div className="flex-1">
+                                                      <label className="text-[9px] font-bold text-slate-600 block">Dummy Price (₹)</label>
+                                                      <input type="number" value={plan.ultraOriginalPrice} onChange={e => updatePlan('ultraOriginalPrice', Number(e.target.value))} className="w-full p-1.5 border rounded text-xs line-through text-slate-500" />
+                                                  </div>
+                                                  <div className="flex-1">
+                                                      <label className="text-[9px] font-bold text-purple-600 block">Selling Price (₹)</label>
+                                                      <input type="number" value={plan.ultraPrice} onChange={e => updatePlan('ultraPrice', Number(e.target.value))} className="w-full p-1.5 border border-purple-300 rounded text-xs font-bold text-purple-700 bg-purple-50" />
+                                                  </div>
+                                              </div>
+                                              <div className="mt-2">
+                                                  <label className="text-[9px] font-bold text-amber-700 block">🪙 Max Credit Price (CR)</label>
+                                                  <input type="number" placeholder="Default duration price use hogi" value={plan.creditPriceUltra ?? ''} onChange={e => updatePlan('creditPriceUltra', e.target.value === '' ? undefined : Number(e.target.value))} className="w-full p-1.5 border border-amber-300 rounded text-xs font-bold text-amber-900 bg-amber-50/70" />
+                                              </div>
                                           </div>
                                       </div>
                                   </div>
-                              </div>
-                          );
-                      })}
+                              );
+                          })}
+                      </div>
                   </div>
-              </div>
 
-              {/* CREDIT PASSES */}
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mt-4">
-                  <div className="flex items-center justify-between mb-4">
-                      <h4 className="font-bold text-slate-800 flex items-center gap-2">⚡ Daily Credit Passes</h4>
-                      <button
-                          onClick={() => {
-                              const newPlan = {
-                                  id: `credit-pass-${Date.now()}`,
-                                  name: 'New Credit Pass',
-                                  dailyCredits: 100,
-                                  scoreMultiplier: 1.1,
-                                  price: 299,
-                                  weeklyPrice: 99,
-                                  isActive: true,
-                                  popular: false
+                  {/* CREDIT PASSES */}
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mt-4">
+                      <div className="flex items-center justify-between mb-4">
+                          <h4 className="font-bold text-slate-800 flex items-center gap-2">⚡ Daily Credit Passes</h4>
+                          <button
+                              onClick={() => {
+                                  const newPlan = {
+                                      id: `credit-pass-${Date.now()}`,
+                                      name: 'New Credit Pass',
+                                      dailyCredits: 100,
+                                      scoreMultiplier: 1.1,
+                                      price: 299,
+                                      weeklyPrice: 99,
+                                      isActive: true,
+                                      popular: false
+                                  };
+                                  const current = Array.isArray(localSettings.creditSubscriptionPlans) ? localSettings.creditSubscriptionPlans : DEFAULT_CREDIT_SUB_PLANS;
+                                  setLocalSettings({...localSettings, creditSubscriptionPlans: [...current, newPlan]});
+                              }}
+                              className="bg-slate-800 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-slate-700 transition-colors flex items-center gap-1"
+                          >
+                              <Plus size={14} /> Add Credit Pass
+                          </button>
+                      </div>
+                      <div className="space-y-4">
+                          {(Array.isArray(localSettings.creditSubscriptionPlans) ? localSettings.creditSubscriptionPlans : DEFAULT_CREDIT_SUB_PLANS).map((plan, idx) => {
+                              const updatePlan = (field: string, value: any) => {
+                                  const current = Array.isArray(localSettings.creditSubscriptionPlans) ? localSettings.creditSubscriptionPlans : DEFAULT_CREDIT_SUB_PLANS;
+                                  const newPlans = [...current];
+                                  newPlans[idx] = { ...newPlans[idx], [field]: value };
+                                  setLocalSettings({...localSettings, creditSubscriptionPlans: newPlans});
                               };
-                              const current = localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS;
-                              setLocalSettings({...localSettings, creditSubscriptionPlans: [...current, newPlan]});
-                          }}
-                          className="bg-slate-800 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-slate-700 transition-colors flex items-center gap-1"
-                      >
-                          <Plus size={14} /> Add Credit Pass
-                      </button>
-                  </div>
-                  <div className="space-y-4">
-                      {(localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS).map((plan, idx) => {
-                          const updatePlan = (field: string, value: any) => {
-                              const current = localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS;
-                              const newPlans = [...current];
-                              newPlans[idx] = { ...newPlans[idx], [field]: value };
-                              setLocalSettings({...localSettings, creditSubscriptionPlans: newPlans});
-                          };
-                          return (
-                              <div key={plan.id} className="bg-white p-3 rounded-lg border border-slate-200 relative grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 items-end">
-                                  <button onClick={() => {
-                                      if(!confirm('Delete this pass?')) return;
-                                      const current = localSettings.creditSubscriptionPlans || DEFAULT_CREDIT_SUB_PLANS;
-                                      const newPlans = current.filter(p => p.id !== plan.id);
-                                      setLocalSettings({...localSettings, creditSubscriptionPlans: newPlans});
-                                  }} className="absolute -top-2 -right-2 bg-red-100 text-red-600 p-1 rounded-full hover:bg-red-200"><X size={14}/></button>
+                              return (
+                                  <div key={plan.id} className="bg-white p-3 rounded-lg border border-slate-200 relative grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 items-end">
+                                      <button onClick={() => {
+                                          if(!confirm('Delete this pass?')) return;
+                                          const current = Array.isArray(localSettings.creditSubscriptionPlans) ? localSettings.creditSubscriptionPlans : DEFAULT_CREDIT_SUB_PLANS;
+                                          const newPlans = current.filter(p => p.id !== plan.id);
+                                          setLocalSettings({...localSettings, creditSubscriptionPlans: newPlans});
+                                      }} className="absolute -top-2 -right-2 bg-red-100 text-red-600 p-1 rounded-full hover:bg-red-200"><X size={14}/></button>
 
-                                  <div>
-                                      <label className="text-[10px] text-slate-500 font-bold">Pass Name</label>
-                                      <input type="text" value={plan.name} onChange={e => updatePlan('name', e.target.value)} className="w-full p-2 border rounded-lg text-xs font-bold" />
+                                      <div>
+                                          <label className="text-[10px] text-slate-500 font-bold">Pass Name</label>
+                                          <input type="text" value={plan.name} onChange={e => updatePlan('name', e.target.value)} className="w-full p-2 border rounded-lg text-xs font-bold" />
+                                      </div>
+                                      <div>
+                                          <label className="text-[10px] text-slate-500 font-bold">Daily Credits 🪙</label>
+                                          <input type="number" value={plan.dailyCredits || 0} onChange={e => updatePlan('dailyCredits', Number(e.target.value))} className="w-full p-2 border rounded-lg text-xs" />
+                                      </div>
+                                      <div>
+                                          <label className="text-[10px] text-slate-500 font-bold">XP Boost (e.g. 1.2 = +20%)</label>
+                                          <input type="number" step="0.1" value={plan.scoreMultiplier || 1.0} onChange={e => updatePlan('scoreMultiplier', Number(e.target.value))} className="w-full p-2 border rounded-lg text-xs" />
+                                      </div>
+                                      <div>
+                                          <label className="text-[10px] text-slate-500 font-bold">Monthly Price (₹)</label>
+                                          <input type="number" value={plan.price} onChange={e => updatePlan('price', Number(e.target.value))} className="w-full p-2 border rounded-lg text-xs font-bold text-green-600" />
+                                      </div>
+                                      <div>
+                                          <label className="text-[10px] text-slate-500 font-bold">Weekly Price (₹)</label>
+                                          <input type="number" value={plan.weeklyPrice || 0} onChange={e => updatePlan('weeklyPrice', Number(e.target.value))} className="w-full p-2 border rounded-lg text-xs font-bold text-blue-600" />
+                                      </div>
+                                      <div className="flex items-center gap-2 pb-2">
+                                          <input type="checkbox" checked={plan.isActive !== false} onChange={e => updatePlan('isActive', e.target.checked)} className="w-4 h-4 accent-green-600"/>
+                                          <label className="text-xs font-bold text-slate-700">Active</label>
+                                      </div>
                                   </div>
-                                  <div>
-                                      <label className="text-[10px] text-slate-500 font-bold">Daily Credits 🪙</label>
-                                      <input type="number" value={plan.dailyCredits || 0} onChange={e => updatePlan('dailyCredits', Number(e.target.value))} className="w-full p-2 border rounded-lg text-xs" />
-                                  </div>
-                                  <div>
-                                      <label className="text-[10px] text-slate-500 font-bold">XP Boost (e.g. 1.2 = +20%)</label>
-                                      <input type="number" step="0.1" value={plan.scoreMultiplier || 1.0} onChange={e => updatePlan('scoreMultiplier', Number(e.target.value))} className="w-full p-2 border rounded-lg text-xs" />
-                                  </div>
-                                  <div>
-                                      <label className="text-[10px] text-slate-500 font-bold">Monthly Price (₹)</label>
-                                      <input type="number" value={plan.price} onChange={e => updatePlan('price', Number(e.target.value))} className="w-full p-2 border rounded-lg text-xs font-bold text-green-600" />
-                                  </div>
-                                  <div>
-                                      <label className="text-[10px] text-slate-500 font-bold">Weekly Price (₹)</label>
-                                      <input type="number" value={plan.weeklyPrice || 0} onChange={e => updatePlan('weeklyPrice', Number(e.target.value))} className="w-full p-2 border rounded-lg text-xs font-bold text-blue-600" />
-                                  </div>
-                                  <div className="flex items-center gap-2 pb-2">
-                                      <input type="checkbox" checked={plan.isActive !== false} onChange={e => updatePlan('isActive', e.target.checked)} className="w-4 h-4 accent-green-600"/>
-                                      <label className="text-xs font-bold text-slate-700">Active</label>
-                                  </div>
-                              </div>
-                          );
-                      })}
+                              );
+                          })}
+                      </div>
                   </div>
-              </div>
 
-              {/* DIAMOND PASSES */}
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mt-4">
-                  <div className="flex items-center justify-between mb-4">
-                      <h4 className="font-bold text-slate-800 flex items-center gap-2">💎 Diamond Passes</h4>
-                  </div>
-                  
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {/* Diamond Tiers */}
-                    <div>
-                        <div className="flex justify-between items-center mb-2">
-                            <h5 className="font-bold text-sm text-slate-700">Tiers & Daily Drops</h5>
-                            <button onClick={() => {
-                                const newT = { id: `dia-${Date.now()}`, name: 'New Diamond', icon: '💎', dailyDiamonds: 10, features: [] };
-                                const current = localSettings.diamondTemplates || [];
-                                setLocalSettings({...localSettings, diamondTemplates: [...current, newT]});
-                            }} className="text-xs bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded font-bold text-slate-700">+ Add Tier</button>
+                  {/* DIAMOND PASSES */}
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mt-4">
+                      <div className="flex items-center justify-between mb-4">
+                          <h4 className="font-bold text-slate-800 flex items-center gap-2">💎 Diamond Passes</h4>
+                      </div>
+                      
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* Diamond Tiers */}
+                        <div>
+                            <div className="flex justify-between items-center mb-2">
+                                <h5 className="font-bold text-sm text-slate-700">Tiers & Daily Drops</h5>
+                                <button onClick={() => {
+                                    const newT = { id: `dia-${Date.now()}`, name: 'New Diamond', icon: '💎', dailyDiamonds: 10, features: [] };
+                                    const current = Array.isArray(localSettings.diamondTemplates) ? localSettings.diamondTemplates : [];
+                                    setLocalSettings({...localSettings, diamondTemplates: [...current, newT]});
+                                }} className="text-xs bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded font-bold text-slate-700">+ Add Tier</button>
+                            </div>
+                            <div className="space-y-3">
+                                {((Array.isArray(localSettings.diamondTemplates) ? localSettings.diamondTemplates : null) || [
+                                    { id: 'starter_diamond', name: 'Starter Diamond Pass', icon: '💎', dailyDiamonds: 10, features: ['Daily 10 💎 Drop Claim'] },
+                                    { id: 'active_diamond', name: 'Active Diamond Pass', icon: '⚡', dailyDiamonds: 20, features: ['Daily 20 💎 Drop Claim'] },
+                                    { id: 'premium_diamond', name: 'Premium Diamond Pass', icon: '🌟', dailyDiamonds: 30, features: ['Daily 30 💎 Drop Claim'] },
+                                    { id: 'elite_diamond', name: 'Elite Diamond Pass', icon: '👑', dailyDiamonds: 50, features: ['Daily 50 💎 Huge Drop'] }
+                                ]).map((template) => {
+                                    const updateT = (field: string, val: any) => {
+                                        const current = Array.isArray(localSettings.diamondTemplates) ? localSettings.diamondTemplates : [];
+                                        const newT = current.map(t => t.id === template.id ? {...t, [field]: val} : t);
+                                        setLocalSettings({...localSettings, diamondTemplates: newT});
+                                    };
+                                    return (
+                                        <div key={template.id} className="bg-white p-3 rounded-lg border border-slate-200 relative flex flex-col gap-2">
+                                            <button onClick={() => {
+                                                if(!confirm('Delete this tier?')) return;
+                                                const current = Array.isArray(localSettings.diamondTemplates) ? localSettings.diamondTemplates : [];
+                                                setLocalSettings({...localSettings, diamondTemplates: current.filter(t => t.id !== template.id)});
+                                            }} className="absolute top-2 right-2 text-red-500 hover:bg-red-50 p-1 rounded"><X size={14}/></button>
+                                            <div className="flex gap-2 items-center">
+                                                <input type="text" value={template.icon} onChange={e => updateT('icon', e.target.value)} className="w-10 p-2 border rounded-lg text-center" />
+                                                <input type="text" value={template.name} onChange={e => updateT('name', e.target.value)} className="flex-1 p-2 border rounded-lg text-xs font-bold" />
+                                                <div className="flex items-center gap-1 bg-slate-50 border rounded-lg px-2">
+                                                    <input type="number" value={template.dailyDiamonds} onChange={e => updateT('dailyDiamonds', Number(e.target.value))} className="w-16 p-1 text-center font-black text-sky-600 bg-transparent outline-none" />
+                                                    <span className="text-xs font-bold text-slate-500">💎/d</span>
+                                                </div>
+                                            </div>
+                                            <input type="text" value={(Array.isArray(template.features) ? template.features : (typeof template.features === 'string' ? [template.features] : [])).join(', ')} onChange={e => updateT('features', e.target.value.split(',').map(s=>s.trim()).filter(Boolean))} placeholder="Features (comma separated)" className="w-full p-2 border rounded-lg text-xs text-slate-600" />
+                                        </div>
+                                    )
+                                })}
+                            </div>
                         </div>
-                        <div className="space-y-3">
-                            {(localSettings.diamondTemplates || [
-                                { id: 'starter_diamond', name: 'Starter Diamond Pass', icon: '💎', dailyDiamonds: 10, features: ['Daily 10 💎 Drop Claim'] },
-                                { id: 'active_diamond', name: 'Active Diamond Pass', icon: '⚡', dailyDiamonds: 20, features: ['Daily 20 💎 Drop Claim'] },
-                                { id: 'premium_diamond', name: 'Premium Diamond Pass', icon: '🌟', dailyDiamonds: 30, features: ['Daily 30 💎 Drop Claim'] },
-                                { id: 'elite_diamond', name: 'Elite Diamond Pass', icon: '👑', dailyDiamonds: 50, features: ['Daily 50 💎 Huge Drop'] }
-                            ]).map((template) => {
-                                const updateT = (field: string, val: any) => {
-                                    const current = localSettings.diamondTemplates || [];
-                                    const newT = current.map(t => t.id === template.id ? {...t, [field]: val} : t);
-                                    setLocalSettings({...localSettings, diamondTemplates: newT});
-                                };
-                                return (
-                                    <div key={template.id} className="bg-white p-3 rounded-lg border border-slate-200 relative flex flex-col gap-2">
-                                        <button onClick={() => {
-                                            if(!confirm('Delete this tier?')) return;
-                                            const current = localSettings.diamondTemplates || [];
-                                            setLocalSettings({...localSettings, diamondTemplates: current.filter(t => t.id !== template.id)});
-                                        }} className="absolute top-2 right-2 text-red-500 hover:bg-red-50 p-1 rounded"><X size={14}/></button>
-                                        <div className="flex gap-2 items-center">
-                                            <input type="text" value={template.icon} onChange={e => updateT('icon', e.target.value)} className="w-10 p-2 border rounded-lg text-center" />
-                                            <input type="text" value={template.name} onChange={e => updateT('name', e.target.value)} className="flex-1 p-2 border rounded-lg text-xs font-bold" />
-                                            <div className="flex items-center gap-1 bg-slate-50 border rounded-lg px-2">
-                                                <input type="number" value={template.dailyDiamonds} onChange={e => updateT('dailyDiamonds', Number(e.target.value))} className="w-16 p-1 text-center font-black text-sky-600 bg-transparent outline-none" />
-                                                <span className="text-xs font-bold text-slate-500">💎/d</span>
+
+                        {/* Diamond Durations */}
+                        <div>
+                            <div className="flex justify-between items-center mb-2">
+                                <h5 className="font-bold text-sm text-slate-700">Validities & Pricing Multipliers</h5>
+                                <button onClick={() => {
+                                    const newD = { id: `dur-${Date.now()}`, label: 'New', days: 30, ratePerDiamond: 1.5 };
+                                    const current = Array.isArray(localSettings.diamondDurations) ? localSettings.diamondDurations : [];
+                                    setLocalSettings({...localSettings, diamondDurations: [...current, newD]});
+                                }} className="text-xs bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded font-bold text-slate-700">+ Add Validity</button>
+                            </div>
+                            <div className="space-y-3">
+                                {((Array.isArray(localSettings.diamondDurations) ? localSettings.diamondDurations : null) || [
+                                    { id: '7_DAYS', label: '7D', days: 7, ratePerDiamond: 2.00 },
+                                    { id: '30_DAYS', label: '1M', days: 30, ratePerDiamond: 1.50 },
+                                    { id: '90_DAYS', label: '3M', days: 90, ratePerDiamond: 1.30 },
+                                    { id: '180_DAYS', label: '6M', days: 180, ratePerDiamond: 1.15 },
+                                    { id: '365_DAYS', label: '1Y', days: 365, ratePerDiamond: 1.00 }
+                                ]).map((dur) => {
+                                    const updateD = (field: string, val: any) => {
+                                        const current = Array.isArray(localSettings.diamondDurations) ? localSettings.diamondDurations : [];
+                                        const newD = current.map(d => d.id === dur.id ? {...d, [field]: val} : d);
+                                        setLocalSettings({...localSettings, diamondDurations: newD});
+                                    };
+                                    return (
+                                        <div key={dur.id} className="bg-white p-2 rounded-lg border border-slate-200 relative flex items-center justify-between gap-2">
+                                            <button onClick={() => {
+                                                if(!confirm('Delete this validity?')) return;
+                                                const current = Array.isArray(localSettings.diamondDurations) ? localSettings.diamondDurations : [];
+                                                setLocalSettings({...localSettings, diamondDurations: current.filter(d => d.id !== dur.id)});
+                                            }} className="absolute -left-2 -top-2 bg-red-100 text-red-600 hover:bg-red-200 p-1 rounded-full"><X size={12}/></button>
+                                            <div className="flex items-center gap-2 flex-1 ml-2">
+                                                <input type="text" value={dur.label} onChange={e => updateD('label', e.target.value)} className="w-12 p-1.5 border rounded text-xs font-bold text-center" placeholder="e.g. 1M" />
+                                                <input type="number" value={dur.days} onChange={e => updateD('days', Number(e.target.value))} className="w-16 p-1.5 border rounded text-xs text-center" placeholder="Days" />
+                                                <span className="text-[10px] text-slate-500 font-bold">Days</span>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-[10px] text-slate-500 font-bold">₹ Rate per 💎:</span>
+                                                <input type="number" step="0.01" value={dur.ratePerDiamond} onChange={e => updateD('ratePerDiamond', Number(e.target.value))} className="w-20 p-1.5 border rounded text-xs font-bold text-green-600 bg-green-50 text-right" />
                                             </div>
                                         </div>
-                                        <input type="text" value={(template.features||[]).join(', ')} onChange={e => updateT('features', e.target.value.split(',').map(s=>s.trim()).filter(Boolean))} placeholder="Features (comma separated)" className="w-full p-2 border rounded-lg text-xs text-slate-600" />
-                                    </div>
-                                )
-                            })}
+                                    )
+                                })}
+                            </div>
                         </div>
-                    </div>
-
-                    {/* Diamond Durations */}
-                    <div>
-                        <div className="flex justify-between items-center mb-2">
-                            <h5 className="font-bold text-sm text-slate-700">Validities & Pricing Multipliers</h5>
-                            <button onClick={() => {
-                                const newD = { id: `dur-${Date.now()}`, label: 'New', days: 30, ratePerDiamond: 1.5 };
-                                const current = localSettings.diamondDurations || [];
-                                setLocalSettings({...localSettings, diamondDurations: [...current, newD]});
-                            }} className="text-xs bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded font-bold text-slate-700">+ Add Validity</button>
-                        </div>
-                        <div className="space-y-3">
-                            {(localSettings.diamondDurations || [
-                                { id: '7_DAYS', label: '7D', days: 7, ratePerDiamond: 2.00 },
-                                { id: '30_DAYS', label: '1M', days: 30, ratePerDiamond: 1.50 },
-                                { id: '90_DAYS', label: '3M', days: 90, ratePerDiamond: 1.30 },
-                                { id: '180_DAYS', label: '6M', days: 180, ratePerDiamond: 1.15 },
-                                { id: '365_DAYS', label: '1Y', days: 365, ratePerDiamond: 1.00 }
-                            ]).map((dur) => {
-                                const updateD = (field: string, val: any) => {
-                                    const current = localSettings.diamondDurations || [];
-                                    const newD = current.map(d => d.id === dur.id ? {...d, [field]: val} : d);
-                                    setLocalSettings({...localSettings, diamondDurations: newD});
-                                };
-                                return (
-                                    <div key={dur.id} className="bg-white p-2 rounded-lg border border-slate-200 relative flex items-center justify-between gap-2">
-                                        <button onClick={() => {
-                                            if(!confirm('Delete this validity?')) return;
-                                            const current = localSettings.diamondDurations || [];
-                                            setLocalSettings({...localSettings, diamondDurations: current.filter(d => d.id !== dur.id)});
-                                        }} className="absolute -left-2 -top-2 bg-red-100 text-red-600 hover:bg-red-200 p-1 rounded-full"><X size={12}/></button>
-                                        <div className="flex items-center gap-2 flex-1 ml-2">
-                                            <input type="text" value={dur.label} onChange={e => updateD('label', e.target.value)} className="w-12 p-1.5 border rounded text-xs font-bold text-center" placeholder="e.g. 1M" />
-                                            <input type="number" value={dur.days} onChange={e => updateD('days', Number(e.target.value))} className="w-16 p-1.5 border rounded text-xs text-center" placeholder="Days" />
-                                            <span className="text-[10px] text-slate-500 font-bold">Days</span>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-[10px] text-slate-500 font-bold">₹ Rate per 💎:</span>
-                                            <input type="number" step="0.01" value={dur.ratePerDiamond} onChange={e => updateD('ratePerDiamond', Number(e.target.value))} className="w-20 p-1.5 border rounded text-xs font-bold text-green-600 bg-green-50 text-right" />
-                                        </div>
-                                    </div>
-                                )
-                            })}
-                        </div>
-                    </div>
-                  </div>
-              </div>
-
-              {/* STORE FEATURE LIST (Moved from General Settings) */}
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mt-4">
-                  <h4 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><List size={18} /> Store Display Features</h4>
-                  <div className="grid grid-cols-2 gap-4">
-                      <div>
-                          <label className="text-xs font-bold text-blue-600 uppercase mb-2 block">Basic Plan Features</label>
-                          <textarea
-                              value={(localSettings.storeFeatures?.basic || DEFAULT_BASIC_FEATURES).join('\n')}
-                              onChange={e => setLocalSettings({...localSettings, storeFeatures: {...(localSettings.storeFeatures || {basic:[], ultra:[]}), basic: e.target.value.split('\n')}})}
-                              className="w-full h-32 p-2 border border-blue-200 rounded-lg text-xs"
-                              placeholder="One per line"
-                          />
-                      </div>
-                      <div>
-                          <label className="text-xs font-bold text-purple-600 uppercase mb-2 block">Ultra Plan Features</label>
-                          <textarea
-                              value={(localSettings.storeFeatures?.ultra || DEFAULT_ULTRA_FEATURES).join('\n')}
-                              onChange={e => setLocalSettings({...localSettings, storeFeatures: {...(localSettings.storeFeatures || {basic:[], ultra:[]}), ultra: e.target.value.split('\n')}})}
-                              className="w-full h-32 p-2 border border-purple-200 rounded-lg text-xs"
-                              placeholder="One per line"
-                          />
                       </div>
                   </div>
-              </div>
 
-              <div className="mt-8 flex justify-end">
-                  <button onClick={() => handleSaveSettings()} className="bg-green-600 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:bg-green-700 flex items-center gap-2">
-                      <Save size={18} /> Save Store Config
-                  </button>
+                  {/* STORE FEATURE LIST (Moved from General Settings) */}
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 mt-4">
+                      <h4 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><List size={18} /> Store Display Features</h4>
+                      <div className="grid grid-cols-2 gap-4">
+                          <div>
+                              <label className="text-xs font-bold text-blue-600 uppercase mb-2 block">Basic Plan Features</label>
+                              <textarea
+                                  value={(Array.isArray(localSettings.storeFeatures?.basic) ? localSettings.storeFeatures.basic : (Array.isArray(DEFAULT_BASIC_FEATURES) ? DEFAULT_BASIC_FEATURES : [])).join('\n')}
+                                  onChange={e => setLocalSettings({...localSettings, storeFeatures: {...(localSettings.storeFeatures || {basic:[], ultra:[]}), basic: e.target.value.split('\n')}})}
+                                  className="w-full h-32 p-2 border border-blue-200 rounded-lg text-xs"
+                                  placeholder="One per line"
+                              />
+                          </div>
+                          <div>
+                              <label className="text-xs font-bold text-purple-600 uppercase mb-2 block">Ultra Plan Features</label>
+                              <textarea
+                                  value={(Array.isArray(localSettings.storeFeatures?.ultra) ? localSettings.storeFeatures.ultra : (Array.isArray(DEFAULT_ULTRA_FEATURES) ? DEFAULT_ULTRA_FEATURES : [])).join('\n')}
+                                  onChange={e => setLocalSettings({...localSettings, storeFeatures: {...(localSettings.storeFeatures || {basic:[], ultra:[]}), ultra: e.target.value.split('\n')}})}
+                                  className="w-full h-32 p-2 border border-purple-200 rounded-lg text-xs"
+                                  placeholder="One per line"
+                              />
+                          </div>
+                      </div>
+                  </div>
+
+                  <div className="mt-8 flex justify-end">
+                      <button onClick={() => handleSaveSettings()} className="bg-green-600 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:bg-green-700 flex items-center gap-2">
+                          <Save size={18} /> Save Store Config
+                      </button>
+                  </div>
               </div>
-          </div>
-      )}
+            </ErrorBoundary>
+          );
+      })()}
 
       {/* --- MAINTENANCE CODE GENERATOR (SECURITY TAB) --- */}
       {activeTab === 'EVENT_MANAGER' && (
@@ -7048,8 +7101,8 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                       <div>
                           <h4 className="font-bold text-slate-800 text-sm flex items-center gap-2">
                               Card Rotating Border Animation
-                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${localSettings.cardBorderAnimation !== false ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>
-                                  {localSettings.cardBorderAnimation !== false ? 'ACTIVE' : 'OFF'}
+                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${localSettings.cardBorderAnimation === true ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>
+                                  {localSettings.cardBorderAnimation === true ? 'ACTIVE' : 'OFF'}
                               </span>
                           </h4>
                           <p className="text-[11px] text-slate-500 mt-0.5">
@@ -7060,12 +7113,12 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                   <button
                       type="button"
                       onClick={() => {
-                          const nextVal = localSettings.cardBorderAnimation === false ? true : false;
+                          const nextVal = localSettings.cardBorderAnimation === true ? false : true;
                           setLocalSettings({ ...localSettings, cardBorderAnimation: nextVal });
                       }}
-                      className={`w-12 h-6 rounded-full transition-colors relative shrink-0 p-0.5 ${localSettings.cardBorderAnimation !== false ? 'bg-blue-600' : 'bg-slate-300'}`}
+                      className={`w-12 h-6 rounded-full transition-colors relative shrink-0 p-0.5 ${localSettings.cardBorderAnimation === true ? 'bg-blue-600' : 'bg-slate-300'}`}
                   >
-                      <div className={`w-5 h-5 rounded-full bg-white shadow-md transition-transform ${localSettings.cardBorderAnimation !== false ? 'translate-x-6' : 'translate-x-0'}`} />
+                      <div className={`w-5 h-5 rounded-full bg-white shadow-md transition-transform ${localSettings.cardBorderAnimation === true ? 'translate-x-6' : 'translate-x-0'}`} />
                   </button>
               </div>
 
@@ -7207,6 +7260,25 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                   </div>
               </div>
 
+              {/* REFER & EARN PRIZES LINK BANNER */}
+              <div className="bg-gradient-to-r from-amber-50 to-purple-50 p-5 rounded-2xl border border-amber-200 mb-6 flex items-center justify-between gap-4 flex-wrap">
+                  <div className="flex items-center gap-3">
+                      <span className="p-2.5 rounded-xl bg-amber-500 text-slate-950 font-black shadow-sm text-lg">
+                          🎁
+                      </span>
+                      <div>
+                          <h4 className="font-black text-slate-900 text-base">Refer & Earn Prizes & Milestones</h4>
+                          <p className="text-xs text-slate-600">Students ke 1 se 50,000+ active friends ke rewards (Coins, Diamonds, VIP Passes) ko customize karein.</p>
+                      </div>
+                  </div>
+                  <button
+                      onClick={() => setActiveTab('REFERRAL_PRIZES_MANAGER')}
+                      className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs shadow-md shadow-purple-600/20 flex items-center gap-1.5 transition-all"
+                  >
+                      Manage Refer Prizes →
+                  </button>
+              </div>
+
               <div className="bg-yellow-50 p-6 rounded-2xl border border-yellow-100 mb-8">
                   <h4 className="font-bold text-yellow-900 mb-4">Add New Prize Rule</h4>
                   <div className="space-y-4">
@@ -7334,6 +7406,31 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
               
               <button onClick={() => handleSaveSettings()} className="w-full mt-6 bg-green-600 text-white font-bold py-3 rounded-xl shadow-lg hover:bg-green-700">Save Changes</button>
           </div>
+      )}
+
+      {/* --- REFERRAL PRIZES & MILESTONES MANAGER --- */}
+      {activeTab === 'REFERRAL_PRIZES_MANAGER' && (
+          <ReferralPrizesManager
+              settings={localSettings}
+              onSaveSettings={(updated) => {
+                  setLocalSettings(updated);
+                  handleSaveSettings(updated);
+              }}
+              onBack={() => setActiveTab('DASHBOARD')}
+              isSaving={isSettingsSaving}
+          />
+      )}
+
+      {/* --- PLAN COMPARISON MATRIX MANAGER (COMPARE) --- */}
+      {activeTab === 'PLAN_COMPARISON_MANAGER' && (
+          <PlanComparisonManager
+              settings={localSettings}
+              onUpdateSettings={(updated) => {
+                  setLocalSettings(updated);
+                  handleSaveSettings(updated);
+              }}
+              onBack={() => setActiveTab('DASHBOARD')}
+          />
       )}
 
       {/* 3-TIER POPUP CONFIG TAB */}
@@ -7822,6 +7919,29 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                               <p className="text-[10px] text-cyan-700 mt-2 leading-snug">
                                   💡 Tip: PNG transparent background ke saath best dikhta hai. Max 1 MB. Changes "Save Settings" press karne ke baad apply honge.
                               </p>
+                          </div>
+
+                          {/* ── Sequential Page Reading Setting ── */}
+                          <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-4">
+                              <div className="flex items-center justify-between gap-3">
+                                  <div className="flex-1 min-w-0">
+                                      <label className="text-xs font-black uppercase text-amber-800 flex items-center gap-1.5">
+                                          <span>🔒 Sequential Page Reading Rule (Page 1 Read → Page 2 Unlock)</span>
+                                      </label>
+                                      <p className="text-[11px] text-amber-700 mt-1 leading-snug">
+                                          Jab yeh on rahega, student jab tak Page 1 complete read nahi karega tab tak Page 2 lock rahega. Isi tarah aage ke pages ke liye previous page read karna compulsory hoga.
+                                      </p>
+                                  </div>
+                                  <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                                      <input
+                                          type="checkbox"
+                                          checked={Boolean(localSettings.enforceSequentialPages)}
+                                          onChange={e => setLocalSettings({ ...localSettings, enforceSequentialPages: e.target.checked })}
+                                          className="sr-only peer"
+                                      />
+                                      <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
+                                  </label>
+                              </div>
                           </div>
                       </>
                   )}

@@ -20,10 +20,11 @@ import {
   MessageCircle,
   Search,
 } from 'lucide-react';
-import { User, ReferredUserRecord } from '../types';
+import { User, ReferredUserRecord, SystemSettings } from '../types';
 import { saveUserToLive } from '../firebase';
 import {
   REFERRAL_MILESTONES,
+  getEffectiveReferralMilestones,
   getReferralStats,
   claimReferralMilestoneReward,
   getReferrerRoyaltyRate,
@@ -31,11 +32,12 @@ import {
 
 interface Props {
   user: User;
+  settings?: SystemSettings;
   onClose: () => void;
   onUpdateUser: (u: User) => void;
 }
 
-export const ReferralPopup: React.FC<Props> = ({ user, onClose, onUpdateUser }) => {
+export const ReferralPopup: React.FC<Props> = ({ user, settings, onClose, onUpdateUser }) => {
   // Consolidated into 2 rich, uniform tabs
   const [activeTab, setActiveTab] = useState<'FRIENDS' | 'MILESTONES'>('FRIENDS');
   const [code, setCode] = useState('');
@@ -47,6 +49,10 @@ export const ReferralPopup: React.FC<Props> = ({ user, onClose, onUpdateUser }) 
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'PENDING' | 'INACTIVE'>('ALL');
   const [showEnterCode, setShowEnterCode] = useState(!user.redeemedReferralCode);
 
+  const effectiveMilestones = useMemo(
+    () => getEffectiveReferralMilestones(settings?.referralMilestones),
+    [settings?.referralMilestones]
+  );
   const myReferralCode = user.displayId || user.id;
   const stats = getReferralStats(user);
   const royaltyRate = getReferrerRoyaltyRate(user.level);
@@ -80,7 +86,7 @@ export const ReferralPopup: React.FC<Props> = ({ user, onClose, onUpdateUser }) 
   };
 
   const handleClaimMilestone = async (target: number) => {
-    const res = claimReferralMilestoneReward(user, target);
+    const res = claimReferralMilestoneReward(user, target, effectiveMilestones);
     if (!res.success) {
       showToast(res.message);
       return;
@@ -607,15 +613,15 @@ export const ReferralPopup: React.FC<Props> = ({ user, onClose, onUpdateUser }) 
               <div className="space-y-3 pt-1">
                 <div className="flex items-center justify-between">
                   <h3 className="text-xs font-black uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-                    <Crown size={15} className="text-amber-400" /> All 15 Milestone Rewards
+                    <Crown size={15} className="text-amber-400" /> All {effectiveMilestones.length} Milestone Rewards
                   </h3>
                   <span className="text-[11px] font-bold text-slate-400">
-                    Active: <strong className="text-amber-300 font-mono">{stats.activeCount} Users</strong>
+                    Active: <strong className="text-amber-300 font-mono">{stats.activeCount.toLocaleString('en-IN')} Users</strong>
                   </span>
                 </div>
 
                 <div className="space-y-3">
-                  {REFERRAL_MILESTONES.map((m) => {
+                  {effectiveMilestones.map((m) => {
                     const isClaimed = claimedMilestones.includes(m.target);
                     const canClaim = !isClaimed && stats.activeCount >= m.target;
                     const progressPct = Math.min(100, Math.round((stats.activeCount / m.target) * 100));
@@ -634,14 +640,14 @@ export const ReferralPopup: React.FC<Props> = ({ user, onClose, onUpdateUser }) 
                         {/* Top Header: Title, Milestone Tag, Active Count Badge */}
                         <div className="flex items-center justify-between gap-2 flex-wrap mb-2.5">
                           <div className="flex items-center gap-2">
-                            <div className={`w-7 h-7 rounded-xl flex items-center justify-center font-black text-xs shrink-0 ${
+                            <div className={`w-auto min-w-[1.75rem] px-1.5 h-7 rounded-xl flex items-center justify-center font-black text-xs shrink-0 ${
                               canClaim
                                 ? 'bg-amber-400 text-slate-950 shadow-md shadow-amber-400/30'
                                 : isClaimed
                                 ? 'bg-slate-800 text-amber-300'
                                 : 'bg-purple-950 text-purple-300 border border-purple-500/30'
                             }`}>
-                              #{m.target}
+                              #{m.target.toLocaleString('en-IN')}
                             </div>
                             <h4 className="text-sm font-black text-white tracking-wide">{m.title}</h4>
                           </div>
@@ -657,7 +663,7 @@ export const ReferralPopup: React.FC<Props> = ({ user, onClose, onUpdateUser }) 
                                 ? 'bg-slate-800 text-slate-400 border-slate-700'
                                 : 'bg-slate-800/80 text-cyan-300 border-cyan-500/30'
                             }`}>
-                              {stats.activeCount}/{m.target} Active
+                              {stats.activeCount.toLocaleString('en-IN')}/{m.target.toLocaleString('en-IN')} Active
                             </span>
                           </div>
                         </div>
@@ -713,7 +719,7 @@ export const ReferralPopup: React.FC<Props> = ({ user, onClose, onUpdateUser }) 
                                   ? 'Milestone Completed'
                                   : canClaim
                                   ? 'Ready to Claim!'
-                                  : `${Math.max(0, m.target - stats.activeCount)} aur active ${m.target - stats.activeCount === 1 ? 'dost' : 'doston'} ki zaroorat`}
+                                  : `${Math.max(0, m.target - stats.activeCount).toLocaleString('en-IN')} aur active ${m.target - stats.activeCount === 1 ? 'dost' : 'doston'} ki zaroorat`}
                               </span>
                             </div>
                             <div className="w-full h-2 bg-slate-800/90 rounded-full overflow-hidden border border-slate-700/50">
@@ -753,10 +759,10 @@ export const ReferralPopup: React.FC<Props> = ({ user, onClose, onUpdateUser }) 
                               <button
                                 disabled
                                 className="w-full sm:w-auto px-4 py-2 rounded-xl bg-white/5 text-slate-400 font-bold text-xs flex items-center justify-center gap-1.5 border border-white/10 select-none cursor-not-allowed"
-                                title={`${m.target} active doston par unlock hoga`}
+                                title={`${m.target.toLocaleString('en-IN')} active doston par unlock hoga`}
                               >
                                 <span className="text-xs">🔒</span>
-                                <span>Claim Locked ({stats.activeCount}/{m.target})</span>
+                                <span>Claim Locked ({stats.activeCount.toLocaleString('en-IN')}/{m.target.toLocaleString('en-IN')})</span>
                               </button>
                             )}
                           </div>

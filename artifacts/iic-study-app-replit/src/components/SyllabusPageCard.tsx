@@ -20,6 +20,7 @@ import {
   calculatePageRequiredReadingSec,
   getPagePointsCount,
 } from '../utils/routineAutoTrack';
+import { isSequentialReadingEnforced } from '../utils/readingRules';
 import {
   getStudyActivity,
   getStudyActivityKey,
@@ -114,6 +115,14 @@ export const SyllabusPageCard: React.FC<SyllabusPageCardProps> = ({
   );
   const isAdmin = user.role === 'ADMIN' || user.role === 'SUB_ADMIN';
 
+  // ── Sequential Page Locking ──
+  // Free users: ALWAYS ON. Basic & Ultra users: Configurable in Settings (self ON/OFF). Admin: Bypassed.
+  const isPageLockedBySequence = Boolean(
+    isSequentialReadingEnforced(user, settings) &&
+    pageIndex > 0 &&
+    !isRoutinePageRead(lessonId, pageIndex - 1)
+  );
+
   // ── 2. Reading Score % ──
   // Rule:
   // - If goal met: 100%
@@ -167,7 +176,7 @@ export const SyllabusPageCard: React.FC<SyllabusPageCardProps> = ({
 
   // ── 4. Free vs Premium MCQ Gate ──
   // Free users cannot open MCQ until required reading time is completed.
-  const isMcqLocked = !isAdmin && !isPremiumUser && !isReadGoalMet;
+  const isMcqLocked = isPageLockedBySequence || (!isAdmin && !isPremiumUser && !isReadGoalMet);
 
   // ── 5. Consolidated Page Mastery % ──
   // If MCQ exists: (Reading% + Best MCQ%) / 2
@@ -182,6 +191,13 @@ export const SyllabusPageCard: React.FC<SyllabusPageCardProps> = ({
 
   // ── 6. Status Chip ──
   const statusConfig = useMemo(() => {
+    if (isPageLockedBySequence) {
+      return {
+        label: `Pg ${pageIndex} Incomplete`,
+        dot: '🔒',
+        bg: 'bg-rose-50 text-rose-700 border-rose-200',
+      };
+    }
     if (isReadGoalMet && (totalMcq === 0 || (hasAttemptedMcq && bestMcqPct >= 60))) {
       return {
         label: 'Mastered',
@@ -208,7 +224,7 @@ export const SyllabusPageCard: React.FC<SyllabusPageCardProps> = ({
       dot: '⚪',
       bg: 'bg-slate-50 text-slate-500 border-slate-200',
     };
-  }, [isReadGoalMet, totalMcq, hasAttemptedMcq, bestMcqPct, combinedReadingSec]);
+  }, [isPageLockedBySequence, pageIndex, isReadGoalMet, totalMcq, hasAttemptedMcq, bestMcqPct, combinedReadingSec]);
 
   // Display texts
   const pageNumStr = page.pageNo ? `Pg ${page.pageNo}` : `Pg ${pageIndex + 1}`;
@@ -221,14 +237,48 @@ export const SyllabusPageCard: React.FC<SyllabusPageCardProps> = ({
 
   const handleLockedMcqClick = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (isPageLockedBySequence) {
+      showAlert(
+        `🔒 Page ${pageIndex} jab tak complete read na hoga, Page ${pageIndex + 1} lock rahega!\nPehle Page ${pageIndex} complete read karein.`,
+        'INFO',
+        'Page Locked'
+      );
+      return;
+    }
     const rem = Math.max(0, reqSec - combinedReadingSec);
     showAlert(
-      `🔒 Free users ke liye pehle reading complete karna zaroori hai!\nReading Mode ya Writing Mode me ${formatSecs(
+      `🔒 Free users ke liye pehle reading complete karna zaroori hai!\nReading Mode ya Premium Notes me ${formatSecs(
         rem
       )} aur padhein, uske baad MCQ automatic unlock ho jayega.`,
       'INFO',
       'MCQ Locked'
     );
+  };
+
+  const handleOpenReadingClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isPageLockedBySequence) {
+      showAlert(
+        `🔒 Page ${pageIndex} jab tak complete read na hoga, Page ${pageIndex + 1} lock rahega!\nPehle Page ${pageIndex} complete read karein.`,
+        'INFO',
+        'Page Locked'
+      );
+      return;
+    }
+    onOpenReading();
+  };
+
+  const handleOpenWritingClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isPageLockedBySequence) {
+      showAlert(
+        `🔒 Page ${pageIndex} jab tak complete read na hoga, Page ${pageIndex + 1} lock rahega!\nPehle Page ${pageIndex} complete read karein.`,
+        'INFO',
+        'Page Locked'
+      );
+      return;
+    }
+    onOpenWriting?.();
   };
 
   return (
@@ -255,30 +305,38 @@ export const SyllabusPageCard: React.FC<SyllabusPageCardProps> = ({
           <div
             className="w-10 h-10 rounded-xl flex flex-col items-center justify-center shrink-0 border transition-all"
             style={{
-              background: isReadGoalMet && (totalMcq === 0 || bestMcqPct >= 60)
+              background: isPageLockedBySequence
+                ? '#fff1f2'
+                : isReadGoalMet && (totalMcq === 0 || bestMcqPct >= 60)
                 ? '#ecfdf5'
                 : isReadGoalMet
                 ? '#fff7ed'
                 : `${tierTheme.primary}12`,
-              borderColor: isReadGoalMet && (totalMcq === 0 || bestMcqPct >= 60)
+              borderColor: isPageLockedBySequence
+                ? '#fecdd3'
+                : isReadGoalMet && (totalMcq === 0 || bestMcqPct >= 60)
                 ? '#a7f3d0'
                 : isReadGoalMet
                 ? '#fed7aa'
                 : `${tierTheme.primary}33`,
             }}
           >
-            <span
-              className="text-[11px] font-black leading-none"
-              style={{
-                color: isReadGoalMet && (totalMcq === 0 || bestMcqPct >= 60)
-                  ? '#059669'
-                  : isReadGoalMet
-                  ? '#ea580c'
-                  : tierTheme.primary,
-              }}
-            >
-              {pageNumStr}
-            </span>
+            {isPageLockedBySequence ? (
+              <Lock size={15} className="text-rose-500" />
+            ) : (
+              <span
+                className="text-[11px] font-black leading-none"
+                style={{
+                  color: isReadGoalMet && (totalMcq === 0 || bestMcqPct >= 60)
+                    ? '#059669'
+                    : isReadGoalMet
+                    ? '#ea580c'
+                    : tierTheme.primary,
+                }}
+              >
+                {pageNumStr}
+              </span>
+            )}
           </div>
 
           <div className="min-w-0 flex-1">
@@ -397,7 +455,7 @@ export const SyllabusPageCard: React.FC<SyllabusPageCardProps> = ({
             <div className="flex items-center gap-3 text-[10px] text-slate-500 pt-0.5 flex-wrap">
               <span>📖 Reading: <strong className="text-slate-700">{formatSecs(readSec)}</strong></span>
               {writeSec > 0 && (
-                <span>✍️ Writing: <strong className="text-slate-700">{formatSecs(writeSec)}</strong></span>
+                <span>✍️ Premium Notes: <strong className="text-slate-700">{formatSecs(writeSec)}</strong></span>
               )}
             </div>
 
@@ -413,7 +471,7 @@ export const SyllabusPageCard: React.FC<SyllabusPageCardProps> = ({
             <div className="flex gap-2 pt-1">
               <button
                 type="button"
-                onClick={(e) => { e.stopPropagation(); onOpenReading(); }}
+                onClick={handleOpenReadingClick}
                 className="flex-1 py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 shadow-xs active:scale-98 transition-all"
               >
                 <BookOpen size={13} />
@@ -423,12 +481,12 @@ export const SyllabusPageCard: React.FC<SyllabusPageCardProps> = ({
               {page.htmlNotes && onOpenWriting && (
                 <button
                   type="button"
-                  onClick={(e) => { e.stopPropagation(); onOpenWriting(); }}
+                  onClick={handleOpenWritingClick}
                   className="py-2 px-3 bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-200 rounded-xl text-xs font-black flex items-center justify-center gap-1 active:scale-98 transition-all shrink-0"
-                  title="Practice writing notes"
+                  title="Premium Notes"
                 >
                   <PenTool size={12} />
-                  Writing Mode
+                  Premium Notes
                 </button>
               )}
             </div>

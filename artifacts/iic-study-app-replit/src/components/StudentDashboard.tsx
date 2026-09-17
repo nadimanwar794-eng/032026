@@ -12,7 +12,7 @@ import { StudentProgressDashboard } from "./StudentProgressDashboard";
 import { SuggestionsPanel } from "./SuggestionsPanel";
 import { applyDeduction, getTotalCredits, getCreditCost } from "../utils/creditSystem";
 import { fireCreditNotify } from "../utils/creditNotify";
-import { getDiamondUnlockCost, UNLOCK_COSTS } from "../utils/limits";
+import { getDiamondUnlockCost, getAllModesDiamondCost, UNLOCK_COSTS } from "../utils/limits";
 import { LevelLeaderboard } from "./LevelLeaderboard";
 import { StudentLevelPage } from "./StudentLevelPage";
 import { TopBarRow2XpBar } from "./TopBarRow2XpBar";
@@ -71,6 +71,7 @@ import { isHomeSectionVisible } from "../utils/homeSections";
 import { checkFeatureAccess } from "../utils/permissionUtils";
 import { downloadAsMHTML, downloadAsHTML, downloadElementAsHTML } from "../utils/downloadUtils";
 import { renderMathInHtml, formatExplanationHtml } from "../utils/mathUtils";
+import { isSequentialReadingEnforced } from "../utils/readingRules";
 import { recordLogin, updateSessionDuration, getLoginHistory, formatDuration, formatLoginTime, type LoginSession } from "../utils/loginHistory";
 import { getNewContentItems, markContentItemSeen, markAllContentItemsSeen, formatContentDate, type ContentNotifItem } from "../utils/contentNotifications";
 import { clearAllRecentReads, saveRecentHomework, getRecentHomeworks, removeRecentHomework, getRecentChapters, removeRecentChapter, saveRecentLucent, getRecentLucent, removeRecentLucent, markNoteFullyRead, getFullyReadMap, markReadToday, getReadingStreak, getReadDates, getBestReadingDay, getTodayItemCount, type RecentChapterEntry, type RecentHwEntry, type RecentLucentEntry, type StreakInfo, type BestDay } from "../utils/recentReads";
@@ -266,11 +267,12 @@ import { McqReviewHub } from "./McqReviewHub"; // NEW
 import { UniversalVideoView } from "./UniversalVideoView"; // NEW
 import { RevisionHubV2 } from "./RevisionHubV2"; // NEW: Revision Hub V2 with auto-note search
 import { RevisionHubScreen } from "./RevisionHubScreen"; // NEW: Revision Hub full-screen with top tabs
+import { UpdatesPage } from "./UpdatesPage"; // NEW: Updates central hub with countdown & cards
 import { MyRoutine } from "./MyRoutine"; // My Routine full-screen
 import { DailyEventPage } from "./DailyEventPage"; // Daily Hub: Routine + Revision + Mistakes + Tracker
 import { CustomBloggerPage } from "./CustomBloggerPage";
 import { ReferralPopup } from "./ReferralPopup";
-import { getReferralStats } from "../utils/referralEngine";
+import { getReferralStats, getEffectiveReferralMilestones, REFERRAL_MILESTONES } from "../utils/referralEngine";
 import { SpeakButton } from "./SpeakButton";
 import { McqSpeakButtons } from "./McqSpeakButtons";
 import { FlashcardMcqView } from "./FlashcardMcqView";
@@ -1178,6 +1180,19 @@ export const StudentDashboard: React.FC<Props> = ({
   ) => {
     const _isAdm = user.role === 'ADMIN' || user.role === 'SUB_ADMIN';
     if (_isAdm) { action(); return; }
+
+    const _allModesKey = pageInfo?.pageLabel ? `${pageInfo.pageLabel} (All Modes)` : '';
+    const _singleModeKey = pageInfo?.pageLabel ? `${pageInfo.pageLabel} - ${reason}` : '';
+    const isPermanentlyUnlocked = !!(
+      (user.unlockedContent || []).includes(reason) ||
+      (_singleModeKey && (user.unlockedContent || []).includes(_singleModeKey)) ||
+      (_allModesKey && (user.unlockedContent || []).includes(_allModesKey))
+    );
+    if (baseCost === 0 || isPermanentlyUnlocked) {
+      action();
+      return;
+    }
+
     const { cost, discountPct } = _getCoinCost(baseCost);
     const total = getTotalCredits(user);
     if (total < cost) {
@@ -1262,6 +1277,7 @@ export const StudentDashboard: React.FC<Props> = ({
   };
 
   // Projector costs 20 CR once and has an independent unlock from every other mode.
+  // Reading, Writing, MCQ, and Projector are NEVER free with any subscription.
   const handleProjectorModeGate = (
     lid: string,
     pi: number,
@@ -1269,7 +1285,7 @@ export const StudentDashboard: React.FC<Props> = ({
     pgInfo?: Parameters<typeof showCoinGate>[5],
   ) => {
     const _isAdm = user.role === 'ADMIN' || user.role === 'SUB_ADMIN';
-    if (_isAdm || _isBasicUser || _isUltraUser || isProjectorUnlocked(lid, pi)) { action(); return; }
+    if (_isAdm || isProjectorUnlocked(lid, pi)) { action(); return; }
     showCoinGate(20, 'Projector Mode', () => {
       if (lid) markProjectorUnlocked(lid, pi);
       action();
@@ -4274,13 +4290,14 @@ export const StudentDashboard: React.FC<Props> = ({
   });
   const [showStarredPage, setShowStarredPage] = useState(false);
   const [showRevisionHubScreen, setShowRevisionHubScreen] = useState(false);
+  const [showUpdatesPage, setShowUpdatesPage] = useState(false);
   const [initialRevisionAutoStartMcq, setInitialRevisionAutoStartMcq] = useState(false);
   const [showMyRoutine, setShowMyRoutine] = useState(false);
   const [showDailyEventPage, setShowDailyEventPage] = useState(false);
   // XP badge useEffect — yahan rakhna zaroori hai (showRevisionHubScreen/showMyRoutine/showChat ke baad)
   // Pehle rakhne se TDZ crash hota tha (dependency array mein undeclared vars)
   React.useEffect(() => {
-    const isOnHome = activeTab === 'HOME' && !showRevisionHubScreen && !showMyRoutine && !showChat;
+    const isOnHome = activeTab === 'HOME' && !showRevisionHubScreen && !showUpdatesPage && !showMyRoutine && !showChat;
     const wasOnHome = xpBadgeIsOnHomeRef.current;
     xpBadgeIsOnHomeRef.current = isOnHome;
     if (isOnHome && !wasOnHome) {
@@ -4293,7 +4310,7 @@ export const StudentDashboard: React.FC<Props> = ({
     }
     return () => { if (xpBadgeTimerRef.current) clearTimeout(xpBadgeTimerRef.current); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, showRevisionHubScreen, showMyRoutine, showChat]);
+  }, [activeTab, showRevisionHubScreen, showUpdatesPage, showMyRoutine, showChat]);
   // lessonTitle for auto-navigation when opening Revision Hub from Routine/Daily Event (coins already paid).
   const [initialRevisionLessonTitle, setInitialRevisionLessonTitle] = useState<string | null>(null);
   // Routine gate popup — shown when user tries to open a lesson in a routineApplied subject
@@ -5613,6 +5630,15 @@ export const StudentDashboard: React.FC<Props> = ({
       return;
     }
 
+    // Check sequential page reading rule: Free users always ON, Basic/Ultra configurable
+    if (isSequentialReadingEnforced(user, settings) && pageIdx > 0) {
+      const prevRead = isRoutinePageRead(entry.id, pageIdx - 1);
+      if (!prevRead) {
+        showAlert(`🔒 Page ${pageIdx} jab tak complete read na hoga, Page ${pageIdx + 1} lock rahega! Pehle Page ${pageIdx} complete read karein.`, 'INFO', 'Page Locked');
+        return;
+      }
+    }
+
     const doOpen = () => {
       setLucentNoteViewer(entry);
       setLucentPageIndex(pageIdx);
@@ -5698,8 +5724,8 @@ export const StudentDashboard: React.FC<Props> = ({
         ...(_hasMcqOpen ? [
           { mode: 'MCQ', label: 'MCQ Practice', emoji: '🧠', cost: 20,
             isUnlocked: isMcqPageUnlocked(entry.id, pageIdx), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markMcqPageUnlocked(entry.id, pageIdx) },
-          { mode: 'FLASHCARD', label: 'Flashcard', emoji: '🃏', cost: 20,
-            isUnlocked: isFcPageUnlocked(entry.id, pageIdx), isAccessible: _isUltraUser, requiredTier: 'ultra' as const, unlockAction: () => markFcPageUnlocked(entry.id, pageIdx) },
+          { mode: 'FLASHCARD', label: 'Flashcard', emoji: '🃏', cost: _isUltraUser ? 0 : 20,
+            isUnlocked: _isUltraUser || isFcPageUnlocked(entry.id, pageIdx), isAccessible: true, requiredTier: 'ultra' as const, unlockAction: () => markFcPageUnlocked(entry.id, pageIdx) },
         ] : []),
         ...(_hasPdfOpen ? [{ mode: 'PDF',   label: 'PDF',   emoji: '📄', cost: 0, isUnlocked: true, isAccessible: _isBasicUser || _isUltraUser, requiredTier: 'basic' as const, unlockAction: undefined }] : []),
         ...(_hasVidOpen ? [{ mode: 'VIDEO', label: 'Video', emoji: '🎬', cost: 0, isUnlocked: true, isAccessible: _isUltraUser, requiredTier: 'ultra' as const, unlockAction: undefined }] : []),
@@ -7383,6 +7409,7 @@ export const StudentDashboard: React.FC<Props> = ({
     showSidebar,
     showInbox,
     showRevisionHubScreen,
+    showUpdatesPage,
     // content-tree state
     initialParentSubject,
     homeworkSubjectView,
@@ -7421,6 +7448,7 @@ export const StudentDashboard: React.FC<Props> = ({
     showSidebar,
     showInbox,
     showRevisionHubScreen,
+    showUpdatesPage,
     initialParentSubject,
     homeworkSubjectView,
     class612SubjectView: !!class612SubjectView,
@@ -7478,6 +7506,7 @@ export const StudentDashboard: React.FC<Props> = ({
         !s.showSidebar &&
         !s.showInbox &&
         !s.showRevisionHubScreen &&
+        !s.showUpdatesPage &&
         !s.flashcardMcqs &&
         !s.compMcqSession;
 
@@ -7530,6 +7559,7 @@ export const StudentDashboard: React.FC<Props> = ({
       if (s.showStarredPage)     { setShowStarredPage(false);         return; }
       if (s.showDailyEventPage)    { setShowDailyEventPage(false);     return; }
       if (s.showRevisionHubScreen) { setShowRevisionHubScreen(false); return; }
+      if (s.showUpdatesPage)       { setShowUpdatesPage(false);       return; }
       if (s.showCompMcqHub)      { setShowCompMcqHub(false);         return; }
       if (s.showMistakePractice) { setShowMistakePractice(false);    return; }
       if (s.showRulesPage)       { setShowRulesPage(false);           return; }
@@ -7794,6 +7824,38 @@ export const StudentDashboard: React.FC<Props> = ({
     const tid = setInterval(() => setNowTick(Date.now()), 1000);
     return () => clearInterval(tid);
   }, [showInbox]);
+
+  const handleJoinSchool = async (school: any) => {
+    const updated = { ...user, schoolId: school.id } as any;
+    handleUserUpdate(updated);
+    setUserSchool(school);
+    try { await saveUserToLive(updated); } catch {}
+    setShowSchoolPicker(false);
+    setSchoolCodeInput('');
+    setSchoolCodeError('');
+    setSchoolCodeTargetId(null);
+  };
+
+  const handleRemoveSchool = async () => {
+    const updated = { ...user, schoolId: null } as any;
+    handleUserUpdate(updated);
+    setUserSchool(null);
+    try { await saveUserToLive(updated); } catch {}
+    try { await removeSchoolUserByUid(user.id); } catch {}
+  };
+
+  const handleJoinCoaching = async (c: { id: string; name: string }) => {
+    const updated = { ...user, coachingId: c.id, coachingName: c.name } as any;
+    handleUserUpdate(updated);
+    try { await saveUserToLive(updated); } catch {}
+    setShowCoachingPicker(false);
+  };
+
+  const handleRemoveCoaching = async () => {
+    const updated = { ...user, coachingId: null, coachingName: null } as any;
+    handleUserUpdate(updated);
+    try { await saveUserToLive(updated); } catch {}
+  };
 
   // Helper: format remaining time as "Xh Ym baki"
   const fmtCountdown = (expiresAt: string): string => {
@@ -9289,32 +9351,32 @@ export const StudentDashboard: React.FC<Props> = ({
                     <>
                       <span className="text-[9px] font-black text-teal-600 bg-teal-50 border border-teal-200 px-1.5 py-0.5 rounded-full whitespace-nowrap shrink-0">✏️ WRITE</span>
                       {_isAdminUser && (
-                        <button onClick={() => setShowAdminBoard(true)} className="w-7 h-7 flex items-center justify-center rounded-lg bg-orange-50 border border-orange-200 text-orange-500 active:scale-90 transition shrink-0" title="Whiteboard"><Presentation size={12} /></button>
+                        <button onClick={() => setShowAdminBoard(true)} className="w-8 h-8 flex items-center justify-center rounded-xl bg-orange-50 border border-orange-200 text-orange-600 hover:bg-orange-100 active:scale-95 shadow-sm transition-all shrink-0" title="Whiteboard"><Presentation size={12} /></button>
                       )}
                       {_isAdminUser && (
-                        <button onClick={() => { const src = (activeHw as any)?.htmlNotes || ''; setInlineEditContent(src); setInlineEditPoints(splitHtmlIntoBlocks(src)); setInlineEditPointIdx(null); setInlineEditPointDraft(''); setInlineEditModal({ type: 'hw_html', entryId: activeHw.id || '', title: activeHw.title || 'Competition Note', originalEntry: activeHw }); setHwWriteMenuOpen(false); }} className="w-7 h-7 flex items-center justify-center rounded-lg bg-orange-50 border border-orange-200 text-orange-500 active:scale-90 transition shrink-0" title="Edit HTML"><Pencil size={12} /></button>
+                        <button onClick={() => { const src = (activeHw as any)?.htmlNotes || ''; setInlineEditContent(src); setInlineEditPoints(splitHtmlIntoBlocks(src)); setInlineEditPointIdx(null); setInlineEditPointDraft(''); setInlineEditModal({ type: 'hw_html', entryId: activeHw.id || '', title: activeHw.title || 'Competition Note', originalEntry: activeHw }); setHwWriteMenuOpen(false); }} className="w-8 h-8 flex items-center justify-center rounded-xl bg-orange-50 border border-orange-200 text-orange-600 hover:bg-orange-100 active:scale-95 shadow-sm transition-all shrink-0" title="Edit HTML"><Pencil size={12} /></button>
                       )}
-                      <div className="flex items-center rounded-lg overflow-hidden border border-slate-200 bg-slate-50 shrink-0">
-                        <button onClick={zoomOut} className="w-6 h-7 flex items-center justify-center text-slate-600 text-[10px] font-black active:scale-90 transition hover:bg-slate-100">A−</button>
+                      <div className="flex items-center rounded-xl overflow-hidden border border-slate-200 bg-white shadow-sm shrink-0">
+                        <button onClick={zoomOut} className="w-8 h-8 flex items-center justify-center text-slate-600 text-[11px] font-black active:scale-95 transition-all hover:bg-slate-50 hover:text-indigo-600">A−</button>
                         <span className="px-1 text-slate-500 text-[9px] font-bold tabular-nums border-x border-slate-200">{Math.round(noteZoom * 100)}%</span>
-                        <button onClick={zoomIn} className="w-6 h-7 flex items-center justify-center text-slate-600 text-[10px] font-black active:scale-90 transition hover:bg-slate-100">A+</button>
+                        <button onClick={zoomIn} className="w-8 h-8 flex items-center justify-center text-slate-600 text-[11px] font-black active:scale-95 transition-all hover:bg-slate-50 hover:text-indigo-600">A+</button>
                       </div>
-                      <button onClick={handleRotate} className={`w-7 h-7 flex items-center justify-center rounded-lg border active:scale-90 transition shrink-0 ${isLandscape ? 'bg-emerald-50 border-emerald-300 text-emerald-600' : 'bg-slate-100 border-slate-200 text-slate-500'}`} title="Rotate"><RotateCcw size={12} /></button>
+                      <button onClick={handleRotate} className={`w-8 h-8 flex items-center justify-center rounded-xl border shadow-sm active:scale-95 transition-all shrink-0 ${isLandscape ? "bg-indigo-50 border-indigo-200 text-indigo-600" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`} title="Rotate"><RotateCcw size={12} /></button>
                       <button
                         onClick={async () => { try { const src = (activeHw as any).htmlNotes || (activeHw as any).chunkNotes || activeHw.notes || ''; await saveOfflineItem({ id: `hw_${activeHw.id}`, type: 'NOTE', title: activeHw.title || 'Homework', subtitle: `Competition · ${activeHw.targetSubject || ''}`, data: { kind: 'LUCENT_CHUNK', chunkNotes: src, lessonTitle: activeHw.title, subject: activeHw.targetSubject } }); setHwSaved(true); showAlert('✅ Saved offline!', 'SUCCESS'); setTimeout(() => setHwSaved(false), 3000); } catch { showAlert('Save failed.', 'ERROR'); } }}
-                        className={`w-7 h-7 flex items-center justify-center rounded-lg border active:scale-90 transition shrink-0 ${hwSaved ? 'bg-emerald-50 border-emerald-300 text-emerald-600' : 'bg-slate-100 border-slate-200 text-slate-500'}`}
+                        className={`w-8 h-8 flex items-center justify-center rounded-xl border shadow-sm active:scale-95 transition-all shrink-0 ${hwSaved ? "bg-emerald-500 border-emerald-600 text-white shadow-emerald-200" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}
                         title={hwSaved ? 'Saved ✓' : 'Save Offline'}
                       ><WifiOff size={12} /></button>
                       {(activeHw as any).htmlNotes && (
-                        <button onClick={async () => { try { const safeTitle = (activeHw.title || 'Homework').replace(/[^a-z0-9_\- ]/gi, '_').slice(0, 60); const _dlOk = await checkAndDoDownload(async () => { await downloadAsMHTML('hw-html-download', safeTitle, { appName: settings?.appShortName || settings?.appName || 'IIC', pageTitle: activeHw.title || 'Homework', subtitle: 'Homework Notes — Write Mode' }); }); if (_dlOk) showAlert('📥 Saved!', 'SUCCESS'); } catch { showAlert('Download failed.', 'ERROR'); } }} className="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-100 border border-slate-200 text-slate-500 active:scale-90 transition shrink-0" title="Download"><Download size={12} /></button>
+                        <button onClick={async () => { try { const safeTitle = (activeHw.title || 'Homework').replace(/[^a-z0-9_\- ]/gi, '_').slice(0, 60); const _dlOk = await checkAndDoDownload(async () => { await downloadAsMHTML('hw-html-download', safeTitle, { appName: settings?.appShortName || settings?.appName || 'IIC', pageTitle: activeHw.title || 'Homework', subtitle: 'Homework Notes — Write Mode' }); }); if (_dlOk) showAlert('📥 Saved!', 'SUCCESS'); } catch { showAlert('Download failed.', 'ERROR'); } }} className="w-8 h-8 flex items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-indigo-600 active:scale-95 shadow-sm transition-all shrink-0" title="Download"><Download size={12} /></button>
                       )}
                     </>
                   )}
                   {/* MCQ controls */}
                   {effectiveMode === 'mcq' && (
                     <>
-                      <button onClick={handleRotate} className={`w-7 h-7 flex items-center justify-center rounded-lg border active:scale-90 transition shrink-0 ${isLandscape ? 'bg-emerald-50 border-emerald-300 text-emerald-600' : 'bg-slate-100 border-slate-200 text-slate-500'}`} title="Rotate"><RotateCcw size={12} /></button>
-                      {_isAdminUser && <button onClick={() => setShowAdminBoard(true)} className="w-7 h-7 flex items-center justify-center rounded-lg bg-orange-50 border border-orange-200 text-orange-500 active:scale-90 transition shrink-0" title="Whiteboard"><Presentation size={12} /></button>}
+                      <button onClick={handleRotate} className={`w-8 h-8 flex items-center justify-center rounded-xl border shadow-sm active:scale-95 transition-all shrink-0 ${isLandscape ? "bg-indigo-50 border-indigo-200 text-indigo-600" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`} title="Rotate"><RotateCcw size={12} /></button>
+                      {_isAdminUser && <button onClick={() => setShowAdminBoard(true)} className="w-8 h-8 flex items-center justify-center rounded-xl bg-orange-50 border border-orange-200 text-orange-600 hover:bg-orange-100 active:scale-95 shadow-sm transition-all shrink-0" title="Whiteboard"><Presentation size={12} /></button>}
                     </>
                   )}
                   {/* Q&A — Reveal All / Hide All */}
@@ -11994,35 +12056,7 @@ export const StudentDashboard: React.FC<Props> = ({
                     </div>
                   )}
 
-                  {/* ── MY SCHOOL CARD ── */}
-                  {userSchool && (
-                    <div>
-                      <div className="flex items-center gap-2 mb-3">
-                        <span className="flex-1 h-px" style={{ background: `${tierTheme.primary}30` }} />
-                        <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: tierTheme.primary }}> My School</span>
-                        <span className="flex-1 h-px" style={{ background: `${tierTheme.primary}30` }} />
-                      </div>
-                      <SchoolHomeCard
-                        school={userSchool}
-                        onOpen={() => { hapticStrong(); onOpenSchool?.(); }}
-                        onChangeSchool={() => { hapticMedium(); onOpenSchool?.(); }}
-                        themeAccent={_scBdr}
-                        cardBg={_scBg}
-                        card3D={_sc3D}
-                      />
-                    </div>
-                  )}
 
-                  {/* ── COACHING HOMEWORK CARDS — only when user has joined a coaching ── */}
-                  {!!(user as any).coachingId && (
-                  <CoachingHomeworkSection tierTheme={tierTheme} isDarkMode={isDarkMode}
-                    card3D={_masterAll3D || (settings?.homeCoachingHomeworkCard3D ?? false)}
-                    settings={settings}
-                    user={user}
-                    onSendToMcqCommunity={(draft) => { setMcqCommunityDraft(draft); setShowMcqCommunityPopup(true); }}
-                    onNotesReaderOpen={() => setCoachingNotesReaderOpen(true)}
-                    onNotesReaderClose={() => setCoachingNotesReaderOpen(false)} />
-                  )}
 
 
                   {/* ── QUICK ACTION CARDS ── */}
@@ -13465,8 +13499,10 @@ export const StudentDashboard: React.FC<Props> = ({
           {(() => {
             const refStats = getReferralStats(user);
             const activeInvites = refStats.activeCount || 0;
-            const nextTarget = activeInvites < 1 ? 1 : activeInvites < 3 ? 3 : activeInvites < 5 ? 5 : activeInvites < 10 ? 10 : 25;
-            const canClaimAny = [1, 3, 5, 10, 25].some(t => activeInvites >= t && !(user.referralMilestonesClaimed || []).includes(t));
+            const effectiveMilestones = getEffectiveReferralMilestones(settings?.referralMilestones);
+            const nextMilestone = effectiveMilestones.find(m => activeInvites < m.target) || effectiveMilestones[effectiveMilestones.length - 1];
+            const nextTarget = nextMilestone.target;
+            const canClaimAny = effectiveMilestones.some(m => activeInvites >= m.target && !(user.claimedReferralMilestones || []).includes(m.target));
 
             return (
               <div className="px-3 mb-3.5">
@@ -13508,7 +13544,7 @@ export const StudentDashboard: React.FC<Props> = ({
                     </div>
 
                     <span className="text-[11px] font-black px-2.5 py-1 rounded-xl bg-white/10 text-amber-300 border border-amber-400/30 shrink-0 font-mono">
-                      {activeInvites} Active
+                      {activeInvites.toLocaleString('en-IN')} Active
                     </span>
                   </div>
 
@@ -13530,10 +13566,10 @@ export const StudentDashboard: React.FC<Props> = ({
                           <span className="text-[9px] font-black uppercase tracking-wider text-amber-300 bg-amber-400/15 px-2 py-0.5 rounded border border-amber-400/30">
                             Prize Box
                           </span>
-                          <span className="text-[10px] text-purple-200 font-semibold">Target: {nextTarget} Active</span>
+                          <span className="text-[10px] text-purple-200 font-semibold">Target: {nextTarget.toLocaleString('en-IN')} Active</span>
                         </div>
                         <p className="text-xs sm:text-sm font-black text-white mt-1 leading-snug truncate">
-                          1-Year Ultra VIP Pass 👑 + 5,000🪙 + 500💎
+                          {nextMilestone.title} ({nextMilestone.rewardDescription})
                         </p>
                       </div>
                     </div>
@@ -13542,7 +13578,7 @@ export const StudentDashboard: React.FC<Props> = ({
                       <div className="text-right hidden xs:block">
                         <span className="text-[9px] text-slate-300 block">Reward Status</span>
                         <span className="text-[11px] font-black text-amber-300">
-                          {canClaimAny ? 'Ready to Claim!' : `${activeInvites}/${nextTarget} Active`}
+                          {canClaimAny ? 'Ready to Claim!' : `${activeInvites.toLocaleString('en-IN')}/${nextTarget.toLocaleString('en-IN')} Active`}
                         </span>
                       </div>
                     </div>
@@ -13885,48 +13921,6 @@ export const StudentDashboard: React.FC<Props> = ({
             const _userCoachingId = (user as any).coachingId as string | undefined;
             const _userCoachingNm = (user as any).coachingName as string | undefined;
 
-            const hasSchool = !!(_userSchoolId && String(_userSchoolId).trim() !== '');
-            const hasCoaching = !!(_userCoachingId && String(_userCoachingId).trim() !== '') || isCoachingAdmin;
-
-            // Agar school aur coaching dono nahi hai to Profile page me Affiliations section hide rahega
-            if (!hasSchool && !hasCoaching) {
-              return null;
-            }
-
-            const _joinSchool = async (school: any) => {
-              const updated = { ...user, schoolId: school.id } as any;
-              handleUserUpdate(updated);
-              setUserSchool(school);
-              try { await saveUserToLive(updated); } catch {}
-              setShowSchoolPicker(false);
-              setSchoolCodeInput('');
-              setSchoolCodeError('');
-              setSchoolCodeTargetId(null);
-            };
-
-            const _removeSchool = async () => {
-              const updated = { ...user, schoolId: null } as any;
-              handleUserUpdate(updated);
-              setUserSchool(null);
-              try { await saveUserToLive(updated); } catch {}
-              // Also clear the school_users record so the fallback lookup
-              // in the useEffect doesn't restore the old school after removal.
-              try { await removeSchoolUserByUid(user.id); } catch {}
-            };
-
-            const _joinCoaching = async (c: { id: string; name: string }) => {
-              const updated = { ...user, coachingId: c.id, coachingName: c.name } as any;
-              handleUserUpdate(updated);
-              try { await saveUserToLive(updated); } catch {}
-              setShowCoachingPicker(false);
-            };
-
-            const _removeCoaching = async () => {
-              const updated = { ...user, coachingId: null, coachingName: null } as any;
-              handleUserUpdate(updated);
-              try { await saveUserToLive(updated); } catch {}
-            };
-
             const _openSchoolPicker = async () => {
               setSchoolPickerLoading(true);
               setShowSchoolPicker(true);
@@ -13973,7 +13967,7 @@ export const StudentDashboard: React.FC<Props> = ({
                           style={{ background: `${tierTheme.primary}18`, color: tierTheme.primary }}>
                           Change
                         </button>
-                        <button onClick={_removeSchool}
+                        <button onClick={handleRemoveSchool}
                           className="text-[11px] font-black px-2.5 py-1 rounded-lg active:scale-95 transition"
                           style={{ background: 'rgba(239,68,68,0.10)', color: '#ef4444' }}>
                           Remove
@@ -14010,7 +14004,7 @@ export const StudentDashboard: React.FC<Props> = ({
                           style={{ background: 'rgba(139,92,246,0.12)', color: '#8b5cf6' }}>
                           Change
                         </button>
-                        <button onClick={_removeCoaching}
+                        <button onClick={handleRemoveCoaching}
                           className="text-[11px] font-black px-2.5 py-1 rounded-lg active:scale-95 transition"
                           style={{ background: 'rgba(239,68,68,0.10)', color: '#ef4444' }}>
                           Remove
@@ -14025,172 +14019,6 @@ export const StudentDashboard: React.FC<Props> = ({
                     )}
                   </div>
                 </div>
-
-                {/* ── SCHOOL PICKER MODAL ── */}
-                {showSchoolPicker && (
-                  <div className="fixed inset-0 z-[500] flex flex-col" style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}>
-                    <div className="flex-1" onClick={() => { setShowSchoolPicker(false); setSchoolCodeTargetId(null); setSchoolCodeInput(''); setSchoolCodeError(''); }} />
-                    <div className="rounded-t-3xl overflow-hidden flex flex-col" style={{ background: _pCard, maxHeight: '72vh' }}>
-                      {/* Header */}
-                      <div className="px-5 py-4 flex items-center gap-3 shrink-0" style={{ borderBottom: _pSep }}>
-                        <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: `${tierTheme.primary}18` }}>
-                          <span className="text-lg">🏫</span>
-                        </div>
-                        <div className="flex-1">
-                          <p className={`text-sm font-black ${_pTxt}`}>School Chunein</p>
-                          <p className="text-[10px]" style={{ color: _pTxtMutedColor }}>Apni school select karo</p>
-                        </div>
-                        <button onClick={() => { setShowSchoolPicker(false); setSchoolCodeTargetId(null); setSchoolCodeInput(''); setSchoolCodeError(''); }} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: `${_pTxtMutedColor}18` }}>
-                          <X size={16} style={{ color: _pTxtMutedColor }} />
-                        </button>
-                      </div>
-                      {/* School list */}
-                      <div className="overflow-y-auto flex-1 p-3 space-y-2">
-                        {schoolPickerLoading ? (
-                          <div className="py-8 text-center">
-                            <div className="w-8 h-8 rounded-full border-2 border-t-transparent animate-spin mx-auto mb-2" style={{ borderColor: tierTheme.primary, borderTopColor: 'transparent' }} />
-                            <p className="text-[11px]" style={{ color: _pTxtMutedColor }}>Schools load ho rahi hain…</p>
-                          </div>
-                        ) : allSchools.length === 0 ? (
-                          <p className="py-8 text-center text-sm" style={{ color: _pTxtMutedColor }}>Koi school available nahi hai</p>
-                        ) : (
-                          allSchools.map((school: any) => {
-                            const isLocked = school.lockCodeActive;
-                            const isCurrentSchool = school.id === _userSchoolId;
-                            const isTarget = schoolCodeTargetId === school.id;
-                            return (
-                              <div key={school.id} className="rounded-2xl overflow-hidden" style={{ background: isCurrentSchool ? `${tierTheme.primary}10` : `${_pTxtMutedColor}08`, border: isCurrentSchool ? `1.5px solid ${tierTheme.primary}50` : `1px solid ${_pTxtMutedColor}18` }}>
-                                <button
-                                  onClick={() => {
-                                    if (isCurrentSchool) return;
-                                    if (isLocked) {
-                                      setSchoolCodeTargetId(isTarget ? null : school.id);
-                                      setSchoolCodeInput('');
-                                      setSchoolCodeError('');
-                                    } else {
-                                      _joinSchool(school);
-                                    }
-                                  }}
-                                  className="w-full px-4 py-3 flex items-center gap-3 text-left active:opacity-80 transition">
-                                  {school.logoUrl ? (
-                                    <img src={school.logoUrl} alt="" className="w-10 h-10 rounded-xl object-cover shrink-0" />
-                                  ) : (
-                                    <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 text-xl" style={{ background: `${tierTheme.primary}12` }}>🏫</div>
-                                  )}
-                                  <div className="flex-1 min-w-0">
-                                    <p className={`text-sm font-bold truncate ${_pTxt}`}>{school.name}</p>
-                                    {school.address && <p className="text-[10px] truncate" style={{ color: _pTxtMutedColor }}>{school.address}</p>}
-                                  </div>
-                                  {isLocked && <Lock size={14} style={{ color: '#f59e0b' }} className="shrink-0" />}
-                                  {isCurrentSchool && <CheckCircle size={15} style={{ color: tierTheme.primary }} className="shrink-0" />}
-                                </button>
-                                {/* Code input for locked school */}
-                                {isTarget && isLocked && (
-                                  <div className="px-4 pb-3">
-                                    <div className="flex gap-2">
-                                      <input
-                                        type="text"
-                                        value={schoolCodeInput}
-                                        onChange={e => { setSchoolCodeInput(e.target.value.toUpperCase()); setSchoolCodeError(''); }}
-                                        placeholder="Access code dalein"
-                                        className="flex-1 rounded-xl px-3 py-2 text-sm font-bold outline-none"
-                                        style={{ background: `${_pTxtMutedColor}12`, border: schoolCodeError ? '1.5px solid #ef4444' : `1px solid ${_pTxtMutedColor}25`, color: _pTxtColor }}
-                                        autoFocus
-                                      />
-                                      <button
-                                        onClick={() => {
-                                          if (!schoolCodeInput.trim()) { setSchoolCodeError('Code dalein'); return; }
-                                          if (schoolCodeInput.trim().toUpperCase() !== (school.lockCode || '').toUpperCase()) {
-                                            setSchoolCodeError('Galat code hai');
-                                            return;
-                                          }
-                                          _joinSchool(school);
-                                        }}
-                                        className="px-4 py-2 rounded-xl text-sm font-black text-white active:scale-95 transition"
-                                        style={{ background: tierTheme.primary }}>
-                                        OK
-                                      </button>
-                                    </div>
-                                    {schoolCodeError && <p className="text-[10px] mt-1 text-red-500 font-bold">{schoolCodeError}</p>}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })
-                        )}
-                      </div>
-                      {/* None option */}
-                      {_userSchoolId && (
-                        <div className="p-3 pt-0 shrink-0">
-                          <button
-                            onClick={async () => { await _removeSchool(); setShowSchoolPicker(false); }}
-                            className="w-full py-3 rounded-2xl text-sm font-black active:scale-95 transition"
-                            style={{ background: 'rgba(239,68,68,0.10)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.20)' }}>
-                            School hatao (None)
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* ── COACHING PICKER MODAL ── */}
-                {showCoachingPicker && (
-                  <div className="fixed inset-0 z-[500] flex flex-col" style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}>
-                    <div className="flex-1" onClick={() => setShowCoachingPicker(false)} />
-                    <div className="rounded-t-3xl overflow-hidden flex flex-col" style={{ background: _pCard, maxHeight: '72vh' }}>
-                      {/* Header */}
-                      <div className="px-5 py-4 flex items-center gap-3 shrink-0" style={{ borderBottom: _pSep }}>
-                        <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'rgba(139,92,246,0.12)' }}>
-                          <span className="text-lg">📚</span>
-                        </div>
-                        <div className="flex-1">
-                          <p className={`text-sm font-black ${_pTxt}`}>Coaching Chunein</p>
-                          <p className="text-[10px]" style={{ color: _pTxtMutedColor }}>Apni coaching institute select karo</p>
-                        </div>
-                        <button onClick={() => setShowCoachingPicker(false)} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: `${_pTxtMutedColor}18` }}>
-                          <X size={16} style={{ color: _pTxtMutedColor }} />
-                        </button>
-                      </div>
-                      {/* Coaching list */}
-                      <div className="overflow-y-auto flex-1 p-3 space-y-2">
-                        {coachingPickerLoading ? (
-                          <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin" style={{ color: '#8b5cf6' }} /></div>
-                        ) : rtdbCoachingList.length === 0 ? (
-                          <p className="py-8 text-center text-sm" style={{ color: _pTxtMutedColor }}>Admin ne abhi koi coaching nahi add ki</p>
-                        ) : (
-                          rtdbCoachingList.map(c => {
-                            const isSelected = c.id === _userCoachingId;
-                            return (
-                              <button
-                                key={c.id}
-                                onClick={() => _joinCoaching(c)}
-                                className="w-full px-4 py-3.5 rounded-2xl flex items-center gap-3 text-left active:scale-98 transition"
-                                style={{ background: isSelected ? 'rgba(139,92,246,0.12)' : `${_pTxtMutedColor}08`, border: isSelected ? '1.5px solid rgba(139,92,246,0.45)' : `1px solid ${_pTxtMutedColor}18` }}>
-                                <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 text-xl" style={{ background: 'rgba(139,92,246,0.10)' }}>{c.emoji || '📚'}</div>
-                                <div className="flex-1 min-w-0">
-                                  <p className={`text-sm font-bold truncate ${_pTxt}`}>{c.name}</p>
-                                </div>
-                                {isSelected && <CheckCircle size={15} style={{ color: '#8b5cf6' }} className="shrink-0" />}
-                              </button>
-                            );
-                          })
-                        )}
-                      </div>
-                      {/* None option */}
-                      {_userCoachingId && (
-                        <div className="p-3 pt-0 shrink-0">
-                          <button
-                            onClick={async () => { await _removeCoaching(); setShowCoachingPicker(false); }}
-                            className="w-full py-3 rounded-2xl text-sm font-black active:scale-95 transition"
-                            style={{ background: 'rgba(239,68,68,0.10)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.20)' }}>
-                            Coaching hatao (None)
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
               </div>
             );
           })()}
@@ -14216,33 +14044,6 @@ export const StudentDashboard: React.FC<Props> = ({
                 <ChevronRight size={15} style={{ color: _pTxtMutedColor }} className="shrink-0" />
               </button>
             )}
-
-            {/* Theme Studio — custom colors for all; admin gets publishing controls */}
-            <button onClick={() => { themeOpenerRef.current = 'PROFILE'; onTabChange('THEME_CUSTOMIZER' as any); }}
-                className={`w-full px-4 py-4 flex items-center gap-3.5 ${_pHovCls} transition-colors`}
-                style={{ borderBottom: _pSep }}>
-                <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'rgba(168,85,247,0.15)', border: '1px solid rgba(168,85,247,0.35)' }}>
-                  <Palette size={17} style={{ color: '#a855f7' }} />
-                </div>
-                <div className="flex-1 text-left">
-                   <div className="flex items-center gap-2">
-                     <p className={`text-sm font-bold ${_pTxt}`}>Theme Studio</p>
-                     {!isImpersonating && _newThemeCount > 0 && (
-                       <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full text-fuchsia-200 bg-fuchsia-500/25">
-                         {_newThemeCount} NEW
-                       </span>
-                     )}
-                   </div>
-                   <p className="text-[9px]" style={{ color: _pTxtMutedColor }}>
-                     {user.role === 'ADMIN' || user.role === 'SUB_ADMIN'
-                       ? 'Create & publish themes'
-                       : _newThemeCount > 0
-                         ? `${_newThemeCount} new theme${_newThemeCount > 1 ? 's' : ''} available · Browse & buy`
-                         : 'Browse, preview & buy themes'}
-                   </p>
-                </div>
-                <ChevronRight size={15} style={{ color: _pTxtMutedColor }} className="shrink-0" />
-            </button>
 
             {/* Teacher Store */}
             {user.role === 'TEACHER' && (
@@ -14365,6 +14166,83 @@ export const StudentDashboard: React.FC<Props> = ({
               </div>
               <ChevronRight size={14} style={{ color: _pTxtMutedColor }} className="shrink-0" />
             </button>
+
+            {/* ── Sequential Page Reading Control (Free: Always ON, Basic/Ultra: Self ON/OFF) ── */}
+            {(() => {
+              const isVip = Boolean(
+                user.isPremium && (user.subscriptionLevel === 'BASIC' || user.subscriptionLevel === 'ULTRA')
+              );
+              // For VIP users: sequentialReadingDisabled === true means OFF, else ON
+              const isEnabled = isVip ? !user.sequentialReadingDisabled : true;
+
+              return (
+                <button
+                  onClick={async () => {
+                    if (!isVip) {
+                      showAlert('🔒 Sequential Page Reading Free users ke liye hamesha ON rehta hai! Isko toggle karne ke liye Store se Basic ya Ultra plan lijiye.', 'INFO', 'Free Plan Rule');
+                      return;
+                    }
+                    try {
+                      const nextDisabled = !user.sequentialReadingDisabled;
+                      const uRef = doc(db, 'users', user.id);
+                      await updateDoc(uRef, { sequentialReadingDisabled: nextDisabled });
+                      const updated = { ...user, sequentialReadingDisabled: nextDisabled };
+                      handleUserUpdate(updated);
+                      showAlert(
+                        nextDisabled
+                          ? '🔓 Sequential Page Reading OFF! Ab aap kisi bhi page par direct ja sakte hain.'
+                          : '🔒 Sequential Page Reading ON! Pehle ka page poora padhne par hi agla page khulega.',
+                        'SUCCESS',
+                        'Reading Rule Updated'
+                      );
+                    } catch {
+                      showAlert('❌ Setting update nahi ho payi.', 'ERROR');
+                    }
+                  }}
+                  className={`w-full px-4 py-4 flex items-center gap-3.5 ${_pHovCls} transition-colors`}
+                  style={{ borderBottom: _pSep }}>
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{
+                    background: isEnabled ? 'rgba(14,165,233,0.15)' : 'rgba(100,116,139,0.15)',
+                    border: `1px solid ${isEnabled ? 'rgba(14,165,233,0.40)' : 'rgba(100,116,139,0.30)'}`,
+                  }}>
+                    <span className="text-base leading-none">{isEnabled ? '📖' : '📑'}</span>
+                  </div>
+                  <div className="flex-1 text-left">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <p className={`text-sm font-bold ${_pTxt}`}>
+                        Sequential Page Reading
+                      </p>
+                      {isVip ? (
+                        <span className="text-[9px] bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-300 px-1.5 py-0.5 rounded font-black">
+                          {user.subscriptionLevel} VIP Control
+                        </span>
+                      ) : (
+                        <span className="text-[9px] bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded font-black">
+                          Free (Always ON)
+                        </span>
+                      )}
+                    </div>
+                    <p className={`text-[10px] mt-0.5 ${_pTxtSub}`}>
+                      {isVip
+                        ? isEnabled
+                          ? 'ON (Active) — Pehla page padhne ke baad hi agla page unlock hoga. Tap to turn OFF.'
+                          : 'OFF (Disabled) — Free navigation active! Aap kisi bhi page par ja sakte hain.'
+                        : 'Free students ke liye hamesha ON rehta hai (Strict sequence required).'}
+                    </p>
+                  </div>
+                  {/* Toggle pill */}
+                  <div className="shrink-0 w-10 h-5 rounded-full relative transition-all"
+                    style={{ background: isEnabled ? 'rgba(14,165,233,0.85)' : 'rgba(255,255,255,0.12)' }}>
+                    <div className="absolute top-0.5 w-4 h-4 rounded-full transition-all"
+                      style={{
+                        background: '#fff',
+                        left: isEnabled ? '1.375rem' : '0.125rem',
+                        boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
+                      }} />
+                  </div>
+                </button>
+              );
+            })()}
 
             {/* ── Theme Override Toggle ── */}
             {(() => {
@@ -15386,37 +15264,6 @@ export const StudentDashboard: React.FC<Props> = ({
                                   </div>
                                 );
                               }
-                               if (isThemeStudio) {
-                                 const studio = (settings as any)?.themeStudioEvent;
-                                 return (
-                                   <div key={i} className="rounded-2xl overflow-hidden" style={{ background: 'rgba(168,85,247,0.10)', border: '1px solid rgba(168,85,247,0.38)' }}>
-                                     <div className="px-4 pt-3.5 pb-2 flex items-center justify-between">
-                                       <div className="flex items-center gap-2">
-                                         <span className="text-xl">🎨</span>
-                                         <div>
-                                           <p className="font-black text-white text-sm">{studio?.eventName || 'Theme Studio'}</p>
-                                            <p className="text-[9px] text-fuchsia-300/70">
-                                              { _publishedThemeLibrary.length > 0
-                                                ? `${_publishedThemeLibrary.length} theme${_publishedThemeLibrary.length > 1 ? 's' : ''} available${_newThemeCount > 0 ? ` · ${_newThemeCount} NEW` : ''} — preview & buy`
-                                                : 'Custom colors, presets aur admin themes explore karo'}
-                                            </p>
-                                         </div>
-                                       </div>
-                                       <span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${isEndingSoon ? 'bg-red-500/20 text-red-400' : 'bg-fuchsia-500/20 text-fuchsia-300'}`}>
-                                         {isEndingSoon ? 'ENDING' : 'LIVE'}
-                                       </span>
-                                     </div>
-                                     <div className="px-4 pb-3">
-                                       {isEndingSoon && endCountdown && <p className="text-[9px] font-black text-red-400 mb-2">⏰ {endCountdown} — jaldi try karo</p>}
-                                       <button onClick={() => onTabChange('THEME_CUSTOMIZER' as any)}
-                                         className="w-full py-2.5 rounded-xl text-[10px] font-black text-white"
-                                         style={{ background: 'linear-gradient(135deg,#9333ea,#db2777)' }}>
-                                         🎨 Theme Studio kholo →
-                                       </button>
-                                     </div>
-                                   </div>
-                                 );
-                               }
                               return (
                                 <div key={i} className="rounded-2xl p-4 flex items-center gap-3"
                                   style={isEndingSoon
@@ -15838,10 +15685,10 @@ export const StudentDashboard: React.FC<Props> = ({
                   <button
                     id="topbar-row1-store-btn"
                     onClick={() => {
-                      setStoreInitialTier('FREE');
+                      setStoreInitialTier('SUBSCRIPTION');
                       onTabChange("STORE");
                     }}
-                     className={`absolute top-0.5 bottom-0.5 left-1/2 -translate-x-1/2 w-max max-w-[92px] flex items-center justify-center gap-1 px-1.5 rounded-full border transition-all duration-500 ease-out cursor-pointer active:scale-95 group ${
+                    className={`absolute top-0.5 bottom-0.5 left-1/2 -translate-x-1/2 w-[94px] flex items-center justify-between px-2 rounded-full border transition-all duration-500 ease-out cursor-pointer active:scale-95 group ${
                       topBarSwitchIdx === 0
                         ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto'
                         : 'opacity-0 -translate-y-2 scale-95 pointer-events-none'
@@ -15849,15 +15696,15 @@ export const StudentDashboard: React.FC<Props> = ({
                     style={{
                       background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.32) 0%, rgba(5, 150, 105, 0.22) 100%)',
                       borderColor: 'rgba(52, 211, 153, 0.50)',
-                       boxShadow: '0 0 7px rgba(16, 185, 129, 0.24), inset 0 1px 1px rgba(255, 255, 255, 0.22)',
+                      boxShadow: '0 0 7px rgba(16, 185, 129, 0.24), inset 0 1px 1px rgba(255, 255, 255, 0.22)',
                     }}
-                    title="Store kholein — Subscriptions, Credits aur Offers"
+                    title="Store kholein — VIP Plans, Credits aur Offers"
                   >
                     <ShoppingBag size={12.5} className="text-emerald-300 group-hover:scale-110 transition-transform shrink-0 drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]" />
                     <span className="font-black text-[11px] sm:text-[11.5px] text-emerald-100 tracking-wide drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]">
                       Store
                     </span>
-                    <span className="text-[8px] font-black px-1.5 py-0.2 rounded-full bg-emerald-400 text-slate-950 font-mono uppercase leading-tight shadow-sm tracking-wider">
+                    <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full bg-emerald-400 text-slate-950 font-mono uppercase leading-none shadow-xs tracking-wider shrink-0">
                       VIP
                     </span>
                   </button>
@@ -15869,7 +15716,7 @@ export const StudentDashboard: React.FC<Props> = ({
                       setStoreInitialTier('CREDITS');
                       onTabChange("STORE");
                     }}
-                     className={`absolute top-0.5 bottom-0.5 left-1/2 -translate-x-1/2 w-max max-w-[92px] flex items-center justify-center gap-0.5 px-1.5 rounded-full border transition-all duration-500 ease-out cursor-pointer active:scale-95 group ${
+                    className={`absolute top-0.5 bottom-0.5 left-1/2 -translate-x-1/2 w-[94px] flex items-center justify-between px-2 rounded-full border transition-all duration-500 ease-out cursor-pointer active:scale-95 group ${
                       topBarSwitchIdx === 1
                         ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto'
                         : 'opacity-0 -translate-y-2 scale-95 pointer-events-none'
@@ -15877,12 +15724,12 @@ export const StudentDashboard: React.FC<Props> = ({
                     style={{
                       background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.32) 0%, rgba(217, 119, 6, 0.22) 100%)',
                       borderColor: 'rgba(251, 191, 36, 0.50)',
-                       boxShadow: '0 0 7px rgba(245, 158, 11, 0.24), inset 0 1px 1px rgba(255, 255, 255, 0.22)',
+                      boxShadow: '0 0 7px rgba(245, 158, 11, 0.24), inset 0 1px 1px rgba(255, 255, 255, 0.22)',
                     }}
                     title="Aapke Credits — Tap karke Store se aur paayein"
                   >
                     <span className="text-[12px] leading-none shrink-0 select-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]">🪙</span>
-                    <span className="font-black text-[11px] sm:text-[11.5px] tabular-nums text-amber-100 group-hover:text-white truncate max-w-[50px] drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]">
+                    <span className="font-black text-[11px] sm:text-[11.5px] tabular-nums text-amber-100 group-hover:text-white truncate max-w-[46px] drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]">
                       {(user.credits || 0).toLocaleString('en-IN')}
                     </span>
                     <span className="w-3.5 h-3.5 rounded-full bg-amber-400/30 flex items-center justify-center text-amber-300 border border-amber-400/40 group-hover:scale-110 transition-transform shrink-0">
@@ -15897,7 +15744,7 @@ export const StudentDashboard: React.FC<Props> = ({
                       setStoreInitialTier('DIAMONDS');
                       onTabChange("STORE");
                     }}
-                     className={`absolute top-0.5 bottom-0.5 left-1/2 -translate-x-1/2 w-max max-w-[92px] flex items-center justify-center gap-0.5 px-1.5 rounded-full border transition-all duration-500 ease-out cursor-pointer active:scale-95 group ${
+                    className={`absolute top-0.5 bottom-0.5 left-1/2 -translate-x-1/2 w-[94px] flex items-center justify-between px-2 rounded-full border transition-all duration-500 ease-out cursor-pointer active:scale-95 group ${
                       topBarSwitchIdx === 2
                         ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto'
                         : 'opacity-0 -translate-y-2 scale-95 pointer-events-none'
@@ -15905,12 +15752,12 @@ export const StudentDashboard: React.FC<Props> = ({
                     style={{
                       background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.32) 0%, rgba(2, 132, 199, 0.22) 100%)',
                       borderColor: 'rgba(56, 189, 248, 0.50)',
-                       boxShadow: '0 0 7px rgba(6, 182, 212, 0.25), inset 0 1px 1px rgba(255, 255, 255, 0.22)',
+                      boxShadow: '0 0 7px rgba(6, 182, 212, 0.25), inset 0 1px 1px rgba(255, 255, 255, 0.22)',
                     }}
                     title="Aapke Diamonds — Tap karke Diamond Store kholein"
                   >
                     <span className="text-[12px] leading-none shrink-0 select-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]">💎</span>
-                    <span className="font-black text-[11px] sm:text-[11.5px] tabular-nums text-cyan-100 group-hover:text-white truncate max-w-[50px] drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]">
+                    <span className="font-black text-[11px] sm:text-[11.5px] tabular-nums text-cyan-100 group-hover:text-white truncate max-w-[46px] drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]">
                       {(user.diamonds ?? 0).toLocaleString('en-IN')}
                     </span>
                     <span className="w-3.5 h-3.5 rounded-full bg-cyan-400/30 flex items-center justify-center text-cyan-200 border border-cyan-400/40 group-hover:scale-110 transition-transform shrink-0">
@@ -16113,7 +15960,7 @@ export const StudentDashboard: React.FC<Props> = ({
                           {
                             label: 'Store',
                             right: '🛍️',
-                            action: () => { setStoreInitialTier('FREE'); onTabChange("STORE"); setShowDotsMenu(false); },
+                            action: () => { setStoreInitialTier('SUBSCRIPTION'); onTabChange("STORE"); setShowDotsMenu(false); },
                           },
                           {
                             label: 'Diamond Store',
@@ -16271,10 +16118,10 @@ export const StudentDashboard: React.FC<Props> = ({
                 <button
                   id="topbar-row2-store-btn"
                   onClick={() => {
-                    setStoreInitialTier('FREE');
+                    setStoreInitialTier('SUBSCRIPTION');
                     onTabChange("STORE");
                   }}
-                   className={`absolute top-0.5 bottom-0.5 left-1/2 -translate-x-1/2 w-max max-w-[92px] flex items-center justify-center gap-1 px-1.5 rounded-full border transition-all duration-500 ease-out cursor-pointer active:scale-95 group ${
+                  className={`absolute top-0.5 bottom-0.5 left-1/2 -translate-x-1/2 w-[94px] flex items-center justify-between px-2 rounded-full border transition-all duration-500 ease-out cursor-pointer active:scale-95 group ${
                     topBarSwitchIdx === 0
                       ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto'
                       : 'opacity-0 -translate-y-2 scale-95 pointer-events-none'
@@ -16282,15 +16129,15 @@ export const StudentDashboard: React.FC<Props> = ({
                   style={{
                     background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.32) 0%, rgba(5, 150, 105, 0.22) 100%)',
                     borderColor: 'rgba(52, 211, 153, 0.50)',
-                     boxShadow: '0 0 7px rgba(16, 185, 129, 0.24), inset 0 1px 1px rgba(255, 255, 255, 0.22)',
+                    boxShadow: '0 0 7px rgba(16, 185, 129, 0.24), inset 0 1px 1px rgba(255, 255, 255, 0.22)',
                   }}
-                  title="Store kholein — Subscriptions, Credits aur Offers"
+                  title="Store kholein — VIP Plans, Credits aur Offers"
                 >
                   <ShoppingBag size={12.5} className="text-emerald-300 group-hover:scale-110 transition-transform shrink-0 drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]" />
                   <span className="font-black text-[11px] sm:text-[11.5px] text-emerald-100 tracking-wide drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]">
                     Store
                   </span>
-                  <span className="text-[8px] font-black px-1.5 py-0.2 rounded-full bg-emerald-400 text-slate-950 font-mono uppercase leading-tight shadow-sm tracking-wider">
+                  <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full bg-emerald-400 text-slate-950 font-mono uppercase leading-none shadow-xs tracking-wider shrink-0">
                     VIP
                   </span>
                 </button>
@@ -16302,7 +16149,7 @@ export const StudentDashboard: React.FC<Props> = ({
                     setStoreInitialTier('CREDITS');
                     onTabChange("STORE");
                   }}
-                   className={`absolute top-0.5 bottom-0.5 left-1/2 -translate-x-1/2 w-max max-w-[92px] flex items-center justify-center gap-0.5 px-1.5 rounded-full border transition-all duration-500 ease-out cursor-pointer active:scale-95 group ${
+                  className={`absolute top-0.5 bottom-0.5 left-1/2 -translate-x-1/2 w-[94px] flex items-center justify-between px-2 rounded-full border transition-all duration-500 ease-out cursor-pointer active:scale-95 group ${
                     topBarSwitchIdx === 1
                       ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto'
                       : 'opacity-0 -translate-y-2 scale-95 pointer-events-none'
@@ -16310,12 +16157,12 @@ export const StudentDashboard: React.FC<Props> = ({
                   style={{
                     background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.32) 0%, rgba(217, 119, 6, 0.22) 100%)',
                     borderColor: 'rgba(251, 191, 36, 0.50)',
-                     boxShadow: '0 0 7px rgba(245, 158, 11, 0.24), inset 0 1px 1px rgba(255, 255, 255, 0.22)',
+                    boxShadow: '0 0 7px rgba(245, 158, 11, 0.24), inset 0 1px 1px rgba(255, 255, 255, 0.22)',
                   }}
                   title="Aapke Credits — Tap karke Store se aur paayein"
                 >
                   <span className="text-[12px] leading-none shrink-0 select-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]">🪙</span>
-                  <span className="font-black text-[11px] sm:text-[11.5px] tabular-nums text-amber-100 group-hover:text-white truncate max-w-[50px] drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]">
+                  <span className="font-black text-[11px] sm:text-[11.5px] tabular-nums text-amber-100 group-hover:text-white truncate max-w-[46px] drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]">
                     {(user.credits || 0).toLocaleString('en-IN')}
                   </span>
                   <span className="w-3.5 h-3.5 rounded-full bg-amber-400/30 flex items-center justify-center text-amber-300 border border-amber-400/40 group-hover:scale-110 transition-transform shrink-0">
@@ -16330,7 +16177,7 @@ export const StudentDashboard: React.FC<Props> = ({
                     setStoreInitialTier('DIAMONDS');
                     onTabChange("STORE");
                   }}
-                   className={`absolute top-0.5 bottom-0.5 left-1/2 -translate-x-1/2 w-max max-w-[92px] flex items-center justify-center gap-0.5 px-1.5 rounded-full border transition-all duration-500 ease-out cursor-pointer active:scale-95 group ${
+                  className={`absolute top-0.5 bottom-0.5 left-1/2 -translate-x-1/2 w-[94px] flex items-center justify-between px-2 rounded-full border transition-all duration-500 ease-out cursor-pointer active:scale-95 group ${
                     topBarSwitchIdx === 2
                       ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto'
                       : 'opacity-0 -translate-y-2 scale-95 pointer-events-none'
@@ -16338,12 +16185,12 @@ export const StudentDashboard: React.FC<Props> = ({
                   style={{
                     background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.32) 0%, rgba(2, 132, 199, 0.22) 100%)',
                     borderColor: 'rgba(56, 189, 248, 0.50)',
-                     boxShadow: '0 0 7px rgba(6, 182, 212, 0.25), inset 0 1px 1px rgba(255, 255, 255, 0.22)',
+                    boxShadow: '0 0 7px rgba(6, 182, 212, 0.25), inset 0 1px 1px rgba(255, 255, 255, 0.22)',
                   }}
                   title="Aapke Diamonds — Tap karke Diamond Store kholein"
                 >
                   <span className="text-[12px] leading-none shrink-0 select-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]">💎</span>
-                  <span className="font-black text-[11px] sm:text-[11.5px] tabular-nums text-cyan-100 group-hover:text-white truncate max-w-[50px] drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]">
+                  <span className="font-black text-[11px] sm:text-[11.5px] tabular-nums text-cyan-100 group-hover:text-white truncate max-w-[46px] drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]">
                     {(user.diamonds ?? 0).toLocaleString('en-IN')}
                   </span>
                   <span className="w-3.5 h-3.5 rounded-full bg-cyan-400/30 flex items-center justify-center text-cyan-200 border border-cyan-400/40 group-hover:scale-110 transition-transform shrink-0">
@@ -21062,6 +20909,8 @@ export const StudentDashboard: React.FC<Props> = ({
               setShowCompareView(false);
               // Close Revision Hub Screen if open — otherwise it covers all other tabs.
               setShowRevisionHubScreen(false);
+              // Close Updates Page if open.
+              setShowUpdatesPage(false);
               // Close My Routine screen if open.
               setShowMyRoutine(false);
               // Close Community Stars page if open.
@@ -21125,28 +20974,29 @@ export const StudentDashboard: React.FC<Props> = ({
                 // When the Important Notes overlay is open, Home should NOT
                 // appear active — only ONE bottom-nav tab can be active at a
                 // time. Same rule applies to all sibling tabs below.
-                isActive: !showStarredPage && !showChat && !showRevisionHubScreen && !showMyRoutine && !showDailyEventPage && !showProgressDashboard && currentLogicalTab === "HOME",
+                isActive: !showStarredPage && !showChat && !showRevisionHubScreen && !showUpdatesPage && !showMyRoutine && !showDailyEventPage && !showProgressDashboard && currentLogicalTab === "HOME",
                 onClick: () => switchToLogicalTab("HOME"),
               },
 
-              // Revision Hub — quick access to smart learning
+              // Updates & Central Hub — live events countdown, daily challenge & portals
               {
-                id: "REVISION_HUB" as any,
-                label: "Revision",
-                Icon: BrainCircuit,
+                id: "UPDATES" as any,
+                label: "Updates",
+                Icon: Sparkles,
                 filledOnActive: true,
-                isActive: showRevisionHubScreen,
+                isActive: showUpdatesPage,
                 onClick: () => {
                   setShowChat(false);
                   setShowStarredPage(false);
                   setShowMyRoutine(false);
                   setShowDailyEventPage(false);
+                  setShowRevisionHubScreen(false);
                   if (showCommunityStarsPage) {
                     try { stopProfileStarRead(); } catch (_) {}
                     setShowCommunityStarsPage(false);
                   }
                   hapticMedium();
-                  setShowRevisionHubScreen(true);
+                  setShowUpdatesPage(true);
                 },
               },
 
@@ -21171,12 +21021,13 @@ export const StudentDashboard: React.FC<Props> = ({
                   label: "Routine",
                   Icon: CalendarCheck,
                   filledOnActive: true,
-                  isActive: showMyRoutine,
+                  isActive: !showUpdatesPage && showMyRoutine,
                   badge: _routineBadge,
                   onClick: () => {
                     setShowChat(false);
                     setShowStarredPage(false);
                     setShowRevisionHubScreen(false);
+                    setShowUpdatesPage(false);
                     setShowDailyEventPage(false);
                     if (showCommunityStarsPage) {
                       try { stopProfileStarRead(); } catch (_) {}
@@ -21194,11 +21045,12 @@ export const StudentDashboard: React.FC<Props> = ({
                 label: "Community",
                 Icon: MessageSquare,
                 filledOnActive: true,
-                isActive: showChat,
+                isActive: !showUpdatesPage && showChat,
                 // ✅ Naya onClick
         onClick: () => {
   setShowCompareView(false);
   setShowRevisionHubScreen(false);
+  setShowUpdatesPage(false);
   setShowMyRoutine(false);
   setShowDailyEventPage(false);
   if (showCommunityStarsPage) {
@@ -21221,7 +21073,7 @@ export const StudentDashboard: React.FC<Props> = ({
                       label: "Apps",
                       Icon: ShoppingBag,
                       filledOnActive: true,
-                      isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showProgressDashboard && !showChat && currentLogicalTab === "APP_STORE",
+                      isActive: !showStarredPage && !showRevisionHubScreen && !showUpdatesPage && !showMyRoutine && !showProgressDashboard && !showChat && currentLogicalTab === "APP_STORE",
                       onClick: () => switchToLogicalTab("APP_STORE"),
                     },
                   ]
@@ -21234,7 +21086,7 @@ export const StudentDashboard: React.FC<Props> = ({
                 Icon: UserIcon,
                 filledOnActive: false,
                 // ✅ Nayi Line (Chat/Community open hone par Profile inactive rahega)
-isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showProgressDashboard && !showChat && currentLogicalTab === "PROFILE",
+isActive: !showStarredPage && !showRevisionHubScreen && !showUpdatesPage && !showMyRoutine && !showProgressDashboard && !showChat && currentLogicalTab === "PROFILE",
 
                 onClick: () => switchToLogicalTab("PROFILE"),
               },
@@ -22707,6 +22559,13 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
           const _isAdm2 = user.role === 'ADMIN' || user.role === 'SUB_ADMIN';
           if (safeIndex < totalPages - 1) {
             const _nextIdx = safeIndex + 1;
+            if (isSequentialReadingEnforced(user, settings)) {
+              const currentRead = isRoutinePageRead(entry.id, safeIndex);
+              if (!currentRead) {
+                showAlert(`🔒 Page ${safeIndex + 1} jab tak complete read na hoga, Page ${_nextIdx + 1} lock rahega! Pehle Page ${safeIndex + 1} poora padhein.`, 'INFO', 'Page Locked');
+                return;
+              }
+            }
             if (_isAdm2 || isPgReadUnlocked(entry.id, _nextIdx)) {
               setLucentPageIndex(_nextIdx);
             } else {
@@ -23084,8 +22943,8 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                 ...(_hasMcqTb ? [
                   { mode: 'MCQ',      label: 'MCQ Practice',  emoji: '🧠', cost: 20,
                     isUnlocked: isMcqPageUnlocked(entry.id, safeIndex), isAccessible: true,                       requiredTier: 'free'  as const, unlockAction: () => markMcqPageUnlocked(entry.id, safeIndex) },
-                  { mode: 'FLASHCARD',label: 'Flashcard',     emoji: '🃏', cost: 20,
-                    isUnlocked: isFcPageUnlocked(entry.id, safeIndex),  isAccessible: _isUltraUser,               requiredTier: 'ultra' as const, unlockAction: () => markFcPageUnlocked(entry.id, safeIndex) },
+                  { mode: 'FLASHCARD',label: 'Flashcard',     emoji: '🃏', cost: _isUltraUser ? 0 : 20,
+                    isUnlocked: _isUltraUser || isFcPageUnlocked(entry.id, safeIndex),  isAccessible: true,                       requiredTier: 'ultra' as const, unlockAction: () => markFcPageUnlocked(entry.id, safeIndex) },
                 ] : []),
                 ...(_hasPdfTb ? [
                   { mode: 'PDF',   label: 'PDF',   emoji: '📄', cost: 0,
@@ -23159,12 +23018,11 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                   showCoinGate(20, 'Q&A Mode', () => { markQaPageUnlocked(entry.id, safeIndex); _doSwitch(); }, undefined, undefined, _pgInfo);
                 } else if (tab === 'FLASHCARD') {
                   if (_isUltraUser || _isAdm) {
-                    if (isFcPageUnlocked(entry.id, safeIndex)) { _doSwitch(); return; }
-                    showCoinGate(20, 'Flashcard', () => { markFcPageUnlocked(entry.id, safeIndex); _doSwitch(); }, undefined, undefined, _pgInfo);
-                  } else {
-                    if (isFcPageUnlocked(entry.id, safeIndex)) { _doSwitch(); return; }
-                    showDiamondOnlyGate(5, 'Flashcard (Ultra Exclusive)', () => { markFcPageUnlocked(entry.id, safeIndex); _doSwitch(); });
+                    _doSwitch();
+                    return;
                   }
+                  if (isFcPageUnlocked(entry.id, safeIndex)) { _doSwitch(); return; }
+                  showDiamondOnlyGate(5, 'Flashcard (Ultra Exclusive)', () => { markFcPageUnlocked(entry.id, safeIndex); _doSwitch(); });
                 }
               };
               return (
@@ -23325,20 +23183,20 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                         </button>
                       )}
                       {_isAdminUser && (
-                        <button onClick={() => { const src = (currentPage as any)?.htmlNotes || (currentPage as any)?.content || ''; setInlineEditContent(src); setInlineEditPoints(splitHtmlIntoBlocks(src)); setInlineEditPointIdx(null); setInlineEditPointDraft(''); setInlineEditModal({ type: 'lucent_html', entryId: entry.id, pageIndex: safeIndex, title: `${entry.lessonTitle} · Page ${currentPage?.pageNo ?? safeIndex + 1}`, originalEntry: entry }); setLucentWriteMenuOpen(false); }} className="w-7 h-7 flex items-center justify-center rounded-lg bg-orange-50 border border-orange-200 text-orange-500 active:scale-90 transition shrink-0" title="Edit HTML"><Pencil size={12} /></button>
+                        <button onClick={() => { const src = (currentPage as any)?.htmlNotes || (currentPage as any)?.content || ''; setInlineEditContent(src); setInlineEditPoints(splitHtmlIntoBlocks(src)); setInlineEditPointIdx(null); setInlineEditPointDraft(''); setInlineEditModal({ type: 'lucent_html', entryId: entry.id, pageIndex: safeIndex, title: `${entry.lessonTitle} · Page ${currentPage?.pageNo ?? safeIndex + 1}`, originalEntry: entry }); setLucentWriteMenuOpen(false); }} className="w-8 h-8 flex items-center justify-center rounded-xl bg-orange-50 border border-orange-200 text-orange-600 hover:bg-orange-100 active:scale-95 shadow-sm transition-all shrink-0" title="Edit HTML"><Pencil size={12} /></button>
                       )}
                       {_isAdminUser && (
-                        <button onClick={() => setShowAdminBoard(true)} className="w-7 h-7 flex items-center justify-center rounded-lg bg-orange-50 border border-orange-200 text-orange-500 active:scale-90 transition shrink-0" title="Whiteboard"><Presentation size={12} /></button>
+                        <button onClick={() => setShowAdminBoard(true)} className="w-8 h-8 flex items-center justify-center rounded-xl bg-orange-50 border border-orange-200 text-orange-600 hover:bg-orange-100 active:scale-95 shadow-sm transition-all shrink-0" title="Whiteboard"><Presentation size={12} /></button>
                       )}
-                      <div className="flex items-center rounded-lg overflow-hidden border border-slate-200 bg-slate-50 shrink-0">
-                        <button onClick={zoomOut} className="w-6 h-7 flex items-center justify-center text-slate-600 text-[10px] font-black active:scale-90 transition hover:bg-slate-100">A−</button>
+                      <div className="flex items-center rounded-xl overflow-hidden border border-slate-200 bg-white shadow-sm shrink-0">
+                        <button onClick={zoomOut} className="w-8 h-8 flex items-center justify-center text-slate-600 text-[11px] font-black active:scale-95 transition-all hover:bg-slate-50 hover:text-indigo-600">A−</button>
                         <span className="px-1 text-slate-500 text-[9px] font-bold tabular-nums border-x border-slate-200">{Math.round(noteZoom * 100)}%</span>
-                        <button onClick={zoomIn} className="w-6 h-7 flex items-center justify-center text-slate-600 text-[10px] font-black active:scale-90 transition hover:bg-slate-100">A+</button>
+                        <button onClick={zoomIn} className="w-8 h-8 flex items-center justify-center text-slate-600 text-[11px] font-black active:scale-95 transition-all hover:bg-slate-50 hover:text-indigo-600">A+</button>
                       </div>
-                      <button onClick={handleRotate} className={`w-7 h-7 flex items-center justify-center rounded-lg border active:scale-90 transition shrink-0 ${isLandscape ? 'bg-emerald-50 border-emerald-300 text-emerald-600' : 'bg-slate-100 border-slate-200 text-slate-500'}`} title="Rotate"><RotateCcw size={12} /></button>
-                      <button onClick={() => handleLucentSaveOffline(true)} className={`w-7 h-7 flex items-center justify-center rounded-lg border active:scale-90 transition shrink-0 ${lucentSaved ? 'bg-emerald-50 border-emerald-300 text-emerald-600' : 'bg-slate-100 border-slate-200 text-slate-500'}`} title={lucentSaved ? 'Saved ✓' : 'Save Offline'}><WifiOff size={12} /></button>
+                      <button onClick={handleRotate} className={`w-8 h-8 flex items-center justify-center rounded-xl border shadow-sm active:scale-95 transition-all shrink-0 ${isLandscape ? "bg-indigo-50 border-indigo-200 text-indigo-600" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`} title="Rotate"><RotateCcw size={12} /></button>
+                      <button onClick={() => handleLucentSaveOffline(true)} className={`w-8 h-8 flex items-center justify-center rounded-xl border shadow-sm active:scale-95 transition-all shrink-0 ${lucentSaved ? "bg-emerald-500 border-emerald-600 text-white shadow-emerald-200" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`} title={lucentSaved ? 'Saved ✓' : 'Save Offline'}><WifiOff size={12} /></button>
                       {(currentPage?.htmlNotes || currentPage?.content) && (
-                        <button onClick={async () => { try { const pageLabel = `Page ${currentPage?.pageNo || safeIndex + 1}`; const safeTitle = `${entry.lessonTitle || 'Lucent'} · ${pageLabel}`.replace(/[^a-z0-9_\- ·]/gi, '_').slice(0, 60); const _dlOk = await checkAndDoDownload(async () => { await downloadAsMHTML('lucent-html-download', safeTitle, { appName: settings?.appShortName || settings?.appName || 'IIC', pageTitle: `${entry.lessonTitle || 'Lucent'} · ${pageLabel}`, subtitle: 'Write Mode Notes' }); }); if (_dlOk) showAlert('📥 Saved!', 'SUCCESS'); } catch { showAlert('Download failed.', 'ERROR'); } }} className="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-100 border border-slate-200 text-slate-500 active:scale-90 transition shrink-0" title="Download"><Download size={12} /></button>
+                        <button onClick={async () => { try { const pageLabel = `Page ${currentPage?.pageNo || safeIndex + 1}`; const safeTitle = `${entry.lessonTitle || 'Lucent'} · ${pageLabel}`.replace(/[^a-z0-9_\- ·]/gi, '_').slice(0, 60); const _dlOk = await checkAndDoDownload(async () => { await downloadAsMHTML('lucent-html-download', safeTitle, { appName: settings?.appShortName || settings?.appName || 'IIC', pageTitle: `${entry.lessonTitle || 'Lucent'} · ${pageLabel}`, subtitle: 'Write Mode Notes' }); }); if (_dlOk) showAlert('📥 Saved!', 'SUCCESS'); } catch { showAlert('Download failed.', 'ERROR'); } }} className="w-8 h-8 flex items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-indigo-600 active:scale-95 shadow-sm transition-all shrink-0" title="Download"><Download size={12} /></button>
                       )}
                     </>
                   )}
@@ -23399,7 +23257,7 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
                       >
                         <LayoutGrid size={12} />
                       </button>
-                      <button onClick={handleRotate} className={`w-7 h-7 flex items-center justify-center rounded-lg border active:scale-90 transition shrink-0 ${isLandscape ? 'bg-emerald-50 border-emerald-300 text-emerald-600' : 'bg-slate-100 border-slate-200 text-slate-500'}`} title="Rotate"><RotateCcw size={12} /></button>
+                      <button onClick={handleRotate} className={`w-8 h-8 flex items-center justify-center rounded-xl border shadow-sm active:scale-95 transition-all shrink-0 ${isLandscape ? "bg-indigo-50 border-indigo-200 text-indigo-600" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`} title="Rotate"><RotateCcw size={12} /></button>
                     </>
                   )}
 
@@ -23430,7 +23288,7 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
 
                   {/* VIDEO MODE */}
                   {lucentActiveTab === 'VIDEO' && (
-                    <button onClick={handleRotate} className={`w-7 h-7 flex items-center justify-center rounded-lg border active:scale-90 transition shrink-0 ${isLandscape ? 'bg-emerald-50 border-emerald-300 text-emerald-600' : 'bg-slate-100 border-slate-200 text-slate-500'}`} title="Rotate"><RotateCcw size={12} /></button>
+                    <button onClick={handleRotate} className={`w-8 h-8 flex items-center justify-center rounded-xl border shadow-sm active:scale-95 transition-all shrink-0 ${isLandscape ? "bg-indigo-50 border-indigo-200 text-indigo-600" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`} title="Rotate"><RotateCcw size={12} /></button>
                   )}
 
                   {/* Q&A MODE — Reveal All / Hide All */}
@@ -23462,7 +23320,7 @@ isActive: !showStarredPage && !showRevisionHubScreen && !showMyRoutine && !showP
 
                   {/* Admin Whiteboard (PDF/Video/Audio tabs) */}
                   {lucentActiveTab !== 'NOTES' && lucentActiveTab !== 'MCQS' && lucentActiveTab !== 'QA' && _isAdminUser && (
-                    <button onClick={() => setShowAdminBoard(true)} className="w-7 h-7 flex items-center justify-center rounded-lg bg-orange-50 border border-orange-200 text-orange-500 active:scale-90 transition shrink-0" title="Whiteboard"><Presentation size={12} /></button>
+                    <button onClick={() => setShowAdminBoard(true)} className="w-8 h-8 flex items-center justify-center rounded-xl bg-orange-50 border border-orange-200 text-orange-600 hover:bg-orange-100 active:scale-95 shadow-sm transition-all shrink-0" title="Whiteboard"><Presentation size={12} /></button>
                   )}
                 </div>
                 {/* 📖 Live session pts — fixed right side of slim bar */}
@@ -24880,6 +24738,89 @@ RULES:
         />
       )}
 
+      {/* ── UPDATES & CENTRAL HUB FULL-SCREEN — Countdown Events, Daily Challenge, Revision, Messenger, Study Room, School & Coaching ── */}
+      {showUpdatesPage && (
+        <div className="fixed inset-0 z-[280] overflow-y-auto bg-slate-50 dark:bg-slate-950">
+          <UpdatesPage
+            user={user}
+            settings={settings}
+            tierTheme={tierTheme}
+            isDarkMode={isDarkMode}
+            onBack={() => setShowUpdatesPage(false)}
+            dailyChallenges={activeChallenges20}
+            onStartDailyChallenge={(challenge) => {
+              if (onStartWeeklyTest) {
+                onStartWeeklyTest({
+                  id: challenge.id,
+                  name: challenge.title,
+                  description: challenge.description || "Aaj ka Daily Challenge 2.0",
+                  durationMinutes: challenge.durationMinutes || 60,
+                  createdAt: challenge.createdAt,
+                  isCompleted: false,
+                  score: 0,
+                  totalQuestions: challenge.questions.length,
+                  questions: challenge.questions,
+                  classLevel: challenge.classLevel,
+                  challengeType: isDailyChallenge20(challenge) ? 'DAILY_CHALLENGE' : 'WEEKLY_TEST',
+                } as any);
+              }
+            }}
+            onClaimDailyChallenge={handleClaimDailyChallenge20}
+            onOpenRevisionHub={() => {
+              setShowRevisionHubScreen(true);
+            }}
+            onOpenMessenger={() => {
+              setShowWhatsAppChatModal(true);
+            }}
+            onOpenStudyRoom={() => {
+              setShowGroupStudyModal(true);
+            }}
+            onOpenStore={() => {
+              setShowUpdatesPage(false);
+              onTabChange?.('STORE');
+            }}
+            onOpenThemeStudio={() => {
+              setShowUpdatesPage(false);
+              onTabChange?.('THEME_CUSTOMIZER' as any);
+            }}
+            onOpenPracticeMcq={() => {
+              setShowUpdatesPage(false);
+              onTabChange?.('MCQ' as any);
+            }}
+            onOpenAudioStudio={() => {
+              setShowUpdatesPage(false);
+              onTabChange?.('AUDIO' as any);
+            }}
+            userSchool={userSchool}
+            onOpenSchool={() => { hapticStrong(); onOpenSchool?.(); }}
+            onOpenSchoolPicker={async () => {
+              setSchoolPickerLoading(true);
+              setShowSchoolPicker(true);
+              setSchoolCodeInput('');
+              setSchoolCodeError('');
+              setSchoolCodeTargetId(null);
+              try { const s = await getAllSchools(); setAllSchools(s.filter((x: any) => x.active)); } catch {}
+              setSchoolPickerLoading(false);
+            }}
+            userCoachingId={(user as any).coachingId}
+            userCoachingName={(user as any).coachingName}
+            isCoachingAdmin={isCoachingAdmin}
+            onOpenCoaching={() => onOpenCoaching?.()}
+            onOpenCoachingPicker={async () => {
+              setCoachingPickerLoading(true);
+              setShowCoachingPicker(true);
+              try {
+                const list = await getActiveCoachings();
+                setRtdbCoachingList(list);
+              } catch {
+                setRtdbCoachingList([]);
+              }
+              setCoachingPickerLoading(false);
+            }}
+          />
+        </div>
+      )}
+
       {/* REVISION HUB FULL-SCREEN — MCQ · Revision · History · Performance */}
       {showRevisionHubScreen && (
         <RevisionHubScreen
@@ -25979,7 +25920,8 @@ RULES:
           mode: 'READING' | 'WRITING' | 'MCQ' | 'QA' | 'FLASHCARD',
           action: () => void,
         ) => {
-          if (_isAdminUser || fl?.isCompetition) { action(); return; }
+          if (_isAdminUser) { action(); return; }
+          if (mode === 'FLASHCARD' && _isUltraUser) { action(); return; }
           const modeConfig = {
             READING: { label: 'Reading Mode', isUnlocked: isPgReadUnlocked(_overlayUnlockId, _overlayUnlockPage), mark: () => markPgReadUnlocked(_overlayUnlockId, _overlayUnlockPage) },
             WRITING: { label: 'Writing Mode', isUnlocked: isPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage), mark: () => markPgWriteUnlocked(_overlayUnlockId, _overlayUnlockPage) },
@@ -25988,6 +25930,13 @@ RULES:
             FLASHCARD: { label: 'Flashcard', isUnlocked: isFcPageUnlocked(_overlayUnlockId, _overlayUnlockPage), mark: () => markFcPageUnlocked(_overlayUnlockId, _overlayUnlockPage) },
           }[mode];
           if (modeConfig.isUnlocked) { action(); return; }
+          if (mode === 'FLASHCARD') {
+            showDiamondOnlyGate(5, 'Flashcard (Ultra Exclusive)', () => {
+              modeConfig.mark();
+              action();
+            });
+            return;
+          }
           showCoinGate(20, modeConfig.label, () => {
             modeConfig.mark();
             action();
@@ -26005,7 +25954,7 @@ RULES:
              { mode: 'PROJECTOR', label: 'Projector Mode', emoji: '📽️', cost: 20, isUnlocked: isProjectorUnlocked(_overlayUnlockId, _overlayUnlockPage), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markProjectorUnlocked(_overlayUnlockId, _overlayUnlockPage) },
              ...(fl.hasMcq ? [
                { mode: 'MCQ', label: 'MCQ Practice', emoji: '🧠', cost: 20, isUnlocked: isMcqPageUnlocked(_overlayUnlockId, _overlayUnlockPage), isAccessible: true, requiredTier: 'free' as const, unlockAction: () => markMcqPageUnlocked(_overlayUnlockId, _overlayUnlockPage) },
-               { mode: 'FLASHCARD', label: 'Flashcard', emoji: '🃏', cost: 20, isUnlocked: isFcPageUnlocked(_overlayUnlockId, _overlayUnlockPage), isAccessible: _isUltraUser, requiredTier: 'ultra' as const, unlockAction: () => markFcPageUnlocked(_overlayUnlockId, _overlayUnlockPage) },
+               { mode: 'FLASHCARD', label: 'Flashcard', emoji: '🃏', cost: _isUltraUser ? 0 : 20, isUnlocked: _isUltraUser || isFcPageUnlocked(_overlayUnlockId, _overlayUnlockPage), isAccessible: true, requiredTier: 'ultra' as const, unlockAction: () => markFcPageUnlocked(_overlayUnlockId, _overlayUnlockPage) },
              ] : []),
              ...(fl.hasPdf ? [{ mode: 'PDF', label: 'PDF', emoji: '📄', cost: 0, isUnlocked: true, isAccessible: _isBasicUser || _isUltraUser, requiredTier: 'basic' as const, unlockAction: undefined }] : []),
              ...(fl.hasVideo ? [{ mode: 'VIDEO', label: 'Video', emoji: '🎬', cost: 0, isUnlocked: true, isAccessible: _isUltraUser, requiredTier: 'ultra' as const, unlockAction: undefined }] : []),
@@ -29005,11 +28954,36 @@ RULES:
         const { cost, originalCost, discountPct, reason, action, onCancel, selectedBulk, bulkOption, pageInfo, diamondOnly, costDiamonds, diamondCostOverride } = coinGate;
         const isDiamondOnly = !!diamondOnly;
         const diamondCostOnly = costDiamonds || 5;
+
+        // User subscription tier for study modes:
+        const userTier: 'FREE' | 'BASIC' | 'ULTRA' = (_isUltraUser || user.role === 'ADMIN' || user.role === 'SUB_ADMIN')
+          ? 'ULTRA'
+          : _isBasicUser
+            ? 'BASIC'
+            : 'FREE';
+
+        // 7 Modes Diamond Pricing:
+        // - Free user: 7 modes × 5 = 35 Diamonds
+        // - Basic user: PDF free in Basic -> 6 modes × 5 = 30 Diamonds
+        // - Ultra user: PDF, Flashcard, Video free in Ultra -> 4 modes × 5 = 20 Diamonds
+        const allModesDiamondInfo = getAllModesDiamondCost(userTier);
+
+        const _allModesKey = pageInfo?.pageLabel ? `${pageInfo.pageLabel} (All Modes)` : '';
+        const _singleModeKey = pageInfo?.pageLabel ? `${pageInfo.pageLabel} - ${reason}` : '';
         const isPermanentlyUnlocked = !!(
           (user.unlockedContent || []).includes(reason) ||
+          (_singleModeKey && (user.unlockedContent || []).includes(_singleModeKey)) ||
+          (_allModesKey && (user.unlockedContent || []).includes(_allModesKey)) ||
           (pageInfo?.pageLabel && (user.unlockedContent || []).includes(pageInfo.pageLabel))
         );
         const isFree = !isDiamondOnly && (cost === 0 || isPermanentlyUnlocked);
+        if (isFree) {
+          setTimeout(() => {
+            setCoinGate(null);
+            action();
+          }, 0);
+          return null;
+        }
         const hasPageInfo = !isDiamondOnly && !!pageInfo;
         const isDisc50 = discountPct === 50;
         const isDisc25 = discountPct === 25;
@@ -29021,7 +28995,23 @@ RULES:
           : [];
         const _bulkModeCost = _lockableModes.reduce((s, m) => s + Math.max(1, Math.floor(m.cost * discMult)), 0);
         const _bulkModeCostDiscounted = Math.floor(_bulkModeCost * 0.8); // 20% off for Sabhi Modes bundle
-        const _hasMultiModes = _lockableModes.length > 1; // more than just the current mode
+        const _hasMultiModes = hasPageInfo && ((pageInfo!.availableModes || []).length > 1 || _lockableModes.length > 1);
+
+        // Effective Diamond Cost based on selection:
+        const effectiveDiamondCost = (() => {
+          if (diamondCostOverride) return diamondCostOverride;
+          if (isDiamondOnly) return costDiamonds || 5;
+          if (hasPageInfo) {
+            if (selectedBulk) {
+              return allModesDiamondInfo.totalDiamonds;
+            }
+            return 5; // Yahi Mode (1 single mode = 5 diamonds)
+          }
+          if (bulkOption && selectedBulk) {
+            return Math.max(5, bulkOption.count * 5);
+          }
+          return getDiamondUnlockCost(activeCost, reason);
+        })();
 
         // ── Active cost/action based on selection ──
         const activeCost = hasPageInfo
@@ -29029,7 +29019,10 @@ RULES:
           : (selectedBulk && bulkOption ? bulkOption.totalCost : cost);
         const activeAction = hasPageInfo
           ? (selectedBulk
-              ? () => { _lockableModes.forEach(m => { if (m.unlockAction) m.unlockAction(); }); action(); }
+              ? () => {
+                  (pageInfo!.availableModes || []).forEach(m => { if (m.unlockAction) m.unlockAction(); });
+                  action();
+                }
               : action)
           : (selectedBulk && bulkOption ? bulkOption.action : action);
         const canAfford = balance >= activeCost;
@@ -29194,14 +29187,17 @@ RULES:
                     </div>
                     <p className="text-[11px] font-black leading-tight mb-1 line-clamp-2" style={{ color: 'var(--nst-color-brand)' }}>{reason}</p>
                     <div className="mt-auto">
-                      <div className="flex items-baseline gap-1">
-                        <span className="text-[22px] font-black leading-none" style={{ color: 'var(--nst-color-brand)' }}>{cost}</span>
-                        <span className="text-[11px] font-bold" style={{ color: 'var(--nst-color-brand-60, #818cf8)' }}>CR</span>
-                        {(isDisc50 || isDisc25) && <span className="text-[10px] text-slate-400 line-through">{originalCost}</span>}
+                      <div className="flex items-baseline justify-between gap-1">
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-[20px] font-black leading-none" style={{ color: 'var(--nst-color-brand)' }}>{cost}</span>
+                          <span className="text-[10px] font-bold" style={{ color: 'var(--nst-color-brand-60, #818cf8)' }}>CR</span>
+                          {(isDisc50 || isDisc25) && <span className="text-[10px] text-slate-400 line-through">{originalCost}</span>}
+                        </div>
+                        <span className="text-[12px] font-black text-sky-600 shrink-0">💎 5</span>
                       </div>
                       {isDisc50 && <p className="text-[8px] font-black text-emerald-600">🎉 50% off</p>}
                       {isDisc25 && <p className="text-[8px] font-black text-amber-600">⚡ 25% off</p>}
-                      <p className="text-[9px] text-slate-400 font-semibold mt-0.5">{pageInfo!.pageLabel || '1 page'}</p>
+                      <p className="text-[9px] text-slate-400 font-semibold mt-0.5">{pageInfo!.pageLabel || '1 page'} · 1 Mode</p>
                     </div>
                   </button>
 
@@ -29250,14 +29246,19 @@ RULES:
                           );
                         })}
                       </div>
-                      {/* Total — 20% discounted */}
+                      {/* Total — Coins & Diamonds */}
                       <div className="border-t border-slate-200/70 pt-1.5 mt-auto">
-                        <div className="flex items-baseline gap-1">
-                          <span className="text-[22px] font-black leading-none" style={{ color: 'var(--nst-color-brand)' }}>{_bulkModeCostDiscounted}</span>
-                          <span className="text-[11px] font-bold" style={{ color: 'var(--nst-color-brand-60, #818cf8)' }}>CR</span>
-                          <span className="text-[10px] text-slate-400 line-through">{_bulkModeCost}</span>
+                        <div className="flex items-baseline justify-between gap-1">
+                          <div className="flex items-baseline gap-1">
+                            <span className="text-[20px] font-black leading-none" style={{ color: 'var(--nst-color-brand)' }}>{_bulkModeCostDiscounted}</span>
+                            <span className="text-[10px] font-bold" style={{ color: 'var(--nst-color-brand-60, #818cf8)' }}>CR</span>
+                            <span className="text-[10px] text-slate-400 line-through">{_bulkModeCost}</span>
+                          </div>
+                          <span className="text-[12px] font-black text-sky-600 shrink-0">💎 {allModesDiamondInfo.totalDiamonds}</span>
                         </div>
-                        <p className="text-[9px] font-black leading-none" style={{ color: 'var(--nst-color-brand)' }}>🔓 Sab modes unlock — 20% off</p>
+                        <p className="text-[8.5px] font-black leading-tight mt-0.5" style={{ color: 'var(--nst-color-brand)' }}>
+                          🔓 Sabhi Modes · {allModesDiamondInfo.breakdown}
+                        </p>
                       </div>
                     </button>
                   )}
@@ -29399,7 +29400,7 @@ RULES:
                   <button
                     type="button"
                     onClick={() => {
-                       const diamondCost = diamondCostOverride || getDiamondUnlockCost(activeCost, reason);
+                      const diamondCost = effectiveDiamondCost;
                       const freshU = (window as any).__dashUserRef?.current ?? userRef.current ?? user;
                       const userDiamonds = typeof freshU.diamonds === 'number' ? freshU.diamonds : (user.diamonds ?? 0);
                       if (userDiamonds < diamondCost) {
@@ -29407,12 +29408,47 @@ RULES:
                         onOpenStore?.();
                         return;
                       }
-                      const contentKey = pageInfo?.pageLabel || reason;
-                      const updatedUnlocked = Array.from(new Set([...(freshU.unlockedContent || []), contentKey]));
+
+                      let updatedUnlocked = Array.from(new Set(freshU.unlockedContent || []));
+                      if (hasPageInfo && selectedBulk) {
+                        // User unlocked ALL modes for this page!
+                        (pageInfo!.availableModes || []).forEach(m => {
+                          if (m.unlockAction) m.unlockAction();
+                        });
+
+                        const entryId = (lucentNoteViewer as any)?.id || '';
+                        const pageIdx = lucentPageIndex ?? 0;
+                        if (entryId) {
+                          try {
+                            localStorage.setItem(`nst_pg_r_${user.id}_${entryId}_${pageIdx}`, '1');
+                            localStorage.setItem(`nst_pg_w_${user.id}_${entryId}_${pageIdx}`, '1');
+                            localStorage.setItem(`nst_projector_${user.id}_${entryId}_${pageIdx}`, '1');
+                            localStorage.setItem(`nst_mcq_p_${user.id}_${entryId}_${pageIdx}`, '1');
+                            localStorage.setItem(`nst_fc_p_${user.id}_${entryId}_${pageIdx}`, '1');
+                            localStorage.setItem(`nst_pdf_unlocked_${user.id}_${entryId}_${pageIdx}`, '1');
+                            localStorage.setItem(`nst_pdf_unlocked_${user.id}_${entryId}`, '1');
+                            localStorage.setItem(`nst_video_unlocked_${user.id}_${entryId}_${pageIdx}`, '1');
+                            localStorage.setItem(`nst_video_unlocked_${user.id}_${entryId}`, '1');
+                          } catch {}
+                        }
+
+                        if (pageInfo?.pageLabel) {
+                          updatedUnlocked.push(`${pageInfo.pageLabel} (All Modes)`);
+                          updatedUnlocked.push(pageInfo.pageLabel);
+                        }
+                      } else {
+                        // User unlocked ONLY this single mode!
+                        if (pageInfo?.pageLabel) {
+                          updatedUnlocked.push(`${pageInfo.pageLabel} - ${reason}`);
+                        } else {
+                          updatedUnlocked.push(reason);
+                        }
+                      }
+
                       const updatedU = {
                         ...freshU,
                         diamonds: Math.max(0, userDiamonds - diamondCost),
-                        unlockedContent: updatedUnlocked,
+                        unlockedContent: Array.from(new Set(updatedUnlocked)),
                       };
                       handleUserUpdate(updatedU);
                       setCoinGate(null);
@@ -29422,9 +29458,11 @@ RULES:
                   >
                     <span>💎</span>
                     <span>
-                      {(user.diamonds ?? 0) >= (diamondCostOverride || getDiamondUnlockCost(activeCost, reason))
-                        ? `💎 ${diamondCostOverride || getDiamondUnlockCost(activeCost, reason)} Diamonds Se Permanent Unlock`
-                        : `💎 Store se Diamonds Lein (Need ${diamondCostOverride || getDiamondUnlockCost(activeCost, reason)} 💎)`}
+                      {(user.diamonds ?? 0) >= effectiveDiamondCost
+                        ? (hasPageInfo && selectedBulk
+                            ? `💎 ${effectiveDiamondCost} Diamonds Se Sabhi Modes Unlock (${allModesDiamondInfo.breakdown})`
+                            : `💎 ${effectiveDiamondCost} Diamonds Se Permanent Unlock (1 Mode)`)
+                        : `💎 Store se Diamonds Lein (Need ${effectiveDiamondCost} 💎)`}
                     </span>
                   </button>
                 )}
@@ -30669,9 +30707,191 @@ Explanation: Yahan explanation...`}</p>
       {showReferralPopup && (
         <ReferralPopup
           user={user}
+          settings={settings}
           onClose={() => setShowReferralPopup(false)}
           onUpdateUser={handleUserUpdate}
         />
+      )}
+
+      {/* ── GLOBAL SCHOOL PICKER MODAL ── */}
+      {showSchoolPicker && (
+        <div className="fixed inset-0 z-[500] flex flex-col" style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}>
+          <div className="flex-1" onClick={() => { setShowSchoolPicker(false); setSchoolCodeTargetId(null); setSchoolCodeInput(''); setSchoolCodeError(''); }} />
+          <div className="rounded-t-3xl overflow-hidden flex flex-col bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800" style={{ maxHeight: '72vh' }}>
+            {/* Header */}
+            <div className="px-5 py-4 flex items-center gap-3 shrink-0 border-b border-slate-100 dark:border-slate-800">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-blue-500/15">
+                <span className="text-lg">🏫</span>
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-black text-slate-900 dark:text-white">School Chunein</p>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400">Apni school select karo</p>
+              </div>
+              <button
+                onClick={() => { setShowSchoolPicker(false); setSchoolCodeTargetId(null); setSchoolCodeInput(''); setSchoolCodeError(''); }}
+                className="w-8 h-8 rounded-full flex items-center justify-center bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            {/* School list */}
+            <div className="overflow-y-auto flex-1 p-3 space-y-2">
+              {schoolPickerLoading ? (
+                <div className="py-8 text-center">
+                  <div className="w-8 h-8 rounded-full border-2 border-t-transparent animate-spin mx-auto mb-2 border-blue-500 border-t-transparent" />
+                  <p className="text-[11px] text-slate-400">Schools load ho rahi hain…</p>
+                </div>
+              ) : allSchools.length === 0 ? (
+                <p className="py-8 text-center text-sm text-slate-400">Koi school available nahi hai</p>
+              ) : (
+                allSchools.map((school: any) => {
+                  const isLocked = school.lockCodeActive;
+                  const isCurrentSchool = school.id === (user as any).schoolId;
+                  const isTarget = schoolCodeTargetId === school.id;
+                  return (
+                    <div
+                      key={school.id}
+                      className={`rounded-2xl overflow-hidden border ${
+                        isCurrentSchool
+                          ? 'bg-blue-50 dark:bg-blue-950/40 border-blue-500/50'
+                          : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700/60'
+                      }`}
+                    >
+                      <button
+                        onClick={() => {
+                          if (isCurrentSchool) return;
+                          if (isLocked) {
+                            setSchoolCodeTargetId(isTarget ? null : school.id);
+                            setSchoolCodeInput('');
+                            setSchoolCodeError('');
+                          } else {
+                            handleJoinSchool(school);
+                          }
+                        }}
+                        className="w-full px-4 py-3 flex items-center gap-3 text-left active:opacity-80 transition cursor-pointer"
+                      >
+                        {school.logoUrl ? (
+                          <img src={school.logoUrl} alt="" className="w-10 h-10 rounded-xl object-cover shrink-0" />
+                        ) : (
+                          <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 text-xl bg-blue-500/10">🏫</div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-bold truncate text-slate-900 dark:text-white">{school.name}</p>
+                          {school.address && <p className="text-[10px] truncate text-slate-500 dark:text-slate-400">{school.address}</p>}
+                        </div>
+                        {isLocked && <Lock size={14} className="text-amber-500 shrink-0" />}
+                        {isCurrentSchool && <CheckCircle size={15} className="text-blue-500 shrink-0" />}
+                      </button>
+                      {/* Code input for locked school */}
+                      {isTarget && isLocked && (
+                        <div className="px-4 pb-3">
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={schoolCodeInput}
+                              onChange={e => { setSchoolCodeInput(e.target.value.toUpperCase()); setSchoolCodeError(''); }}
+                              placeholder="Access code dalein"
+                              className="flex-1 rounded-xl px-3 py-2 text-sm font-bold outline-none bg-white dark:bg-slate-900 border text-slate-900 dark:text-white"
+                              style={{ borderColor: schoolCodeError ? '#ef4444' : undefined }}
+                              autoFocus
+                            />
+                            <button
+                              onClick={() => {
+                                if (!schoolCodeInput.trim()) { setSchoolCodeError('Code dalein'); return; }
+                                if (schoolCodeInput.trim().toUpperCase() !== (school.lockCode || '').toUpperCase()) {
+                                  setSchoolCodeError('Galat code hai');
+                                  return;
+                                }
+                                handleJoinSchool(school);
+                              }}
+                              className="px-4 py-2 rounded-xl text-sm font-black text-white bg-blue-600 active:scale-95 transition"
+                            >
+                              OK
+                            </button>
+                          </div>
+                          {schoolCodeError && <p className="text-[10px] mt-1 text-red-500 font-bold">{schoolCodeError}</p>}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+            {/* None option */}
+            {(user as any).schoolId && (
+              <div className="p-3 pt-0 shrink-0">
+                <button
+                  onClick={async () => { await handleRemoveSchool(); setShowSchoolPicker(false); }}
+                  className="w-full py-3 rounded-2xl text-sm font-black active:scale-95 transition bg-red-500/10 text-red-500 border border-red-500/20"
+                >
+                  School hatao (None)
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── GLOBAL COACHING PICKER MODAL ── */}
+      {showCoachingPicker && (
+        <div className="fixed inset-0 z-[500] flex flex-col" style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}>
+          <div className="flex-1" onClick={() => setShowCoachingPicker(false)} />
+          <div className="rounded-t-3xl overflow-hidden flex flex-col bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800" style={{ maxHeight: '72vh' }}>
+            {/* Header */}
+            <div className="px-5 py-4 flex items-center gap-3 shrink-0 border-b border-slate-100 dark:border-slate-800">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-purple-500/15">
+                <span className="text-lg">📚</span>
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-black text-slate-900 dark:text-white">Coaching Chunein</p>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400">Apni coaching institute select karo</p>
+              </div>
+              <button onClick={() => setShowCoachingPicker(false)} className="w-8 h-8 rounded-full flex items-center justify-center bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
+                <X size={16} />
+              </button>
+            </div>
+            {/* Coaching list */}
+            <div className="overflow-y-auto flex-1 p-3 space-y-2">
+              {coachingPickerLoading ? (
+                <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin text-purple-500" /></div>
+              ) : rtdbCoachingList.length === 0 ? (
+                <p className="py-8 text-center text-sm text-slate-400">Admin ne abhi koi coaching nahi add ki</p>
+              ) : (
+                rtdbCoachingList.map(c => {
+                  const isSelected = c.id === (user as any).coachingId;
+                  return (
+                    <button
+                      key={c.id}
+                      onClick={() => handleJoinCoaching(c)}
+                      className={`w-full px-4 py-3.5 rounded-2xl flex items-center gap-3 text-left active:scale-98 transition cursor-pointer border ${
+                        isSelected
+                          ? 'bg-purple-50 dark:bg-purple-950/40 border-purple-500/50'
+                          : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700/60'
+                      }`}
+                    >
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 text-xl bg-purple-500/10">{c.emoji || '📚'}</div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold truncate text-slate-900 dark:text-white">{c.name}</p>
+                      </div>
+                      {isSelected && <CheckCircle size={15} className="text-purple-500 shrink-0" />}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+            {/* None option */}
+            {(user as any).coachingId && (
+              <div className="p-3 pt-0 shrink-0">
+                <button
+                  onClick={async () => { await handleRemoveCoaching(); setShowCoachingPicker(false); }}
+                  className="w-full py-3 rounded-2xl text-sm font-black active:scale-95 transition bg-red-500/10 text-red-500 border border-red-500/20"
+                >
+                  Coaching hatao (None)
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   </ThemeProvider>

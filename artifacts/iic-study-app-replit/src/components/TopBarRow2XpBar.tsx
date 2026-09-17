@@ -4,14 +4,19 @@ import { getLevelInfo, getNextLevelInfo, getLevelProgress } from '../utils/level
 import { Zap } from 'lucide-react';
 
 export function formatXpDisplay(num: number): string {
-  if (num < 10000) {
-    return num.toString();
+  if (num >= 1_000_000_000) {
+    const inB = num / 1_000_000_000;
+    return `${inB.toFixed(1).replace(/\.0$/, '')}B`;
   }
-  const inK = num / 1000;
-  if (num % 1000 === 0) {
-    return `${inK}k`;
+  if (num >= 1_000_000) {
+    const inM = num / 1_000_000;
+    return `${inM.toFixed(1).replace(/\.0$/, '')}M`;
   }
-  return `${inK.toFixed(1).replace(/\.0$/, '')}k`;
+  if (num >= 10_000) {
+    const inK = num / 1000;
+    return `${inK.toFixed(1).replace(/\.0$/, '')}k`;
+  }
+  return num.toString();
 }
 
 interface TopBarRow2XpBarProps {

@@ -158,6 +158,9 @@ export interface User {
   referralCommissionBalance?: number; // Accumulated cashback from friends spending credits
   referralCommissionLogs?: ReferralCommissionLog[]; // History of royalty earnings
   
+  // READING & PROGRESS SETTINGS
+  sequentialReadingDisabled?: boolean; // When true, Basic/Ultra user has chosen to disable sequential page reading (jump to any page)
+  
   // Soft Delete / Ban Logic
   isArchived?: boolean; // Acts as Soft Delete / Recycle Bin
   isLocked?: boolean;   // NEW: Hard Lock (Login Denied, but not deleted)
@@ -744,6 +747,22 @@ export interface AppNotification {
   expiresAt?: string; // ISO date — auto-hidden after this time (e.g. 7 days for content alerts)
 }
 
+export interface PlanCompareItem {
+  id: string;
+  label: string;
+  free: string;
+  basic: string;
+  ultra: string;
+  tooltip?: string;
+  highlight?: boolean;
+}
+
+export interface PlanCompareGroup {
+  id: string;
+  category: string;
+  items: PlanCompareItem[];
+}
+
 export interface SystemSettings {
   cardBorderAnimation?: boolean; // When true or undefined, rotating border animation on cards is active
   notifications?: AppNotification[];
@@ -843,9 +862,12 @@ export interface SystemSettings {
   // When true, Profile is always in the drawer; when false, Profile only moves to drawer if Revision Hub V2 is enabled.
   profileInMenuForced?: boolean;
   hideLockedForFreeAndBasic?: boolean; // When ON, locked content & features are hidden for Free & Basic users. When OFF, shown with lock icons.
+  enforceSequentialPages?: boolean; // When true, Page 2+ is locked until previous page (e.g. Page 1) is completely read. Admin toggleable.
   hideNstaMessenger?: boolean; // When true, Nsta Messenger floating button is hidden on student dashboard
   hideCreateStudyRoom?: boolean; // When true, the option to create study rooms ("Apna Study Room Banayein" / "Live Study Room") is hidden for students
   officialAppUrl?: string; // NEW: Play Store Link
+  referralMilestones?: ReferralMilestone[]; // Admin-configurable Refer & Earn milestones & prizes
+  planComparisonData?: PlanCompareGroup[]; // Admin-configurable Plan Comparison matrix (Free vs Basic vs Ultra)
   enable3DModels?: boolean; // NEW: 3D Models in Notes
   showMcqMakerCard?: boolean; // NEW: Show MCQ Maker card on student home page
   showHomeResumeFilter?: boolean; // NEW: Show subject filter chips above Home "Continue Reading" card
@@ -1570,6 +1592,8 @@ export interface ChatMessage {
     userName: string;
     text: string;
   };
+  isSaved?: boolean;
+  savedBy?: Record<string, boolean>;
 }
 
 export interface IICPost {
@@ -2134,6 +2158,8 @@ export interface ChatMessage {
     };
     isAdminOnly?: boolean;
     timestamp: string;
+    isSaved?: boolean;
+    savedBy?: Record<string, boolean>;
 }
 
 export interface AppFeedbackAnswer {
