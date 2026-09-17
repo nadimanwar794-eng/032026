@@ -32,6 +32,7 @@ export interface ChatMessage {
   timestamp: number;
   type?: 'TEXT' | 'VOICE' | 'IMAGE' | 'DOUBT' | 'NOTE' | 'SYSTEM';
   mediaUrl?: string;
+  mediaUrls?: string[]; // Multiple photos (up to 10 at once)
   voiceDuration?: number; // seconds
   doubtSubject?: string;
   status?: 'SENT' | 'DELIVERED' | 'READ';
@@ -420,7 +421,7 @@ export const sendPrivateMessage = async (
   peerUserId: string,
   text: string,
   type: ChatMessage['type'] = 'TEXT',
-  extra?: { mediaUrl?: string; voiceDuration?: number; doubtSubject?: string; replyTo?: any }
+  extra?: { mediaUrl?: string; mediaUrls?: string[]; voiceDuration?: number; doubtSubject?: string; replyTo?: any }
 ): Promise<ChatMessage> => {
   const convId = getDirectConversationId(myUserId, peerUserId);
   const msgId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -442,6 +443,7 @@ export const sendPrivateMessage = async (
     readByRecipient: false,
     readAt: undefined,
     ...(extra?.mediaUrl ? { mediaUrl: extra.mediaUrl } : {}),
+    ...(extra?.mediaUrls && extra.mediaUrls.length > 0 ? { mediaUrls: extra.mediaUrls } : {}),
     ...(extra?.voiceDuration ? { voiceDuration: extra.voiceDuration } : {}),
     ...(extra?.doubtSubject ? { doubtSubject: extra.doubtSubject } : {}),
     ...(extra?.replyTo ? { replyTo: extra.replyTo } : {}),
@@ -488,7 +490,7 @@ export const sendGroupMessage = async (
   myPhoto: string | undefined,
   text: string,
   type: ChatMessage['type'] = 'TEXT',
-  extra?: { mediaUrl?: string; voiceDuration?: number; doubtSubject?: string; replyTo?: any }
+  extra?: { mediaUrl?: string; mediaUrls?: string[]; voiceDuration?: number; doubtSubject?: string; replyTo?: any }
 ): Promise<ChatMessage> => {
   const msgId = `grp_msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const timestamp = Date.now();
@@ -507,6 +509,7 @@ export const sendGroupMessage = async (
     seen: false,
     readAt: undefined,
     ...(extra?.mediaUrl ? { mediaUrl: extra.mediaUrl } : {}),
+    ...(extra?.mediaUrls && extra.mediaUrls.length > 0 ? { mediaUrls: extra.mediaUrls } : {}),
     ...(extra?.voiceDuration ? { voiceDuration: extra.voiceDuration } : {}),
     ...(extra?.doubtSubject ? { doubtSubject: extra.doubtSubject } : {}),
     ...(extra?.replyTo ? { replyTo: extra.replyTo } : {}),

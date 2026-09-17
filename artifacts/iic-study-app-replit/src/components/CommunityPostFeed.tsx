@@ -498,21 +498,36 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
             {/* Action buttons inside composer */}
             <div className="flex items-center justify-between pt-1">
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (fileInputRef.current) {
+                      fileInputRef.current.value = '';
+                      fileInputRef.current.click();
+                    }
+                  }}
+                  className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors"
+                >
+                  <Camera size={14} className="text-purple-600 dark:text-purple-400" />
+                  <span>{selectedImageFile ? 'Change Photo' : 'Photo Add Karein'}</span>
+                </button>
                 <input
                   type="file"
                   ref={fileInputRef}
                   accept="image/*"
                   onChange={handleImageSelect}
-                  className="hidden"
-                  id="community-post-image-input"
+                  style={{
+                    position: 'fixed',
+                    top: '-1000px',
+                    left: '-1000px',
+                    width: '1px',
+                    height: '1px',
+                    opacity: 0.01,
+                    pointerEvents: 'auto',
+                  }}
                 />
-                <label
-                  htmlFor="community-post-image-input"
-                  className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors"
-                >
-                  <Camera size={14} className="text-purple-600 dark:text-purple-400" />
-                  <span>{selectedImageFile ? 'Change Photo' : 'Photo Add Karein'}</span>
-                </label>
               </div>
 
               <div className="flex items-center gap-2">

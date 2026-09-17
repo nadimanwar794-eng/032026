@@ -66,7 +66,10 @@ import {
   ZoomOut,
   RotateCw,
   Download,
+  ChevronLeft,
+  Archive,
 } from 'lucide-react';
+import JSZip from 'jszip';
 import { User } from '../types';
 import { applyDeduction, getTotalCredits } from '../utils/creditSystem';
 import { saveUserToLive, auth } from '../firebase';
@@ -615,42 +618,53 @@ export const WhatsAppChatModal: React.FC<Props> = ({
   // Nsta Dual Password Modal (Default & Special Passwords)
   const [showDualPasswordModal, setShowDualPasswordModal] = useState<boolean>(false);
 
-  // Image Upload & Lightbox State (Cloud CDN integration)
+  // Image Upload & Lightbox State (Cloud CDN integration & Multi-photo batch up to 10)
   const [isUploadingImage, setIsUploadingImage] = useState<boolean>(false);
-  const [selectedImageToSend, setSelectedImageToSend] = useState<File | null>(null);
+  const [uploadProgressText, setUploadProgressText] = useState<string>('');
+  const [selectedImagesToSend, setSelectedImagesToSend] = useState<File[]>([]);
+  const [activePreviewImageIndex, setActivePreviewImageIndex] = useState<number>(0);
   const [imagePreviewModalOpen, setImagePreviewModalOpen] = useState<boolean>(false);
   const [imageCaptionInput, setImageCaptionInput] = useState<string>('');
   const [isCroppingImage, setIsCroppingImage] = useState<boolean>(false);
   const [imageToCropUrl, setImageToCropUrl] = useState<string | null>(null);
-  const [previewImageBlobUrl, setPreviewImageBlobUrl] = useState<string | null>(null);
+  const [selectedImageUrls, setSelectedImageUrls] = useState<string[]>([]);
   const [lightboxImageUrl, setLightboxImageUrl] = useState<string | null>(null);
+  const [lightboxImagesList, setLightboxImagesList] = useState<string[]>([]);
+  const [lightboxActiveIndex, setLightboxActiveIndex] = useState<number>(0);
   const [lightboxZoom, setLightboxZoom] = useState<number>(1);
   const [lightboxRotation, setLightboxRotation] = useState<number>(0);
   const [isLightboxFullscreen, setIsLightboxFullscreen] = useState<boolean>(false);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const addMoreImageInputRef = useRef<HTMLInputElement>(null);
 
-  // Sync preview blob URL when selectedImageToSend updates
+  // Maintain stable object URLs for all selected photos in batch (prevents broken thumbnails and preview blanks)
   useEffect(() => {
-    if (!selectedImageToSend) {
-      setPreviewImageBlobUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
-        return null;
+    if (selectedImagesToSend.length === 0) {
+      setSelectedImageUrls((prev) => {
+        prev.forEach((u) => {
+          try { URL.revokeObjectURL(u); } catch {}
+        });
+        return [];
       });
       return;
     }
-    const url = URL.createObjectURL(selectedImageToSend);
-    setPreviewImageBlobUrl((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
-      return url;
-    });
+
+    const urls = selectedImagesToSend.map((file) => URL.createObjectURL(file));
+    setSelectedImageUrls(urls);
+
     return () => {
-      URL.revokeObjectURL(url);
+      urls.forEach((u) => {
+        try {
+          URL.revokeObjectURL(u);
+        } catch {}
+      });
     };
-  }, [selectedImageToSend]);
+  }, [selectedImagesToSend]);
 
   const handleStartCrop = () => {
-    if (!selectedImageToSend) return;
-    const objectUrl = URL.createObjectURL(selectedImageToSend);
+    const activeFile = selectedImagesToSend[activePreviewImageIndex];
+    if (!activeFile) return;
+    const objectUrl = selectedImageUrls[activePreviewImageIndex] || URL.createObjectURL(activeFile);
     setImageToCropUrl(objectUrl);
     setIsCroppingImage(true);
   };
@@ -674,9 +688,14 @@ export const WhatsAppChatModal: React.FC<Props> = ({
         blob = await res.blob();
       }
 
-      const fileName = selectedImageToSend ? `cropped_${selectedImageToSend.name}` : `cropped_${Date.now()}.jpg`;
+      const activeFile = selectedImagesToSend[activePreviewImageIndex];
+      const fileName = activeFile ? `cropped_${activeFile.name}` : `cropped_${Date.now()}.jpg`;
       const newFile = new File([blob], fileName, { type: blob.type || 'image/jpeg' });
-      setSelectedImageToSend(newFile);
+      setSelectedImagesToSend((prev) => {
+        const next = [...prev];
+        next[activePreviewImageIndex] = newFile;
+        return next;
+      });
       setIsCroppingImage(false);
       if (imageToCropUrl) {
         URL.revokeObjectURL(imageToCropUrl);
@@ -697,8 +716,61 @@ export const WhatsAppChatModal: React.FC<Props> = ({
     }
   };
 
-  const openImageLightbox = (url: string) => {
-    setLightboxImageUrl(url);
+  const handleRemoveImageFromBatch = (indexToRemove: number) => {
+    setSelectedImagesToSend((prev) => {
+      const next = prev.filter((_, idx) => idx !== indexToRemove);
+      if (next.length === 0) {
+        setImagePreviewModalOpen(false);
+        setImageCaptionInput('');
+        return [];
+      }
+      if (activePreviewImageIndex >= next.length) {
+        setActivePreviewImageIndex(Math.max(0, next.length - 1));
+      }
+      return next;
+    });
+  };
+
+  const handleAddMoreImages = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    const remainingSlots = 10 - selectedImagesToSend.length;
+    if (remainingSlots <= 0) {
+      showToast('⚠️ Maximum 10 photos ki limit reach ho chuki hai!');
+      return;
+    }
+
+    const validFiles: File[] = [];
+    for (const f of files) {
+      if (f.size > 10 * 1024 * 1024) {
+        showToast(`⚠️ ${f.name} ka size 10MB se bada hai, skip kiya gaya.`);
+        continue;
+      }
+      validFiles.push(f);
+    }
+
+    if (validFiles.length > remainingSlots) {
+      showToast(`⚠️ Sirf ${remainingSlots} aur photo(s) add kiye gaye (Maximum 10 limit).`);
+    }
+
+    const filesToAdd = validFiles.slice(0, remainingSlots);
+    if (filesToAdd.length > 0) {
+      setSelectedImagesToSend((prev) => [...prev, ...filesToAdd]);
+      showToast(`📸 ${filesToAdd.length} aur photo(s) jud gaye!`);
+    }
+
+    if (addMoreImageInputRef.current) {
+      addMoreImageInputRef.current.value = '';
+    }
+  };
+
+  const openImageLightbox = (url: string, albumUrls?: string[], initialIndex: number = 0) => {
+    const list = albumUrls && albumUrls.length > 0 ? albumUrls : [url];
+    const validIndex = Math.max(0, Math.min(initialIndex, list.length - 1));
+    setLightboxImagesList(list);
+    setLightboxActiveIndex(validIndex);
+    setLightboxImageUrl(list[validIndex] || url);
     setLightboxZoom(1);
     setLightboxRotation(0);
     setIsLightboxFullscreen(false);
@@ -706,6 +778,8 @@ export const WhatsAppChatModal: React.FC<Props> = ({
 
   const closeImageLightbox = () => {
     setLightboxImageUrl(null);
+    setLightboxImagesList([]);
+    setLightboxActiveIndex(0);
     setLightboxZoom(1);
     setLightboxRotation(0);
     setIsLightboxFullscreen(false);
@@ -714,23 +788,120 @@ export const WhatsAppChatModal: React.FC<Props> = ({
     }
   };
 
+  const goToNextLightboxImage = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (lightboxImagesList.length <= 1) return;
+    const nextIdx = (lightboxActiveIndex + 1) % lightboxImagesList.length;
+    setLightboxActiveIndex(nextIdx);
+    setLightboxImageUrl(lightboxImagesList[nextIdx]);
+    setLightboxZoom(1);
+    setLightboxRotation(0);
+  };
+
+  const goToPrevLightboxImage = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (lightboxImagesList.length <= 1) return;
+    const prevIdx = (lightboxActiveIndex - 1 + lightboxImagesList.length) % lightboxImagesList.length;
+    setLightboxActiveIndex(prevIdx);
+    setLightboxImageUrl(lightboxImagesList[prevIdx]);
+    setLightboxZoom(1);
+    setLightboxRotation(0);
+  };
+
   const handleDownloadImage = async (url: string) => {
     try {
       setBannerNotice('📥 Photo save ho rahi hai...');
-      const res = await fetch(url);
-      const blob = await res.blob();
-      const blobUrl = URL.createObjectURL(blob);
+      if (url.startsWith('data:')) {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `photo_${Date.now()}.jpg`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      } else {
+        const res = await fetch(url);
+        const blob = await res.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = `photo_${Date.now()}.jpg`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+      }
+      setBannerNotice('✅ Photo device par save ho gayi!');
+      setTimeout(() => setBannerNotice(null), 3000);
+    } catch {
+      // Fallback direct open/save
       const a = document.createElement('a');
-      a.href = blobUrl;
+      a.href = url;
+      a.target = '_blank';
       a.download = `photo_${Date.now()}.jpg`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
-      setBannerNotice('✅ Photo device par save ho gayi!');
+      setBannerNotice('✅ Photo download trigger ho gayi!');
       setTimeout(() => setBannerNotice(null), 3000);
-    } catch {
-      setBannerNotice('❌ Photo download nahi ho saki.');
+    }
+  };
+
+  // ── Ek Saath Saare Download Karein (Batch Download as ZIP or Multi-file) ──
+  const handleDownloadAllImages = async (urls: string[]) => {
+    if (!urls || urls.length === 0) return;
+    try {
+      setBannerNotice(`📥 ${urls.length} photos ki ZIP file ban rahi hai...`);
+      const zip = new JSZip();
+      let addedCount = 0;
+
+      for (let i = 0; i < urls.length; i++) {
+        const u = urls[i];
+        try {
+          if (u.startsWith('data:')) {
+            const parts = u.split(',');
+            const base64 = parts[1];
+            zip.file(`photo_${i + 1}.jpg`, base64, { base64: true });
+            addedCount++;
+          } else {
+            const res = await fetch(u);
+            if (res.ok) {
+              const blob = await res.blob();
+              zip.file(`photo_${i + 1}.jpg`, blob);
+              addedCount++;
+            }
+          }
+        } catch (e) {
+          console.warn(`Error packaging image ${i + 1} for zip:`, e);
+        }
+      }
+
+      if (addedCount > 0) {
+        const content = await zip.generateAsync({ type: 'blob' });
+        const blobUrl = URL.createObjectURL(content);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = `nsta_photos_${Date.now()}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 1500);
+        setBannerNotice(`✅ Sabhi ${addedCount} photos ZIP file me download ho gayi!`);
+      } else {
+        // Fallback: sequential download
+        for (let i = 0; i < urls.length; i++) {
+          await handleDownloadImage(urls[i]);
+          await new Promise((r) => setTimeout(r, 250));
+        }
+        setBannerNotice(`✅ Sabhi ${urls.length} photos download ho gayi!`);
+      }
+      setTimeout(() => setBannerNotice(null), 3500);
+    } catch (err) {
+      console.error('Download all failed:', err);
+      for (let i = 0; i < urls.length; i++) {
+        await handleDownloadImage(urls[i]);
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      setBannerNotice('✅ Sabhi photos download ho gayi!');
       setTimeout(() => setBannerNotice(null), 3000);
     }
   };
@@ -2005,25 +2176,44 @@ export const WhatsAppChatModal: React.FC<Props> = ({
     }
   };
 
-  // ── Handle Image Selection & ImgBB Upload ──
+  // ── Handle Image Selection & ImgBB Upload (Up to 10 photos at once) ──
   const handleSelectImageFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > 10 * 1024 * 1024) {
-      showToast('⚠️ Image size maximum 10MB honi chahiye!');
-      return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    const validFiles: File[] = [];
+    for (const f of files) {
+      if (f.size > 10 * 1024 * 1024) {
+        showToast(`⚠️ ${f.name} ka size 10MB se zyada hai, skip kiya gaya.`);
+        continue;
+      }
+      validFiles.push(f);
     }
-    setSelectedImageToSend(file);
+
+    if (validFiles.length === 0) return;
+
+    if (validFiles.length > 10) {
+      showToast('⚠️ Ek baar me maximum 10 photos bhej sakte hain. Pehli 10 photos select ki gayi hain.');
+    }
+
+    const finalBatch = validFiles.slice(0, 10);
+    const initialUrls = finalBatch.map((f) => URL.createObjectURL(f));
+    setSelectedImageUrls(initialUrls);
+    setSelectedImagesToSend(finalBatch);
+    setActivePreviewImageIndex(0);
     setImageCaptionInput('');
     setImagePreviewModalOpen(true);
-    // Reset file input value so same file can be selected again
+
+    if (e.target) {
+      e.target.value = '';
+    }
     if (imageInputRef.current) {
       imageInputRef.current.value = '';
     }
   };
 
   const handleSendImageMessage = async () => {
-    if (!selectedImageToSend) return;
+    if (selectedImagesToSend.length === 0) return;
     if (totalDailyMsgLimit !== Infinity && dailyMessagesSent >= totalDailyMsgLimit) {
       setShowMessageLimitModal(true);
       return;
@@ -2035,13 +2225,23 @@ export const WhatsAppChatModal: React.FC<Props> = ({
     }
 
     setIsUploadingImage(true);
-    try {
-      const uploadedUrl = await uploadImageToImgBB(
-        selectedImageToSend,
-        `nsta_chat_${effectiveUserId}_${Date.now()}`
-      );
+    setUploadProgressText(`Photos prepare ho rahi hain (0/${selectedImagesToSend.length})...`);
 
-      if (!uploadedUrl) {
+    try {
+      const uploadedUrls: string[] = [];
+      for (let i = 0; i < selectedImagesToSend.length; i++) {
+        setUploadProgressText(`Photo ${i + 1} of ${selectedImagesToSend.length} bhej rahe hain...`);
+        const file = selectedImagesToSend[i];
+        const uploadedUrl = await uploadImageToImgBB(
+          file,
+          `nsta_chat_${effectiveUserId}_${Date.now()}_${i}`
+        );
+        if (uploadedUrl) {
+          uploadedUrls.push(uploadedUrl);
+        }
+      }
+
+      if (uploadedUrls.length === 0) {
         throw new Error('Photo link taiyaar nahi ho saki. Dobara koshish karein.');
       }
 
@@ -2066,7 +2266,8 @@ export const WhatsAppChatModal: React.FC<Props> = ({
           text: captionText,
           timestamp: Date.now(),
           type: 'IMAGE',
-          mediaUrl: uploadedUrl,
+          mediaUrl: uploadedUrls[0],
+          mediaUrls: uploadedUrls,
           status: 'SENT',
           seen: false,
           delivered: false,
@@ -2085,7 +2286,7 @@ export const WhatsAppChatModal: React.FC<Props> = ({
           selectedContact.id,
           captionText,
           'IMAGE',
-          { mediaUrl: uploadedUrl }
+          { mediaUrl: uploadedUrls[0], mediaUrls: uploadedUrls }
         );
       } else if (selectedGroup) {
         const optimisticMsg: ChatMessage = {
@@ -2096,7 +2297,8 @@ export const WhatsAppChatModal: React.FC<Props> = ({
           text: captionText,
           timestamp: Date.now(),
           type: 'IMAGE',
-          mediaUrl: uploadedUrl,
+          mediaUrl: uploadedUrls[0],
+          mediaUrls: uploadedUrls,
           status: 'SENT',
           seen: false,
           delivered: false,
@@ -2114,20 +2316,23 @@ export const WhatsAppChatModal: React.FC<Props> = ({
           userPhoto,
           captionText,
           'IMAGE',
-          { mediaUrl: uploadedUrl }
+          { mediaUrl: uploadedUrls[0], mediaUrls: uploadedUrls }
         );
       }
 
-      showToast('📷 Photo safaltapoorvak bhej di gayi!');
+      showToast(`📷 ${uploadedUrls.length} photo(s) safaltapoorvak bhej di gayi!`);
       setImagePreviewModalOpen(false);
-      setSelectedImageToSend(null);
+      setSelectedImagesToSend([]);
+      setActivePreviewImageIndex(0);
       setImageCaptionInput('');
       setIsCroppingImage(false);
+      setUploadProgressText('');
     } catch (err: any) {
       console.error('[WhatsAppChatModal] Image upload/send failed:', err);
       showToast(`❌ Photo bhejte samay samasya aayi: ${err.message || 'Network error'}`);
     } finally {
       setIsUploadingImage(false);
+      setUploadProgressText('');
     }
   };
 
@@ -3586,36 +3791,6 @@ export const WhatsAppChatModal: React.FC<Props> = ({
             {/* TAB 1: CONFIRMED CHATS (FRIENDS ONLY) */}
             {activeTab === 'CHATS' && (
               <div className="relative min-h-full pb-20">
-                {/* Friend Quota Status Strip */}
-                <div className="mx-4 mt-2.5 p-2.5 bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-950/40 dark:to-slate-900 border border-purple-200 dark:border-purple-800/60 rounded-xl flex items-center justify-between shadow-xs">
-                  <div className="flex items-center gap-2">
-                    <div className="w-7 h-7 rounded-lg bg-purple-600 text-white flex items-center justify-center text-xs font-black shadow-xs">
-                      🤝
-                    </div>
-                    <div>
-                      <div className="text-[11px] font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
-                        <span>Friends Quota:</span>
-                        <span className="text-purple-700 dark:text-purple-300 font-black">
-                          {friends.length} / {totalFriendLimit}
-                        </span>
-                        <span className="text-[9px] font-semibold px-1.5 py-0.2 bg-purple-200/60 dark:bg-purple-900/60 text-purple-800 dark:text-purple-200 rounded">
-                          {currentTier}
-                        </span>
-                      </div>
-                      <p className="text-[9px] text-slate-500 dark:text-slate-400">
-                        Free: 10 · Basic: 20 · Ultra: 40 friends
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowFriendLimitModal(true)}
-                    className="px-2.5 py-1 bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-bold rounded-lg shadow-sm active:scale-95 transition-all flex items-center gap-1 cursor-pointer"
-                  >
-                    <Plus size={11} />
-                    <span>+10 Friends</span>
-                  </button>
-                </div>
                 {/* Blocked Users Notice Bar */}
                 {blockedUsers.length > 0 && (
                   <div className="mx-4 mt-2.5 p-2 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-between">
@@ -5395,26 +5570,118 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                           <Ban size={12} className="opacity-70" />
                           <span>This message was deleted</span>
                         </p>
-                      ) : (msg.type === 'IMAGE' || !!msg.mediaUrl) ? (
-                        <div className="space-y-1.5">
-                          <div
-                            className="relative overflow-hidden rounded-xl max-h-72 cursor-pointer bg-black/10 group select-none"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openImageLightbox(msg.mediaUrl || '');
-                            }}
-                          >
-                            <img
-                              src={msg.mediaUrl}
-                              alt="Photo attachment"
-                              className="w-full max-h-72 object-cover object-center group-hover:scale-[1.01] transition-transform rounded-xl"
-                              loading="lazy"
-                            />
-                            <div className="absolute bottom-2 right-2 px-2 py-1 bg-black/70 backdrop-blur-xs text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] font-bold">
-                              <Maximize2 size={12} />
-                              <span>View Full</span>
+                      ) : (msg.type === 'IMAGE' || !!msg.mediaUrl || (msg.mediaUrls && msg.mediaUrls.length > 0)) ? (
+                        <div className="space-y-2">
+                          {msg.mediaUrls && msg.mediaUrls.length > 1 ? (
+                            <div className="space-y-1.5">
+                              {/* Multi-Photo Grid (WhatsApp Style Album supporting up to 10 photos) */}
+                              <div
+                                className={`grid gap-1 rounded-2xl overflow-hidden bg-black/10 ${
+                                  msg.mediaUrls.length === 2
+                                    ? 'grid-cols-2 max-w-[280px]'
+                                    : msg.mediaUrls.length === 3
+                                    ? 'grid-cols-2 max-w-[280px]'
+                                    : 'grid-cols-2 max-w-[280px]'
+                                }`}
+                              >
+                                {msg.mediaUrls.slice(0, 4).map((url, idx) => {
+                                  const isFourth = idx === 3 && msg.mediaUrls!.length > 4;
+                                  const extraCount = msg.mediaUrls!.length - 4;
+                                  const isSpan2 = msg.mediaUrls!.length === 3 && idx === 0;
+
+                                  return (
+                                    <div
+                                      key={idx}
+                                      className={`relative overflow-hidden cursor-pointer group select-none ${
+                                        isSpan2 ? 'col-span-2 h-36' : 'h-28'
+                                      } bg-slate-900/40`}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        openImageLightbox(url, msg.mediaUrls, idx);
+                                      }}
+                                    >
+                                      <img
+                                        src={url}
+                                        alt={`Photo ${idx + 1}`}
+                                        className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform"
+                                        loading="lazy"
+                                      />
+                                      {isFourth && (
+                                        <div className="absolute inset-0 bg-black/70 backdrop-blur-xs flex flex-col items-center justify-center text-white font-black text-lg">
+                                          <span>+{extraCount}</span>
+                                          <span className="text-[10px] font-medium opacity-85">aur photos</span>
+                                        </div>
+                                      )}
+                                      {!isFourth && (
+                                        <div className="absolute bottom-1 right-1 px-1.5 py-0.5 bg-black/60 rounded text-white text-[9px] opacity-0 group-hover:opacity-100 transition-opacity">
+                                          🔍
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+
+                              {/* Prominent "Ek Saath Saare Download Karein" Bulk Download Button */}
+                              <div className="pt-0.5">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDownloadAllImages(msg.mediaUrls || []);
+                                  }}
+                                  className={`w-full px-2.5 py-1.5 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer active:scale-98 ${
+                                    isMe
+                                      ? 'bg-white/25 hover:bg-white/35 text-white'
+                                      : 'bg-purple-100 hover:bg-purple-200 dark:bg-purple-950/80 dark:hover:bg-purple-900 text-purple-700 dark:text-purple-300'
+                                  }`}
+                                  title="Sabhi photos ek saath ZIP file me download karein"
+                                >
+                                  <Download size={13} />
+                                  <span>📥 Ek Saath Saare Download Karein ({msg.mediaUrls.length})</span>
+                                </button>
+                              </div>
                             </div>
-                          </div>
+                          ) : (msg.mediaUrl || msg.mediaUrls?.[0]) ? (
+                            /* Single Photo Layout */
+                            <div className="space-y-1">
+                              <div
+                                className="relative overflow-hidden rounded-xl max-h-72 cursor-pointer bg-black/10 group select-none"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openImageLightbox(msg.mediaUrl || msg.mediaUrls?.[0] || '');
+                                }}
+                              >
+                                <img
+                                  src={msg.mediaUrl || msg.mediaUrls?.[0]}
+                                  alt="Photo attachment"
+                                  className="w-full max-h-72 object-cover object-center group-hover:scale-[1.01] transition-transform rounded-xl"
+                                  loading="lazy"
+                                />
+                                <div className="absolute bottom-2 right-2 px-2 py-1 bg-black/70 backdrop-blur-xs text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] font-bold">
+                                  <Maximize2 size={12} />
+                                  <span>View Full</span>
+                                </div>
+                              </div>
+                              <div className="flex justify-end">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDownloadImage(msg.mediaUrl || msg.mediaUrls?.[0] || '');
+                                  }}
+                                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold flex items-center gap-1 opacity-70 hover:opacity-100 transition-opacity cursor-pointer ${
+                                    isMe ? 'text-white' : 'text-slate-600 dark:text-slate-300'
+                                  }`}
+                                  title="Download Photo"
+                                >
+                                  <Download size={11} />
+                                  <span>Download</span>
+                                </button>
+                              </div>
+                            </div>
+                          ) : null}
+
                           {msg.text && (
                             <p className="text-xs whitespace-pre-wrap leading-relaxed px-0.5">{msg.text}</p>
                           )}
@@ -5563,26 +5830,35 @@ export const WhatsAppChatModal: React.FC<Props> = ({
             {/* Quick Doubt / Notes / Photo Attachment Flyout */}
             {showAttachmentMenu && (
               <div className="p-3 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex items-center gap-2 overflow-x-auto z-20">
+                <label
+                  onClick={() => setShowAttachmentMenu(false)}
+                  className="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:opacity-95 text-white rounded-xl text-xs font-bold shadow-xs flex-shrink-0 flex items-center gap-1.5 cursor-pointer active:scale-95 select-none"
+                  title="Mobile Storage / Gallery se 10 photos tak chunein"
+                >
+                  <ImageIcon size={14} />
+                  <span>📱 Gallery (10 Photos)</span>
+                  <input
+                    type="file"
+                    accept="image/*,image/jpeg,image/png,image/webp,image/jpg"
+                    multiple
+                    className="sr-only"
+                    onChange={handleSelectImageFile}
+                    onClick={(e) => {
+                      (e.target as HTMLInputElement).value = '';
+                    }}
+                  />
+                </label>
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowAttachmentMenu(false);
-                    imageInputRef.current?.click();
-                  }}
-                  className="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:opacity-95 text-white rounded-xl text-xs font-bold shadow-xs flex-shrink-0 flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Camera size={14} />
-                  <span>📷 Photo Bhejein</span>
-                </button>
-                <button
                   onClick={() => handleSendQuickAttachment('DOUBT', '📐 Mujhe is question ke formula calculation me doubt hai. Koi step explain kar sakta hai?')}
-                  className="px-3 py-1.5 bg-amber-50 dark:bg-amber-950/50 hover:bg-amber-100 text-amber-800 dark:text-amber-200 rounded-xl text-xs font-bold border border-amber-200 flex-shrink-0 flex items-center gap-1"
+                  className="px-3 py-1.5 bg-amber-50 dark:bg-amber-950/50 hover:bg-amber-100 text-amber-800 dark:text-amber-200 rounded-xl text-xs font-bold border border-amber-200 flex-shrink-0 flex items-center gap-1 cursor-pointer"
                 >
                   <span>💡 Ask Doubt</span>
                 </button>
                 <button
+                  type="button"
                   onClick={() => handleSendQuickAttachment('NOTE', '📚 Chapter ke key short notes maine review kar liye hain. Kisi ko chahiye toh batayein!')}
-                  className="px-3 py-1.5 bg-blue-50 dark:bg-blue-950/50 hover:bg-blue-100 text-blue-800 dark:text-blue-200 rounded-xl text-xs font-bold border border-blue-200 flex-shrink-0 flex items-center gap-1"
+                  className="px-3 py-1.5 bg-blue-50 dark:bg-blue-950/50 hover:bg-blue-100 text-blue-800 dark:text-blue-200 rounded-xl text-xs font-bold border border-blue-200 flex-shrink-0 flex items-center gap-1 cursor-pointer"
                 >
                   <span>📝 Share Note</span>
                 </button>
@@ -5609,34 +5885,6 @@ export const WhatsAppChatModal: React.FC<Props> = ({
 
             {/* Bottom Input Controls */}
             <div className="p-2 md:p-3 bg-white dark:bg-slate-900 border-t border-purple-500/20 z-20">
-              {/* Daily Message Quota Status */}
-              {totalDailyMsgLimit !== Infinity ? (
-                <div className="flex items-center justify-between pb-2 mb-1 px-1 text-[11px] border-b border-slate-100 dark:border-slate-800">
-                  <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
-                    <span>💬 Daily Quota:</span>
-                    <span className={dailyMessagesSent >= totalDailyMsgLimit ? 'text-rose-600 font-black' : 'text-purple-700 dark:text-purple-300 font-bold'}>
-                      {dailyMessagesSent} / {totalDailyMsgLimit} msgs
-                    </span>
-                    <span className="text-[9px] px-1.5 py-0.2 bg-purple-100 dark:bg-purple-900/60 text-purple-700 dark:text-purple-300 rounded font-semibold">
-                      {currentTier}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowMessageLimitModal(true)}
-                    className="text-purple-700 dark:text-purple-300 hover:text-purple-900 dark:hover:text-purple-100 text-[10px] font-bold flex items-center gap-1 hover:underline cursor-pointer"
-                  >
-                    <span>+10 Limit (100 🪙 / 10 💎)</span>
-                  </button>
-                </div>
-              ) : (
-                <div className="flex items-center justify-between pb-1.5 mb-1 px-1 text-[10px] border-b border-amber-500/20 text-amber-600 dark:text-amber-400 font-bold">
-                  <span className="flex items-center gap-1">
-                    <Crown size={12} className="text-amber-500" />
-                    <span>Ultra Plan · Unlimited Daily Messages</span>
-                  </span>
-                </div>
-              )}
               {/* Replying To Preview Banner */}
               {replyingTo && (
                 <div className="mb-2 p-2.5 bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-950/60 dark:to-slate-900 border-l-4 border-purple-600 rounded-r-2xl flex items-center justify-between shadow-xs animate-in slide-in-from-bottom-2 duration-150">
@@ -5715,21 +5963,35 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                     <Paperclip size={20} />
                   </button>
 
-                  {/* Dedicated Photo / Image Upload Button */}
-                  <button
-                    type="button"
-                    onClick={() => imageInputRef.current?.click()}
-                    className="p-2 text-slate-500 hover:text-purple-600 transition-colors cursor-pointer"
-                    title="Photo / Image Bhejein"
+                  {/* Dedicated Photo / Gallery Button - Native Label for guaranteed mobile picker */}
+                  <label
+                    className="p-2 text-slate-500 hover:text-purple-600 dark:hover:text-purple-400 transition-colors cursor-pointer flex items-center justify-center rounded-lg active:opacity-60 select-none"
+                    title="Mobile Gallery se Photos Bhejein (10 tak)"
                   >
                     <Camera size={20} />
-                  </button>
+                    <input
+                      ref={imageInputRef}
+                      type="file"
+                      accept="image/*,image/jpeg,image/png,image/webp,image/jpg"
+                      multiple
+                      className="sr-only"
+                      onChange={handleSelectImageFile}
+                      onClick={(e) => {
+                        (e.target as HTMLInputElement).value = '';
+                      }}
+                    />
+                  </label>
+                  {/* Add More Photos Input for Batch */}
                   <input
-                    ref={imageInputRef}
+                    ref={addMoreImageInputRef}
                     type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={handleSelectImageFile}
+                    accept="image/*,image/jpeg,image/png,image/webp,image/jpg"
+                    multiple
+                    className="sr-only"
+                    onChange={handleAddMoreImages}
+                    onClick={(e) => {
+                      (e.target as HTMLInputElement).value = '';
+                    }}
                   />
 
                   <div className="flex-1 relative">
@@ -7100,18 +7362,28 @@ export const WhatsAppChatModal: React.FC<Props> = ({
           }}
         />
 
-        {/* ─── MODAL 6: SEND PHOTO / IMAGE PREVIEW MODAL ──────────────── */}
-        {imagePreviewModalOpen && selectedImageToSend && (
+        {/* ─── MODAL 6: SEND PHOTO / IMAGE PREVIEW MODAL (UP TO 10 PHOTOS) ─── */}
+        {imagePreviewModalOpen && selectedImagesToSend.length > 0 && (
           <div className="fixed inset-0 z-[390] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4">
-            <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4 animate-in zoom-in-95">
+            <div className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl p-4 sm:p-5 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-3.5 animate-in zoom-in-95">
+              {/* Header */}
               <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-xl bg-purple-100 dark:bg-purple-950 text-purple-600 flex items-center justify-center">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-purple-100 dark:bg-purple-950 text-purple-600 dark:text-purple-400 flex items-center justify-center font-bold">
                     <Camera size={18} />
                   </div>
                   <div>
-                    <h3 className="font-bold text-sm text-slate-900 dark:text-white">Photo Bhejein</h3>
-                    <p className="text-[10px] text-slate-500">{selectedImageToSend.name}</p>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+                        Photos Bhejein
+                      </h3>
+                      <span className="px-2 py-0.5 bg-purple-100 dark:bg-purple-900/60 text-purple-700 dark:text-purple-300 rounded-full text-[11px] font-extrabold">
+                        {selectedImagesToSend.length}/10
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 truncate max-w-[200px]">
+                      {selectedImagesToSend[activePreviewImageIndex]?.name}
+                    </p>
                   </div>
                 </div>
 
@@ -7122,7 +7394,7 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                     onClick={handleStartCrop}
                     disabled={isUploadingImage}
                     className="px-2.5 py-1 bg-purple-100 dark:bg-purple-950/80 hover:bg-purple-200 dark:hover:bg-purple-900 text-purple-700 dark:text-purple-300 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
-                    title="Photo crop karein ya adjust karein"
+                    title="Active photo crop karein ya adjust karein"
                   >
                     <Crop size={14} />
                     <span>Crop</span>
@@ -7133,7 +7405,8 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                     onClick={() => {
                       if (!isUploadingImage) {
                         setImagePreviewModalOpen(false);
-                        setSelectedImageToSend(null);
+                        setSelectedImagesToSend([]);
+                        setActivePreviewImageIndex(0);
                         setImageCaptionInput('');
                         setIsCroppingImage(false);
                       }
@@ -7146,13 +7419,25 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                 </div>
               </div>
 
-              {/* Image Preview with Interactive Crop Overlay */}
-              <div className="relative rounded-2xl overflow-hidden max-h-72 bg-slate-950 flex items-center justify-center group">
-                <img
-                  src={previewImageBlobUrl || ''}
-                  alt="Preview"
-                  className="max-h-72 w-full object-contain"
-                />
+              {/* Main Image Preview with Interactive Crop Overlay */}
+              <div className="relative rounded-2xl overflow-hidden h-64 sm:h-72 bg-slate-950 flex items-center justify-center group">
+                {selectedImageUrls[activePreviewImageIndex] ? (
+                  <img
+                    src={selectedImageUrls[activePreviewImageIndex]}
+                    alt={`Preview ${activePreviewImageIndex + 1}`}
+                    className="max-h-full w-full object-contain"
+                  />
+                ) : (
+                  <div className="flex flex-col items-center justify-center text-slate-400 gap-2 p-8">
+                    <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                    <span className="text-xs">Photo taiyar ho rahi hai...</span>
+                  </div>
+                )}
+
+                {/* Active Photo Badge */}
+                <div className="absolute top-2 left-2 px-2.5 py-1 bg-black/70 text-white rounded-lg text-[10px] font-bold backdrop-blur-xs flex items-center gap-1">
+                  <span>Photo {activePreviewImageIndex + 1} of {selectedImagesToSend.length}</span>
+                </div>
 
                 {/* Overlay Crop Button on top-right of image */}
                 {!isUploadingImage && (
@@ -7160,19 +7445,100 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                     type="button"
                     onClick={handleStartCrop}
                     className="absolute top-2 right-2 px-3 py-1.5 bg-black/75 hover:bg-purple-600 text-white rounded-xl text-xs font-bold backdrop-blur-xs flex items-center gap-1.5 transition-all shadow-md cursor-pointer active:scale-95"
-                    title="Photo Crop ya Rotate karein"
+                    title="Active Photo Crop ya Rotate karein"
                   >
                     <Crop size={14} />
                     <span>Crop / Adjust</span>
                   </button>
                 )}
 
+                {/* Upload Progress Overlay */}
                 {isUploadingImage && (
-                  <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-xs flex flex-col items-center justify-center text-white space-y-2">
-                    <div className="w-8 h-8 border-3 border-purple-500 border-t-transparent rounded-full animate-spin" />
-                    <p className="text-xs font-bold animate-pulse">Photo upload ho rahi hai...</p>
+                  <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-xs flex flex-col items-center justify-center text-white space-y-2 p-4 text-center">
+                    <div className="w-9 h-9 border-3 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                    <p className="text-xs font-bold animate-pulse text-purple-300">
+                      {uploadProgressText || 'Photos upload ho rahi hain...'}
+                    </p>
+                    <p className="text-[10px] text-slate-400">
+                      Kripya intezar karein, sabhi photos bhej rahe hain...
+                    </p>
                   </div>
                 )}
+              </div>
+
+              {/* Multi-Photo Thumbnail Strip (up to 10 photos) */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[11px] text-slate-500 px-0.5">
+                  <span className="font-semibold">Selected Photos ({selectedImagesToSend.length}/10):</span>
+                  {selectedImagesToSend.length < 10 && (
+                    <button
+                      type="button"
+                      onClick={() => addMoreImageInputRef.current?.click()}
+                      className="text-purple-600 dark:text-purple-400 font-bold hover:underline flex items-center gap-1 cursor-pointer active:scale-95 select-none"
+                    >
+                      <Plus size={12} />
+                      <span>Aur Photos Jodein ({10 - selectedImagesToSend.length} bachi)</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-0.5 scrollbar-thin">
+                  {selectedImagesToSend.map((f, idx) => {
+                    const isActive = idx === activePreviewImageIndex;
+                    const thumbUrl = selectedImageUrls[idx];
+                    return (
+                      <div
+                        key={`${f.name}_${idx}`}
+                        className={`relative group shrink-0 w-14 h-14 rounded-xl overflow-hidden cursor-pointer transition-all ${
+                          isActive
+                            ? 'ring-2 ring-purple-600 ring-offset-2 dark:ring-offset-slate-900 scale-105'
+                            : 'opacity-70 hover:opacity-100'
+                        }`}
+                        onClick={() => setActivePreviewImageIndex(idx)}
+                      >
+                        {thumbUrl ? (
+                          <img
+                            src={thumbUrl}
+                            alt={f.name}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-full h-full bg-slate-800 flex items-center justify-center text-white text-xs">
+                            📷
+                          </div>
+                        )}
+                        <div className="absolute top-0.5 left-1 text-[9px] font-black text-white bg-black/60 px-1 rounded">
+                          {idx + 1}
+                        </div>
+                        {!isUploadingImage && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRemoveImageFromBatch(idx);
+                            }}
+                            className="absolute top-0.5 right-0.5 w-4 h-4 bg-rose-600/90 hover:bg-rose-700 text-white rounded-full flex items-center justify-center text-[10px] shadow-xs cursor-pointer"
+                            title="Hataayein"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* Add more photo card */}
+                  {selectedImagesToSend.length < 10 && (
+                    <label
+                      htmlFor="nsta-chat-add-more-input"
+                      className="shrink-0 w-14 h-14 rounded-xl border-2 border-dashed border-purple-300 dark:border-purple-800 hover:border-purple-500 dark:hover:border-purple-600 bg-purple-50/50 dark:bg-purple-950/30 flex flex-col items-center justify-center text-purple-600 dark:text-purple-400 gap-0.5 cursor-pointer transition-colors active:scale-95 select-none"
+                      title="Aur photos jodein (Maximum 10)"
+                    >
+                      <Plus size={16} />
+                      <span className="text-[9px] font-bold">+Add</span>
+                    </label>
+                  )}
+                </div>
               </div>
 
               {/* Caption Input */}
@@ -7191,19 +7557,20 @@ export const WhatsAppChatModal: React.FC<Props> = ({
               </div>
 
               {/* Actions */}
-              <div className="flex gap-2">
+              <div className="flex gap-2 pt-1">
                 <button
                   type="button"
                   onClick={() => {
                     if (!isUploadingImage) {
                       setImagePreviewModalOpen(false);
-                      setSelectedImageToSend(null);
+                      setSelectedImagesToSend([]);
+                      setActivePreviewImageIndex(0);
                       setImageCaptionInput('');
                       setIsCroppingImage(false);
                     }
                   }}
                   disabled={isUploadingImage}
-                  className="flex-1 py-2.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl text-xs font-bold hover:bg-slate-200 cursor-pointer disabled:opacity-50"
+                  className="flex-1 py-2.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl text-xs font-bold hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -7215,7 +7582,7 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                   className="flex-1 py-2.5 bg-purple-100 hover:bg-purple-200 dark:bg-purple-950/80 dark:hover:bg-purple-900 text-purple-700 dark:text-purple-300 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
                 >
                   <Crop size={14} />
-                  <span>Crop Karein</span>
+                  <span>Crop Active</span>
                 </button>
 
                 <button
@@ -7227,12 +7594,12 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                   {isUploadingImage ? (
                     <>
                       <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span>Bhej rahe hain...</span>
+                      <span className="truncate">{uploadProgressText || 'Bhej rahe hain...'}</span>
                     </>
                   ) : (
                     <>
                       <Send size={15} />
-                      <span>Photo Bhejein 🚀</span>
+                      <span>Bhejein ({selectedImagesToSend.length} Photos) 🚀</span>
                     </>
                   )}
                 </button>
@@ -7266,7 +7633,9 @@ export const WhatsAppChatModal: React.FC<Props> = ({
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center gap-2 text-white">
-                <span className="text-xs sm:text-sm font-black tracking-wide">📷 Photo Viewer</span>
+                <span className="text-xs sm:text-sm font-black tracking-wide">
+                  📷 {lightboxImagesList.length > 1 ? `Photo ${lightboxActiveIndex + 1} of ${lightboxImagesList.length}` : 'Photo Viewer'}
+                </span>
                 {lightboxZoom > 1 && (
                   <span className="text-[10px] sm:text-[11px] font-mono font-bold bg-white/20 px-2 py-0.5 rounded-full text-white">
                     {Math.round(lightboxZoom * 100)}%
@@ -7275,6 +7644,19 @@ export const WhatsAppChatModal: React.FC<Props> = ({
               </div>
 
               <div className="flex items-center gap-1 sm:gap-2">
+                {/* Bulk Download Button in Lightbox when multiple photos */}
+                {lightboxImagesList.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadAllImages(lightboxImagesList)}
+                    className="px-2.5 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:opacity-95 text-white rounded-xl text-xs font-bold shadow-sm flex items-center gap-1.5 transition-all cursor-pointer mr-1"
+                    title="Sabhi photos ek saath ZIP file me download karein"
+                  >
+                    <Download size={14} />
+                    <span>Download All ({lightboxImagesList.length})</span>
+                  </button>
+                )}
+
                 {/* Zoom Out */}
                 <button
                   type="button"
@@ -7305,7 +7687,7 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                   <RotateCw size={16} />
                 </button>
 
-                {/* In-App Fullscreen Toggle (Never leaves the app, expands 100% inside app) */}
+                {/* In-App Fullscreen Toggle */}
                 <button
                   type="button"
                   onClick={() => toggleLightboxFullscreen()}
@@ -7315,12 +7697,12 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                   {isLightboxFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
                 </button>
 
-                {/* Save to Device (In-App Blob Download - No external tab) */}
+                {/* Save Current Photo to Device */}
                 <button
                   type="button"
                   onClick={() => handleDownloadImage(lightboxImageUrl)}
                   className="p-2 sm:p-2.5 bg-white/15 hover:bg-white/25 text-white rounded-full transition-colors cursor-pointer"
-                  title="Device me Save Karein"
+                  title="Current Photo Save Karein"
                 >
                   <Download size={16} />
                 </button>
@@ -7337,30 +7719,87 @@ export const WhatsAppChatModal: React.FC<Props> = ({
               </div>
             </div>
 
-            {/* Central Fullscreen Image Viewport (In-App) */}
+            {/* Central Fullscreen Image Viewport with Previous & Next navigation */}
             <div
               className="flex-1 w-full h-full flex items-center justify-center overflow-hidden relative cursor-default"
               onClick={(e) => e.stopPropagation()}
               onDoubleClick={() => setLightboxZoom((z) => (z > 1 ? 1 : 2))}
             >
-              <img
-                src={lightboxImageUrl}
-                alt="Photo"
-                style={{
-                  transform: `scale(${lightboxZoom}) rotate(${lightboxRotation}deg)`,
-                  transition: 'transform 0.2s cubic-bezier(0.2, 0, 0, 1)',
-                }}
-                className={`select-none max-w-full max-h-full object-contain pointer-events-auto transition-all ${
-                  isLightboxFullscreen ? 'w-full h-full p-0' : 'max-w-[96vw] max-h-[82vh] rounded-2xl shadow-2xl p-1'
-                }`}
-                draggable={false}
-              />
+              {/* Previous Image Arrow */}
+              {lightboxImagesList.length > 1 && (
+                <button
+                  type="button"
+                  onClick={goToPrevLightboxImage}
+                  className="absolute left-2 sm:left-4 z-30 p-2.5 sm:p-3 rounded-full bg-black/60 hover:bg-purple-600 text-white backdrop-blur-xs transition-all shadow-lg cursor-pointer active:scale-95"
+                  title="Pichli Photo (Previous Photo)"
+                >
+                  <ChevronLeft size={22} />
+                </button>
+              )}
+
+              {lightboxImageUrl ? (
+                <img
+                  src={lightboxImageUrl}
+                  alt={`Photo ${lightboxActiveIndex + 1}`}
+                  style={{
+                    transform: `scale(${lightboxZoom}) rotate(${lightboxRotation}deg)`,
+                    transition: 'transform 0.2s cubic-bezier(0.2, 0, 0, 1)',
+                  }}
+                  className={`select-none max-w-full max-h-full object-contain pointer-events-auto transition-all ${
+                    isLightboxFullscreen ? 'w-full h-full p-0' : 'max-w-[96vw] max-h-[82vh] rounded-2xl shadow-2xl p-1'
+                  }`}
+                  draggable={false}
+                />
+              ) : null}
+
+              {/* Next Image Arrow */}
+              {lightboxImagesList.length > 1 && (
+                <button
+                  type="button"
+                  onClick={goToNextLightboxImage}
+                  className="absolute right-2 sm:right-4 z-30 p-2.5 sm:p-3 rounded-full bg-black/60 hover:bg-purple-600 text-white backdrop-blur-xs transition-all shadow-lg cursor-pointer active:scale-95"
+                  title="Agli Photo (Next Photo)"
+                >
+                  <ChevronRight size={22} />
+                </button>
+              )}
             </div>
 
+            {/* Bottom Strip: Mini Carousel / Dots if multiple images */}
+            {lightboxImagesList.length > 1 && (
+              <div
+                className="w-full flex items-center justify-center gap-2 py-2 px-3 z-20 bg-gradient-to-t from-black/85 to-transparent overflow-x-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {lightboxImagesList.map((url, idx) => {
+                  const isActive = idx === lightboxActiveIndex;
+                  return (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => {
+                        setLightboxActiveIndex(idx);
+                        setLightboxImageUrl(url);
+                        setLightboxZoom(1);
+                        setLightboxRotation(0);
+                      }}
+                      className={`relative w-10 h-10 sm:w-12 sm:h-12 rounded-lg overflow-hidden shrink-0 transition-all cursor-pointer ${
+                        isActive
+                          ? 'ring-2 ring-purple-500 scale-110 shadow-lg'
+                          : 'opacity-50 hover:opacity-90'
+                      }`}
+                    >
+                      <img src={url} alt={`Thumb ${idx + 1}`} className="w-full h-full object-cover" />
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             {/* In-App Subtle Hint Bar */}
-            <div className="w-full text-center py-2 z-10 bg-gradient-to-t from-black/80 to-transparent pointer-events-none">
+            <div className="w-full text-center py-1.5 z-10 bg-gradient-to-t from-black/80 to-transparent pointer-events-none">
               <p className="text-[10px] text-white/60 font-medium select-none">
-                Double tap to zoom • App ke andar hi puri picture dikhegi
+                Double tap to zoom • Left/Right arrows se photos badlein • App ke andar hi puri picture dikhegi
               </p>
             </div>
           </div>
