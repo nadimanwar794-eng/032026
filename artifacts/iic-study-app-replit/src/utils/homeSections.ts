@@ -96,6 +96,20 @@ export const HOME_SECTION_REGISTRY: HomeSectionMeta[] = [
     emoji: '🏛️',
     color: 'amber',
   },
+  {
+    id: 'home_revision_hub',
+    label: 'Revision Hub Card',
+    description: 'Smart spaced repetition and revision drill card on Home tab.',
+    emoji: '🧠',
+    color: 'violet',
+  },
+  {
+    id: 'home_my_routine',
+    label: 'My Routine Card',
+    description: 'Daily timetable, study planner and streak card on Home tab.',
+    emoji: '📅',
+    color: 'emerald',
+  },
 ];
 
 export function isHomeSectionVisible(

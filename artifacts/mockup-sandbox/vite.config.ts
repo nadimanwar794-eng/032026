@@ -45,6 +45,19 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist"),
     emptyOutDir: true,
+    rollupOptions: {
+      onwarn(warning, warn) {
+        if (
+          warning.code === 'MODULE_LEVEL_DIRECTIVE' ||
+          (typeof warning.message === 'string' &&
+            (warning.message.includes('Module level directives cause errors when bundled') ||
+             warning.message.includes('"use client"')))
+        ) {
+          return;
+        }
+        warn(warning);
+      },
+    },
   },
   server: {
     port,

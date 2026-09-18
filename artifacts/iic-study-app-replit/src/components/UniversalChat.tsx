@@ -2,11 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { User } from '../types';
 import { buildSubColorsFromHex } from '../utils/tierTheme';
 import { useAppTheme } from '../utils/themeContext';
-import { Send, MessageSquare, Shield, Users, X, Trash2, Crown, Zap, Lock, Megaphone, BookOpen, CheckCircle, ThumbsUp, ThumbsDown, Award, Flag, ChevronDown, ChevronUp, MessageCircle, Globe } from 'lucide-react';
+import { Send, MessageSquare, Shield, Users, X, Trash2, Crown, Zap, Lock, Megaphone, BookOpen, CheckCircle, ThumbsUp, ThumbsDown, Award, Flag, ChevronDown, ChevronUp, MessageCircle, Globe, ArrowLeft, Search, Plus } from 'lucide-react';
 import { ref, onValue, query, limitToLast, remove, set, get } from 'firebase/database';
 import { rtdb } from '../firebase';
 import { TopBarEffectsLayer } from '../utils/topBarEffects';
 import { CommunityPostFeed } from './CommunityPostFeed';
+import { McqHub } from './McqHub';
 
 interface Props {
     user: User;
@@ -19,10 +20,18 @@ interface Props {
     initialMcqDraft?: { question: string; options: [string,string,string,string]; correctAnswer: number; explanation: string };
     defaultTab?: 'GLOBAL' | 'MCQ' | 'SUPPORT';
     hideGlobalTab?: boolean;
+    hideSupportTab?: boolean;
+    isFeedOnly?: boolean;
+    isMcqOnly?: boolean;
+    isSupportOnly?: boolean;
     onSpendCoins?: (amount: number) => boolean;
     onSpendDiamonds?: (amount: number) => boolean;
     onUpdateUser?: (updatedUser: User) => void;
     themeColor?: string; // Optional override color from admin settings or user redeem code
+    onRestoreBottomNav?: () => void;
+    isBottomNavVisible?: boolean;
+    appLogo?: string;
+    appName?: string;
 }
 
 interface McqDraft {
@@ -34,7 +43,7 @@ interface McqDraft {
 
 const EMPTY_MCQ: McqDraft = { question: '', options: ['', '', '', ''], correctAnswer: 0, explanation: '' };
 
-export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetUser, roomId, roomName, allowStudentMcq, initialMcqDraft, defaultTab, hideGlobalTab, onSpendCoins, onSpendDiamonds, onUpdateUser, themeColor }) => {
+export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetUser, roomId, roomName, allowStudentMcq, initialMcqDraft, defaultTab, hideGlobalTab, hideSupportTab, isFeedOnly, isMcqOnly, isSupportOnly, onSpendCoins, onSpendDiamonds, onUpdateUser, themeColor, onRestoreBottomNav, isBottomNavVisible = false, appLogo, appName }) => {
     const appTheme = useAppTheme();
     // Determine effective color: prop override > subscription tier
     const _baseSubColor = (user.subscriptionLevel === 'ULTRA' && user.isPremium) ? '#1d4ed8'
@@ -53,17 +62,11 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                 : 'rgba(14,165,233,0.28)',
           };
     const isUltraChatUser = (user.subscriptionLevel === 'ULTRA' && user.isPremium) || isAdmin;
-    // Community MCQ posting is free, but sending is available to Basic/Ultra.
-    // Free users can still open the MCQ tab and solve shared questions.
-    const isSubscriber = isAdmin
-        || (allowStudentMcq !== false && !!(
-            user.isPremium
-            || (user.subscriptionTier && user.subscriptionTier !== 'FREE')
-            || user.subscriptionLevel === 'BASIC'
-            || user.subscriptionLevel === 'ULTRA'
-        ));
+    // Community MCQ posting is now open for ALL users (Free, Basic, Ultra)
+    const canSendMcq = isAdmin || allowStudentMcq !== false;
+    const isSubscriber = true;
     const [activeTab, setActiveTab] = useState<'GLOBAL' | 'SUPPORT' | 'MCQ'>(
-        defaultTab || (hideGlobalTab ? 'MCQ' : 'GLOBAL')
+        isFeedOnly ? 'GLOBAL' : isMcqOnly ? 'MCQ' : isSupportOnly ? 'SUPPORT' : (defaultTab || (hideGlobalTab ? 'MCQ' : 'GLOBAL'))
     );
     const [supportCurrency, setSupportCurrency] = useState<'CREDITS' | 'DIAMONDS'>('CREDITS');
     const [mcqVotes, setMcqVotes] = useState<Record<string, Record<string, number>>>({});
@@ -83,10 +86,25 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
     const [msgDislikes, setMsgDislikes] = useState<Record<string, number>>({});
     const [myMsgReaction, setMyMsgReaction] = useState<Record<string, 'like' | 'dislike'>>({});
     const [showTopContribs, setShowTopContribs] = useState(true);
+    const [communitySearchOpen, setCommunitySearchOpen] = useState(false);
+    const [communitySearchQuery, setCommunitySearchQuery] = useState('');
+    const [communityComposerOpen, setCommunityComposerOpen] = useState(false);
     const dummyRef = useRef<HTMLDivElement>(null);
     const upvotingRef = useRef<Set<string>>(new Set());
     const reactingRef = useRef<Set<string>>(new Set());
     const isAdminOrSub = user.role === 'ADMIN' || user.role === 'SUB_ADMIN';
+
+    if (isMcqOnly) {
+        return (
+            <div className="w-full h-full bg-slate-900 flex flex-col">
+                <McqHub
+                    user={user}
+                    onBack={onClose}
+                    initialMcqDraft={initialMcqDraft}
+                />
+            </div>
+        );
+    }
 
     const chatPath = roomId
         ? `chat/rooms/${roomId}`
@@ -489,66 +507,205 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                 </div>
             )}
 
-            <div className="w-full h-full flex flex-col overflow-hidden" style={{ background: appTheme.appBgColor || appTheme.profileBg || '#ffffff' }}>
+            <div className={`w-full h-full flex flex-col overflow-hidden ${isBottomNavVisible ? 'pb-[64px]' : ''}`} style={{ background: appTheme.appBgColor || appTheme.profileBg || '#ffffff' }}>
 
-                {/* Header */}
-                <div className="text-white p-4 flex items-center justify-between shrink-0" style={{ background: appTheme.topBarGrad || '#0f172a' }}>
-                    <div className="flex items-center gap-3">
-                        <div className={`p-2 rounded-lg ${activeTab === 'GLOBAL' ? 'bg-purple-600' : activeTab === 'MCQ' ? '' : 'bg-green-600'}`} style={activeTab === 'MCQ' || roomId ? { background: subColor } : {}}>
-                            {roomId ? <MessageSquare size={18} /> : activeTab === 'GLOBAL' ? <Globe size={18} /> : activeTab === 'MCQ' ? <BookOpen size={18} /> : <Shield size={18} />}
-                        </div>
-                        <div>
-                            <h3 className="font-bold text-sm">
-                                {roomId ? roomName : activeTab === 'GLOBAL' ? 'Community Posts Feed' : activeTab === 'MCQ' ? 'MCQ Community' : isAdmin ? `Chat — ${targetUser?.name || 'User'}` : 'Admin Support'}
-                            </h3>
-                            <p className="text-[10px] text-slate-400">
-                                {activeTab === 'GLOBAL' ? 'Ultra, Free & Basic — Sabhi students post, like & comment kar sakte hain' : activeTab === 'MCQ' ? `Aaj bheje: ${mcqDailyCount}/10 MCQ${!isAdminOrSub ? ` • ${Math.max(0, 10 - mcqDailyCount)} bache` : ''}` : 'Sirf Admin/Mod dekh sakta hai'}
-                            </p>
-                        </div>
+                {/* Unified Single Top Bar: Combines Header + Navigation Tabs */}
+                <div
+                    className="text-white px-2.5 py-2 flex items-center justify-between gap-2 shrink-0 shadow-sm"
+                    style={{ background: appTheme.topBarGrad || '#0f172a' }}
+                >
+                    <div className="flex items-center gap-1 shrink-0">
+                        {onClose && (
+                            <button
+                                type="button"
+                                onClick={onClose}
+                                className="p-1.5 -ml-0.5 hover:bg-white/10 rounded-full transition-colors cursor-pointer active:scale-95 text-white shrink-0"
+                                title="Back"
+                                aria-label="Back"
+                            >
+                                <ArrowLeft size={18} />
+                            </button>
+                        )}
                     </div>
-                    
-                    <div className="flex items-center gap-2">
-                        <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors"><X size={20} /></button>
+
+                    {/* Integrated Tab Pills or Community Header inside the single top bar */}
+                    {communitySearchOpen && (activeTab === 'GLOBAL' || isFeedOnly) ? (
+                        <div className="flex-1 flex items-center gap-2 bg-white/15 px-2.5 py-1 rounded-xl border border-white/25 min-w-0">
+                            <Search size={15} className="text-white/80 shrink-0" />
+                            <input
+                                type="text"
+                                value={communitySearchQuery}
+                                onChange={(e) => setCommunitySearchQuery(e.target.value)}
+                                placeholder="Search posts or students..."
+                                className="w-full bg-transparent text-white placeholder-white/60 text-xs focus:outline-none"
+                                autoFocus
+                            />
+                            {communitySearchQuery && (
+                                <button
+                                    type="button"
+                                    onClick={() => setCommunitySearchQuery('')}
+                                    className="text-white/70 hover:text-white p-0.5"
+                                >
+                                    <X size={13} />
+                                </button>
+                            )}
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setCommunitySearchOpen(false);
+                                    setCommunitySearchQuery('');
+                                }}
+                                className="text-[11px] text-white/90 hover:text-white font-bold px-1 cursor-pointer shrink-0"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    ) : (activeTab === 'GLOBAL' || isFeedOnly) ? (
+                        <div className="flex-1 flex items-center justify-between gap-1 min-w-0">
+                            <div className="flex items-center gap-2 min-w-0">
+                                <div className="p-1.5 rounded-lg bg-white/10 text-white shrink-0">
+                                    <Globe size={16} />
+                                </div>
+                                <span className="font-bold text-sm sm:text-base text-white truncate tracking-tight">
+                                    Community
+                                </span>
+                                {/* Search icon right after Community */}
+                                <button
+                                    type="button"
+                                    onClick={() => setCommunitySearchOpen(true)}
+                                    className="p-1.5 hover:bg-white/15 rounded-lg text-white/90 hover:text-white transition-all cursor-pointer active:scale-95 shrink-0"
+                                    title="Search posts"
+                                    aria-label="Search posts"
+                                >
+                                    <Search size={16} />
+                                </button>
+                                {/* + icon to add new post right after search */}
+                                <button
+                                    type="button"
+                                    onClick={() => setCommunityComposerOpen((prev) => !prev)}
+                                    className="p-1.5 hover:bg-white/15 rounded-lg text-white/90 hover:text-white transition-all cursor-pointer active:scale-95 shrink-0"
+                                    title="Naya Post Add Karein"
+                                    aria-label="Naya Post"
+                                >
+                                    <Plus size={18} />
+                                </button>
+                            </div>
+                        </div>
+                    ) : !roomId && !isMcqOnly && !isSupportOnly && !isFeedOnly ? (
+                        <div className="flex-1 flex items-center justify-center gap-1 max-w-sm mx-auto bg-black/25 p-1 rounded-xl border border-white/10">
+                            {!hideGlobalTab && (
+                                <button
+                                    type="button"
+                                    onClick={() => setActiveTab('GLOBAL')}
+                                    className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer select-none ${
+                                        activeTab === 'GLOBAL'
+                                            ? 'bg-purple-600 text-white shadow-sm'
+                                            : 'text-white/70 hover:text-white hover:bg-white/5'
+                                    }`}
+                                >
+                                    <Globe size={13} />
+                                    <span>Community</span>
+                                </button>
+                            )}
+                            <button
+                                type="button"
+                                onClick={() => setActiveTab('MCQ')}
+                                className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer select-none relative ${
+                                    activeTab === 'MCQ'
+                                        ? 'bg-blue-600 text-white shadow-sm'
+                                        : 'text-white/70 hover:text-white hover:bg-white/5'
+                                }`}
+                            >
+                                <BookOpen size={13} />
+                                <span>MCQs</span>
+                                {!isAdminOrSub && mcqDailyCount > 0 && (
+                                    <span className="text-[9px] bg-amber-400 text-slate-950 font-black rounded-full px-1 py-0.2 ml-0.5">
+                                        {mcqDailyCount}/10
+                                    </span>
+                                )}
+                            </button>
+                            {!hideSupportTab && (
+                                <button
+                                    type="button"
+                                    onClick={() => setActiveTab('SUPPORT')}
+                                    className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer select-none ${
+                                        activeTab === 'SUPPORT'
+                                            ? 'bg-emerald-600 text-white shadow-sm'
+                                            : 'text-white/70 hover:text-white hover:bg-white/5'
+                                    }`}
+                                >
+                                    <Shield size={13} />
+                                    <span>{isAdmin ? 'DMs' : 'Help'}</span>
+                                </button>
+                            )}
+                        </div>
+                    ) : (
+                        <div className="flex-1 flex items-center gap-2 min-w-0">
+                            <div className="p-1.5 rounded-lg bg-white/10 text-white">
+                                {roomId ? <MessageSquare size={16} /> : activeTab === 'MCQ' ? <BookOpen size={16} /> : <Shield size={16} />}
+                            </div>
+                            <div className="min-w-0">
+                                <h3 className="font-bold text-xs sm:text-sm truncate">
+                                    {roomId ? roomName : activeTab === 'MCQ' ? 'MCQ Community' : isAdmin ? `Chat — ${targetUser?.name || 'User'}` : 'Community Support'}
+                                </h3>
+                                <p className="text-[10px] text-white/70 leading-tight truncate">
+                                    {activeTab === 'MCQ' ? `Daily: ${mcqDailyCount}/10 MCQ` : 'Direct Admin Support'}
+                                </p>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="flex items-center gap-1 shrink-0">
+                        {/* NSTA App icon button to toggle bottom navigation on Community / MCQ / Support */}
+                        {onRestoreBottomNav && (
+                            <button
+                                type="button"
+                                onClick={onRestoreBottomNav}
+                                className={`p-1 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 px-2 active:scale-95 ${
+                                    isBottomNavVisible
+                                        ? 'bg-white text-slate-900 shadow-xs'
+                                        : 'bg-white/15 text-white hover:bg-white/25'
+                                }`}
+                                title={isBottomNavVisible ? "Bottom navigation chhipayein" : "Bottom navigation dikhayein"}
+                            >
+                                <img
+                                    src={appLogo || '/branding/nsta-logo.svg'}
+                                    alt={appName || "NSTA"}
+                                    className="w-5 h-5 rounded-md object-contain"
+                                    onError={(e) => {
+                                        (e.target as HTMLElement).style.display = 'none';
+                                    }}
+                                />
+                                <span className="text-[10px] font-black">{appName || 'NSTA'}</span>
+                            </button>
+                        )}
+                        {onClose && (
+                            <button
+                                type="button"
+                                onClick={onClose}
+                                className="p-1.5 hover:bg-white/10 rounded-full transition-colors cursor-pointer active:scale-95 text-white"
+                                title="Close"
+                                aria-label="Close"
+                            >
+                                <X size={18} />
+                            </button>
+                        )}
                     </div>
                 </div>
-
-                {/* Tabs */}
-                {!roomId && (
-                    <div className="flex p-1 gap-1 shrink-0" style={{ background: appTheme.profileCardBg || '#f1f5f9' }}>
-                        {!hideGlobalTab && (
-                        <button
-                            onClick={() => {
-                                setActiveTab('GLOBAL');
-                            }}
-                            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${activeTab === 'GLOBAL' ? 'bg-white shadow text-purple-600' : 'text-slate-500 hover:text-slate-700'}`}
-                        >
-                            <Globe size={13} />
-                            <span>Posts Feed</span>
-                        </button>
-                        )}
-                        <button
-                            onClick={() => setActiveTab('MCQ')}
-                            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1 relative ${activeTab === 'MCQ' ? 'bg-white shadow' : 'text-slate-500 hover:text-slate-700'}`}
-                            style={activeTab === 'MCQ' ? { color: subColor } : {}}
-                        >
-                            <BookOpen size={12} /> MCQs
-                            {!isAdminOrSub && mcqDailyCount > 0 && (
-                                <span className="absolute -top-0.5 -right-0.5 text-white text-[7px] font-black rounded-full px-1 leading-tight" style={{ background: subColor }}>{mcqDailyCount}/10</span>
-                            )}
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('SUPPORT')}
-                            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1 ${activeTab === 'SUPPORT' ? 'bg-white shadow text-green-600' : 'text-slate-500 hover:text-slate-700'}`}
-                        >
-                            <Shield size={12} /> {isAdmin ? 'DMs' : 'Help'}
-                        </button>
-                    </div>
-                )}
 
                 {/* Content: Community Post Feed (replaces Global Chat) */}
                 {activeTab === 'GLOBAL' && !roomId ? (
                     <div className="flex-1 overflow-hidden">
-                        <CommunityPostFeed user={user} isAdmin={isAdminOrSub} onClose={onClose} />
+                        <CommunityPostFeed
+                            user={user}
+                            isAdmin={isAdminOrSub}
+                            onClose={onClose}
+                            isEmbedded={true}
+                            externalSearchQuery={communitySearchQuery}
+                            onSearchQueryChange={setCommunitySearchQuery}
+                            externalShowComposer={communityComposerOpen}
+                            onShowComposerChange={setCommunityComposerOpen}
+                        />
                     </div>
                 ) : activeTab === 'SUPPORT' && isAdmin && !targetUser && !roomId ? (
                     <div className="flex-1 flex flex-col items-center justify-center text-slate-500 p-6 text-center">
@@ -604,22 +761,31 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                             );
                         })()}
 
-                {/* Messages */}
-                        <div
-                            className="flex-1 overflow-y-auto p-3 space-y-3 pb-[calc(env(safe-area-inset-bottom,0px)+96px)]"
-                            style={{ background: appTheme.appBgColor || appTheme.profileBg || '#f8fafc' }}
-                        >
-                            {visibleMessages.length === 0 && (
-                                <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-2">
-                                    <MessageSquare size={40} className="opacity-40" />
-                                    <p className="text-xs">Koi message nahi. Pehla message bhejo!</p>
-                                </div>
-                            )}
+                {/* Messages or MCQ Hub */}
+                {activeTab === 'MCQ' ? (
+                    <div className="flex-1 overflow-hidden flex flex-col">
+                        <McqHub
+                            user={user}
+                            onBack={() => setActiveTab('GLOBAL')}
+                            initialMcqDraft={initialMcqDraft}
+                        />
+                    </div>
+                ) : (
+                    <div
+                        className="flex-1 overflow-y-auto p-3 space-y-3 pb-3.5"
+                        style={{ background: appTheme.appBgColor || appTheme.profileBg || '#f8fafc' }}
+                    >
+                        {visibleMessages.length === 0 && (
+                            <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-2">
+                                <MessageSquare size={40} className="opacity-40" />
+                                <p className="text-xs">Koi message nahi. Pehla message bhejo!</p>
+                            </div>
+                        )}
 
-                            {visibleMessages.map((msg) => {
-                                const isMe = msg.userId === user.id;
-                                return (
-                                    <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} group`}>
+                        {visibleMessages.map((msg) => {
+                            const isMe = msg.userId === user.id;
+                            return (
+                                <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} group`}>
 
                                         {msg.isAdminOnly && isAdminOrSub && (
                                             <div className="flex items-center gap-1 mb-0.5 px-1">
@@ -832,38 +998,7 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                             })}
                             <div ref={dummyRef} />
                         </div>
-
-                        {/* MCQ quick action bar — only in MCQ tab, hide for admin (they have their own footer) */}
-                        {activeTab === 'MCQ' && !isAdminOrSub && (
-                        <div className="px-3 pt-2 pb-[calc(env(safe-area-inset-bottom,0px)+88px)] border-t border-slate-100 shrink-0" style={{ background: appTheme.profileCardBg || '#ffffff' }}>
-                            {!isAdminOrSub && (
-                                <div className={`mb-1.5 flex items-center justify-between text-[10px] font-bold px-0.5 ${mcqDailyCount >= 10 ? 'text-red-500' : ''}`} style={mcqDailyCount < 10 ? { color: subColor } : {}}>
-                                    <span>Aaj ke MCQ: {mcqDailyCount}/10</span>
-                                    {mcqDailyCount >= 10 ? <span>Limit poori ⛔ Kal aana</span> : <span>{10 - mcqDailyCount} bache</span>}
-                                </div>
-                            )}
-                            <button
-                                onClick={() => {
-                                    if (!isSubscriber) {
-                                        alert('🔒 Community MCQ Send feature Basic aur Ultra members ke liye hai! Upgrade your plan to participate.');
-                                        return;
-                                    }
-                                    setShowMcqBuilder(true);
-                                }}
-                                disabled={!isAdminOrSub && mcqDailyCount >= 10}
-                                title={!isSubscriber ? "🔒 Community MCQ Send (Basic+ Required)" : "MCQ bhejo"}
-                                className={`w-full py-2.5 rounded-xl border font-bold text-xs transition-all flex items-center justify-center gap-2 ${!isAdminOrSub && mcqDailyCount >= 10 ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' : 'active:scale-95'}`}
-                                style={!(!isAdminOrSub && mcqDailyCount >= 10) ? { background: subColorLight, color: subColor, borderColor: subColorBorder } : {}}
-                            >
-                                <BookOpen size={16} /> MCQ Bhejo
-                                {!isSubscriber && (
-                                    <span className="text-[9px] bg-amber-500/15 text-amber-700 border border-amber-500/30 font-black px-1.5 py-0.5 rounded-md flex items-center gap-0.5">
-                                        <Lock size={9} /> Basic+
-                                    </span>
-                                )}
-                            </button>
-                        </div>
-                        )}
+                )}
 
                         {/* MCQ Builder — bottom-sheet modal */}
                         {showMcqBuilder && (
@@ -885,7 +1020,7 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                                             <p className="text-sm font-black text-indigo-700 flex items-center gap-2"><BookOpen size={15} /> MCQ Banao &amp; Bhejo</p>
                                             {!isAdminOrSub && (
                                                 <p className={`text-[10px] font-bold mt-0.5 ${mcqDailyCount >= 10 ? 'text-red-500' : 'text-slate-400'}`}>
-                                                    Aaj ke {mcqDailyCount}/10 MCQ bheje gaye
+                                                    Aaj ke {mcqDailyCount}/10 MCQ bheje gaye (Daily limit: 10)
                                                 </p>
                                             )}
                                         </div>
@@ -898,18 +1033,12 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                                     </div>
                                     {/* Scrollable form body */}
                                     <div className="overflow-y-auto flex-1 px-5 py-4 space-y-3">
-                                        {!isSubscriber && (
-                                            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center justify-between gap-2">
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-base">🔒</span>
-                                                    <div>
-                                                        <span className="text-xs font-black text-amber-900 block">Community MCQ Send Locked</span>
-                                                        <span className="text-[10px] text-amber-700">MCQ community me bhejne ke liye Basic (Pro) ya Ultra (Max) plan zaroori hai.</span>
-                                                    </div>
+                                        {!isAdminOrSub && (
+                                            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 flex items-center gap-2">
+                                                <span className="text-base text-emerald-600 font-black">✓</span>
+                                                <div className="text-[11px] text-emerald-800 font-bold">
+                                                    MCQ Community posting sabhi users ke liye free hai (Daily Limit: 10 MCQ)
                                                 </div>
-                                                <span className="text-[9px] font-black uppercase tracking-wider bg-amber-200 text-amber-900 px-2 py-1 rounded-md shrink-0">
-                                                    Basic+ Required
-                                                </span>
                                             </div>
                                         )}
                                         {/* Question */}
@@ -962,31 +1091,23 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                                     </div>
                                     {/* Fixed send footer */}
                                     <div className="shrink-0 px-5 pt-4 pb-[calc(env(safe-area-inset-bottom,0px)+92px)] border-t border-slate-100 bg-white">
-                                        {!isAdminOrSub && isSubscriber && (
+                                        {!isAdminOrSub && (
                                             <p className="text-[11px] text-emerald-600 font-bold text-center mb-2">
-                                                ✓ Community MCQ posting free hai
+                                                ✓ Community MCQ posting sabhi students ke liye open hai
                                             </p>
                                         )}
                                         <button
                                             onClick={() => {
-                                                if (!isSubscriber) {
+                                                if (!canSendMcq) {
                                                     alert('🔒 Community MCQ posting abhi admin ne disable ki hai.');
                                                     return;
                                                 }
                                                 handleSendMcq();
                                             }}
-                                            className={`w-full active:scale-95 text-white py-4 rounded-2xl text-sm font-black transition-all flex items-center justify-center gap-2 shadow-lg ${!isSubscriber ? 'opacity-80 cursor-not-allowed' : ''}`}
-                                            style={{ background: !isSubscriber ? '#94a3b8' : subColor }}
+                                            className="w-full active:scale-95 text-white py-4 rounded-2xl text-sm font-black transition-all flex items-center justify-center gap-2 shadow-lg"
+                                            style={{ background: subColor }}
                                         >
-                                            {!isSubscriber ? (
-                                                <>
-                                                    <Lock size={15} /> <span>Community MCQ posting unavailable</span>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <Send size={15} /> <span>MCQ Community Mein Bhejo</span>
-                                                </>
-                                            )}
+                                            <Send size={15} /> <span>MCQ Community Mein Bhejo</span>
                                         </button>
                                     </div>
                                 </div>
@@ -995,7 +1116,7 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
 
                         {/* Input area — hidden in MCQ tab (no text messages allowed) */}
                         {activeTab !== 'MCQ' && (
-                        <div className="p-3 pb-[calc(env(safe-area-inset-bottom,0px)+88px)] border-t border-slate-100 shrink-0 sticky bottom-0" style={{ background: appTheme.profileCardBg || '#ffffff' }}>
+                        <div className="p-3 pb-2.5 pb-safe border-t border-slate-100 shrink-0 sticky bottom-0" style={{ background: appTheme.profileCardBg || '#ffffff' }}>
                             {/* Global Chat Send restriction for Free & Basic users */}
                             {activeTab === 'GLOBAL' && !isAdminOrSub && !isUltraChatUser ? (
                                 <div className="p-3 rounded-2xl bg-amber-50/90 border border-amber-200 flex items-center gap-2.5">

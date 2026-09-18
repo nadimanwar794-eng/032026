@@ -434,15 +434,26 @@ export const StudentSchoolPanel: React.FC<Props> = ({
           {/* Photo Avatar — clickable to upload */}
           <div className="relative flex-shrink-0">
             <input
+              id="nsta-school-student-photo"
               ref={fileInputRef}
               type="file"
               accept="image/*"
-              className="hidden"
+              className="sr-only"
+              tabIndex={-1}
               onChange={handlePhotoUpload}
+              onClick={(e) => {
+                (e.target as HTMLInputElement).value = '';
+              }}
             />
             <button
-              onClick={() => fileInputRef.current?.click()}
-              className="w-14 h-14 rounded-full overflow-hidden border-2 border-white/30 flex items-center justify-center bg-white/20 active:opacity-70 transition-opacity"
+              type="button"
+              onClick={() => {
+                if (fileInputRef.current) {
+                  fileInputRef.current.value = '';
+                  fileInputRef.current.click();
+                }
+              }}
+              className="w-14 h-14 rounded-full overflow-hidden border-2 border-white/30 flex items-center justify-center bg-white/20 active:opacity-70 transition-opacity cursor-pointer"
               title="Tap to upload photo"
             >
               {photoUploading ? (
@@ -454,9 +465,13 @@ export const StudentSchoolPanel: React.FC<Props> = ({
               )}
             </button>
             {/* Camera badge */}
-            <div className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-white flex items-center justify-center shadow">
+            <label
+              htmlFor="nsta-school-student-photo"
+              className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-white flex items-center justify-center shadow cursor-pointer active:scale-95"
+              title="Camera / Gallery se photo badlein"
+            >
               <Camera className="w-3 h-3 text-indigo-700" />
-            </div>
+            </label>
           </div>
           <div>
             <p className="text-indigo-300 text-xs font-medium uppercase tracking-wider">Student</p>
@@ -465,12 +480,17 @@ export const StudentSchoolPanel: React.FC<Props> = ({
           </div>
         </div>
         {!studentData?.photoUrl && !photoUploading && (
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="mt-3 flex items-center gap-1.5 text-xs text-indigo-300 hover:text-white font-medium"
+          <label
+            htmlFor="nsta-school-student-photo"
+            className="mt-3 flex items-center gap-1.5 text-xs text-indigo-300 hover:text-white font-medium cursor-pointer active:scale-95 select-none"
+            onClick={() => {
+              if (fileInputRef.current) {
+                fileInputRef.current.value = '';
+              }
+            }}
           >
             <Camera className="w-3.5 h-3.5" /> Apni photo upload karein
-          </button>
+          </label>
         )}
       </div>
 

@@ -29,22 +29,53 @@ import { BoardSelection } from './components/BoardSelection';
 import { ClassSelection } from './components/ClassSelection';
 import { SubjectSelection } from './components/SubjectSelection';
 import { StreamSelection } from './components/StreamSelection';
-const LessonView = lazy(() => import('./components/LessonView').then(m => ({ default: m.LessonView })));
+// Resilient dynamic module loader with auto-retry for transient network / dev-server hiccups
+function lazyWithRetry<T extends React.ComponentType<any>>(
+  factory: () => Promise<{ default: T }>,
+  chunkName = 'module'
+): React.LazyExoticComponent<T> {
+  return lazy(async () => {
+    const key = `nst_chunk_retry_${chunkName}`;
+    try {
+      const mod = await factory();
+      try { sessionStorage.removeItem(key); } catch {}
+      return mod;
+    } catch (error: any) {
+      const msg = error?.message || String(error);
+      const isImportError =
+        msg.includes('Failed to fetch dynamically') ||
+        msg.includes('error loading dynamically imported module') ||
+        msg.includes('Importing a module script failed') ||
+        msg.includes('Loading chunk') ||
+        msg.includes('ChunkLoadError');
+
+      const alreadyRetried = sessionStorage.getItem(key);
+      if (isImportError && !alreadyRetried) {
+        try { sessionStorage.setItem(key, 'true'); } catch {}
+        window.location.reload();
+        return new Promise<{ default: T }>(() => {});
+      }
+      throw error;
+    }
+  });
+}
+
+const LessonView = lazyWithRetry(() => import('./components/LessonView').then(m => ({ default: m.LessonView })), 'lesson');
 import { Auth } from './components/Auth';
-const AdminDashboard = lazy(() => import('./components/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
+const AdminDashboard = lazyWithRetry(() => import('./components/AdminDashboard').then(m => ({ default: m.AdminDashboard })), 'admin');
 import { StudentDashboard } from './components/StudentDashboard';
-const SchoolEcosystem = lazy(() => import('./components/school/SchoolEcosystem').then(m => ({ default: m.SchoolEcosystem })));
+const SchoolEcosystem = lazyWithRetry(() => import('./components/school/SchoolEcosystem').then(m => ({ default: m.SchoolEcosystem })), 'school');
 import { getSchoolUserProfile } from './school-firebase';
-const CoachingEcosystem = lazy(() => import('./components/coaching/CoachingEcosystem').then(m => ({ default: m.CoachingEcosystem })));
+const CoachingEcosystem = lazyWithRetry(() => import('./components/coaching/CoachingEcosystem').then(m => ({ default: m.CoachingEcosystem })));
 import { getCoachingUserProfile } from './coaching-firebase';
 import { AudioStudio } from './components/AudioStudio';
 import { PremiumModal } from './components/PremiumModal';
 import { LoadingOverlay } from './components/LoadingOverlay';
 import { RulesPage } from './components/RulesPage';
 import { IICPage } from './components/IICPage';
-const WeeklyTestView = lazy(() => import('./components/WeeklyTestView').then(m => ({ default: m.WeeklyTestView })));
-const UniversalChat = lazy(() => import('./components/UniversalChat').then(m => ({ default: m.UniversalChat })));
-const MarksheetCard = lazy(() => import('./components/MarksheetCard').then(m => ({ default: m.MarksheetCard })));
+const WeeklyTestView = lazyWithRetry(() => import('./components/WeeklyTestView').then(m => ({ default: m.WeeklyTestView })));
+const UniversalChat = lazyWithRetry(() => import('./components/UniversalChat').then(m => ({ default: m.UniversalChat })));
+const MarksheetCard = lazyWithRetry(() => import('./components/MarksheetCard').then(m => ({ default: m.MarksheetCard })));
 import { CreditConfirmationModal } from './components/CreditConfirmationModal';
 import { CustomAlert, CustomConfirm } from './components/CustomDialogs';
 import { UpdatePopup } from './components/UpdatePopup';
@@ -3522,52 +3553,54 @@ const App: React.FC = () => {
                           maintenanceMessage={maintenanceState?.config?.message}
                           maintenanceRetryMinutes={maintenanceState?.config?.retryMinutes}
                         >
-                          <StudentDashboard 
-                              user={state.user} 
-                              dailyStudySeconds={dailyStudySeconds} 
-                              onSubjectSelect={handleSubjectSelect} 
-                              onRedeemSuccess={u => setState(prev => ({...prev, user: u}))} 
-                              settings={state.settings} 
-                              onStartWeeklyTest={handleStartWeeklyTest} 
-                              activeTab={studentTab} 
-                              onTabChange={setStudentTab} 
-                              setFullScreen={setIsFullScreen}
-                              onNavigate={(v) => setState(prev => ({...prev, view: v}))}
-                              isImpersonating={!!state.originalAdmin}
-                              onNavigateToChapter={handleNavigateToChapterFromHistory}
-                              isDarkMode={darkMode}
-                              onToggleDarkMode={setDarkMode}
-                              onLogout={handleLogout}
-                              onUpdateSettings={updateSettings}
-                              onRecoverData={() => {
-                                  if (cloudUser) {
-                                      setShowCloudRecoveryModal(true);
-                                  } else {
-                                      setToastMessage("Your data is already synced and up to date!");
-                                  }
-                              }}
-                              onOpenSchool={() => setState(prev => ({...prev, view: 'SCHOOL_ECOSYSTEM' as any}))}
-                              onOpenCoaching={() => setState(prev => ({...prev, view: 'COACHING_ECOSYSTEM' as any}))}
-                              onOpenMcqAnalysis={(result) => {
-                                  let qs = result.questions || (result as any).data?.questions || null;
-                                  if (!qs && result.chapterId) {
-                                      try {
-                                          const raw = localStorage.getItem(`nst_mcq_data_${result.chapterId}`) || localStorage.getItem(`nst_chapter_${result.chapterId}`);
-                                          if (raw) {
-                                              const parsed = JSON.parse(raw);
-                                              if (Array.isArray(parsed.mcqs) && parsed.mcqs.length > 0) qs = parsed.mcqs;
-                                              else if (Array.isArray(parsed.questions) && parsed.questions.length > 0) qs = parsed.questions;
-                                          }
-                                      } catch {}
-                                  }
-                                  if (!qs && (result as any).wrongQuestions?.length) {
-                                      qs = (result as any).wrongQuestions;
-                                  }
-                                  const fullResult = qs && !result.questions ? { ...result, questions: qs } : result;
-                                  setLastTestResult(fullResult);
-                                  setLastTestQuestions(qs);
-                              }}
-                          />
+                          <Suspense fallback={<div className="min-h-screen flex items-center justify-center" aria-label="Loading student dashboard" aria-busy="true"><div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" /></div>}>
+                            <StudentDashboard 
+                                user={state.user} 
+                                dailyStudySeconds={dailyStudySeconds} 
+                                onSubjectSelect={handleSubjectSelect} 
+                                onRedeemSuccess={u => setState(prev => ({...prev, user: u}))} 
+                                settings={state.settings} 
+                                onStartWeeklyTest={handleStartWeeklyTest} 
+                                activeTab={studentTab} 
+                                onTabChange={setStudentTab} 
+                                setFullScreen={setIsFullScreen}
+                                onNavigate={(v) => setState(prev => ({...prev, view: v}))}
+                                isImpersonating={!!state.originalAdmin}
+                                onNavigateToChapter={handleNavigateToChapterFromHistory}
+                                isDarkMode={darkMode}
+                                onToggleDarkMode={setDarkMode}
+                                onLogout={handleLogout}
+                                onUpdateSettings={updateSettings}
+                                onRecoverData={() => {
+                                    if (cloudUser) {
+                                        setShowCloudRecoveryModal(true);
+                                    } else {
+                                        setToastMessage("Your data is already synced and up to date!");
+                                    }
+                                }}
+                                onOpenSchool={() => setState(prev => ({...prev, view: 'SCHOOL_ECOSYSTEM' as any}))}
+                                onOpenCoaching={() => setState(prev => ({...prev, view: 'COACHING_ECOSYSTEM' as any}))}
+                                onOpenMcqAnalysis={(result) => {
+                                    let qs = result.questions || (result as any).data?.questions || null;
+                                    if (!qs && result.chapterId) {
+                                        try {
+                                            const raw = localStorage.getItem(`nst_mcq_data_${result.chapterId}`) || localStorage.getItem(`nst_chapter_${result.chapterId}`);
+                                            if (raw) {
+                                                const parsed = JSON.parse(raw);
+                                                if (Array.isArray(parsed.mcqs) && parsed.mcqs.length > 0) qs = parsed.mcqs;
+                                                else if (Array.isArray(parsed.questions) && parsed.questions.length > 0) qs = parsed.questions;
+                                            }
+                                        } catch {}
+                                    }
+                                    if (!qs && (result as any).wrongQuestions?.length) {
+                                        qs = (result as any).wrongQuestions;
+                                    }
+                                    const fullResult = qs && !result.questions ? { ...result, questions: qs } : result;
+                                    setLastTestResult(fullResult);
+                                    setLastTestQuestions(qs);
+                                }}
+                            />
+                          </Suspense>
                         </ErrorBoundary>
                         </>
                     )

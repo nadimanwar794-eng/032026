@@ -5,7 +5,7 @@ import {
   Users, School, Building2, ChevronRight, ChevronLeft, Clock, Trophy,
   Flame, CheckCircle, Zap, Tag, Gift, Bell, Calendar,
   ExternalLink, ShieldCheck, ArrowRight, Percent, Globe,
-  Coins, TrendingUp, Palette, Check, Sparkle, Headphones
+  Coins, TrendingUp, Palette, Check, Sparkle, Headphones, Lightbulb
 } from 'lucide-react';
 import type { User, SystemSettings, Challenge20 } from '../types';
 import { isDailyChallenge20, getChallengeDateKey } from '../utils/challengeGenerator';
@@ -19,13 +19,14 @@ interface Props {
   dailyChallenges?: Challenge20[];
   onStartDailyChallenge?: (challenge: Challenge20) => void;
   onClaimDailyChallenge?: (challenge: Challenge20) => void | Promise<void>;
-  onOpenRevisionHub: () => void;
+  onOpenRevisionHub?: () => void;
   onOpenMessenger: () => void;
   onOpenStudyRoom: () => void;
   onOpenStore?: () => void;
   onOpenThemeStudio?: () => void;
   onOpenPracticeMcq?: () => void;
   onOpenAudioStudio?: () => void;
+  onOpenSuggestions?: () => void;
   userSchool?: any;
   onOpenSchool?: () => void;
   onOpenSchoolPicker?: () => void;
@@ -34,6 +35,12 @@ interface Props {
   isCoachingAdmin?: boolean;
   onOpenCoaching?: () => void;
   onOpenCoachingPicker?: () => void;
+  onQuickAccess?: (action: 'VIDEO' | 'PROGRESS' | 'STARRED' | 'READING' | 'FLASHCARDS' | 'OFFLINE' | 'ACTIVITY' | 'CREDITS' | 'MISTAKES') => void;
+  mistakeCount?: number;
+  appName?: string;
+  appLogo?: string;
+  onRestoreBottomNav?: () => void;
+  isBottomNavVisible?: boolean;
 }
 
 interface EventItem {
@@ -86,6 +93,7 @@ export const UpdatesPage: React.FC<Props> = ({
   onOpenThemeStudio,
   onOpenPracticeMcq,
   onOpenAudioStudio,
+  onOpenSuggestions,
   userSchool,
   onOpenSchool,
   onOpenSchoolPicker,
@@ -94,10 +102,20 @@ export const UpdatesPage: React.FC<Props> = ({
   isCoachingAdmin,
   onOpenCoaching,
   onOpenCoachingPicker,
+  onQuickAccess,
+  mistakeCount = 0,
+  appName,
+  appLogo,
+  onRestoreBottomNav,
+  isBottomNavVisible = false,
 }) => {
   const [activeBannerIdx, setActiveBannerIdx] = useState(0);
+  const [activeSectionTab, setActiveSectionTab] = useState<'ADVANCE_TOOLS' | 'UPDATES'>('ADVANCE_TOOLS');
   const [now, setNow] = useState(Date.now());
   const [isClaiming, setIsClaiming] = useState(false);
+
+  const hasSchool = Boolean(userSchool || (user as any)?.schoolId);
+  const hasCoaching = Boolean(userCoachingId || (user as any)?.coachingId || isCoachingAdmin);
 
   // Live countdown timer ticking every 1 second
   useEffect(() => {
@@ -507,6 +525,38 @@ export const UpdatesPage: React.FC<Props> = ({
     return null;
   }, [currentEvent, now]);
 
+  // Helper to calculate countdown per event item
+  const getEventCountdown = (ev: EventItem) => {
+    if (ev.isLive && ev.endsAt) {
+      const endMs = new Date(ev.endsAt).getTime();
+      return {
+        label: 'Offer Live • Ending in',
+        time: formatCountdown(endMs, now),
+        isEnding: true,
+      };
+    } else if (ev.isLive) {
+      return {
+        label: 'Offer Live',
+        time: 'Active Now • Labh Uthayein',
+        isEnding: true,
+      };
+    } else if (!ev.isLive && ev.startsAt) {
+      const startMs = new Date(ev.startsAt).getTime();
+      return {
+        label: 'Offer Status • Starting in',
+        time: formatCountdown(startMs, now),
+        isEnding: false,
+      };
+    } else if (!ev.isLive) {
+      return {
+        label: 'Offer Status',
+        time: 'Coming Soon • Jaldi Shuru Hoga',
+        isEnding: false,
+      };
+    }
+    return null;
+  };
+
   const handleClaim = async () => {
     if (!activeDaily || !onClaimDailyChallenge || isClaiming) return;
     try {
@@ -546,178 +596,127 @@ export const UpdatesPage: React.FC<Props> = ({
 
   return (
     <div className={`min-h-screen pb-28 ${isDarkMode ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-800'}`}>
-      {/* ── TOP APP BAR ── */}
-      <div className={`sticky top-0 z-30 px-4 py-3.5 flex items-center justify-between backdrop-blur-md border-b ${
-        isDarkMode ? 'bg-slate-950/85 border-slate-800' : 'bg-white/85 border-slate-200/80 shadow-xs'
+      {/* ── TOP APP BAR: PRO+ ── */}
+      <div className={`sticky top-0 z-30 px-4 py-3 flex items-center justify-between backdrop-blur-md border-b ${
+        isDarkMode ? 'bg-slate-950/90 border-slate-800' : 'bg-white/90 border-slate-200/80 shadow-xs'
       }`}>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <button
             type="button"
             onClick={onBack}
-            className={`p-2 rounded-xl active:scale-95 transition-all cursor-pointer ${
+            className={`p-2 rounded-xl active:scale-95 transition-all cursor-pointer shrink-0 ${
               isDarkMode ? 'hover:bg-slate-800 text-slate-300' : 'hover:bg-slate-100 text-slate-600'
             }`}
+            title="Back"
+            aria-label="Back"
           >
             <ArrowLeft size={18} />
           </button>
-          <div>
+
+          <div className="min-w-0">
             <div className="flex items-center gap-1.5">
-              <Sparkles size={16} className="text-amber-500 fill-amber-500 animate-pulse" />
-              <h1 className="text-base font-black tracking-tight">Updates & Central Hub</h1>
+              <Sparkles size={16} className="text-amber-500 fill-amber-500 animate-pulse shrink-0" />
+              <h1 className="text-sm sm:text-base font-black tracking-tight truncate">Pro+</h1>
             </div>
-            <p className="text-[10px] text-slate-400 font-medium">All Events, Daily Challenge & Portals</p>
+            <p className="text-[10px] text-slate-400 font-medium hidden md:block truncate">1st: Advance Tools • 2nd: Updates</p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-violet-100 text-violet-700 dark:bg-violet-950/80 dark:text-violet-300 border border-violet-200 dark:border-violet-800">
-            Hub 2.0
+          {onRestoreBottomNav && (
+            <button
+              type="button"
+              onClick={onRestoreBottomNav}
+              className={`p-1 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 px-2 active:scale-95 ${
+                isBottomNavVisible
+                  ? 'bg-purple-600 text-white shadow-xs'
+                  : isDarkMode
+                  ? 'bg-slate-850 text-slate-300 hover:bg-slate-800 border border-slate-700'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
+              }`}
+              title={isBottomNavVisible ? "Bottom navigation chhipayein" : "Bottom navigation dikhayein"}
+            >
+              <img
+                src={appLogo || '/branding/nsta-logo.svg'}
+                alt={appName || "NSTA"}
+                className="w-5 h-5 rounded-md object-contain"
+                onError={(e) => {
+                  (e.target as HTMLElement).style.display = 'none';
+                }}
+              />
+              <span className="text-[10px] font-black">{appName || 'NSTA'}</span>
+            </button>
+          )}
+          <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+            PRO+
           </span>
         </div>
       </div>
 
-      <div className="max-w-3xl mx-auto px-4 pt-4 space-y-5">
-        {/* ── 1. FEATURED EVENT CARD (SAME CARD SIZE & LOOK, FULL DETAILS IN CRISP COMPACT TEXT) ── */}
-        {currentEvent && (
-          <div
-            className="nst-card-animated relative rounded-2xl p-4.5 flex flex-col justify-between active:scale-[0.985] transition-all"
-            style={homeCardStyle}
-          >
-            <div className="space-y-3">
-              {/* Header: Event Emoji + Title & Subtitle + Live/Soon Badge & Switcher */}
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div
-                    className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-xs bg-gradient-to-br ${currentEvent.gradient} text-white`}
-                  >
-                    <span className="text-2xl drop-shadow-xs">{currentEvent.emoji}</span>
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h4 className="text-sm font-black text-slate-900 dark:text-white truncate">
-                        {currentEvent.title}
-                      </h4>
-                      {eventsList.length > 1 && (
-                        <div
-                          className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold shrink-0"
-                          style={chipStyle}
-                        >
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setActiveBannerIdx((prev) => (prev > 0 ? prev - 1 : eventsList.length - 1));
-                            }}
-                            className="p-0.5 rounded hover:opacity-75 active:scale-95 transition-all cursor-pointer"
-                            title="Previous Event"
-                          >
-                            <ChevronLeft size={12} />
-                          </button>
-                          <span className="font-mono">
-                            {activeBannerIdx + 1}/{eventsList.length}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setActiveBannerIdx((prev) => (prev < eventsList.length - 1 ? prev + 1 : 0));
-                            }}
-                            className="p-0.5 rounded hover:opacity-75 active:scale-95 transition-all cursor-pointer"
-                            title="Next Event"
-                          >
-                            <ChevronRight size={12} />
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2 leading-relaxed">
-                      {currentEvent.description}
-                    </p>
-                  </div>
-                </div>
+      {/* ── STICKY SUB-HEADER: 2 SECTIONS TABS (ADVANCE TOOLS & UPDATES) ── */}
+      <div className={`sticky top-[57px] z-20 px-4 py-2 backdrop-blur-md border-b flex items-center gap-2 overflow-x-auto no-scrollbar ${
+        isDarkMode ? 'bg-slate-950/85 border-slate-800/80' : 'bg-white/85 border-slate-200/70'
+      }`}>
+        <button
+          type="button"
+          onClick={() => setActiveSectionTab('ADVANCE_TOOLS')}
+          className={`flex-1 sm:flex-initial px-4 py-2 rounded-xl text-xs font-black shrink-0 transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+            activeSectionTab === 'ADVANCE_TOOLS'
+              ? 'text-white shadow-xs'
+              : (isDarkMode ? 'bg-slate-900 text-slate-400 hover:text-white' : 'bg-slate-100 text-slate-600 hover:text-slate-900')
+          }`}
+          style={activeSectionTab === 'ADVANCE_TOOLS' ? { background: themeBtnGrad } : {}}
+        >
+          <span>🚀 1st: Advance Tools</span>
+        </button>
 
+        <button
+          type="button"
+          onClick={() => setActiveSectionTab('UPDATES')}
+          className={`flex-1 sm:flex-initial px-4 py-2 rounded-xl text-xs font-black shrink-0 transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+            activeSectionTab === 'UPDATES'
+              ? 'text-white shadow-xs'
+              : (isDarkMode ? 'bg-slate-900 text-slate-400 hover:text-white' : 'bg-slate-100 text-slate-600 hover:text-slate-900')
+          }`}
+          style={activeSectionTab === 'UPDATES' ? { background: themeBtnGrad } : {}}
+        >
+          <span>📢 2nd: Updates ({eventsList.length} Events)</span>
+        </button>
+      </div>
+
+      <div className="max-w-3xl mx-auto px-4 pt-4 space-y-6">
+        {/* ── 1ST SECTION: ADVANCE TOOLS ── */}
+        {activeSectionTab === 'ADVANCE_TOOLS' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between px-1 pt-1">
+              <div className="flex items-center gap-2.5">
                 <span
-                  className={`px-2.5 py-1 rounded-xl text-[10px] font-black shrink-0 uppercase tracking-wider shadow-2xs select-none ${
-                    currentEvent.isLive
-                      ? 'bg-emerald-500 text-white'
-                      : 'bg-amber-400 text-slate-950 ring-1 ring-amber-300'
-                  }`}
+                  className="w-6 h-6 rounded-lg flex items-center justify-center text-[11px] font-black shrink-0 text-white shadow-xs"
+                  style={{ background: themePrimary }}
                 >
-                  {currentEvent.isLive ? '🟢 LIVE' : '⏳ COMING SOON'}
+                  1
                 </span>
+                <div>
+                  <h3 className="text-xs font-black uppercase tracking-widest text-slate-800 dark:text-slate-100">
+                    Advance Tools
+                  </h3>
+                  <p className="text-[10px] text-slate-400 font-medium">Daily Challenge, Messengers, Study Rooms & Portals</p>
+                </div>
               </div>
-
-              {/* Details & Highlights & Live Countdown Chips (Chhote text me saare details bina kam kiye) */}
-              <div className="flex flex-wrap items-center gap-2 text-[10px] font-bold">
-                {countdownDisplay && (
-                  <span
-                    className="px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-2xs"
-                    style={{
-                      background: currentEvent.isLive ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.12)',
-                      border: `1px solid ${currentEvent.isLive ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`,
-                      color: currentEvent.isLive ? '#059669' : '#d97706',
-                    }}
-                  >
-                    <Clock size={12} className={`shrink-0 ${currentEvent.isLive ? 'animate-spin' : ''}`} style={{ animationDuration: '6s' }} />
-                    <span>{countdownDisplay.label}:</span>
-                    <span className="font-mono font-black">{countdownDisplay.time}</span>
-                  </span>
-                )}
-
-                {currentEvent.highlights && currentEvent.highlights.map((hl, hIdx) => (
-                  <span key={hIdx} className="px-2.5 py-1 rounded-lg" style={chipStyle}>
-                    ✨ {hl}
-                  </span>
-                ))}
-              </div>
+              <span
+                className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full"
+                style={{
+                  background: `${themeBorder}18`,
+                  color: themeBorder,
+                  border: `1px solid ${themeBorder}30`,
+                }}
+              >
+                1st Section
+              </span>
             </div>
 
-            {/* Event Action Button */}
-            {currentEvent.actionText && (
-              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => handleEventAction(currentEvent)}
-                  className="w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98"
-                  style={{
-                    background: themeBtnGrad,
-                    color: '#ffffff',
-                    boxShadow: `0 4px 14px ${themePrimary}35`,
-                  }}
-                >
-                  <span>{currentEvent.actionText}</span>
-                  <ArrowRight size={14} />
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── SECTION HEADER ── */}
-        <div className="flex items-center justify-between px-1 pt-1">
-          <div className="flex items-center gap-2">
-            <span
-              className="w-2.5 h-2.5 rounded-full animate-ping shrink-0"
-              style={{ background: themePrimary }}
-            />
-            <h3 className="text-xs font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
-              Apps, Tools & Portals
-            </h3>
-          </div>
-          <span
-            className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full"
-            style={{
-              background: `${themeBorder}18`,
-              color: themeBorder,
-              border: `1px solid ${themeBorder}30`,
-            }}
-          >
-            All Features
-          </span>
-        </div>
-
-        {/* ── 2. CARDS GRID (HOME PAGE CARD STYLE & THEME COLOR REACTIVE) ── */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* ── ADVANCE TOOLS GRID ── */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
           {/* ── CARD 1: DAILY CHALLENGE 2.0 ── */}
           <div
@@ -808,67 +807,7 @@ export const UpdatesPage: React.FC<Props> = ({
             </div>
           </div>
 
-          {/* ── CARD 2: REVISION HUB ── */}
-          <div
-            className="nst-card-animated relative rounded-2xl p-4.5 flex flex-col justify-between active:scale-[0.985] transition-all"
-            style={homeCardStyle}
-          >
-            <div className="space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div
-                    className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-xs"
-                    style={{ background: `${themeBorder}18`, color: themeBorder }}
-                  >
-                    <BrainCircuit size={22} />
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-black text-slate-900 dark:text-white">Revision Hub</h4>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">Smart spaced repetition & flashcards drill</p>
-                  </div>
-                </div>
-                <span
-                  className="px-2.5 py-1 rounded-xl text-[10px] font-black shrink-0 uppercase tracking-wider shadow-2xs"
-                  style={{
-                    background: `${themeBorder}18`,
-                    color: themeBorder,
-                    border: `1px solid ${themeBorder}35`,
-                  }}
-                >
-                  Smart AI
-                </span>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2 text-[10px] font-bold">
-                <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
-                  🧠 Spaced Repetition
-                </span>
-                <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
-                  📝 Quick Notes
-                </span>
-                <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
-                  ⚡ Weak MCQs
-                </span>
-              </div>
-            </div>
-
-            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
-              <button
-                type="button"
-                onClick={onOpenRevisionHub}
-                className="w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98"
-                style={{
-                  background: themeBtnGrad,
-                  color: '#ffffff',
-                  boxShadow: `0 4px 14px ${themePrimary}35`,
-                }}
-              >
-                <span>Open Revision Hub →</span>
-              </button>
-            </div>
-          </div>
-
-          {/* ── CARD 3: NSTA MESSENGER ── */}
+          {/* ── CARD 2: NSTA MESSENGER ── */}
           <div
             className="nst-card-animated relative rounded-2xl p-4.5 flex flex-col justify-between active:scale-[0.985] transition-all"
             style={homeCardStyle}
@@ -988,204 +927,391 @@ export const UpdatesPage: React.FC<Props> = ({
             </div>
           </div>
 
-          {/* ── CARD 5: SCHOOL PORTAL ── */}
-          <div
-            className="nst-card-animated relative rounded-2xl p-4.5 flex flex-col justify-between active:scale-[0.985] transition-all"
-            style={homeCardStyle}
-          >
-            <div className="space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div
-                    className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-xs"
-                    style={{ background: `${themeBorder}18`, color: themeBorder }}
+          {/* ── CARD 5: SCHOOL PORTAL (Visible only when user is enrolled in a school) ── */}
+          {hasSchool && (
+            <div
+              className="nst-card-animated relative rounded-2xl p-4.5 flex flex-col justify-between active:scale-[0.985] transition-all"
+              style={homeCardStyle}
+            >
+              <div className="space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-xs"
+                      style={{ background: `${themeBorder}18`, color: themeBorder }}
+                    >
+                      <School size={22} />
+                    </div>
+                    <div className="min-w-0">
+                      <h4 className="text-sm font-black text-slate-900 dark:text-white truncate">
+                        {userSchool?.name || 'School Portal'}
+                      </h4>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        {userSchool ? `School Code: ${userSchool.code || userSchool.id}` : 'Connect school for timetable & notice board'}
+                      </p>
+                    </div>
+                  </div>
+                  <span
+                    className="px-2.5 py-1 rounded-xl text-[10px] font-black shrink-0 uppercase tracking-wider shadow-2xs"
+                    style={{
+                      background: `${themeBorder}18`,
+                      color: themeBorder,
+                      border: `1px solid ${themeBorder}35`,
+                    }}
                   >
-                    <School size={22} />
-                  </div>
-                  <div className="min-w-0">
-                    <h4 className="text-sm font-black text-slate-900 dark:text-white truncate">
-                      {userSchool?.name || 'School Portal'}
-                    </h4>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      {userSchool ? `School Code: ${userSchool.code || userSchool.id}` : 'Connect school for timetable & notice board'}
-                    </p>
-                  </div>
+                    {userSchool ? 'Joined' : 'Connect School'}
+                  </span>
                 </div>
-                <span
-                  className="px-2.5 py-1 rounded-xl text-[10px] font-black shrink-0 uppercase tracking-wider shadow-2xs"
-                  style={{
-                    background: `${themeBorder}18`,
-                    color: themeBorder,
-                    border: `1px solid ${themeBorder}35`,
-                  }}
-                >
-                  {userSchool ? 'Joined' : 'Connect School'}
-                </span>
+
+                <div className="flex flex-wrap items-center gap-2 text-[10px] font-bold">
+                  <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
+                    📅 Timetable
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
+                    📋 Homework Sync
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
+                    📢 School Notices
+                  </span>
+                </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 text-[10px] font-bold">
-                <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
-                  📅 Timetable
-                </span>
-                <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
-                  📋 Homework Sync
-                </span>
-                <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
-                  📢 School Notices
-                </span>
-              </div>
-            </div>
-
-            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2">
-              {userSchool ? (
-                <>
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2">
+                {userSchool ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={onOpenSchool}
+                      className="flex-1 py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-98"
+                      style={{
+                        background: themeBtnGrad,
+                        color: '#ffffff',
+                        boxShadow: `0 4px 14px ${themePrimary}35`,
+                      }}
+                    >
+                      <span>Open School Dashboard</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onOpenSchoolPicker}
+                      className={`px-3 py-2.5 rounded-xl text-xs font-bold border active:scale-95 transition-all cursor-pointer ${
+                        isDarkMode ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-slate-100 text-slate-700 border-slate-200'
+                      }`}
+                    >
+                      Change
+                    </button>
+                  </>
+                ) : (
                   <button
                     type="button"
-                    onClick={onOpenSchool}
-                    className="flex-1 py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-98"
+                    onClick={onOpenSchoolPicker || onOpenSchool}
+                    className="w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98"
                     style={{
                       background: themeBtnGrad,
                       color: '#ffffff',
                       boxShadow: `0 4px 14px ${themePrimary}35`,
                     }}
                   >
-                    <span>Open School Dashboard</span>
+                    <School size={15} />
+                    <span>Join / Connect School →</span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={onOpenSchoolPicker}
-                    className={`px-3 py-2.5 rounded-xl text-xs font-bold border active:scale-95 transition-all cursor-pointer ${
-                      isDarkMode ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-slate-100 text-slate-700 border-slate-200'
-                    }`}
-                  >
-                    Change
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  onClick={onOpenSchoolPicker || onOpenSchool}
-                  className="w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98"
-                  style={{
-                    background: themeBtnGrad,
-                    color: '#ffffff',
-                    boxShadow: `0 4px 14px ${themePrimary}35`,
-                  }}
-                >
-                  <School size={15} />
-                  <span>Join / Connect School →</span>
-                </button>
-              )}
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* ── CARD 6: COACHING PORTAL ── */}
-          <div
-            className="nst-card-animated relative rounded-2xl p-4.5 flex flex-col justify-between active:scale-[0.985] transition-all"
-            style={homeCardStyle}
-          >
-            <div className="space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div
-                    className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-xs"
-                    style={{ background: `${themeBorder}18`, color: themeBorder }}
+          {/* ── CARD 6: COACHING PORTAL (Visible only when user is enrolled in coaching) ── */}
+          {hasCoaching && (
+            <div
+              className="nst-card-animated relative rounded-2xl p-4.5 flex flex-col justify-between active:scale-[0.985] transition-all"
+              style={homeCardStyle}
+            >
+              <div className="space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-xs"
+                      style={{ background: `${themeBorder}18`, color: themeBorder }}
+                    >
+                      <Building2 size={22} />
+                    </div>
+                    <div className="min-w-0">
+                      <h4 className="text-sm font-black text-slate-900 dark:text-white truncate">
+                        {userCoachingName || 'Coaching Classes'}
+                      </h4>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        {userCoachingId ? 'Batch homework, tests & assignments' : 'Connect coaching institute for batch classes'}
+                      </p>
+                    </div>
+                  </div>
+                  <span
+                    className="px-2.5 py-1 rounded-xl text-[10px] font-black shrink-0 uppercase tracking-wider shadow-2xs"
+                    style={{
+                      background: `${themeBorder}18`,
+                      color: themeBorder,
+                      border: `1px solid ${themeBorder}35`,
+                    }}
                   >
-                    <Building2 size={22} />
-                  </div>
-                  <div className="min-w-0">
-                    <h4 className="text-sm font-black text-slate-900 dark:text-white truncate">
-                      {userCoachingName || 'Coaching Classes'}
-                    </h4>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      {userCoachingId ? 'Batch homework, tests & assignments' : 'Connect coaching institute for batch classes'}
-                    </p>
-                  </div>
+                    {userCoachingId ? 'Enrolled' : 'Join Coaching'}
+                  </span>
                 </div>
-                <span
-                  className="px-2.5 py-1 rounded-xl text-[10px] font-black shrink-0 uppercase tracking-wider shadow-2xs"
-                  style={{
-                    background: `${themeBorder}18`,
-                    color: themeBorder,
-                    border: `1px solid ${themeBorder}35`,
-                  }}
-                >
-                  {userCoachingId ? 'Enrolled' : 'Join Coaching'}
-                </span>
+
+                <div className="flex flex-wrap items-center gap-2 text-[10px] font-bold">
+                  <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
+                    📚 Batch Lectures
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
+                    📝 Homework & DPP
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
+                    📊 Institute Tests
+                  </span>
+                </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 text-[10px] font-bold">
-                <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
-                  📚 Batch Lectures
-                </span>
-                <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
-                  📝 Homework & DPP
-                </span>
-                <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
-                  📊 Institute Tests
-                </span>
-              </div>
-            </div>
-
-            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2">
-              {isCoachingAdmin ? (
-                <button
-                  type="button"
-                  onClick={onOpenCoaching}
-                  className="w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98"
-                  style={{
-                    background: themeBtnGrad,
-                    color: '#ffffff',
-                    boxShadow: `0 4px 14px ${themePrimary}35`,
-                  }}
-                >
-                  <Building2 size={15} />
-                  <span>Manage Coaching Institute →</span>
-                </button>
-              ) : userCoachingId ? (
-                <>
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center gap-2">
+                {isCoachingAdmin ? (
                   <button
                     type="button"
                     onClick={onOpenCoaching}
-                    className="flex-1 py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-98"
+                    className="w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98"
                     style={{
                       background: themeBtnGrad,
                       color: '#ffffff',
                       boxShadow: `0 4px 14px ${themePrimary}35`,
                     }}
                   >
-                    <span>View Coaching Batch</span>
+                    <Building2 size={15} />
+                    <span>Manage Coaching Institute →</span>
                   </button>
+                ) : userCoachingId ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={onOpenCoaching}
+                      className="flex-1 py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-98"
+                      style={{
+                        background: themeBtnGrad,
+                        color: '#ffffff',
+                        boxShadow: `0 4px 14px ${themePrimary}35`,
+                      }}
+                    >
+                      <span>View Coaching Batch</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onOpenCoachingPicker}
+                      className={`px-3 py-2.5 rounded-xl text-xs font-bold border active:scale-95 transition-all cursor-pointer ${
+                        isDarkMode ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-slate-100 text-slate-700 border-slate-200'
+                      }`}
+                    >
+                      Change
+                    </button>
+                  </>
+                ) : (
                   <button
                     type="button"
-                    onClick={onOpenCoachingPicker}
-                    className={`px-3 py-2.5 rounded-xl text-xs font-bold border active:scale-95 transition-all cursor-pointer ${
-                      isDarkMode ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-slate-100 text-slate-700 border-slate-200'
-                    }`}
+                    onClick={onOpenCoachingPicker || onOpenCoaching}
+                    className="w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98"
+                    style={{
+                      background: themeBtnGrad,
+                      color: '#ffffff',
+                      boxShadow: `0 4px 14px ${themePrimary}35`,
+                    }}
                   >
-                    Change
+                    <Building2 size={15} />
+                    <span>Join Coaching Institute →</span>
                   </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  onClick={onOpenCoachingPicker || onOpenCoaching}
-                  className="w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98"
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── CARD 7: SUGGESTIONS & CORRECTIONS ── */}
+          <div
+            className="nst-card-animated relative rounded-2xl p-4.5 flex flex-col justify-between active:scale-[0.985] transition-all"
+            style={homeCardStyle}
+          >
+            <div className="space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div
+                    className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-xs"
+                    style={{ background: `rgba(245,158,11,0.18)`, color: '#f59e0b' }}
+                  >
+                    <Lightbulb size={22} />
+                  </div>
+                  <div className="min-w-0">
+                    <h4 className="text-sm font-black text-slate-900 dark:text-white truncate">
+                      Suggestions & Corrections
+                    </h4>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Galti ya bug mila? Photo ke saath report karein aur coins jeetein
+                    </p>
+                  </div>
+                </div>
+                <span
+                  className="px-2.5 py-1 rounded-xl text-[10px] font-black shrink-0 uppercase tracking-wider shadow-2xs"
                   style={{
-                    background: themeBtnGrad,
-                    color: '#ffffff',
-                    boxShadow: `0 4px 14px ${themePrimary}35`,
+                    background: `rgba(245,158,11,0.15)`,
+                    color: '#f59e0b',
+                    border: `1px solid rgba(245,158,11,0.35)`,
                   }}
                 >
-                  <Building2 size={15} />
-                  <span>Join Coaching Institute →</span>
-                </button>
-              )}
+                  Feedback
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 text-[10px] font-bold">
+                <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
+                  💡 Bug / Mistake Report
+                </span>
+                <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
+                  📷 Photo Attach
+                </span>
+                <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
+                  🪙 Earn Coins
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={onOpenSuggestions}
+                className="w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98 text-white"
+                style={{
+                  background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                  boxShadow: '0 4px 14px rgba(245,158,11,0.35)',
+                }}
+              >
+                <Lightbulb size={15} />
+                <span>Open Suggestions & Corrections →</span>
+              </button>
             </div>
           </div>
 
         </div>
       </div>
-    </div>
-  );
+    )}
+
+    {/* ── 2ND SECTION: UPDATES (ALL EVENTS & OFFERS AS INDIVIDUAL CARDS) ── */}
+    {activeSectionTab === 'UPDATES' && (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between px-1 pt-2">
+          <div className="flex items-center gap-2.5">
+            <span
+              className="w-6 h-6 rounded-lg flex items-center justify-center text-[11px] font-black shrink-0 text-white shadow-xs bg-gradient-to-br from-amber-500 to-orange-600"
+            >
+              2
+            </span>
+            <div>
+              <h3 className="text-xs font-black uppercase tracking-widest text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                <span>Updates</span>
+                <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-950/80 dark:text-amber-300">
+                  {eventsList.length} Events & Offers
+                </span>
+              </h3>
+              <p className="text-[10px] text-slate-400 font-medium">Sare events ke alag-alag cards aur unki poori details</p>
+            </div>
+          </div>
+          <span
+            className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30"
+          >
+            2nd Section • Events
+          </span>
+        </div>
+
+        {/* Individual Event Cards List */}
+        <div className="space-y-4">
+          {eventsList.map((ev) => {
+            const countdown = getEventCountdown(ev);
+            return (
+              <div
+                key={ev.id}
+                className="nst-card-animated relative rounded-2xl p-4.5 flex flex-col justify-between active:scale-[0.99] transition-all"
+                style={homeCardStyle}
+              >
+                <div className="space-y-3">
+                  {/* Header: Event Emoji + Title & Description + Live/Soon Badge */}
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div
+                        className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-xs bg-gradient-to-br ${ev.gradient} text-white`}
+                      >
+                        <span className="text-2xl drop-shadow-xs">{ev.emoji}</span>
+                      </div>
+                      <div className="min-w-0">
+                        <h4 className="text-sm font-black text-slate-900 dark:text-white">
+                          {ev.title}
+                        </h4>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
+                          {ev.description}
+                        </p>
+                      </div>
+                    </div>
+
+                    <span
+                      className={`px-2.5 py-1 rounded-xl text-[10px] font-black shrink-0 uppercase tracking-wider shadow-2xs select-none ${
+                        ev.isLive
+                          ? 'bg-emerald-500 text-white'
+                          : 'bg-amber-400 text-slate-950 ring-1 ring-amber-300'
+                      }`}
+                    >
+                      {ev.isLive ? '🟢 LIVE' : '⏳ COMING SOON'}
+                    </span>
+                  </div>
+
+                  {/* Details & Highlights & Live Countdown Chips */}
+                  <div className="flex flex-wrap items-center gap-2 text-[10px] font-bold">
+                    {countdown && (
+                      <span
+                        className="px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-2xs"
+                        style={{
+                          background: ev.isLive ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.12)',
+                          border: `1px solid ${ev.isLive ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`,
+                          color: ev.isLive ? '#059669' : '#d97706',
+                        }}
+                      >
+                        <Clock size={12} className={`shrink-0 ${ev.isLive ? 'animate-spin' : ''}`} style={{ animationDuration: '6s' }} />
+                        <span>{countdown.label}:</span>
+                        <span className="font-mono font-black">{countdown.time}</span>
+                      </span>
+                    )}
+
+                    {ev.highlights && ev.highlights.map((hl, hIdx) => (
+                      <span key={hIdx} className="px-2.5 py-1 rounded-lg" style={chipStyle}>
+                        ✨ {hl}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Event Action Button */}
+                {ev.actionText && (
+                  <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => handleEventAction(ev)}
+                      className="w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98"
+                      style={{
+                        background: themeBtnGrad,
+                        color: '#ffffff',
+                        boxShadow: `0 4px 14px ${themePrimary}35`,
+                      }}
+                    >
+                      <span>{ev.actionText}</span>
+                      <ArrowRight size={14} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    )}
+  </div>
+</div>
+);
 };

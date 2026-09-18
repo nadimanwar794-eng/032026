@@ -58,35 +58,27 @@ export class ErrorBoundary extends Component<Props, State> {
       componentStack: errorInfo?.componentStack ?? undefined,
     }).catch(() => {});
 
-    // Smart Crash Protection: auto-report crash to Firebase so admin can see it
-    if (this.props.crashTarget) {
+    const isChunkError =
+      msg.includes('ChunkLoadError') ||
+      msg.includes('Loading chunk') ||
+      msg.includes('Failed to fetch dynamically') ||
+      msg.includes('dynamically imported module') ||
+      msg.includes('Importing a module script failed');
+
+    // Smart Crash Protection: auto-report crash to Firebase so admin can see it (do not report transient chunk load errors)
+    if (this.props.crashTarget && !isChunkError) {
       reportCrash(this.props.crashTarget, msg).catch(() => {});
     }
 
-    if (msg.includes('FIRESTORE') && msg.includes('INTERNAL ASSERTION FAILED')) {
-      console.warn('[IIC] Firestore assertion — clearing cache & reloading…');
-      try {
-        const doReload = () => {
-          try { localStorage.removeItem('nst_firebase_project_id'); } catch {}
-          window.location.reload();
-        };
-        (indexedDB as any).databases?.().then((dbs: { name?: string }[]) => {
-          const dels = dbs
-            .filter(d => d.name && (d.name.includes('firestore') || d.name.includes('firebase')))
-            .map(d => new Promise<void>(res => {
-              const r = indexedDB.deleteDatabase(d.name!);
-              r.onsuccess = () => res();
-              r.onerror = () => res();
-            }));
-          Promise.all(dels).then(doReload).catch(doReload);
-        }).catch(doReload);
-      } catch { window.location.reload(); }
-      return;
-    }
-
-    if (msg.includes('ChunkLoadError') || msg.includes('Loading chunk') || msg.includes('Failed to fetch dynamically')) {
-      console.warn('[IIC] ChunkLoadError — reloading silently…');
-      window.location.reload();
+    if (isChunkError) {
+      console.warn('[IIC] ChunkLoadError / Dynamic import failed — auto-retrying in 600ms…');
+      if (this.state.retryCount < 5) {
+        setTimeout(() => {
+          this.setState(s => ({ hasError: false, error: null, retryCount: s.retryCount + 1 }));
+        }, 600);
+        return;
+      }
+      try { window.location.reload(); } catch {}
       return;
     }
 
@@ -94,6 +86,18 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   private handleRetry = () => {
+    const errText = this.state.error?.message || this.state.error?.toString() || '';
+    const isChunkError =
+      errText.includes('ChunkLoadError') ||
+      errText.includes('Loading chunk') ||
+      errText.includes('Failed to fetch dynamically') ||
+      errText.includes('dynamically imported module') ||
+      errText.includes('Importing a module script failed');
+
+    if (isChunkError) {
+      try { window.location.reload(); } catch {}
+      return;
+    }
     this.setState(s => ({ hasError: false, error: null, retryCount: s.retryCount + 1 }));
   };
 
@@ -121,6 +125,32 @@ export class ErrorBoundary extends Component<Props, State> {
 
     const isOffline = !navigator.onLine;
     const label = this.props.fallbackLabel ?? 'page';
+
+    const errText = this.state.error?.message || this.state.error?.toString() || '';
+    const isChunkError =
+      errText.includes('ChunkLoadError') ||
+      errText.includes('Loading chunk') ||
+      errText.includes('Failed to fetch dynamically') ||
+      errText.includes('dynamically imported module') ||
+      errText.includes('Importing a module script failed');
+
+    if (isChunkError) {
+      return (
+        <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-900 text-white text-center">
+          <div className="w-12 h-12 border-4 border-amber-400 border-t-transparent rounded-full animate-spin mb-4" />
+          <h2 className="text-lg font-bold text-slate-100">App Load Ho Raha Hai...</h2>
+          <p className="text-xs text-slate-400 mt-1 max-w-xs">
+            Module connect ho raha hai, kripya 1 second intezar karein.
+          </p>
+          <button
+            onClick={this.handleRetry}
+            className="mt-4 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold rounded-xl shadow active:scale-95 transition-all flex items-center gap-2"
+          >
+            <RefreshCcw size={14} /> Dobara Koshish Karein
+          </button>
+        </div>
+      );
+    }
 
     // Custom fallback takes priority over built-in renders
     if (this.props.fallback) {

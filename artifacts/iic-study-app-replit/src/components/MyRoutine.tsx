@@ -465,6 +465,7 @@ function CatSubjectCard({
   onCoinFlash: (msg: string) => void;
   onOpenLesson?: (id: string) => void;
 }) {
+  const theme = useAppTheme();
   const [targetStart, setTargetStart] = useState(sub.currentLessonIndex);
 
   // Sync if external updates happen
@@ -474,10 +475,16 @@ function CatSubjectCard({
   const skipCost = getSkipCost(sub.currentLessonIndex, targetStart);
 
   return (
-    <div className={`rounded-2xl border overflow-hidden transition-all shadow-sm ${meta.border} bg-white`}>
+    <div
+      className={`rounded-2xl border overflow-hidden transition-all shadow-sm bg-white`}
+      style={{ borderColor: `${theme.primary}30` }}
+    >
       {/* Header: subject name */}
-      <div className="flex items-center gap-3 px-4 py-3 bg-slate-50/50">
-        <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${meta.bg} ${meta.color}`}>
+      <div className="flex items-center gap-3 px-4 py-3" style={{ background: `${theme.primary}0a` }}>
+        <div
+          className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-xs"
+          style={{ background: `${theme.primary}18`, color: theme.primary }}
+        >
           {sub.emoji || meta.icon}
         </div>
         <div className="flex-1 min-w-0">
@@ -514,7 +521,7 @@ function CatSubjectCard({
             </select>
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider leading-none mb-0.5 flex items-center justify-center gap-1">
               <span>Lesson {targetStart + 1} of {lessons.length}</span>
-              <span className="text-[8px] text-blue-500 font-bold">▾</span>
+              <span className="text-[8px] font-bold" style={{ color: theme.primary }}>▾</span>
             </p>
             <p className="text-[12px] font-bold text-slate-800 leading-tight truncate">
               {lessons[targetStart]?.lessonTitle || `Lesson ${targetStart + 1}`}
@@ -539,14 +546,16 @@ function CatSubjectCard({
           <div className="grid grid-cols-2 gap-2 mt-2.5">
             <button
               onClick={() => onOpenLesson(lessons[sub.currentLessonIndex].id)}
-              className="py-1.5 px-2 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-700 text-[11px] font-black flex items-center justify-center gap-1 active:scale-95 transition hover:bg-indigo-100"
+              className="py-1.5 px-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1 active:scale-95 transition"
+              style={{ background: `${theme.primary}12`, border: `1px solid ${theme.primary}30`, color: theme.primary }}
             >
               <BookOpen size={12} />
               <span>📖 Read Notes</span>
             </button>
             <button
               onClick={() => onOpenLesson(lessons[sub.currentLessonIndex].id)}
-              className="py-1.5 px-2 rounded-xl bg-violet-600 text-white text-[11px] font-black flex items-center justify-center gap-1 active:scale-95 transition hover:bg-violet-700 shadow-xs"
+              className="py-1.5 px-2 rounded-xl text-white text-[11px] font-black flex items-center justify-center gap-1 active:scale-95 transition shadow-xs"
+              style={{ background: theme.btnGrad || theme.primary }}
             >
               <Target size={12} />
               <span>🧠 Practice MCQ</span>
@@ -561,7 +570,8 @@ function CatSubjectCard({
               onChangeStart(catId, sub.subjectId, targetStart);
               onCoinFlash(skipCost > 0 ? `Start changed! −${skipCost}🪙` : 'Start point changed! Free 🎉');
             }}
-            className="mt-2.5 w-full py-2 rounded-xl bg-blue-600 text-white text-xs font-black active:scale-95 transition shadow-sm"
+            className="mt-2.5 w-full py-2 rounded-xl text-white text-xs font-black active:scale-95 transition shadow-sm"
+            style={{ background: theme.btnGrad || theme.primary }}
           >
             {skipCost > 0 ? `✓ Apply (−${skipCost}🪙 deduct hoga)` : '✓ Apply (Free)'}
           </button>
@@ -580,6 +590,7 @@ function SubjectCard({
   onCoinFlash: (msg: string) => void;
   onOpenLesson?: (id: string) => void;
 }) {
+  const theme = useAppTheme();
   const [targetStart, setTargetStart] = useState(sub.startLessonIndex);
   const meta     = SUBJECT_META[sub.id] || DEFAULT_META;
   const skipCost = getSkipCost(sub.startLessonIndex, targetStart);
@@ -596,10 +607,19 @@ function SubjectCard({
   };
 
   return (
-    <div className={`rounded-2xl border overflow-hidden transition-all shadow-sm ${sub.routineApplied ? meta.border : 'border-slate-200'} bg-white`}>
+    <div
+      className={`rounded-2xl border overflow-hidden transition-all shadow-sm bg-white`}
+      style={{ borderColor: sub.routineApplied ? (theme.primary || '#6366f1') : '#e2e8f0' }}
+    >
       {/* Header: subject name + toggle */}
-      <div className="flex items-center gap-3 px-4 py-3">
-        <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${sub.routineApplied ? `${meta.bg} ${meta.color}` : 'bg-slate-100 text-slate-400'}`}>
+      <div className="flex items-center gap-3 px-4 py-3" style={{ background: sub.routineApplied ? `${theme.primary}0a` : undefined }}>
+        <div
+          className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-xs"
+          style={{
+            background: sub.routineApplied ? `${theme.primary}18` : '#f1f5f9',
+            color: sub.routineApplied ? theme.primary : '#94a3b8'
+          }}
+        >
           {meta.icon}
         </div>
         <div className="flex-1 min-w-0">
@@ -612,8 +632,9 @@ function SubjectCard({
           style={{
             minWidth: 44, width: 44, height: 24,
             backgroundColor: sub.routineApplied
-              ? (SUBJECT_TOGGLE_COLOR[meta.color] ?? '#6366f1')
-              : '#94a3b8', /* slate-400 — clearly visible in both states */
+              ? (theme.btnGrad ? undefined : (theme.primary || '#6366f1'))
+              : '#94a3b8',
+            background: sub.routineApplied && theme.btnGrad ? theme.btnGrad : undefined
           }}
         >
           <span
@@ -651,7 +672,7 @@ function SubjectCard({
             </select>
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider leading-none mb-0.5 flex items-center justify-center gap-1">
               <span>Lesson {targetStart + 1} of {lessons.length}</span>
-              <span className="text-[8px] text-blue-500 font-bold">▾</span>
+              <span className="text-[8px] font-bold" style={{ color: theme.primary }}>▾</span>
             </p>
             <p className="text-[12px] font-bold text-slate-800 leading-tight truncate">
               {lessons[targetStart]?.lessonTitle || `Lesson ${targetStart + 1}`}
@@ -676,14 +697,16 @@ function SubjectCard({
           <div className="grid grid-cols-2 gap-2 mt-2.5">
             <button
               onClick={() => onOpenLesson(lessons[sub.startLessonIndex].id)}
-              className="py-1.5 px-2 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-700 text-[11px] font-black flex items-center justify-center gap-1 active:scale-95 transition hover:bg-indigo-100"
+              className="py-1.5 px-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1 active:scale-95 transition"
+              style={{ background: `${theme.primary}12`, border: `1px solid ${theme.primary}30`, color: theme.primary }}
             >
               <BookOpen size={12} />
               <span>📖 Read Notes</span>
             </button>
             <button
               onClick={() => onOpenLesson(lessons[sub.startLessonIndex].id)}
-              className="py-1.5 px-2 rounded-xl bg-violet-600 text-white text-[11px] font-black flex items-center justify-center gap-1 active:scale-95 transition hover:bg-violet-700 shadow-xs"
+              className="py-1.5 px-2 rounded-xl text-white text-[11px] font-black flex items-center justify-center gap-1 active:scale-95 transition shadow-xs"
+              style={{ background: theme.btnGrad || theme.primary }}
             >
               <Target size={12} />
               <span>🧠 Practice MCQ</span>
@@ -698,7 +721,8 @@ function SubjectCard({
               onChangeStart(targetStart);
               onCoinFlash(skipCost > 0 ? `Start changed! −${skipCost}🪙` : 'Start point changed! Free 🎉');
             }}
-            className="mt-2.5 w-full py-2 rounded-xl bg-blue-600 text-white text-xs font-black active:scale-95 transition shadow-sm"
+            className="mt-2.5 w-full py-2 rounded-xl text-white text-xs font-black active:scale-95 transition shadow-sm"
+            style={{ background: theme.btnGrad || theme.primary }}
           >
             {skipCost > 0 ? `✓ Apply (−${skipCost}🪙 deduct hoga)` : '✓ Apply (Free)'}
           </button>
@@ -715,6 +739,7 @@ function TrackingView({ subjectGroups, subjects, mcqHistory, onOpenLesson }: {
   mcqHistory: any[];
   onOpenLesson?: (id: string) => void;
 }) {
+  const theme = useAppTheme();
   const [expandedSubs, setExpandedSubs] = useState<Record<string, boolean>>({});
   const [expandedLessons, setExpandedLessons] = useState<Record<string, boolean>>({});
   const [trackingSearch, setTrackingSearch] = useState('');
@@ -767,9 +792,12 @@ function TrackingView({ subjectGroups, subjects, mcqHistory, onOpenLesson }: {
   return (
     <div className="space-y-4">
       {/* Overall stats card */}
-      <div className="bg-gradient-to-br from-indigo-700 via-purple-700 to-blue-700 rounded-2xl p-4 text-white shadow-lg">
+      <div
+        className="rounded-2xl p-4 text-white shadow-lg transition-all"
+        style={{ background: theme.topBarGrad || theme.btnGrad || `linear-gradient(135deg, ${theme.primary}, ${theme.mid || theme.primary})` }}
+      >
         <div className="flex items-center justify-between mb-2">
-          <p className="text-[10px] font-black uppercase tracking-widest text-indigo-200">📖 My Syllabus Mastery (3-Tier)</p>
+          <p className="text-[10px] font-black uppercase tracking-widest text-white/90">📖 My Syllabus Mastery (3-Tier)</p>
           <span className="text-xs font-black bg-white/20 px-2 py-0.5 rounded-full">{syllabusMasteryPct}% Mastered</span>
         </div>
         <div className="grid grid-cols-4 gap-2 mb-3">
@@ -779,9 +807,9 @@ function TrackingView({ subjectGroups, subjects, mcqHistory, onOpenLesson }: {
             { label: 'Pages Read', value: totalRead },
             { label: 'MCQ Done', value: totalMcqDone },
           ].map(s => (
-            <div key={s.label} className="bg-white/10 rounded-xl p-2 text-center">
+            <div key={s.label} className="bg-white/15 backdrop-blur-xs rounded-xl p-2 text-center border border-white/10">
               <p className="text-base font-black">{s.value}</p>
-              <p className="text-[8px] opacity-70 font-medium">{s.label}</p>
+              <p className="text-[8px] opacity-80 font-medium">{s.label}</p>
             </div>
           ))}
         </div>
@@ -792,7 +820,7 @@ function TrackingView({ subjectGroups, subjects, mcqHistory, onOpenLesson }: {
             </div>
             <span className="text-xs font-black">{syllabusMasteryPct}%</span>
           </div>
-          <div className="flex items-center justify-between text-[10px] text-white/80 font-semibold px-0.5">
+          <div className="flex items-center justify-between text-[10px] text-white/90 font-semibold px-0.5">
             <span>📖 Reading: {readPct}% ({totalRead}/{totalPages} pgs)</span>
             <span>🧠 MCQ: {mcqPct}% ({totalMcqDone}/{totalPages} pgs)</span>
           </div>
@@ -824,7 +852,8 @@ function TrackingView({ subjectGroups, subjects, mcqHistory, onOpenLesson }: {
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar pt-1 border-t border-slate-100">
           <button
             onClick={() => setSelectedSubFilter('ALL')}
-            className={`px-2.5 py-1 rounded-lg text-[10px] font-black whitespace-nowrap transition-all shrink-0 ${selectedSubFilter === 'ALL' ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+            className={`px-2.5 py-1 rounded-lg text-[10px] font-black whitespace-nowrap transition-all shrink-0 ${selectedSubFilter === 'ALL' ? 'text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+            style={selectedSubFilter === 'ALL' ? { background: theme.btnGrad || theme.primary } : {}}
           >
             🌟 Sabhi ({allLessons.length} Lessons)
           </button>
@@ -836,7 +865,8 @@ function TrackingView({ subjectGroups, subjects, mcqHistory, onOpenLesson }: {
               <button
                 key={sub.id}
                 onClick={() => setSelectedSubFilter(sub.id)}
-                className={`px-2.5 py-1 rounded-lg text-[10px] font-black whitespace-nowrap transition-all shrink-0 flex items-center gap-1 ${selectedSubFilter === sub.id ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                className={`px-2.5 py-1 rounded-lg text-[10px] font-black whitespace-nowrap transition-all shrink-0 flex items-center gap-1 ${selectedSubFilter === sub.id ? 'text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                style={selectedSubFilter === sub.id ? { background: theme.btnGrad || theme.primary } : {}}
               >
                 <span>{meta.icon}</span>
                 <span>{sub.name}</span>
@@ -2459,7 +2489,10 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
   const actualMaxSlots = getActualMaxSlots(subTier, userLevel, data);
 
   return (
-    <div className="fixed inset-0 z-[200] bg-slate-50 flex flex-col h-[100dvh] w-screen overflow-hidden">
+    <div
+      className="fixed inset-0 z-[200] flex flex-col h-[100dvh] w-screen overflow-hidden transition-colors"
+      style={{ background: theme.appBg || theme.appBgColor || '#f8fafc' }}
+    >
 
       {showRoutineSetup && (
         <RoutineSetupSheet
@@ -2622,25 +2655,35 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
       )}
 
       {/* Header */}
-      <div className="sticky top-0 z-10 bg-white border-b border-slate-100 shrink-0">
+      <div
+        className="sticky top-0 z-10 border-b shrink-0 transition-colors shadow-xs"
+        style={{
+          background: theme.cardBg || '#ffffff',
+          borderColor: `${theme.primary}20`,
+        }}
+      >
         {/* Row 1: back · title · actions */}
         <div className="px-4 pt-3 pb-2 flex items-center gap-2">
-          <button onClick={onBack} className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center active:scale-90 transition shrink-0">
-            <ChevronLeft size={20} className="text-slate-700" />
+          <button
+            onClick={onBack}
+            className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition shrink-0"
+            style={{ background: `${theme.primary}12`, color: theme.primary }}
+          >
+            <ChevronLeft size={20} />
           </button>
           <div className="flex-1 min-w-0">
-            <h1 className="font-black text-slate-900 text-sm flex items-center gap-1.5">
+            <h1 className="font-black text-sm flex items-center gap-1.5" style={{ color: theme.textPrimary || '#0f172a' }}>
               <CalendarCheck size={16} className="shrink-0" style={{ color: theme.primary }} /> My Routine
             </h1>
           </div>
           {/* Routine ON/OFF toggle — compact */}
           <button onClick={toggleRoutine}
             className="relative w-12 h-6 rounded-full transition-all duration-300 shrink-0"
-            style={{ background: data.enabled ? (theme.btnGrad || theme.primary) : '#e2e8f0' }}
+            style={{ background: data.enabled ? (theme.btnGrad || theme.primary) : '#cbd5e1' }}
             title={data.enabled ? 'Routine ON' : 'Routine OFF'}>
             <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-all duration-300 ${data.enabled ? 'left-6' : 'left-0.5'}`} />
           </button>
-          <button onClick={() => setShowInfo(true)} className="w-8 h-8 rounded-full border flex items-center justify-center active:scale-90 shrink-0"
+          <button onClick={() => setShowInfo(true)} className="w-8 h-8 rounded-full border flex items-center justify-center active:scale-90 shrink-0 transition"
             style={{ background: `${theme.primary}12`, borderColor: `${theme.primary}25`, color: theme.primary }}>
             <HelpCircle size={15} />
           </button>
@@ -2648,15 +2691,16 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
           <div className="relative shrink-0">
             <button
               onClick={() => setShowSettingsMenu(s => !s)}
-              className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center active:scale-90 transition"
+              className="w-8 h-8 rounded-full flex items-center justify-center active:scale-90 transition"
+              style={{ background: `${theme.primary}12`, color: theme.primary }}
             >
-              <Settings size={15} className="text-slate-600" />
+              <Settings size={15} />
             </button>
             {showSettingsMenu && (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setShowSettingsMenu(false)} />
-                <div className="absolute right-0 top-10 z-50 bg-white rounded-2xl shadow-xl border border-slate-200 w-52 overflow-hidden">
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest px-4 pt-3 pb-1">Settings</p>
+                <div className="absolute right-0 top-10 z-50 bg-white rounded-2xl shadow-xl border w-52 overflow-hidden" style={{ borderColor: `${theme.primary}25` }}>
+                  <p className="text-[9px] font-black uppercase tracking-widest px-4 pt-3 pb-1" style={{ color: theme.primary }}>Settings</p>
                   <button
                     onClick={() => { setShowSettingsMenu(false); setShowRoutineSetup(true); }}
                     className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 active:bg-slate-100 transition text-left"
@@ -2694,20 +2738,20 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
           </div>
         </div>
         {/* Row 2: tab bar — always visible */}
-        <div className="mx-4 mb-2 flex bg-slate-100 rounded-2xl p-1 gap-1">
+        <div className="mx-4 mb-2 flex rounded-2xl p-1 gap-1" style={{ background: `${theme.primary}12` }}>
           <button onClick={() => setActiveView('home')}
             className={`flex-1 flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-black transition-all ${activeView === 'home' ? 'shadow-sm' : 'text-slate-500'}`}
-            style={activeView === 'home' ? { background: '#ffffff', color: theme.primary } : {}}>
+            style={activeView === 'home' ? { background: '#ffffff', color: theme.primary, border: `1px solid ${theme.primary}25`, boxShadow: `0 2px 8px ${theme.primary}20` } : {}}>
             🎯 Daily Hub
           </button>
           <button onClick={() => setActiveView('subjects')}
             className={`flex-1 flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-black transition-all ${activeView === 'subjects' ? 'shadow-sm' : 'text-slate-500'}`}
-            style={activeView === 'subjects' ? { background: '#ffffff', color: theme.primary } : {}}>
+            style={activeView === 'subjects' ? { background: '#ffffff', color: theme.primary, border: `1px solid ${theme.primary}25`, boxShadow: `0 2px 8px ${theme.primary}20` } : {}}>
             📚 Subjects
           </button>
           <button onClick={() => setActiveView('tracking')}
             className={`flex-1 flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-black transition-all ${activeView === 'tracking' ? 'shadow-sm' : 'text-slate-500'}`}
-            style={activeView === 'tracking' ? { background: '#ffffff', color: theme.primary } : {}}>
+            style={activeView === 'tracking' ? { background: '#ffffff', color: theme.primary, border: `1px solid ${theme.primary}25`, boxShadow: `0 2px 8px ${theme.primary}20` } : {}}>
             📖 My Syllabus
           </button>
         </div>
@@ -2812,14 +2856,27 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
             </div>
 
             {categories.length === 0 ? (
-              <div className="bg-[#f5f2eb] rounded-3xl border border-[#e8e4db] p-6 text-center">
+              <div
+                className="rounded-3xl border p-6 text-center"
+                style={{
+                  background: (theme as any)?.soft || (theme as any)?.profileCardBg || '#f8fafc',
+                  border: `1.5px solid ${(theme as any)?.borderSoft || (theme as any)?.cardBorder || `${theme.primary}25`}`,
+                }}
+              >
                 <p className="text-sm text-slate-400">Daily Hub mein categories add karo pehle</p>
               </div>
             ) : categories.map(cat => (
-              <div key={cat.id} className="bg-slate-50 rounded-2xl border border-slate-200 p-3 shadow-sm space-y-3">
+              <div
+                key={cat.id}
+                className="rounded-2xl border p-3 shadow-sm space-y-3 transition-colors"
+                style={{
+                  background: (theme as any)?.soft || (theme as any)?.profileCardBg || '#f8fafc',
+                  border: `1.5px solid ${(theme as any)?.borderSoft || (theme as any)?.cardBorder || `${theme.primary}25`}`,
+                }}
+              >
                 <div className="flex items-center gap-2 px-1">
                   <span className="text-xl">{cat.emoji}</span>
-                  <h3 className="font-black text-slate-800 text-sm">{cat.categoryName}</h3>
+                  <h3 className="font-black text-sm" style={{ color: theme.textPrimary || '#1e293b' }}>{cat.categoryName}</h3>
                 </div>
                 <div className="space-y-3">
                   {cat.subjects.map(sub => (

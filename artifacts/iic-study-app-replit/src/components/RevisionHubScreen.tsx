@@ -851,8 +851,9 @@ export const RevisionHubScreen: React.FC<Props> = ({
             </div>
 
             {(() => {
-              const _c612Bg  = (settings as any)?.homeClass612CardBg     || (theme as any).profileCardBg || '#ffffff';
-              const _c612Bdr = (settings as any)?.homeClass612CardBorder  || primary;
+              const _isDark = theme.isDarkMode;
+              const _c612Bg  = (settings as any)?.homeClass612CardBg     || (theme as any).cardBg || (theme as any).profileCardBg || '#ffffff';
+              const _c612Bdr = (settings as any)?.homeClass612CardBorder  || (theme as any).primary || primary;
               const _card3D  = (settings as any)?.homeAllCards3D || (settings as any)?.homeClass612Card3D || false;
               const boardClasses = ['10', '11', '12'];
 
@@ -864,7 +865,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
               } : {
                 background: _c612Bg,
                 border: `2px solid ${_c612Bdr}`,
-                boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+                boxShadow: _isDark ? `0 4px 16px ${_c612Bdr}20` : '0 2px 8px rgba(0,0,0,0.05)',
               };
 
               const ClassBtn = ({ c }: { c: string }) => {
@@ -876,23 +877,23 @@ export const RevisionHubScreen: React.FC<Props> = ({
                   <button
                     key={c}
                     onClick={() => setMcqSelectedClass(c)}
-                    className="relative flex flex-col p-2.5 rounded-xl active:scale-95 transition-all text-left"
+                    className="relative flex flex-col p-2.5 rounded-xl active:scale-95 transition-all text-left group"
                     style={cardStyle3D}
                   >
                     {isBoard ? (
-                      <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-full text-[7px] font-black bg-amber-400 text-amber-900 leading-none">👑</span>
+                      <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-full text-[7px] font-black bg-amber-400 text-amber-900 leading-none shadow-xs">👑</span>
                     ) : (
-                      <span className="absolute top-1.5 right-1.5 text-sm leading-none select-none opacity-60">{CLASS_EMOJIS[c]}</span>
+                      <span className="absolute top-1.5 right-1.5 text-sm leading-none select-none opacity-70 group-hover:scale-110 transition-transform">{CLASS_EMOJIS[c]}</span>
                     )}
-                    <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-0.5">CLASS</p>
+                    <p className="text-[7px] font-black uppercase tracking-widest mb-0.5" style={{ color: _isDark ? '#94a3b8' : theme.textSecondary || '#64748b' }}>CLASS</p>
                     <p className="text-2xl font-black leading-none mb-1" style={{ color: _c612Bdr }}>{c}</p>
-                    <p className="text-[9px] font-bold text-slate-500 leading-tight">{subjCount} Subj.</p>
+                    <p className="text-[9px] font-bold leading-tight" style={{ color: _isDark ? '#cbd5e1' : theme.textPrimary || '#334155' }}>{subjCount} Subj.</p>
                   </button>
                 );
               };
 
-              const _cmpBg  = (settings as any)?.homeCompetitionCardBg     || (theme as any).profileCardBg || '#ffffff';
-              const _cmpBdr = (settings as any)?.homeCompetitionCardBorder  || primary;
+              const _cmpBg  = (settings as any)?.homeCompetitionCardBg     || (theme as any).cardBg || (theme as any).profileCardBg || '#ffffff';
+              const _cmpBdr = (settings as any)?.homeCompetitionCardBorder  || (theme as any).primary || primary;
               const _cmp3D  = (settings as any)?.homeAllCards3D || (settings as any)?.homeCompetitionCard3D || false;
 
               return (
@@ -909,7 +910,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
                   {/* Competition card — matches home page big banner style */}
                   <button
                     onClick={() => setMcqSelectedClass('COMPETITION')}
-                    className="w-full relative overflow-hidden rounded-2xl text-left active:scale-[0.99] transition-all"
+                    className="w-full relative overflow-hidden rounded-2xl text-left active:scale-[0.99] transition-all group"
                     style={_cmp3D ? {
                       background: _cmpBg,
                       border: `2px solid ${_cmpBdr}`,
@@ -918,21 +919,36 @@ export const RevisionHubScreen: React.FC<Props> = ({
                     } : {
                       background: _cmpBg,
                       border: `2px solid ${_cmpBdr}`,
-                      boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+                      boxShadow: _isDark ? `0 4px 20px ${_cmpBdr}20` : '0 2px 10px rgba(0,0,0,0.06)',
                     }}
                   >
                     <div className="flex items-center justify-between px-4 py-4">
                       <div className="flex-1 min-w-0 pr-2">
-                        <p className="text-[10px] font-black uppercase tracking-wider mb-1" style={{ color: _cmpBdr }}>Competitive Mode</p>
-                        <h3 className="text-[22px] font-black leading-tight mb-1 text-slate-800">Govt. Exams</h3>
-                        <div className="mb-3">
-                          <span className="text-[10px] text-slate-400">SSC · UPSC · Railway · Police</span>
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <span
+                            className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider shrink-0"
+                            style={{
+                              background: `${_cmpBdr}18`,
+                              color: _cmpBdr,
+                              border: `1px solid ${_cmpBdr}35`
+                            }}
+                          >
+                            Competitive Mode
+                          </span>
                         </div>
-                        <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-black text-white" style={{ background: _cmpBdr }}>
-                          Tap to open →
+                        <h3 className="text-[22px] font-black leading-tight mb-1" style={{ color: _isDark ? '#f8fafc' : theme.textPrimary || '#1e293b' }}>Govt. Exams</h3>
+                        <div className="mb-3 flex items-center flex-wrap gap-1.5">
+                          <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${_isDark ? 'bg-white/10 border border-white/10 text-slate-300' : 'bg-slate-100/90 border border-slate-200/60 text-slate-700'}`}>
+                            📚 7 Books
+                          </span>
+                          <span className="text-[10px] font-medium" style={{ color: _isDark ? '#94a3b8' : theme.textSecondary || '#64748b' }}>SSC · UPSC · Railway · Police</span>
+                        </div>
+                        <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-[11px] font-black text-white shadow-xs group-hover:translate-x-0.5 transition-transform" style={{ background: theme.btnGrad || _cmpBdr }}>
+                          <span>Tap to open</span>
+                          <span>→</span>
                         </span>
                       </div>
-                      <div className="text-[52px] leading-none shrink-0 select-none">🏛️</div>
+                      <div className="text-[52px] leading-none shrink-0 select-none group-hover:scale-105 transition-transform">🏛️</div>
                     </div>
                   </button>
                 </>

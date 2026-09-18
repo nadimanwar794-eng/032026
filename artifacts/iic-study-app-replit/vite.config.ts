@@ -4,17 +4,28 @@ import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
-const port = Number(process.env.PORT || 23975);
+const port = 3000;
 const basePath = process.env.BASE_PATH || '/';
 
-export default defineConfig({
-  base: basePath,
-  plugins: [
-    react(),
-    tailwindcss(),
-    VitePWA({
-      registerType: 'autoUpdate',
-      devOptions: { enabled: false },
+export default defineConfig(({ command }) => {
+  const isBuild = command === 'build';
+
+  return {
+    base: basePath,
+    plugins: [
+      ...(!isBuild
+        ? [
+            react({
+              babel: {
+                compact: true,
+              },
+            }),
+          ]
+        : []),
+      tailwindcss(),
+      VitePWA({
+        registerType: 'autoUpdate',
+        devOptions: { enabled: false },
       includeAssets: [
         'favicon.svg',
         'branding/nsta-logo.png',
@@ -61,10 +72,10 @@ export default defineConfig({
         ],
       },
       workbox: {
-        maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
         globIgnores: ['**/*.map'],
         skipWaiting: true,
         clientsClaim: true,
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
       },
     }),
   ],
@@ -81,9 +92,41 @@ export default defineConfig({
     dedupe: ['react', 'react-dom'],
   },
   root: path.resolve(import.meta.dirname),
+  esbuild: {
+    jsx: 'automatic',
+  },
   build: {
     outDir: path.resolve(import.meta.dirname, '../../dist'),
     emptyOutDir: true,
+    reportCompressedSize: false,
+    sourcemap: false,
+    minify: 'esbuild',
+    target: 'esnext',
+    rollupOptions: {
+      onwarn(warning, warn) {
+        if (
+          warning.code === 'MODULE_LEVEL_DIRECTIVE' ||
+          (typeof warning.message === 'string' &&
+            (warning.message.includes('Module level directives cause errors when bundled') ||
+             warning.message.includes('"use client"')))
+        ) {
+          return;
+        }
+        warn(warning);
+      },
+      cache: false,
+      maxParallelFileOps: 2,
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('react-pdf') || id.includes('pdfjs-dist')) return 'vendor-pdf';
+            if (id.includes('jspdf') || id.includes('html2canvas') || id.includes('jszip')) return 'vendor-export';
+            if (id.includes('firebase')) return 'vendor-firebase';
+            if (id.includes('recharts') || id.includes('d3')) return 'vendor-charts';
+          }
+        },
+      },
+    },
   },
   server: {
     port,
@@ -99,4 +142,5 @@ export default defineConfig({
     host: '0.0.0.0',
     allowedHosts: true,
   },
+  };
 });

@@ -53,6 +53,7 @@ export interface ChatMessage {
   disappearingExpiresAt?: number; // epoch ms when message auto-deletes
   isSaved?: boolean; // Snapchat-style "Saved in Chat" (never vanishes until unsaved)
   savedBy?: Record<string, boolean>; // userId -> true
+  isHd?: boolean; // High Quality (HD) indicator for crisp notes, formulas & diagrams
 }
 
 export interface FriendRequest {
@@ -421,7 +422,7 @@ export const sendPrivateMessage = async (
   peerUserId: string,
   text: string,
   type: ChatMessage['type'] = 'TEXT',
-  extra?: { mediaUrl?: string; mediaUrls?: string[]; voiceDuration?: number; doubtSubject?: string; replyTo?: any }
+  extra?: { mediaUrl?: string; mediaUrls?: string[]; voiceDuration?: number; doubtSubject?: string; replyTo?: any; isHd?: boolean }
 ): Promise<ChatMessage> => {
   const convId = getDirectConversationId(myUserId, peerUserId);
   const msgId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -447,6 +448,7 @@ export const sendPrivateMessage = async (
     ...(extra?.voiceDuration ? { voiceDuration: extra.voiceDuration } : {}),
     ...(extra?.doubtSubject ? { doubtSubject: extra.doubtSubject } : {}),
     ...(extra?.replyTo ? { replyTo: extra.replyTo } : {}),
+    ...(extra?.isHd ? { isHd: true } : {}),
   };
 
   // 1. Save to local storage IMMEDIATELY so it never gets lost
@@ -490,7 +492,7 @@ export const sendGroupMessage = async (
   myPhoto: string | undefined,
   text: string,
   type: ChatMessage['type'] = 'TEXT',
-  extra?: { mediaUrl?: string; mediaUrls?: string[]; voiceDuration?: number; doubtSubject?: string; replyTo?: any }
+  extra?: { mediaUrl?: string; mediaUrls?: string[]; voiceDuration?: number; doubtSubject?: string; replyTo?: any; isHd?: boolean }
 ): Promise<ChatMessage> => {
   const msgId = `grp_msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const timestamp = Date.now();
@@ -513,6 +515,7 @@ export const sendGroupMessage = async (
     ...(extra?.voiceDuration ? { voiceDuration: extra.voiceDuration } : {}),
     ...(extra?.doubtSubject ? { doubtSubject: extra.doubtSubject } : {}),
     ...(extra?.replyTo ? { replyTo: extra.replyTo } : {}),
+    ...(extra?.isHd ? { isHd: true } : {}),
   };
 
   // 1. Local storage save first

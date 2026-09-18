@@ -3554,7 +3554,7 @@ export const subscribeAdminMark2Topics = (
 
 // ── 12. Global Suggestions & Corrections ──────────────────────────────────
 
-export const saveSuggestion = async (s: { id: string; text: string; uid: string; userName: string; userBoard?: string; createdAt: string; lessonTitle?: string; pageNo?: string; mode?: 'reading' | 'writing' | 'mcq'; subject?: string; classLevel?: string; chapterKey?: string; pointsData?: { index: number; originalText: string }[]; mcqId?: string; mcqQuestion?: string; mcqOptions?: string[]; mcqCurrentAnswer?: number; }): Promise<void> => {
+export const saveSuggestion = async (s: { id: string; text: string; imageUrl?: string; uid: string; userName: string; userBoard?: string; createdAt: string; lessonTitle?: string; pageNo?: string; mode?: 'reading' | 'writing' | 'mcq'; subject?: string; classLevel?: string; chapterKey?: string; pointsData?: { index: number; originalText: string }[]; mcqId?: string; mcqQuestion?: string; mcqOptions?: string[]; mcqCurrentAnswer?: number; }): Promise<void> => {
     try {
         const payload: Record<string, unknown> = { ...s, likes: 0, dislikes: 0, likedBy: {}, dislikedBy: {}, status: 'open', adminReply: '', adminReplyAt: '' };
         Object.keys(payload).forEach(k => payload[k] === undefined && delete payload[k]);

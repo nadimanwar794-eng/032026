@@ -217,6 +217,9 @@ export function loadRoutineData(userId: string): RoutineData {
 export function saveRoutineData(userId: string, data: RoutineData): void {
   try {
     localStorage.setItem(`${STORAGE_KEY}_${userId}`, JSON.stringify(data));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('iic-routine-updated', { detail: { userId, data } }));
+    }
   } catch {}
 }
 

@@ -24,6 +24,7 @@ import { tryEarnScore, getDailyScoreEarned } from '../utils/scoreSystem';
 import type { User, SystemSettings, Challenge20 } from '../types';
 import type { MistakeEntry } from '../utils/mistakeBank';
 import { getChallengeDateKey, isDailyChallenge20 } from '../utils/challengeGenerator';
+import { useAppTheme } from '../utils/themeContext';
 
 // ── 3-Tier Hierarchy Data Models for Revision ──────────────────────────────────
 export interface ChapterGroup {
@@ -167,34 +168,47 @@ const SectionCard: React.FC<{
   children: React.ReactNode;
   actionLabel?: string;
   onAction?: () => void;
-}> = ({ emoji, title, subtitle, accent, children, actionLabel, onAction }) => (
-  <div className="bg-[#f5f2eb] rounded-3xl border border-[#e8e4db] shadow-sm overflow-hidden">
-    <div className="px-4 pt-4 pb-3 flex items-center justify-between">
-      <div className="flex items-center gap-2.5">
-        <div
-          className="w-9 h-9 rounded-xl flex items-center justify-center text-lg shrink-0"
-          style={{ background: `${accent}18` }}
-        >
-          {emoji}
+}> = ({ emoji, title, subtitle, accent, children, actionLabel, onAction }) => {
+  const theme = useAppTheme();
+  const cardBg = (theme as any)?.soft || (theme as any)?.profileCardBg || '#f8fafc';
+  const cardBorder = (theme as any)?.borderSoft || (theme as any)?.cardBorder || `${theme.primary}25`;
+  const effectiveAccent = accent || theme.primary;
+
+  return (
+    <div
+      className="rounded-3xl shadow-sm overflow-hidden transition-colors"
+      style={{
+        background: cardBg,
+        border: `1.5px solid ${cardBorder}`,
+      }}
+    >
+      <div className="px-4 pt-4 pb-3 flex items-center justify-between" style={{ borderBottom: `1px solid ${cardBorder}30` }}>
+        <div className="flex items-center gap-2.5">
+          <div
+            className="w-9 h-9 rounded-xl flex items-center justify-center text-lg shrink-0 shadow-xs"
+            style={{ background: `${effectiveAccent}18`, color: effectiveAccent }}
+          >
+            {emoji}
+          </div>
+          <div>
+            <p className="font-black text-sm leading-tight" style={{ color: theme.textPrimary || '#1e293b' }}>{title}</p>
+            <p className="text-[10px] text-slate-500 font-medium leading-snug">{subtitle}</p>
+          </div>
         </div>
-        <div>
-          <p className="font-black text-[#20313f] text-sm leading-tight">{title}</p>
-          <p className="text-[10px] text-slate-500 font-medium leading-snug">{subtitle}</p>
-        </div>
+        {actionLabel && onAction && (
+          <button
+            onClick={onAction}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-black text-white active:scale-95 transition-all shrink-0 shadow-xs"
+            style={{ background: theme.btnGrad || effectiveAccent }}
+          >
+            {actionLabel} <ChevronRight size={11} />
+          </button>
+        )}
       </div>
-      {actionLabel && onAction && (
-        <button
-          onClick={onAction}
-          className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-black text-white active:scale-95 transition-all shrink-0"
-          style={{ background: accent }}
-        >
-          {actionLabel} <ChevronRight size={11} />
-        </button>
-      )}
+      <div className="px-4 py-3">{children}</div>
     </div>
-    <div className="px-4 py-3">{children}</div>
-  </div>
-);
+  );
+};
 
 const Stat: React.FC<{ label: string; value: number | string; color: string }> = ({ label, value, color }) => (
   <div className="flex flex-col items-center flex-1 bg-slate-50 rounded-xl px-2 py-2">
@@ -219,6 +233,7 @@ export const DailyEventPage: React.FC<Props> = ({
   user, settings, onBack, onOpenRoutine, onOpenRevisionHub, onPracticeMistakes, onOpenSubjects, onOpenTracking, onOpenLesson,
   onUpdateUser, challenge20s = [], onStartChallenge20, onClaimChallenge20,
 }) => {
+  const theme = useAppTheme();
   const todayStr = getChallengeDateKey();
   const yesterdayStr = useMemo(() => {
     const d = new Date(); d.setDate(d.getDate() - 1);
@@ -860,7 +875,7 @@ export const DailyEventPage: React.FC<Props> = ({
                 : 'Koi slot set nahi'
               : 'Routine enabled nahi hai'
           }
-          accent="#4f46e5"
+          accent={theme.primary || "#4f46e5"}
           actionLabel="Open →"
           onAction={onOpenRoutine}
         >
@@ -876,17 +891,20 @@ export const DailyEventPage: React.FC<Props> = ({
             <div className="space-y-2">
               {/* ── Next Today Task preview ── */}
               {nextSlots.length > 0 && (
-                <div className="bg-sky-50 border border-sky-200 rounded-xl px-3 py-2 mb-1">
-                  <p className="text-[9px] font-black text-sky-600 uppercase tracking-widest mb-1.5">⏭️ Next Today Task</p>
+                <div
+                  className="rounded-xl px-3 py-2 mb-1"
+                  style={{ background: `${theme.primary}10`, border: `1px solid ${theme.primary}25` }}
+                >
+                  <p className="text-[9px] font-black uppercase tracking-widest mb-1.5" style={{ color: theme.primary }}>⏭️ Next Today Task</p>
                   <div className="space-y-1">
                     {(nextSlots as any[]).map((ns: any, i: number) => (
                       <div key={i} className="flex items-center gap-2">
                         <span className="text-sm shrink-0">{ns.emoji}</span>
                         <div className="flex-1 min-w-0">
-                          <p className="text-[11px] font-black text-sky-800 truncate">{ns.lessonTitle}</p>
-                          <p className="text-[9px] text-sky-500">{ns.catName} · {ns.subject}</p>
+                          <p className="text-[11px] font-black truncate" style={{ color: theme.textPrimary || '#0f172a' }}>{ns.lessonTitle}</p>
+                          <p className="text-[9px] text-slate-500">{ns.catName} · {ns.subject}</p>
                         </div>
-                        <span className="text-[9px] font-black text-sky-400 shrink-0">Agle</span>
+                        <span className="text-[9px] font-black shrink-0" style={{ color: theme.primary }}>Agle</span>
                       </div>
                     ))}
                   </div>
@@ -897,7 +915,7 @@ export const DailyEventPage: React.FC<Props> = ({
               {(todaySlots as any[]).map((slot: any, i: number) => (
                 <div
                   key={i}
-                  className={`rounded-xl px-3 py-2.5 border ${slot.done ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}
+                  className={`rounded-xl px-3 py-2.5 border ${slot.done ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-slate-200/80 shadow-xs'}`}
                 >
                   {/* Title row */}
                   <div className="flex items-center gap-2 mb-2">
@@ -917,8 +935,9 @@ export const DailyEventPage: React.FC<Props> = ({
                       className={`py-2 px-3 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 active:scale-95 transition shadow-sm ${
                         slot.readingDone
                           ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                          : 'bg-[#20313f] hover:bg-[#1a2834] text-white'
+                          : 'text-white'
                       }`}
+                      style={!slot.readingDone ? { background: theme.mid || theme.primary || '#20313f' } : {}}
                     >
                       <BookOpen size={13} />
                       <span>{slot.readingDone ? '✓ Notes Done' : '📖 Notes Padhein'}</span>
@@ -928,8 +947,9 @@ export const DailyEventPage: React.FC<Props> = ({
                       className={`py-2 px-3 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 active:scale-95 transition shadow-sm ${
                         slot.mcqDone
                           ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                          : 'bg-violet-600 hover:bg-violet-700 text-white'
+                          : 'text-white'
                       }`}
+                      style={!slot.mcqDone ? { background: theme.btnGrad || theme.primary || '#7c3aed' } : {}}
                     >
                       <Target size={13} />
                       <span>{slot.mcqDone ? '✓ MCQ Done' : '🧠 Practice MCQ'}</span>

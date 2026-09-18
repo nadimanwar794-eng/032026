@@ -89,20 +89,35 @@ export async function compressImage(
   });
 }
 
+export interface UploadImageOptions {
+  isHd?: boolean;
+  maxWidth?: number;
+  maxHeight?: number;
+  quality?: number;
+}
+
 /**
  * Uploads an image directly to high-availability CDN with multiple fallback layers:
  * 1. FreeImage.host CDN (High speed direct iili.io links)
  * 2. ImgBB CDN
  * 3. Compact Compressed Data URL (100% resilient fallback)
+ *
+ * Supports HD mode: high resolution up to 3200px & 0.95 quality for crystal-clear notes and formulas.
  */
 export async function uploadImageToImgBB(
   file: File | Blob | string,
-  name?: string
+  name?: string,
+  options?: UploadImageOptions | boolean
 ): Promise<string> {
+  const isHd = typeof options === 'boolean' ? options : !!options?.isHd;
+  const targetMaxWidth = (typeof options === 'object' && options?.maxWidth) ? options.maxWidth : isHd ? 3200 : 1600;
+  const targetMaxHeight = (typeof options === 'object' && options?.maxHeight) ? options.maxHeight : isHd ? 3200 : 1600;
+  const targetQuality = (typeof options === 'object' && options?.quality) ? options.quality : isHd ? 0.95 : 0.85;
+
   let base64Data = '';
   try {
-    // Compress first for fast network transit
-    base64Data = await compressImage(file, 1600, 1600, 0.85);
+    // Compress first for fast network transit (higher resolution & quality when HD enabled)
+    base64Data = await compressImage(file, targetMaxWidth, targetMaxHeight, targetQuality);
   } catch (err) {
     console.warn('[Cloud Image Service] Pre-compression failed, continuing raw:', err);
   }
@@ -122,7 +137,7 @@ export async function uploadImageToImgBB(
     }
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
+    const timeoutId = setTimeout(() => controller.abort(), 4500);
     const res = await fetch(FREEIMAGE_UPLOAD_URL, {
       method: 'POST',
       body: formData,
@@ -160,7 +175,7 @@ export async function uploadImageToImgBB(
     if (name) formData.append('name', name);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
+    const timeoutId = setTimeout(() => controller.abort(), 4500);
     const res = await fetch(IMGBB_UPLOAD_URL, {
       method: 'POST',
       body: formData,
@@ -183,7 +198,10 @@ export async function uploadImageToImgBB(
   // If external CDN servers are blocked by network/ISP or API rate-limits,
   // compress image cleanly so it instantly delivers without throwing an error
   try {
-    const ultraCompact = await compressImage(file, 960, 960, 0.70);
+    const fallbackWidth = isHd ? 1920 : 960;
+    const fallbackHeight = isHd ? 1920 : 960;
+    const fallbackQuality = isHd ? 0.88 : 0.70;
+    const ultraCompact = await compressImage(file, fallbackWidth, fallbackHeight, fallbackQuality);
     if (ultraCompact) {
       return ultraCompact;
     }

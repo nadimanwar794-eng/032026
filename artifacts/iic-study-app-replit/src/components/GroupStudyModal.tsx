@@ -1338,13 +1338,22 @@ export const GroupStudyModal: React.FC<GroupStudyModalProps> = ({
                               </div>
 
                               {/* Question Card */}
-                              <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-5 shadow-lg">
-                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30 mb-2 inline-block">
-                                  Live Battle Q{qIdx + 1}
-                                </span>
-                                <h4 className="text-base md:text-lg font-black text-white leading-snug">
-                                  {q.question}
-                                </h4>
+                              <div className="bg-slate-800/80 border border-slate-700 rounded-2xl p-4 sm:p-5 shadow-lg">
+                                <div className="flex items-center justify-between gap-2 mb-2">
+                                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30 inline-block">
+                                    Live Battle Q{qIdx + 1}
+                                  </span>
+                                  {q.question && (q.question.length > 90 || q.question.includes('\n')) && (
+                                    <span className="text-[10px] font-bold text-amber-300 flex items-center gap-1 bg-amber-950/60 px-2 py-0.5 rounded-full border border-amber-500/40">
+                                      📜 Scroll Question
+                                    </span>
+                                  )}
+                                </div>
+                                <div className={q.question && (q.question.length > 90 || q.question.includes('\n')) ? 'max-h-36 sm:max-h-48 overflow-y-auto overscroll-contain pr-2 mcq-question-scroll' : ''}>
+                                  <h4 className="text-base md:text-lg font-black text-white leading-snug">
+                                    {q.question}
+                                  </h4>
+                                </div>
                               </div>
 
                               {/* Options List */}

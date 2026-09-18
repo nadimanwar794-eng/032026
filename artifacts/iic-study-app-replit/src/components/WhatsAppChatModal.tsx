@@ -624,6 +624,7 @@ export const WhatsAppChatModal: React.FC<Props> = ({
   const [selectedImagesToSend, setSelectedImagesToSend] = useState<File[]>([]);
   const [activePreviewImageIndex, setActivePreviewImageIndex] = useState<number>(0);
   const [imagePreviewModalOpen, setImagePreviewModalOpen] = useState<boolean>(false);
+  const [isHdQuality, setIsHdQuality] = useState<boolean>(false);
   const [imageCaptionInput, setImageCaptionInput] = useState<string>('');
   const [isCroppingImage, setIsCroppingImage] = useState<boolean>(false);
   const [imageToCropUrl, setImageToCropUrl] = useState<string | null>(null);
@@ -635,6 +636,7 @@ export const WhatsAppChatModal: React.FC<Props> = ({
   const [lightboxRotation, setLightboxRotation] = useState<number>(0);
   const [isLightboxFullscreen, setIsLightboxFullscreen] = useState<boolean>(false);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const addMoreImageInputRef = useRef<HTMLInputElement>(null);
 
   // Maintain stable object URLs for all selected photos in batch (prevents broken thumbnails and preview blanks)
@@ -2210,6 +2212,9 @@ export const WhatsAppChatModal: React.FC<Props> = ({
     if (imageInputRef.current) {
       imageInputRef.current.value = '';
     }
+    if (cameraInputRef.current) {
+      cameraInputRef.current.value = '';
+    }
   };
 
   const handleSendImageMessage = async () => {
@@ -2230,11 +2235,14 @@ export const WhatsAppChatModal: React.FC<Props> = ({
     try {
       const uploadedUrls: string[] = [];
       for (let i = 0; i < selectedImagesToSend.length; i++) {
-        setUploadProgressText(`Photo ${i + 1} of ${selectedImagesToSend.length} bhej rahe hain...`);
+        setUploadProgressText(
+          `Photo ${i + 1} of ${selectedImagesToSend.length} ${isHdQuality ? '(HD Quality)' : ''} bhej rahe hain...`
+        );
         const file = selectedImagesToSend[i];
         const uploadedUrl = await uploadImageToImgBB(
           file,
-          `nsta_chat_${effectiveUserId}_${Date.now()}_${i}`
+          `nsta_chat_${effectiveUserId}_${Date.now()}_${i}`,
+          { isHd: isHdQuality }
         );
         if (uploadedUrl) {
           uploadedUrls.push(uploadedUrl);
@@ -2272,6 +2280,7 @@ export const WhatsAppChatModal: React.FC<Props> = ({
           seen: false,
           delivered: false,
           readByRecipient: false,
+          isHd: isHdQuality,
         };
 
         setMessages((prev) => [
@@ -2286,7 +2295,7 @@ export const WhatsAppChatModal: React.FC<Props> = ({
           selectedContact.id,
           captionText,
           'IMAGE',
-          { mediaUrl: uploadedUrls[0], mediaUrls: uploadedUrls }
+          { mediaUrl: uploadedUrls[0], mediaUrls: uploadedUrls, isHd: isHdQuality }
         );
       } else if (selectedGroup) {
         const optimisticMsg: ChatMessage = {
@@ -2302,6 +2311,7 @@ export const WhatsAppChatModal: React.FC<Props> = ({
           status: 'SENT',
           seen: false,
           delivered: false,
+          isHd: isHdQuality,
         };
 
         setMessages((prev) => [
@@ -2316,17 +2326,18 @@ export const WhatsAppChatModal: React.FC<Props> = ({
           userPhoto,
           captionText,
           'IMAGE',
-          { mediaUrl: uploadedUrls[0], mediaUrls: uploadedUrls }
+          { mediaUrl: uploadedUrls[0], mediaUrls: uploadedUrls, isHd: isHdQuality }
         );
       }
 
-      showToast(`📷 ${uploadedUrls.length} photo(s) safaltapoorvak bhej di gayi!`);
+      showToast(`📷 ${uploadedUrls.length} photo(s) ${isHdQuality ? '(HD Quality) ' : ''}safaltapoorvak bhej di gayi!`);
       setImagePreviewModalOpen(false);
       setSelectedImagesToSend([]);
       setActivePreviewImageIndex(0);
       setImageCaptionInput('');
       setIsCroppingImage(false);
       setUploadProgressText('');
+      setIsHdQuality(false);
     } catch (err: any) {
       console.error('[WhatsAppChatModal] Image upload/send failed:', err);
       showToast(`❌ Photo bhejte samay samasya aayi: ${err.message || 'Network error'}`);
@@ -5576,7 +5587,7 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                             <div className="space-y-1.5">
                               {/* Multi-Photo Grid (WhatsApp Style Album supporting up to 10 photos) */}
                               <div
-                                className={`grid gap-1 rounded-2xl overflow-hidden bg-black/10 ${
+                                className={`relative grid gap-1 rounded-2xl overflow-hidden bg-black/10 ${
                                   msg.mediaUrls.length === 2
                                     ? 'grid-cols-2 max-w-[280px]'
                                     : msg.mediaUrls.length === 3
@@ -5584,6 +5595,11 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                                     : 'grid-cols-2 max-w-[280px]'
                                 }`}
                               >
+                                {msg.isHd && (
+                                  <div className="absolute top-2 left-2 z-10 px-1.5 py-0.5 bg-black/75 backdrop-blur-xs text-white rounded text-[9px] font-black border border-white/20 flex items-center gap-0.5 pointer-events-none shadow-xs">
+                                    <span className="text-amber-300 text-[8px]">✨</span> HD
+                                  </div>
+                                )}
                                 {msg.mediaUrls.slice(0, 4).map((url, idx) => {
                                   const isFourth = idx === 3 && msg.mediaUrls!.length > 4;
                                   const extraCount = msg.mediaUrls!.length - 4;
@@ -5652,6 +5668,11 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                                   openImageLightbox(msg.mediaUrl || msg.mediaUrls?.[0] || '');
                                 }}
                               >
+                                {msg.isHd && (
+                                  <div className="absolute top-2 left-2 z-10 px-1.5 py-0.5 bg-black/75 backdrop-blur-xs text-white rounded text-[9px] font-black border border-white/20 flex items-center gap-0.5 pointer-events-none shadow-xs">
+                                    <span className="text-amber-300 text-[8px]">✨</span> HD
+                                  </div>
+                                )}
                                 <img
                                   src={msg.mediaUrl || msg.mediaUrls?.[0]}
                                   alt="Photo attachment"
@@ -5830,24 +5851,36 @@ export const WhatsAppChatModal: React.FC<Props> = ({
             {/* Quick Doubt / Notes / Photo Attachment Flyout */}
             {showAttachmentMenu && (
               <div className="p-3 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex items-center gap-2 overflow-x-auto z-20">
-                <label
-                  onClick={() => setShowAttachmentMenu(false)}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAttachmentMenu(false);
+                    if (imageInputRef.current) {
+                      imageInputRef.current.value = '';
+                      imageInputRef.current.click();
+                    }
+                  }}
                   className="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:opacity-95 text-white rounded-xl text-xs font-bold shadow-xs flex-shrink-0 flex items-center gap-1.5 cursor-pointer active:scale-95 select-none"
                   title="Mobile Storage / Gallery se 10 photos tak chunein"
                 >
                   <ImageIcon size={14} />
                   <span>📱 Gallery (10 Photos)</span>
-                  <input
-                    type="file"
-                    accept="image/*,image/jpeg,image/png,image/webp,image/jpg"
-                    multiple
-                    className="sr-only"
-                    onChange={handleSelectImageFile}
-                    onClick={(e) => {
-                      (e.target as HTMLInputElement).value = '';
-                    }}
-                  />
-                </label>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAttachmentMenu(false);
+                    if (cameraInputRef.current) {
+                      cameraInputRef.current.value = '';
+                      cameraInputRef.current.click();
+                    }
+                  }}
+                  className="px-3 py-1.5 bg-gradient-to-r from-pink-600 to-rose-600 hover:opacity-95 text-white rounded-xl text-xs font-bold shadow-xs flex-shrink-0 flex items-center gap-1.5 cursor-pointer active:scale-95 select-none"
+                  title="Direct Camera se photo capture karein"
+                >
+                  <Camera size={14} />
+                  <span>📷 Camera</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => handleSendQuickAttachment('DOUBT', '📐 Mujhe is question ke formula calculation me doubt hai. Koi step explain kar sakta hai?')}
@@ -5963,31 +5996,58 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                     <Paperclip size={20} />
                   </button>
 
-                  {/* Dedicated Photo / Gallery Button - Native Label for guaranteed mobile picker */}
+                  {/* Dedicated Photo / Gallery / Camera Button */}
                   <label
-                    className="p-2 text-slate-500 hover:text-purple-600 dark:hover:text-purple-400 transition-colors cursor-pointer flex items-center justify-center rounded-lg active:opacity-60 select-none"
-                    title="Mobile Gallery se Photos Bhejein (10 tak)"
+                    htmlFor="nsta-chat-image-input"
+                    id="nsta-chat-camera-button"
+                    className="p-2 text-slate-500 hover:text-purple-600 dark:hover:text-purple-400 transition-colors cursor-pointer flex items-center justify-center rounded-lg active:scale-95 select-none"
+                    title="Mobile Gallery ya Camera se Photos Bhejein (10 tak)"
+                    aria-label="Mobile Gallery ya Camera se Photos Bhejein"
+                    onClick={() => {
+                      if (imageInputRef.current) {
+                        imageInputRef.current.value = '';
+                      }
+                    }}
                   >
                     <Camera size={20} />
-                    <input
-                      ref={imageInputRef}
-                      type="file"
-                      accept="image/*,image/jpeg,image/png,image/webp,image/jpg"
-                      multiple
-                      className="sr-only"
-                      onChange={handleSelectImageFile}
-                      onClick={(e) => {
-                        (e.target as HTMLInputElement).value = '';
-                      }}
-                    />
                   </label>
-                  {/* Add More Photos Input for Batch */}
+                  {/* File Selection Dialog (Gallery / Camera on Mobile) */}
                   <input
-                    ref={addMoreImageInputRef}
+                    id="nsta-chat-image-input"
+                    ref={imageInputRef}
                     type="file"
-                    accept="image/*,image/jpeg,image/png,image/webp,image/jpg"
+                    accept="image/*"
                     multiple
                     className="sr-only"
+                    tabIndex={-1}
+                    onChange={handleSelectImageFile}
+                    onClick={(e) => {
+                      (e.target as HTMLInputElement).value = '';
+                    }}
+                  />
+                  {/* Direct Camera Hardware Access */}
+                  <input
+                    id="nsta-chat-camera-input"
+                    ref={cameraInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="sr-only"
+                    tabIndex={-1}
+                    onChange={handleSelectImageFile}
+                    onClick={(e) => {
+                      (e.target as HTMLInputElement).value = '';
+                    }}
+                  />
+                  {/* Add More Photos Input for Batch */}
+                  <input
+                    id="nsta-chat-add-more-input"
+                    ref={addMoreImageInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="sr-only"
+                    tabIndex={-1}
                     onChange={handleAddMoreImages}
                     onClick={(e) => {
                       (e.target as HTMLInputElement).value = '';
@@ -7388,6 +7448,35 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                 </div>
 
                 <div className="flex items-center gap-1.5">
+                  {/* WhatsApp-Style HD Quality Toggle Button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextVal = !isHdQuality;
+                      setIsHdQuality(nextVal);
+                      showToast(
+                        nextVal
+                          ? '✨ HD Quality ON: Photo high-resolution (3200px) me bhejegi, formula aur notes crystal-clear dikhenge!'
+                          : '⚡ Standard Quality: Fast transfer active.'
+                      );
+                    }}
+                    disabled={isUploadingImage}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-black flex items-center gap-1 transition-all cursor-pointer select-none active:scale-95 ${
+                      isHdQuality
+                        ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-xs ring-1 ring-emerald-400'
+                        : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700'
+                    }`}
+                    title={isHdQuality ? 'HD Active: High Resolution (Notes aur formula crystal clear)' : 'HD button tap karke High Quality me bhejein'}
+                  >
+                    <Sparkles size={13} className={isHdQuality ? 'text-amber-300 animate-pulse' : 'text-slate-400'} />
+                    <span>HD</span>
+                    {isHdQuality && (
+                      <span className="text-[9px] bg-emerald-800/80 px-1 py-0.2 rounded text-white font-black">
+                        ON
+                      </span>
+                    )}
+                  </button>
+
                   {/* Quick Crop button in header */}
                   <button
                     type="button"
@@ -7419,6 +7508,37 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                 </div>
               </div>
 
+              {/* HD Helper Tip Bar */}
+              {isHdQuality ? (
+                <div className="px-3 py-1.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 rounded-xl flex items-center justify-between text-[11px] text-emerald-800 dark:text-emerald-300">
+                  <div className="flex items-center gap-1.5 font-semibold">
+                    <Sparkles size={12} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    <span>HD Quality Active: High-resolution clear upload for notes & formulas</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsHdQuality(false)}
+                    className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 hover:underline cursor-pointer ml-2 shrink-0"
+                  >
+                    Switch to Standard
+                  </button>
+                </div>
+              ) : (
+                <div className="px-3 py-1 bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-800 rounded-xl flex items-center justify-between text-[11px] text-slate-500">
+                  <span>💡 Formula ya handwritten notes bhej rahe hain?</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsHdQuality(true);
+                      showToast('✨ HD Quality ON: Photo high-resolution me send hogi!');
+                    }}
+                    className="font-bold text-purple-600 dark:text-purple-400 hover:underline cursor-pointer flex items-center gap-0.5 ml-2"
+                  >
+                    <Sparkles size={11} /> Turn HD ON
+                  </button>
+                </div>
+              )}
+
               {/* Main Image Preview with Interactive Crop Overlay */}
               <div className="relative rounded-2xl overflow-hidden h-64 sm:h-72 bg-slate-950 flex items-center justify-center group">
                 {selectedImageUrls[activePreviewImageIndex] ? (
@@ -7434,9 +7554,17 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                   </div>
                 )}
 
-                {/* Active Photo Badge */}
-                <div className="absolute top-2 left-2 px-2.5 py-1 bg-black/70 text-white rounded-lg text-[10px] font-bold backdrop-blur-xs flex items-center gap-1">
-                  <span>Photo {activePreviewImageIndex + 1} of {selectedImagesToSend.length}</span>
+                {/* Active Photo Badge & HD Badge */}
+                <div className="absolute top-2 left-2 flex items-center gap-1.5">
+                  <div className="px-2.5 py-1 bg-black/70 text-white rounded-lg text-[10px] font-bold backdrop-blur-xs flex items-center gap-1">
+                    <span>Photo {activePreviewImageIndex + 1} of {selectedImagesToSend.length}</span>
+                  </div>
+                  {isHdQuality && (
+                    <div className="px-2 py-1 bg-emerald-600/90 text-white rounded-lg text-[10px] font-black backdrop-blur-xs flex items-center gap-1 shadow-xs border border-emerald-400/50">
+                      <Sparkles size={10} className="text-amber-300" />
+                      <span>HD</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Overlay Crop Button on top-right of image */}
@@ -7471,14 +7599,18 @@ export const WhatsAppChatModal: React.FC<Props> = ({
                 <div className="flex items-center justify-between text-[11px] text-slate-500 px-0.5">
                   <span className="font-semibold">Selected Photos ({selectedImagesToSend.length}/10):</span>
                   {selectedImagesToSend.length < 10 && (
-                    <button
-                      type="button"
-                      onClick={() => addMoreImageInputRef.current?.click()}
+                    <label
+                      htmlFor="nsta-chat-add-more-input"
                       className="text-purple-600 dark:text-purple-400 font-bold hover:underline flex items-center gap-1 cursor-pointer active:scale-95 select-none"
+                      onClick={() => {
+                        if (addMoreImageInputRef.current) {
+                          addMoreImageInputRef.current.value = '';
+                        }
+                      }}
                     >
                       <Plus size={12} />
                       <span>Aur Photos Jodein ({10 - selectedImagesToSend.length} bachi)</span>
-                    </button>
+                    </label>
                   )}
                 </div>
 

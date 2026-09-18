@@ -1,7 +1,8 @@
 // @ts-nocheck
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Lightbulb, ThumbsUp, Send, X, Trash2, MessageSquare, CheckCircle, Clock, RefreshCw, ShieldCheck, Tag, FilePen, AlertCircle, Trophy, Coins, Star, Award } from 'lucide-react';
+import { Lightbulb, ThumbsUp, Send, X, Trash2, MessageSquare, CheckCircle, Clock, RefreshCw, ShieldCheck, Tag, FilePen, AlertCircle, Trophy, Coins, Star, Award, Camera, Download, Maximize2 } from 'lucide-react';
+import { uploadImageToImgBB } from '../services/imgbbService';
 import {
   saveSuggestion,
   subscribeSuggestions,
@@ -19,6 +20,7 @@ import {
 interface SuggestionItem {
   id: string;
   text: string;
+  imageUrl?: string;
   uid: string;
   userName: string;
   userBoard?: string;
@@ -85,9 +87,39 @@ export function SuggestionsPanel({ user, isAdmin, onClose }: Props) {
   const [leaderboard, setLeaderboard] = useState<SuggLeaderboardEntry[]>([]);
   const [userCoins, setUserCoins] = useState(0);
   const [userCoinHistory, setUserCoinHistory] = useState<any[]>([]);
+  const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const uid = user?.uid || user?.id || '';
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 15 * 1024 * 1024) {
+      alert('Photo size 15MB se kam honi chahiye.');
+      return;
+    }
+    setSelectedImageFile(file);
+    if (imagePreviewUrl) {
+      URL.revokeObjectURL(imagePreviewUrl);
+    }
+    setImagePreviewUrl(URL.createObjectURL(file));
+  };
+
+  const handleClearImage = () => {
+    setSelectedImageFile(null);
+    if (imagePreviewUrl) {
+      URL.revokeObjectURL(imagePreviewUrl);
+      setImagePreviewUrl(null);
+    }
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
 
   useEffect(() => {
     const unsub = subscribeSuggestions((items) => setSuggestions(items));
@@ -108,14 +140,25 @@ export function SuggestionsPanel({ user, isAdmin, onClose }: Props) {
   }, [uid]);
 
   const handleSubmit = async () => {
-    if (!newText.trim() || submitting) return;
+    if ((!newText.trim() && !selectedImageFile) || submitting) return;
     setSubmitting(true);
     try {
+      let uploadedImageUrl = '';
+      if (selectedImageFile) {
+        setIsUploadingImage(true);
+        uploadedImageUrl = await uploadImageToImgBB(
+          selectedImageFile,
+          `sug_${uid}_${Date.now()}`
+        );
+        setIsUploadingImage(false);
+      }
+
       const id = `sug_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       const userName = user?.name || user?.email?.split('@')[0] || 'Student';
       await saveSuggestion({
         id,
         text: newText.trim(),
+        imageUrl: uploadedImageUrl || undefined,
         uid: uid || 'anonymous',
         userName,
         userBoard: user?.board || '',
@@ -123,12 +166,14 @@ export function SuggestionsPanel({ user, isAdmin, onClose }: Props) {
       });
       updateSuggestionLeaderboard(uid, userName, 'reported').catch(() => {});
       setNewText('');
+      handleClearImage();
       setSubmitted(true);
       setTimeout(() => { setSubmitted(false); setTab('feed'); }, 2000);
     } catch (e) {
       console.error('[SuggestionsPanel] submit error:', e);
     } finally {
       setSubmitting(false);
+      setIsUploadingImage(false);
     }
   };
 
@@ -371,6 +416,25 @@ export function SuggestionsPanel({ user, isAdmin, onClose }: Props) {
                             </div>
                           )}
                           <p className="text-[12px] text-slate-200 leading-relaxed mb-2.5">{s.text}</p>
+
+                          {/* Attached Photo / Screenshot */}
+                          {s.imageUrl && (
+                            <div className="mb-2.5 relative overflow-hidden rounded-xl border border-amber-500/20 bg-black/40 group">
+                              <img
+                                src={s.imageUrl}
+                                alt="Attached Screenshot"
+                                className="w-full max-h-48 object-cover object-center cursor-pointer hover:scale-[1.01] transition-transform duration-200"
+                                onClick={() => setLightboxImage(s.imageUrl)}
+                                loading="lazy"
+                              />
+                              <div
+                                onClick={() => setLightboxImage(s.imageUrl)}
+                                className="absolute bottom-2 right-2 px-2 py-1 bg-black/70 hover:bg-black/90 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                              >
+                                <Maximize2 size={12} /> Full View
+                              </div>
+                            </div>
+                          )}
 
                           {/* Actions row */}
                           <div className="flex items-center gap-2">
@@ -660,13 +724,67 @@ export function SuggestionsPanel({ user, isAdmin, onClose }: Props) {
                       <p className="text-[9px] text-slate-600">Board: {user?.board || 'N/A'} • Class: {user?.class || 'N/A'}</p>
                       <p className="text-[9px] text-slate-600">{newText.length}/500</p>
                     </div>
+
+                    {/* Screenshot / Photo Attachment */}
+                    <div className="mt-3">
+                      <input
+                        id="nsta-suggestion-photo-input"
+                        type="file"
+                        ref={fileInputRef}
+                        accept="image/*"
+                        onChange={handleImageSelect}
+                        className="sr-only"
+                        tabIndex={-1}
+                        onClick={(e) => {
+                          (e.target as HTMLInputElement).value = '';
+                        }}
+                      />
+
+                      {imagePreviewUrl ? (
+                        <div className="relative inline-block mt-1">
+                          <img
+                            src={imagePreviewUrl}
+                            alt="Screenshot preview"
+                            className="w-36 h-24 object-cover rounded-xl border border-amber-400/50 shadow-md"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleClearImage}
+                            className="absolute -top-2 -right-2 p-1 bg-red-600 hover:bg-red-700 text-white rounded-full shadow cursor-pointer active:scale-95 transition-transform"
+                            title="Photo hataayein"
+                          >
+                            <X size={12} />
+                          </button>
+                          {isUploadingImage && (
+                            <div className="absolute inset-0 bg-black/70 rounded-xl flex flex-col items-center justify-center text-white text-[10px] font-bold">
+                              <RefreshCw size={14} className="animate-spin text-amber-400 mb-1" />
+                              <span>Uploading...</span>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <label
+                          htmlFor="nsta-suggestion-photo-input"
+                          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-amber-300 hover:text-amber-200 active:scale-95 transition-all cursor-pointer select-none"
+                          style={{ background: 'rgba(245,158,11,0.12)', border: '1px dashed rgba(245,158,11,0.4)' }}
+                          onClick={() => {
+                            if (fileInputRef.current) {
+                              fileInputRef.current.value = '';
+                            }
+                          }}
+                        >
+                          <Camera size={14} />
+                          <span>Screenshot / Photo Attach Karein (Optional)</span>
+                        </label>
+                      )}
+                    </div>
                   </div>
 
-                  <button onClick={handleSubmit} disabled={!newText.trim() || submitting}
-                    className="w-full py-3.5 rounded-2xl text-[13px] font-black text-white flex items-center justify-center gap-2 active:scale-95 transition disabled:opacity-40"
+                  <button onClick={handleSubmit} disabled={(!newText.trim() && !selectedImageFile) || submitting}
+                    className="w-full py-3.5 rounded-2xl text-[13px] font-black text-white flex items-center justify-center gap-2 active:scale-95 transition disabled:opacity-40 cursor-pointer"
                     style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', boxShadow: '0 4px 20px rgba(245,158,11,0.35)' }}>
                     {submitting ? <RefreshCw size={16} className="animate-spin" /> : <Send size={16} />}
-                    {submitting ? 'Submit ho raha hai…' : 'Submit Suggestion'}
+                    {submitting ? (isUploadingImage ? 'Photo upload ho rahi hai…' : 'Submit ho raha hai…') : 'Submit Suggestion'}
                   </button>
                 </>
               )}
@@ -869,6 +987,49 @@ export function SuggestionsPanel({ user, isAdmin, onClose }: Props) {
           )}
         </div>
       </div>
+
+      {/* Lightbox for enlarged screenshot view */}
+      {lightboxImage && (
+        <div
+          className="fixed inset-0 z-[100000] bg-black/95 backdrop-blur-md flex flex-col items-center justify-center p-4 animate-in fade-in select-none"
+          onClick={() => setLightboxImage(null)}
+        >
+          <div
+            className="absolute top-4 right-4 flex items-center gap-2 z-10"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <a
+              href={lightboxImage}
+              target="_blank"
+              rel="noopener noreferrer"
+              download="suggestion_screenshot.jpg"
+              className="p-2.5 bg-white/20 hover:bg-white/30 text-white rounded-full transition-colors flex items-center justify-center cursor-pointer shadow-lg active:scale-95"
+              title="Screenshot Download Karein"
+            >
+              <Download size={20} />
+            </a>
+            <button
+              type="button"
+              onClick={() => setLightboxImage(null)}
+              className="p-2.5 bg-white/20 hover:bg-white/30 text-white rounded-full transition-colors cursor-pointer shadow-lg active:scale-95"
+              title="Band Karein"
+            >
+              <X size={20} />
+            </button>
+          </div>
+
+          <div
+            className="max-w-4xl max-h-[85vh] relative flex items-center justify-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={lightboxImage}
+              alt="Enlarged Screenshot"
+              className="max-w-full max-h-[85vh] object-contain rounded-2xl shadow-2xl border border-white/10"
+            />
+          </div>
+        </div>
+      )}
     </>,
     document.body
   );
