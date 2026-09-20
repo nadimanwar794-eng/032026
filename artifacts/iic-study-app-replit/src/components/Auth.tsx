@@ -4,8 +4,7 @@ import { User, SystemSettings } from '../types';
 import { ADMIN_EMAIL } from '../constants';
 import { saveUserToLive, auth, getUserByEmail, getUserByMobileOrId, getUserData, getFreshUserData, getUserByLinkedGoogleUid } from '../firebase';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, setPersistence, browserLocalPersistence, signInAnonymously, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult } from 'firebase/auth';
-import { Lock, User as UserIcon, Phone, Mail, ShieldCheck, KeyRound, Copy, Check, XCircle, HelpCircle, Eye, EyeOff, ShieldQuestion, Loader2, ArrowRight, CheckCircle2, Laptop, Smartphone } from 'lucide-react';
-import { rotateScreen } from '../utils/displayPrefs';
+import { Lock, User as UserIcon, Phone, Mail, ShieldCheck, KeyRound, Copy, Check, XCircle, HelpCircle, Eye, EyeOff, ShieldQuestion, Loader2, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { LoginGuide } from './LoginGuide';
 import { CustomAlert } from './CustomDialogs';
 
@@ -212,17 +211,6 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
   const [recoveryStep, setRecoveryStep] = useState<1 | 2>(1);
   const [userEnteredAnswer, setUserEnteredAnswer] = useState('');
 
-  const [isLandscape, setIsLandscape] = useState<boolean>(() => {
-    try { return window.matchMedia('(orientation: landscape)').matches; } catch { return false; }
-  });
-
-  useEffect(() => {
-    const mql = window.matchMedia('(orientation: landscape)');
-    const onChange = (e: MediaQueryListEvent) => setIsLandscape(e.matches);
-    mql.addEventListener('change', onChange);
-    return () => mql.removeEventListener('change', onChange);
-  }, []);
-
   useEffect(() => {
     const s = localStorage.getItem('nst_system_settings');
     if (s) { try { setSettings(JSON.parse(s)); } catch {} }
@@ -323,6 +311,12 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
     void saveUserToLive(newUser, { immediate: true });
     localStorage.setItem('nst_current_user', JSON.stringify(newUser));
     localStorage.setItem('nst_last_user_id', uid);
+    if (!appUser) {
+      try {
+        localStorage.removeItem('nsta_first_assembly_seen');
+        sessionStorage.removeItem('nsta_home_assembly_seen');
+      } catch {}
+    }
     if (logActivity) logActivity(appUser ? "LOGIN" : "SIGNUP_GOOGLE", appUser ? "Logged In via Google Auth" : "New Student via Google", newUser);
     triggerLoginSuccess(newUser);
   };
@@ -579,6 +573,10 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
       void saveUserToLive(newStudentUser, { immediate: true });
       localStorage.setItem('nst_current_user', JSON.stringify(newStudentUser));
       localStorage.setItem('nst_last_user_id', uid);
+      try {
+        localStorage.removeItem('nsta_first_assembly_seen');
+        sessionStorage.removeItem('nsta_home_assembly_seen');
+      } catch {}
       if (logActivity) logActivity("SIGNUP_EMAIL", "New Student Registered", newStudentUser);
 
       setGeneratedId(newId);
@@ -720,24 +718,6 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
             </div>
             <h1 className="text-xl font-black tracking-tight text-slate-900">{settings?.appName || 'NSTA'}</h1>
           </div>
-
-          <button 
-            type="button"
-            onClick={async () => {
-              const result = await rotateScreen();
-              setIsLandscape(result === 'landscape');
-            }} 
-            title={isLandscape ? "Switch to Mobile Mode" : "Switch to Desktop / Laptop Mode"}
-            className={`w-8 h-8 rounded-full bg-[#eef1f5] shadow-[3px_3px_6px_#caced5,-3px_-3px_6px_#ffffff] active:shadow-[inset_2px_2px_4px_#caced5,inset_-2px_-2px_4px_#ffffff] flex items-center justify-center transition-all active:scale-95 ${
-              isLandscape ? 'text-amber-600 font-bold' : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            {isLandscape ? (
-              <Smartphone size={17} className="text-amber-500" />
-            ) : (
-              <Laptop size={17} />
-            )}
-          </button>
         </header>
 
         <div className="w-full max-w-md p-8 rounded-[2.5rem] bg-[#eef1f5] shadow-[20px_20px_60px_#caced5,-20px_-20px_60px_#ffffff] border border-white/60 text-center my-auto">
@@ -797,25 +777,6 @@ export const Auth: React.FC<Props> = ({ onLogin, logActivity, appSettings }) => 
         </div>
 
         <div className="flex items-center gap-2">
-          {/* 💻 Rotate Screen / Desktop Mode Button */}
-          <button 
-            type="button"
-            onClick={async () => {
-              const result = await rotateScreen();
-              setIsLandscape(result === 'landscape');
-            }} 
-            title={isLandscape ? "Switch to Mobile Mode" : "Switch to Desktop / Laptop Mode"}
-            className={`w-8 h-8 rounded-full bg-[#eef1f5] shadow-[3px_3px_6px_#caced5,-3px_-3px_6px_#ffffff] active:shadow-[inset_2px_2px_4px_#caced5,inset_-2px_-2px_4px_#ffffff] flex items-center justify-center transition-all active:scale-95 ${
-              isLandscape ? 'text-amber-600 font-bold' : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            {isLandscape ? (
-              <Smartphone size={17} className="text-amber-500" />
-            ) : (
-              <Laptop size={17} />
-            )}
-          </button>
-
           <button 
             type="button"
             onClick={() => setShowGuide(true)} 

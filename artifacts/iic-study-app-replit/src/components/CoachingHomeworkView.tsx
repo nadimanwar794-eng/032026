@@ -9,9 +9,11 @@ import { hapticMedium, hapticStrong } from '../utils/haptic';
 import { ChunkedNotesReader } from './ChunkedNotesReader';
 import { tryEarnScore, getActiveBoost } from '../utils/scoreSystem';
 import { inlineMd } from '../utils/mcqRender';
-import { getStatementLabel, getStatementText } from '../utils/mcqStructure';
+import { getStatementLabel, getStatementText, getMcqStatements } from '../utils/mcqStructure';
+import { extractStatements } from '../utils/mcqParser';
 import { renderMathInHtml, formatExplanationHtml } from '../utils/mathUtils';
 import McqQuestionNavigator from './McqQuestionNavigator';
+import UnifiedMcqPracticeView from './UnifiedMcqPracticeView';
 
 interface CoachingNote {
   id: string;
@@ -346,7 +348,7 @@ function NoteCard({ note, accent, directOpen = false, user, onReaderOpenChange }
 // ──────────────────────────────────────────────────────────────────────────────
 // McqCard — supports multiple correct answers
 // ──────────────────────────────────────────────────────────────────────────────
-type McqCommunityDraft = { question: string; options: [string,string,string,string]; correctAnswer: number; explanation: string };
+type McqCommunityDraft = { question: string; statements?: string[]; options: [string,string,string,string]; correctAnswer: number; explanation: string };
 
 function McqCard({ mcq, accent, onSendToMcqCommunity, user, answer, multiAnswers, showResult = false, onAnswerChange, onMultiAnswerChange }: {
   mcq: CoachingMcq;
@@ -405,7 +407,23 @@ function McqCard({ mcq, accent, onSendToMcqCommunity, user, answer, multiAnswers
                   ? mcq.options as [string,string,string,string]
                   : ([...mcq.options, '', '', '', ''].slice(0, 4) as [string,string,string,string]);
                 const firstCorrect = correctSet.size > 0 ? [...correctSet][0] : 0;
-                onSendToMcqCommunity({ question: mcq.question, options: opts, correctAnswer: firstCorrect, explanation: mcq.explanation || '' });
+                const stmts = getMcqStatements(mcq);
+                let finalStmts = stmts;
+                let cleanQ = (mcq.question || '').replace(/<br\s*\/?>/gi, '\n').trim();
+                if (finalStmts.length === 0) {
+                  const ext = extractStatements(cleanQ);
+                  if (ext.statements.length > 0) {
+                    finalStmts = ext.statements;
+                    cleanQ = ext.cleanedQuestion.replace(/<br\s*\/?>/gi, '\n').trim();
+                  }
+                }
+                onSendToMcqCommunity({
+                  question: cleanQ,
+                  statements: finalStmts.length > 0 ? finalStmts : undefined,
+                  options: opts,
+                  correctAnswer: firstCorrect,
+                  explanation: mcq.explanation || '',
+                });
               }}
               className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center active:scale-90 transition-all"
               style={{ background: `${accent}18`, color: accent }}
@@ -496,186 +514,50 @@ function McqCard({ mcq, accent, onSendToMcqCommunity, user, answer, multiAnswers
 }
 
 function McqFullPage({ mcqs, accent, label, onClose, onSendToMcqCommunity, user }: { mcqs: CoachingMcq[]; accent: string; label: string; onClose: () => void; onSendToMcqCommunity?: (draft: McqCommunityDraft) => void; user?: any }) {
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [answers, setAnswers] = useState<Record<number, number>>({});
-  const [multiAnswers, setMultiAnswers] = useState<Record<number, Set<number>>>({});
-  const [skipped, setSkipped] = useState<Set<number>>(new Set());
-  const [submitted, setSubmitted] = useState(false);
-  const [score, setScore] = useState<number | null>(null);
-  const [zoomLevel, setZoomLevel] = useState(1);
-
-  const goNext = () => {
-    hapticMedium();
-    if (currentIndex < mcqs.length - 1) {
-      setCurrentIndex(index => index + 1);
-    }
-  };
-
-  const skipQuestion = () => {
-    hapticMedium();
-    if (currentIndex < mcqs.length - 1) {
-      setSkipped(prev => {
-        const next = new Set(prev);
-        if (answers[currentIndex] === undefined && !(multiAnswers[currentIndex]?.size)) next.add(currentIndex);
-        return next;
-      });
-      setCurrentIndex(index => index + 1);
-    }
-  };
-
-  const goBack = () => {
-    if (currentIndex === 0) return;
-    hapticMedium();
-    setCurrentIndex(index => index - 1);
-  };
-
-  const navigatorAnswers: Record<number, unknown> = { ...answers };
-  Object.entries(multiAnswers).forEach(([index, value]) => {
-    if (value.size > 0) navigatorAnswers[Number(index)] = value;
-  });
-
-  const submitAll = () => {
-    if (submitted) return;
+  const handleSubmit = (result: { score: number; total: number; answers: Record<number, number> }) => {
     let correct = 0;
     mcqs.forEach((mcq, index) => {
-      const correctSet = getCorrectSet(mcq);
-      const selectedSet = multiAnswers[index] || new Set<number>();
-      const isCorrect = correctSet.size > 1
-        ? selectedSet.size === correctSet.size && [...selectedSet].every(option => correctSet.has(option))
-        : answers[index] !== undefined && correctSet.has(answers[index]);
-      if (isCorrect) {
+      const correctIdx = typeof mcq.correctAnswer === 'number' ? mcq.correctAnswer : (mcq.correctAnswers?.[0] ?? 0);
+      if (result.answers[index] === correctIdx) {
         correct++;
         if (user?.id) tryEarnScore(user.id, 2, user.subscriptionLevel, user.isPremium, getActiveBoost(user), 'COACHING_HW_MCQ_CORRECT');
       }
     });
-    setScore(correct);
-    setSubmitted(true);
   };
 
+  const handleSendCommunity = onSendToMcqCommunity ? (q: any) => {
+    let finalStmts = q.statements || [];
+    let cleanQ = q.question || '';
+    if (!finalStmts.length && cleanQ) {
+      const ext = extractStatements(cleanQ);
+      if (ext.statements.length > 0) {
+        finalStmts = ext.statements;
+        cleanQ = ext.cleanedQuestion.replace(/<br\s*\/?>/gi, '\n').trim();
+      }
+    }
+    const opts = q.options && q.options.length >= 2 ? q.options : ['A', 'B', 'C', 'D'];
+    const correctIdx = typeof q.correctAnswer === 'number' ? q.correctAnswer : (q.correctAnswers?.[0] ?? 0);
+    onSendToMcqCommunity({
+      question: cleanQ,
+      statements: finalStmts.length > 0 ? finalStmts : undefined,
+      options: opts,
+      correctAnswer: correctIdx,
+      explanation: q.explanation || '',
+    });
+  } : undefined;
+
   return createPortal(
-    <div className="fixed inset-0 flex flex-col" style={{ zIndex: 9999, background: '#f8fafc' }}>
-      <div className="shrink-0 flex items-center gap-3 px-4 py-3 shadow-sm" style={{ background: accent }}>
-        <button onPointerDown={() => { hapticMedium(); onClose(); }} className="p-1.5 rounded-full" style={{ background: 'rgba(255,255,255,0.18)' }}>
-          <ArrowLeft size={18} className="text-white" />
-        </button>
-        <span className="text-white font-black text-base flex-1">🧠 {label}</span>
-        <div className="flex items-center gap-1 rounded-lg p-0.5" style={{ background: 'rgba(255,255,255,0.16)' }}>
-          <button
-            onClick={() => { hapticMedium(); setZoomLevel(level => Math.max(0.85, Number((level - 0.1).toFixed(2)))); }}
-            disabled={zoomLevel <= 0.85}
-            aria-label="Text chhota karein"
-            title="Text chhota karein"
-            className="w-7 h-7 flex items-center justify-center rounded-md text-white disabled:opacity-35 active:scale-90 transition-all"
-          >
-            <ZoomOut size={15} />
-          </button>
-          <span className="min-w-[34px] text-center text-[10px] font-black text-white">{Math.round(zoomLevel * 100)}%</span>
-          <button
-            onClick={() => { hapticMedium(); setZoomLevel(level => Math.min(1.5, Number((level + 0.1).toFixed(2)))); }}
-            disabled={zoomLevel >= 1.5}
-            aria-label="Text bada karein"
-            title="Text bada karein"
-            className="w-7 h-7 flex items-center justify-center rounded-md text-white disabled:opacity-35 active:scale-90 transition-all"
-          >
-            <ZoomIn size={15} />
-          </button>
-        </div>
-        <span className="text-white/90 text-[11px] font-black">{currentIndex + 1} / {mcqs.length}</span>
-      </div>
-      <div className="shrink-0 px-4 pt-3">
-        <div className="h-1.5 rounded-full overflow-hidden bg-slate-200">
-          <div
-            className="h-full rounded-full transition-all duration-300"
-            style={{ width: `${((currentIndex + 1) / Math.max(mcqs.length, 1)) * 100}%`, background: accent }}
-          />
-        </div>
-      </div>
-      <div className="shrink-0 px-4 pt-3">
-        <McqQuestionNavigator
-          total={mcqs.length}
-          currentIndex={currentIndex}
-          answers={navigatorAnswers}
-          skipped={skipped}
-          onJump={setCurrentIndex}
-        />
-      </div>
-      <div className="flex-1 overflow-y-auto px-4 py-3" style={{ paddingBottom: 112 }}>
-        {mcqs.map((m, index) => (
-          <div key={m.id} style={{ display: index === currentIndex ? 'block' : 'none', zoom: zoomLevel }}>
-            <McqCard
-              mcq={m}
-              accent={accent}
-              onSendToMcqCommunity={onSendToMcqCommunity}
-              user={user}
-              answer={answers[index] ?? null}
-              multiAnswers={multiAnswers[index]}
-              showResult={submitted}
-              onAnswerChange={(option) => {
-                setAnswers(prev => ({ ...prev, [index]: option }));
-                setSkipped(prev => { const next = new Set(prev); next.delete(index); return next; });
-                // Single-answer homework questions move forward as soon as an
-                // option is chosen. Multiple-correct questions stay manual so
-                // the student can select every correct option.
-                if (getCorrectSet(m).size <= 1 && index < mcqs.length - 1) {
-                  setCurrentIndex(current => current === index ? index + 1 : current);
-                }
-              }}
-              onMultiAnswerChange={(option) => {
-                setMultiAnswers(prev => {
-                  const next = new Set(prev[index] || []);
-                  if (next.has(option)) next.delete(option); else next.add(option);
-                  return { ...prev, [index]: next };
-                });
-                setSkipped(prev => { const next = new Set(prev); next.delete(index); return next; });
-              }}
-            />
-          </div>
-        ))}
-      </div>
-      <div
-        className="shrink-0 grid grid-cols-3 gap-2 px-4 pt-3 bg-white border-t border-slate-200"
-        style={{ paddingBottom: 'calc(16px + env(safe-area-inset-bottom))' }}
-      >
-        <button
-          onClick={goBack}
-          disabled={currentIndex === 0}
-          className="flex items-center justify-center gap-1.5 py-3 rounded-xl border border-slate-200 bg-white text-slate-700 text-xs font-black disabled:opacity-35 active:scale-[0.98] transition-all"
-        >
-          <ChevronLeft size={15} />
-          Back
-        </button>
-        <button
-          onClick={skipQuestion}
-          className="flex items-center justify-center gap-1.5 py-3 rounded-xl border text-xs font-black active:scale-[0.98] transition-all"
-          style={{ borderColor: `${accent}45`, color: accent, background: `${accent}08` }}
-        >
-          <SkipForward size={14} />
-          Skip
-        </button>
-        <button
-          onClick={goNext}
-          disabled={currentIndex === mcqs.length - 1}
-          className="flex items-center justify-center gap-1.5 py-3 rounded-xl text-white text-xs font-black disabled:opacity-40 active:scale-[0.98] transition-all"
-          style={{ background: accent }}
-        >
-          Next
-          <ChevronRight size={15} />
-        </button>
-        {!submitted ? (
-          <button
-            onClick={submitAll}
-            className="col-span-3 flex items-center justify-center gap-1.5 rounded-xl py-3 text-xs font-black text-white active:scale-[0.98] transition-all"
-            style={{ background: accent }}
-          >
-            ✅ Submit & See Result
-          </button>
-        ) : (
-          <div className="col-span-3 flex items-center justify-between rounded-xl bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700">
-            <span>Result: {score}/{mcqs.length} correct</span>
-            <button onClick={onClose} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-white">Close</button>
-          </div>
-        )}
-      </div>
+    <div className="fixed inset-0 z-[9999] flex flex-col bg-slate-50">
+      <UnifiedMcqPracticeView
+        questions={mcqs}
+        title={label || 'MCQ Practice'}
+        subtitle="Coaching Homework · MCQ Practice"
+        accent={accent}
+        onBack={onClose}
+        onSubmit={handleSubmit}
+        onSendToMcqCommunity={handleSendCommunity}
+        user={user}
+      />
     </div>,
     document.body
   );
@@ -728,7 +610,7 @@ function CategorySection({ catKey, data, accent, onSendToMcqCommunity, user, onR
       </button>
       {open && (
         <div className="space-y-2 pl-1">
-          {notes.map(n => <NoteCard key={n.id} note={n} accent={meta.color} directOpen={catKey !== 'lucent'} user={user} onReaderOpenChange={onReaderOpenChange} />)}
+          {notes.map((n, idx) => <NoteCard key={n.id ? `${n.id}_${idx}` : `note_${idx}`} note={n} accent={meta.color} directOpen={catKey !== 'lucent'} user={user} onReaderOpenChange={onReaderOpenChange} />)}
           {mcqs.length > 0 && (
             <button
               className="w-full flex items-center gap-2 px-3 py-3 rounded-xl border active:scale-[0.99] transition-all"
@@ -743,8 +625,8 @@ function CategorySection({ catKey, data, accent, onSendToMcqCommunity, user, onR
               <ChevronRight size={16} style={{ color: meta.color }} />
             </button>
           )}
-          {pdfs.map(p => (
-            <a key={p.id} href={p.url} target="_blank" rel="noopener noreferrer"
+          {pdfs.map((p, pIdx) => (
+            <a key={p.id ? `${p.id}_${pIdx}` : `pdf_${pIdx}`} href={p.url} target="_blank" rel="noopener noreferrer"
               className="flex items-center gap-2 px-3 py-2 rounded-xl border active:scale-[0.99] transition-all"
               style={{ borderColor: `${meta.color}30`, background: `${meta.color}08` }}
               onClick={() => hapticMedium()}

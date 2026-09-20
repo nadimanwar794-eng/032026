@@ -9,6 +9,7 @@ export const DEFAULT_NAV_ACTIVE_COLORS = [
   '#10b981',
   '#f59e0b',
   '#ec4899',
+  '#6366f1',
 ];
 
 export const getUserTier = (

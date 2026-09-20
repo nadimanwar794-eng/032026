@@ -144,18 +144,26 @@ export function normalizeMcqPaste(raw: string): string {
  * HTML or plain note content
  * </NOTE: Topic Name>
  */
-function extractStatements(questionText: string): { statements: string[], cleanedQuestion: string } {
+export function extractStatements(questionText: string): { statements: string[], cleanedQuestion: string } {
     const statements: string[] = [];
     let cleanedQuestion = "";
 
-    const lines = questionText.split(/<br\/>|\n/);
+    // Normalize horizontal statements if string has no newlines
+    let normalized = questionText;
+    if (!normalized.includes('\n') && !normalized.includes('<br')) {
+        normalized = normalized
+            .replace(/(?<=[^\n])\s*(?=(?:(?:कथन|Statement)\s*(?:\(?\s*[0-9IVXivxABab]+\s*\)?)?\s*[:.\-)]|\(?\d+[\)\.\:\-]\s*|\(?[IVXivx]+[\)\.\:\-]\s*))/gi, '\n')
+            .replace(/(?<=[^\n])\s*(?=(?:उपर्युक्त|उपरोक्त|निम्नलिखित\s+में\s+से|कूट\b|which\s+of\s+the\s+above))/gi, '\n');
+    }
+
+    const lines = normalized.split(/<br\s*\/?>|\n/);
     let inStatementBlock = false;
     let currentStatement = "";
     const tempQuestionLines: string[] = [];
     const endingQuestionLines: string[] = [];
 
-    const statementStartRegex = /^(?:(?:Statement|कथन)\s*(?:[0-9]+|[IVXivx]+)|\d+[\)\.])\s*[:\-\.]?(.*)/i;
-    const endingQuestionRegex = /^(?:which of the|उपर्युक्त|उपरोक्त|choose the|select the|find the|निम्नलिखित में से|कूट\b|कूट का|उपर्युक्त कथनों|\*\*\s*कूट)/i;
+    const statementStartRegex = /^(?:(?:Statement|कथन|Assertion|Reason|अभिकथन|कारण)\s*(?:\(?\s*[0-9IVXivxABab]+\s*\)?)?\s*[:\-\.]?|\(?\d+[\)\.\:\-]\s*|\(?[IVXivx]+[\)\.\:\-]\s*|\(?[a-dA-D]\)[\s\:\.]*)/i;
+    const endingQuestionRegex = /^(?:which\s+of\s+the|which\s+of\s+above|उपर्युक्त|उपरोक्त|choose\s+the|select\s+the|find\s+the|निम्नलिखित\s+में\s+से|कूट\b|कूट\s+का|उपर्युक्त\s+कथनों|\*\*\s*कूट)/i;
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();

@@ -8,6 +8,7 @@ import { rtdb } from '../firebase';
 import { TopBarEffectsLayer } from '../utils/topBarEffects';
 import { CommunityPostFeed } from './CommunityPostFeed';
 import { McqHub } from './McqHub';
+import { extractStatements } from '../utils/mcqParser';
 
 interface Props {
     user: User;
@@ -17,7 +18,7 @@ interface Props {
     roomId?: string;
     roomName?: string;
     allowStudentMcq?: boolean;
-    initialMcqDraft?: { question: string; options: [string,string,string,string]; correctAnswer: number; explanation: string };
+    initialMcqDraft?: { question: string; statements?: string[]; options: [string,string,string,string] | string[]; correctAnswer: number; explanation: string };
     defaultTab?: 'GLOBAL' | 'MCQ' | 'SUPPORT';
     hideGlobalTab?: boolean;
     hideSupportTab?: boolean;
@@ -36,12 +37,13 @@ interface Props {
 
 interface McqDraft {
     question: string;
+    statements?: string[];
     options: [string, string, string, string];
     correctAnswer: number;
     explanation: string;
 }
 
-const EMPTY_MCQ: McqDraft = { question: '', options: ['', '', '', ''], correctAnswer: 0, explanation: '' };
+const EMPTY_MCQ: McqDraft = { question: '', statements: undefined, options: ['', '', '', ''], correctAnswer: 0, explanation: '' };
 
 export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetUser, roomId, roomName, allowStudentMcq, initialMcqDraft, defaultTab, hideGlobalTab, hideSupportTab, isFeedOnly, isMcqOnly, isSupportOnly, onSpendCoins, onSpendDiamonds, onUpdateUser, themeColor, onRestoreBottomNav, isBottomNavVisible = false, appLogo, appName }) => {
     const appTheme = useAppTheme();
@@ -74,7 +76,37 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
     const [messages, setMessages] = useState<any[]>([]);
     const [input, setInput] = useState('');
     const [showMcqBuilder, setShowMcqBuilder] = useState(!!initialMcqDraft);
-    const [mcqDraft, setMcqDraft] = useState<McqDraft>(initialMcqDraft || EMPTY_MCQ);
+    const [mcqDraft, setMcqDraft] = useState<McqDraft>(() => {
+        if (initialMcqDraft) {
+            const opts = (initialMcqDraft.options || []).length === 4
+                ? initialMcqDraft.options as [string, string, string, string]
+                : ([...(initialMcqDraft.options || []), '', '', '', ''].slice(0, 4) as [string, string, string, string]);
+            return {
+                question: initialMcqDraft.question,
+                statements: initialMcqDraft.statements,
+                options: opts,
+                correctAnswer: initialMcqDraft.correctAnswer,
+                explanation: initialMcqDraft.explanation,
+            };
+        }
+        return EMPTY_MCQ;
+    });
+
+    useEffect(() => {
+        if (initialMcqDraft) {
+            const opts = (initialMcqDraft.options || []).length === 4
+                ? initialMcqDraft.options as [string, string, string, string]
+                : ([...(initialMcqDraft.options || []), '', '', '', ''].slice(0, 4) as [string, string, string, string]);
+            setMcqDraft({
+                question: initialMcqDraft.question,
+                statements: initialMcqDraft.statements,
+                options: opts,
+                correctAnswer: initialMcqDraft.correctAnswer,
+                explanation: initialMcqDraft.explanation,
+            });
+            setShowMcqBuilder(true);
+        }
+    }, [initialMcqDraft]);
     const [showMcqLeaderboard, setShowMcqLeaderboard] = useState(true);
     const [isAdminOnly, setIsAdminOnly] = useState(false);
     const [selectedUserProfile, setSelectedUserProfile] = useState<{name: string; id: string; role: string} | null>(null);
@@ -96,7 +128,7 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
 
     if (isMcqOnly) {
         return (
-            <div className="w-full h-full bg-slate-900 flex flex-col">
+            <div className="w-full h-full bg-slate-900 flex flex-col min-h-0 overflow-y-auto overscroll-contain">
                 <McqHub
                     user={user}
                     onBack={onClose}
@@ -405,14 +437,29 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
         if (!isAdminOrSub && mcqDailyCount >= 10) {
             alert('Aap aaj ke 10 MCQ bhej chuke hain! Kal phir aa sakte hain. 😊'); return;
         }
-        const { question, options, correctAnswer, explanation } = mcqDraft;
-        if (!question.trim() || options.some(o => !o.trim())) {
+        let { question, statements, options, correctAnswer, explanation } = mcqDraft;
+        let finalStmts = statements && statements.length > 0 ? statements : undefined;
+        let cleanQ = question.trim();
+        if (!finalStmts) {
+            const ext = extractStatements(cleanQ);
+            if (ext.statements.length > 0) {
+                finalStmts = ext.statements;
+                cleanQ = ext.cleanedQuestion;
+            }
+        }
+        if (!cleanQ || options.some(o => !o.trim())) {
             alert('Question aur sare 4 options fill karo'); return;
         }
         const msg = buildBase({
             type: 'MCQ',
-            text: question,
-            mcqData: { question, options, correctAnswer, explanation },
+            text: cleanQ,
+            mcqData: {
+                question: cleanQ,
+                statements: finalStmts,
+                options,
+                correctAnswer,
+                explanation
+            },
             isAdminOnly: isAdminOrSub ? isAdminOnly : false,
         });
         try {
@@ -763,7 +810,7 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
 
                 {/* Messages or MCQ Hub */}
                 {activeTab === 'MCQ' ? (
-                    <div className="flex-1 overflow-hidden flex flex-col">
+                    <div className="flex-1 overflow-y-auto flex flex-col min-h-0">
                         <McqHub
                             user={user}
                             onBack={() => setActiveTab('GLOBAL')}
@@ -922,7 +969,26 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                                                             <span className={`text-[10px] font-black uppercase tracking-wide ${isMe ? 'text-white/70' : ''}`} style={!isMe ? { color: subColor } : {}}>MCQ</span>
                                                             {totalVotes > 0 && <span className={`text-[9px] font-bold ml-auto ${isMe ? 'text-blue-200' : 'text-slate-400'}`}>{totalVotes} jawab</span>}
                                                         </div>
-                                                        <p className="font-semibold text-[13px] leading-snug mb-3">{msg.mcqData.question}</p>
+                                                        <p className="font-semibold text-[13px] leading-snug mb-2">{msg.mcqData.question}</p>
+                                                        {(() => {
+                                                            let stmts = msg.mcqData.statements;
+                                                            if (!stmts || stmts.length === 0) {
+                                                                const ext = extractStatements(msg.mcqData.question || '');
+                                                                if (ext.statements.length > 0) stmts = ext.statements;
+                                                            }
+                                                            if (stmts && stmts.length > 0) {
+                                                                return (
+                                                                    <div className={`mb-3 p-2 rounded-lg text-xs space-y-1 ${isMe ? 'bg-blue-950/40 text-blue-100 border border-blue-400/30' : 'bg-slate-50 text-slate-700 border border-slate-200'}`}>
+                                                                        {stmts.map((s: string, sIdx: number) => (
+                                                                            <div key={sIdx} className="leading-relaxed font-medium">
+                                                                                {s}
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                );
+                                                            }
+                                                            return null;
+                                                        })()}
                                                         <div className="space-y-2">
                                                             {(msg.mcqData.options || []).map((opt: string, oi: number) => {
                                                                 const isPicked = myVote === oi;
@@ -1050,6 +1116,23 @@ export const UniversalChat: React.FC<Props> = ({ user, onClose, isAdmin, targetU
                                                 onChange={e => setMcqDraft(p => ({ ...p, question: e.target.value }))}
                                                 placeholder="Apna question yahan likhein..."
                                                 className="w-full p-3 text-sm border border-slate-200 rounded-xl bg-slate-50 focus:ring-2 focus:ring-indigo-400 focus:border-transparent outline-none resize-none leading-relaxed"
+                                            />
+                                        </div>
+                                        {/* Statements (कथन) */}
+                                        <div>
+                                            <div className="flex items-center justify-between mb-1">
+                                                <label className="block text-[11px] font-black text-slate-500 uppercase tracking-wide">कथन (Statements) - यदि प्रश्न कथन वाला है</label>
+                                                <span className="text-[10px] text-purple-600 font-semibold">(1 लाइन = 1 कथन)</span>
+                                            </div>
+                                            <textarea
+                                                rows={3}
+                                                value={(mcqDraft.statements || []).join('\n')}
+                                                onChange={e => {
+                                                    const lines = e.target.value.split('\n').map(s => s.trim()).filter(Boolean);
+                                                    setMcqDraft(p => ({ ...p, statements: lines.length > 0 ? lines : undefined }));
+                                                }}
+                                                placeholder={`1. कथन 1\n2. कथन 2`}
+                                                className="w-full p-2.5 text-xs border border-slate-200 rounded-xl bg-slate-50 focus:ring-2 focus:ring-indigo-400 focus:border-transparent outline-none resize-none leading-relaxed"
                                             />
                                         </div>
                                         {/* Options */}

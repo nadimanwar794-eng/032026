@@ -19,6 +19,7 @@ import { playSoundClick, playSoundCorrect, playSoundWrong, playSoundVictory, isS
 import { loadRoutineData } from '../utils/routineStorage';
 import { deferStudyCoins } from '../utils/studyRewards';
 import McqQuestionNavigator from './McqQuestionNavigator';
+import McqQuestionDisplay from './McqQuestionDisplay';
 
 interface InterleavedQ extends MCQItem {
     _topicIndex: number;
@@ -933,15 +934,12 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                     {question._topicName}
                 </div>
 
-                <div className="text-lg font-bold text-slate-800 mb-8 leading-relaxed">
-                    <span dangerouslySetInnerHTML={{ __html: renderMathInHtml(question.question) }} />
-                    {question.statements && question.statements.length > 0 && (
-                        <div className="mt-3 mb-2 flex flex-col space-y-1">
-                            {question.statements.map((stmt: string, sIdx: number) => (
-                                <div key={sIdx} className="text-slate-800 text-base font-medium leading-snug" dangerouslySetInnerHTML={{ __html: renderMathInHtml(stmt) }} />
-                            ))}
-                        </div>
-                    )}
+                <div className="mb-8">
+                    <McqQuestionDisplay
+                        q={question}
+                        questionClassName="text-lg font-bold text-slate-800 leading-relaxed"
+                        stmtClassName="text-base font-semibold text-slate-700 bg-sky-50 border-l-4 border-sky-400 rounded-xl px-3.5 py-2 my-2"
+                    />
                 </div>
 
                 <div className="space-y-2">
@@ -1052,7 +1050,13 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                             )}
                             <div style={{ display:'flex', alignItems:'flex-start', gap:12 }}>
                                 <span style={{ background:'#3b82f6', color:'#fff', borderRadius:999, width:36, height:36, display:'flex', alignItems:'center', justifyContent:'center', fontSize:16, fontWeight:900, flexShrink:0 }}>{projectorQIdx + 1}</span>
-                                <p style={{ fontSize:20, fontWeight:800, color:'#1e293b', lineHeight:1.45, flex:1 }} dangerouslySetInnerHTML={{ __html: renderMathInHtml(pq.question) }} />
+                                <div style={{ flex:1 }}>
+                                    <McqQuestionDisplay
+                                        q={pq}
+                                        questionClassName="text-xl font-extrabold text-slate-800 leading-relaxed"
+                                        stmtClassName="text-base font-semibold text-slate-700 bg-sky-50 border-l-4 border-sky-400 rounded-xl px-3.5 py-2 my-2"
+                                    />
+                                </div>
                             </div>
                             <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
                                 {pq.options.map((opt: string, oi: number) => {

@@ -5,7 +5,7 @@ import {
   Users, School, Building2, ChevronRight, ChevronLeft, Clock, Trophy,
   Flame, CheckCircle, Zap, Tag, Gift, Bell, Calendar,
   ExternalLink, ShieldCheck, ArrowRight, Percent, Globe,
-  Coins, TrendingUp, Palette, Check, Sparkle, Headphones, Lightbulb
+  Coins, TrendingUp, Palette, Check, Sparkle, Headphones, Lightbulb, Lock
 } from 'lucide-react';
 import type { User, SystemSettings, Challenge20 } from '../types';
 import { isDailyChallenge20, getChallengeDateKey } from '../utils/challengeGenerator';
@@ -116,6 +116,15 @@ export const UpdatesPage: React.FC<Props> = ({
 
   const hasSchool = Boolean(userSchool || (user as any)?.schoolId);
   const hasCoaching = Boolean(userCoachingId || (user as any)?.coachingId || isCoachingAdmin);
+
+  // Paid tier check (Basic or Ultra or Admin required for advanced features)
+  const isPaidUser = useMemo(() => {
+    if (!user) return false;
+    if (user.role === 'ADMIN' || (user as any).isAdmin) return true;
+    const isSub = user.subscriptionLevel === 'BASIC' || user.subscriptionLevel === 'ULTRA';
+    const hasValidDate = !user.subscriptionEndDate || new Date(user.subscriptionEndDate).getTime() > Date.now();
+    return Boolean((user.isPremium || isSub) && hasValidDate);
+  }, [user]);
 
   // Live countdown timer ticking every 1 second
   useEffect(() => {
@@ -733,19 +742,22 @@ export const UpdatesPage: React.FC<Props> = ({
                     <Rocket size={22} />
                   </div>
                   <div>
-                    <h4 className="text-sm font-black text-slate-900 dark:text-white">Daily Challenge</h4>
+                    <h4 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                      <span>Daily Challenge</span>
+                      {!isPaidUser && <span className="text-xs">🔒</span>}
+                    </h4>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">Sabhi students ke liye 100 MCQs ka timed test</p>
                   </div>
                 </div>
                 <span
                   className="px-2.5 py-1 rounded-xl text-[10px] font-black shrink-0 uppercase tracking-wider shadow-2xs"
                   style={{
-                    background: `${themeBorder}18`,
-                    color: themeBorder,
-                    border: `1px solid ${themeBorder}35`,
+                    background: isPaidUser ? `${themeBorder}18` : 'rgba(239, 68, 68, 0.15)',
+                    color: isPaidUser ? themeBorder : '#ef4444',
+                    border: isPaidUser ? `1px solid ${themeBorder}35` : '1px solid rgba(239, 68, 68, 0.35)',
                   }}
                 >
-                  +100 XP
+                  {isPaidUser ? '+100 XP' : '🔒 Basic+'}
                 </span>
               </div>
 
@@ -789,21 +801,38 @@ export const UpdatesPage: React.FC<Props> = ({
                 <button
                   type="button"
                   onClick={() => {
+                    if (!isPaidUser) {
+                      alert('🔒 Daily Challenge feature Basic aur Ultra members ke liye hai. Plan upgrade karein!');
+                      return;
+                    }
                     if (activeDaily && onStartDailyChallenge) {
                       onStartDailyChallenge(activeDaily);
                     }
                   }}
                   className="w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98"
                   style={{
-                    background: themeBtnGrad,
+                    background: isPaidUser ? themeBtnGrad : 'linear-gradient(135deg, #64748b, #475569)',
                     color: '#ffffff',
-                    boxShadow: `0 4px 14px ${themePrimary}35`,
+                    boxShadow: isPaidUser ? `0 4px 14px ${themePrimary}35` : 'none',
                   }}
                 >
-                  <Rocket size={15} />
-                  <span>Start Daily Challenge →</span>
+                  {isPaidUser ? <Rocket size={15} /> : <Lock size={15} />}
+                  <span>{isPaidUser ? 'Start Daily Challenge →' : '🔒 Start Daily Challenge (Basic+ Required)'}</span>
                 </button>
               )}
+            </div>
+
+            {/* Kal Ka Leaderboard & Winner Prizes Button */}
+            <div className="mt-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent('iic-open-daily-challenge-leaderboard'));
+                }}
+                className="w-full py-2 px-3 rounded-xl text-xs font-black bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-300/40 dark:border-amber-600/30 flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-98"
+              >
+                <span>🏆 Kal Ka Result & Leaderboard (Sabhi Ke Ranks & Prizes) →</span>
+              </button>
             </div>
           </div>
 
@@ -822,19 +851,22 @@ export const UpdatesPage: React.FC<Props> = ({
                     <MessageSquare size={22} />
                   </div>
                   <div>
-                    <h4 className="text-sm font-black text-slate-900 dark:text-white">Nsta Messenger</h4>
+                    <h4 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                      <span>Nsta Messenger</span>
+                      {!isPaidUser && <span className="text-xs">🔒</span>}
+                    </h4>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">Classmates chat, doubts & study groups</p>
                   </div>
                 </div>
                 <span
                   className="px-2.5 py-1 rounded-xl text-[10px] font-black shrink-0 uppercase tracking-wider shadow-2xs"
                   style={{
-                    background: `${themeBorder}18`,
-                    color: themeBorder,
-                    border: `1px solid ${themeBorder}35`,
+                    background: isPaidUser ? `${themeBorder}18` : 'rgba(239, 68, 68, 0.15)',
+                    color: isPaidUser ? themeBorder : '#ef4444',
+                    border: isPaidUser ? `1px solid ${themeBorder}35` : '1px solid rgba(239, 68, 68, 0.35)',
                   }}
                 >
-                  Instant Chat
+                  {isPaidUser ? 'Instant Chat' : '🔒 Basic+'}
                 </span>
               </div>
 
@@ -854,15 +886,22 @@ export const UpdatesPage: React.FC<Props> = ({
             <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
               <button
                 type="button"
-                onClick={onOpenMessenger}
+                onClick={() => {
+                  if (!isPaidUser) {
+                    alert('🔒 Nsta Messenger feature Basic aur Ultra members ke liye hai. Plan upgrade karein!');
+                    return;
+                  }
+                  if (onOpenMessenger) onOpenMessenger();
+                }}
                 className="w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98"
                 style={{
-                  background: themeBtnGrad,
+                  background: isPaidUser ? themeBtnGrad : 'linear-gradient(135deg, #64748b, #475569)',
                   color: '#ffffff',
-                  boxShadow: `0 4px 14px ${themePrimary}35`,
+                  boxShadow: isPaidUser ? `0 4px 14px ${themePrimary}35` : 'none',
                 }}
               >
-                <span>Open Nsta Messenger →</span>
+                {isPaidUser ? null : <Lock size={15} />}
+                <span>{isPaidUser ? 'Open Nsta Messenger →' : '🔒 Open Nsta Messenger (Basic+ Required)'}</span>
               </button>
             </div>
           </div>
@@ -882,19 +921,22 @@ export const UpdatesPage: React.FC<Props> = ({
                     <Users size={22} />
                   </div>
                   <div>
-                    <h4 className="text-sm font-black text-slate-900 dark:text-white">Study Room</h4>
+                    <h4 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                      <span>Study Room</span>
+                      {!isPaidUser && <span className="text-xs">🔒</span>}
+                    </h4>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">Virtual study rooms with peers & focus timer</p>
                   </div>
                 </div>
                 <span
                   className="px-2.5 py-1 rounded-xl text-[10px] font-black shrink-0 uppercase tracking-wider shadow-2xs"
                   style={{
-                    background: `${themeBorder}18`,
-                    color: themeBorder,
-                    border: `1px solid ${themeBorder}35`,
+                    background: isPaidUser ? `${themeBorder}18` : 'rgba(239, 68, 68, 0.15)',
+                    color: isPaidUser ? themeBorder : '#ef4444',
+                    border: isPaidUser ? `1px solid ${themeBorder}35` : '1px solid rgba(239, 68, 68, 0.35)',
                   }}
                 >
-                  Focus Mode
+                  {isPaidUser ? 'Focus Mode' : '🔒 Basic+'}
                 </span>
               </div>
 
@@ -914,15 +956,22 @@ export const UpdatesPage: React.FC<Props> = ({
             <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
               <button
                 type="button"
-                onClick={onOpenStudyRoom}
+                onClick={() => {
+                  if (!isPaidUser) {
+                    alert('🔒 Study Room (Focus Mode) feature Basic aur Ultra members ke liye hai. Plan upgrade karein!');
+                    return;
+                  }
+                  if (onOpenStudyRoom) onOpenStudyRoom();
+                }}
                 className="w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98"
                 style={{
-                  background: themeBtnGrad,
+                  background: isPaidUser ? themeBtnGrad : 'linear-gradient(135deg, #64748b, #475569)',
                   color: '#ffffff',
-                  boxShadow: `0 4px 14px ${themePrimary}35`,
+                  boxShadow: isPaidUser ? `0 4px 14px ${themePrimary}35` : 'none',
                 }}
               >
-                <span>Join Study Room →</span>
+                {isPaidUser ? null : <Lock size={15} />}
+                <span>{isPaidUser ? 'Join Study Room →' : '🔒 Join Study Room (Basic+ Required)'}</span>
               </button>
             </div>
           </div>
@@ -1137,13 +1186,14 @@ export const UpdatesPage: React.FC<Props> = ({
                 <div className="flex items-center gap-3">
                   <div
                     className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-xs"
-                    style={{ background: `rgba(245,158,11,0.18)`, color: '#f59e0b' }}
+                    style={{ background: `${themeBorder}18`, color: themeBorder }}
                   >
                     <Lightbulb size={22} />
                   </div>
                   <div className="min-w-0">
-                    <h4 className="text-sm font-black text-slate-900 dark:text-white truncate">
-                      Suggestions & Corrections
+                    <h4 className="text-sm font-black text-slate-900 dark:text-white truncate flex items-center gap-1.5">
+                      <span>Suggestions & Corrections</span>
+                      {!isPaidUser && <span className="text-xs">🔒</span>}
                     </h4>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">
                       Galti ya bug mila? Photo ke saath report karein aur coins jeetein
@@ -1153,12 +1203,12 @@ export const UpdatesPage: React.FC<Props> = ({
                 <span
                   className="px-2.5 py-1 rounded-xl text-[10px] font-black shrink-0 uppercase tracking-wider shadow-2xs"
                   style={{
-                    background: `rgba(245,158,11,0.15)`,
-                    color: '#f59e0b',
-                    border: `1px solid rgba(245,158,11,0.35)`,
+                    background: isPaidUser ? `${themeBorder}18` : 'rgba(239, 68, 68, 0.15)',
+                    color: isPaidUser ? themeBorder : '#ef4444',
+                    border: isPaidUser ? `1px solid ${themeBorder}35` : '1px solid rgba(239, 68, 68, 0.35)',
                   }}
                 >
-                  Feedback
+                  {isPaidUser ? 'Feedback' : '🔒 Basic+'}
                 </span>
               </div>
 
@@ -1178,15 +1228,21 @@ export const UpdatesPage: React.FC<Props> = ({
             <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
               <button
                 type="button"
-                onClick={onOpenSuggestions}
+                onClick={() => {
+                  if (!isPaidUser) {
+                    alert('🔒 Suggestions & Corrections feature Basic aur Ultra members ke liye hai. Plan upgrade karein!');
+                    return;
+                  }
+                  if (onOpenSuggestions) onOpenSuggestions();
+                }}
                 className="w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98 text-white"
                 style={{
-                  background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
-                  boxShadow: '0 4px 14px rgba(245,158,11,0.35)',
+                  background: isPaidUser ? themeBtnGrad : 'linear-gradient(135deg, #64748b, #475569)',
+                  boxShadow: isPaidUser ? `0 4px 14px ${themePrimary}35` : 'none',
                 }}
               >
-                <Lightbulb size={15} />
-                <span>Open Suggestions & Corrections →</span>
+                {isPaidUser ? <Lightbulb size={15} /> : <Lock size={15} />}
+                <span>{isPaidUser ? 'Open Suggestions & Corrections →' : '🔒 Open Suggestions & Corrections (Basic+ Required)'}</span>
               </button>
             </div>
           </div>

@@ -864,6 +864,7 @@ export interface SystemSettings {
   hideLockedForFreeAndBasic?: boolean; // When ON, locked content & features are hidden for Free & Basic users. When OFF, shown with lock icons.
   enforceSequentialPages?: boolean; // When true, Page 2+ is locked until previous page (e.g. Page 1) is completely read. Admin toggleable.
   hideNstaMessenger?: boolean; // When true, Nsta Messenger floating button is hidden on student dashboard
+  enableHomeAssemblyAnimation?: boolean; // When true, a 10-15s cinematic assembly animation plays on home load (Orbit assemble -> Dashboard assemble)
   hideCreateStudyRoom?: boolean; // When true, the option to create study rooms ("Apna Study Room Banayein" / "Live Study Room") is hidden for students
   officialAppUrl?: string; // NEW: Play Store Link
   referralMilestones?: ReferralMilestone[]; // Admin-configurable Refer & Earn milestones & prizes

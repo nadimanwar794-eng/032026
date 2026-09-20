@@ -30,6 +30,7 @@ import { deferMcqCreditsFromXp } from '../utils/studyRewards';
 import { McqAnalysisOverlay } from './McqAnalysisOverlay';
 import { hapticCorrect, hapticWrong, hapticLight } from '../utils/haptic';
 import { playSoundClick, playSoundCorrect, playSoundWrong, playSoundVictory, isSoundEnabled, setSoundEnabled } from '../utils/soundEffects';
+import DraggableNstaLogoFab from './DraggableNstaLogoFab';
 
 interface Props {
   questions: MCQItem[];
@@ -51,6 +52,8 @@ interface Props {
   onProjectorModeChange?: (enabled: boolean) => void;
   /** Lesson tab bar rendered at the very top (Reading Mode | Writing Mode | MCQ Practice | Projector) */
   tabBar?: React.ReactNode;
+  /** App bottom navigation bar rendered at the bottom in Projector Mode */
+  bottomNav?: React.ReactNode;
   /** If true, hides the "PROJECTOR MODE" badge in the projector header */
   hideProjectorLabel?: boolean;
   /** Trigger to open Group Study / Live Room modal for this flashcard set */
@@ -91,7 +94,7 @@ const addTodayCount = (userId: string, n: number) => {
 };
 
 export const FlashcardMcqView: React.FC<Props> = ({
-  questions, title, subtitle, subject, onBack, user, settings, onUpdateUser, sourceMeta, sourceKey, startInProjectorMode, onProjectorModeChange, tabBar, hideProjectorLabel, onOpenGroupStudy
+  questions, title, subtitle, subject, onBack, user, settings, onUpdateUser, sourceMeta, sourceKey, startInProjectorMode, onProjectorModeChange, tabBar, bottomNav, hideProjectorLabel, onOpenGroupStudy
 }) => {
   const isMountedRef = useRef(true);
   const [pickedIndices, setPickedIndices] = useState<number[]>([]);
@@ -552,60 +555,6 @@ export const FlashcardMcqView: React.FC<Props> = ({
   const fcBg2 = (appTheme as any).flashcardBg2 || appTheme.mid;
   const tierBgStyle = { background: `linear-gradient(135deg, ${fcBg1} 0%, ${fcBg2} 50%, ${fcBg1} 100%)` };
 
-  if (limitReached && !isProjectorMode) {
-    const canPay = !!(user?.subscriptionLevel && (user.credits ?? 0) >= CREDIT_COST);
-    return (
-      <div className="fixed inset-0 z-[200] flex flex-col h-[100dvh]" style={tierBgStyle}>
-        {tabBar}
-        <div className="px-4 py-3 flex items-center gap-3">
-          <button onClick={handleBack} className="bg-white/10 text-white p-2 rounded-full active:scale-95">
-            <ArrowLeft size={18} />
-          </button>
-          <h2 className="text-base font-black text-white">Flashcards</h2>
-        </div>
-        <div className="flex-1 flex flex-col items-center justify-center text-center px-8">
-          <div className="text-5xl mb-4">⚡</div>
-          <p className="text-white font-black text-xl mb-2">Daily Limit Reached!</p>
-          <p className="text-white/70 text-sm mb-2">
-            You've used today's <span className="font-black text-white">{dailyLimit}</span> free flashcards.
-          </p>
-          <p className="text-white/50 text-xs mb-8">Resets tomorrow or continue with credits.</p>
-          {canPay ? (
-            <button
-              onClick={payAndContinue}
-              className="bg-white font-black px-8 py-3.5 rounded-2xl text-sm shadow-xl active:scale-95 transition mb-3"
-              style={{ color: fcBg2 }}
-            >
-              🪙 Continue with {CREDIT_COST} Credits
-            </button>
-          ) : user?.subscriptionLevel ? (
-            <p className="text-amber-300 text-sm font-bold">Low balance ({user?.credits ?? 0} CR). Earn more credits!</p>
-          ) : (
-            <p className="text-amber-300 text-sm font-bold">Upgrade your plan or come back tomorrow!</p>
-          )}
-          <p className="text-white/30 text-xs mt-4">Balance: {user?.credits ?? 0} CR</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!currentQ && !isProjectorMode) {
-    // If questions exist but pickedIndices is still empty, initSession is running — return null to avoid flash
-    if (questions.length > 0) return null;
-    return (
-      <div className="fixed inset-0 z-[200] flex flex-col h-[100dvh]" style={tierBgStyle}>
-        {tabBar}
-        <div className="px-4 py-3 flex items-center gap-3">
-          <h2 className="text-base font-black text-white">Flashcards</h2>
-        </div>
-        <div className="flex-1 flex flex-col items-center justify-center text-center px-6">
-          <p className="text-white font-black">No MCQs available</p>
-          <p className="text-white/50 text-xs mt-2">Load this chapter's content first.</p>
-        </div>
-      </div>
-    );
-  }
-
   const isLast = pos >= total - 1;
 
   const handleProjectorOptionSelect = useCallback((oi: number) => {
@@ -765,6 +714,60 @@ export const FlashcardMcqView: React.FC<Props> = ({
     });
     setProjectorShowReview(true);
   };
+
+  if (limitReached && !isProjectorMode) {
+    const canPay = !!(user?.subscriptionLevel && (user.credits ?? 0) >= CREDIT_COST);
+    return (
+      <div className="fixed inset-0 z-[200] flex flex-col h-[100dvh]" style={tierBgStyle}>
+        {tabBar}
+        <div className="px-4 py-3 flex items-center gap-3">
+          <button onClick={handleBack} className="bg-white/10 text-white p-2 rounded-full active:scale-95">
+            <ArrowLeft size={18} />
+          </button>
+          <h2 className="text-base font-black text-white">Flashcards</h2>
+        </div>
+        <div className="flex-1 flex flex-col items-center justify-center text-center px-8">
+          <div className="text-5xl mb-4">⚡</div>
+          <p className="text-white font-black text-xl mb-2">Daily Limit Reached!</p>
+          <p className="text-white/70 text-sm mb-2">
+            You've used today's <span className="font-black text-white">{dailyLimit}</span> free flashcards.
+          </p>
+          <p className="text-white/50 text-xs mb-8">Resets tomorrow or continue with credits.</p>
+          {canPay ? (
+            <button
+              onClick={payAndContinue}
+              className="bg-white font-black px-8 py-3.5 rounded-2xl text-sm shadow-xl active:scale-95 transition mb-3"
+              style={{ color: fcBg2 }}
+            >
+              🪙 Continue with {CREDIT_COST} Credits
+            </button>
+          ) : user?.subscriptionLevel ? (
+            <p className="text-amber-300 text-sm font-bold">Low balance ({user?.credits ?? 0} CR). Earn more credits!</p>
+          ) : (
+            <p className="text-amber-300 text-sm font-bold">Upgrade your plan or come back tomorrow!</p>
+          )}
+          <p className="text-white/30 text-xs mt-4">Balance: {user?.credits ?? 0} CR</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentQ && !isProjectorMode) {
+    // If questions exist but pickedIndices is still empty, initSession is running — return null to avoid flash
+    if (questions.length > 0) return null;
+    return (
+      <div className="fixed inset-0 z-[200] flex flex-col h-[100dvh]" style={tierBgStyle}>
+        {tabBar}
+        <div className="px-4 py-3 flex items-center gap-3">
+          <h2 className="text-base font-black text-white">Flashcards</h2>
+        </div>
+        <div className="flex-1 flex flex-col items-center justify-center text-center px-6">
+          <p className="text-white font-black">No MCQs available</p>
+          <p className="text-white/50 text-xs mt-2">Load this chapter's content first.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -1319,73 +1322,7 @@ export const FlashcardMcqView: React.FC<Props> = ({
 
         return createPortal(
           <div style={overlayStyle}>
-            {tabBar}
-
-            {/* Focus Mode Floating Corner Island */}
-            {projectorFocused && (
-              <div style={{ position:'absolute', top:12, right:12, zIndex:30, display:'flex', alignItems:'center', gap:8 }}>
-                {/* Timer pill in focus mode */}
-                {drillTimerMode !== 'off' && (
-                  <div style={{ height:36, padding:'0 12px', background: isThemeDark ? 'rgba(15,23,42,0.9)' : 'rgba(255,255,255,0.94)', border: `1px solid ${pillBorder}`, borderRadius:12, color: timerColor, display:'flex', alignItems:'center', gap:6, fontSize:12, fontWeight:900, backdropFilter:'blur(8px)', boxShadow:'0 4px 14px rgba(0,0,0,0.15)' }}>
-                    <Timer size={14} className={drillTimeRemaining <= 5 && drillTimerMode !== 'stopwatch' ? 'animate-pulse' : ''} />
-                    <span>{drillTimerMode === 'stopwatch' ? `${drillStopwatchSec}s` : `${drillTimeRemaining}s`}</span>
-                  </div>
-                )}
-                {/* Reveal Answer pill */}
-                <button
-                  onClick={() => { setProjectorReveal(r => !r); playSoundClick(); }}
-                  title={projectorReveal ? 'Hide Answer' : 'Reveal Answer'}
-                  aria-label={projectorReveal ? 'Hide Answer' : 'Reveal Answer'}
-                  style={{ height:36, padding:'0 10px', background: projectorReveal ? '#10b981' : isThemeDark ? 'rgba(15,23,42,0.9)' : 'rgba(255,255,255,0.94)', border: `1px solid ${projectorReveal ? '#059669' : pillBorder}`, borderRadius:12, color: projectorReveal ? '#ffffff' : pillText, cursor:'pointer', display:'flex', alignItems:'center', gap:5, fontSize:12, fontWeight:800, backdropFilter:'blur(8px)', boxShadow:'0 4px 14px rgba(0,0,0,0.15)' }}>
-                  {projectorReveal ? <EyeOff size={15} /> : <Eye size={15} />}
-                  <span className="hidden sm:inline">{projectorReveal ? 'Ans Shown' : 'Ans'}</span>
-                </button>
-                {/* Theme Cycle */}
-                <button
-                  onClick={cycleTheme}
-                  title="Switch Theme"
-                  aria-label="Switch Theme"
-                  style={{ width:36, height:36, background: isThemeDark ? 'rgba(15,23,42,0.9)' : 'rgba(255,255,255,0.94)', border: `1px solid ${pillBorder}`, borderRadius:12, color: pillText, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', backdropFilter:'blur(8px)', boxShadow:'0 4px 14px rgba(0,0,0,0.15)' }}>
-                  {isThemeDark ? <Moon size={15} /> : isThemeSepia ? <Scroll size={15} /> : <Sun size={15} />}
-                </button>
-                {/* Rotate Screen */}
-                <button
-                  onClick={async () => {
-                    const result = await rotateScreen();
-                    if (result !== null) { setProjectorRotated(result === 'landscape'); }
-                    else { alert('📱 Phone ko physically rotate karein — landscape ke liye sideways, portrait ke liye seedha.'); }
-                  }}
-                  title={projectorRotated ? 'Portrait mode' : 'Landscape mode'}
-                  aria-label={projectorRotated ? 'Portrait mode' : 'Landscape mode'}
-                  style={{ width:36, height:36, background: isThemeDark ? 'rgba(15,23,42,0.9)' : 'rgba(255,255,255,0.94)', border: `1px solid ${pillBorder}`, borderRadius:12, color: projectorRotated ? '#a855f7' : pillText, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', backdropFilter:'blur(8px)', boxShadow:'0 4px 14px rgba(0,0,0,0.15)' }}>
-                  <RotateCw size={15} />
-                </button>
-                {/* Navigator */}
-                <button
-                  onClick={() => { setProjectorNavigatorOpen(open => !open); playSoundClick(); }}
-                  title="All Questions"
-                  aria-label="All Questions"
-                  style={{ width:36, height:36, background: projectorNavigatorOpen ? '#6366f1' : isThemeDark ? 'rgba(15,23,42,0.9)' : 'rgba(255,255,255,0.94)', border: `1px solid ${projectorNavigatorOpen ? '#4f46e5' : pillBorder}`, borderRadius:12, color: projectorNavigatorOpen ? '#ffffff' : pillText, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', backdropFilter:'blur(8px)', boxShadow:'0 4px 14px rgba(0,0,0,0.15)' }}>
-                  <LayoutGrid size={16} />
-                </button>
-                {/* Sound Toggle */}
-                <button
-                  onClick={handleToggleSound}
-                  title={soundActive ? 'Mute Audio' : 'Unmute Audio'}
-                  aria-label="Toggle Sound"
-                  style={{ width:36, height:36, background: isThemeDark ? 'rgba(15,23,42,0.9)' : 'rgba(255,255,255,0.94)', border: `1px solid ${pillBorder}`, borderRadius:12, color: soundActive ? '#10b981' : '#94a3b8', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', backdropFilter:'blur(8px)', boxShadow:'0 4px 14px rgba(0,0,0,0.15)' }}>
-                  {soundActive ? <Volume2 size={15} /> : <VolumeX size={15} />}
-                </button>
-                {/* Exit Focus */}
-                <button
-                  onClick={() => setProjectorFocused(false)}
-                  title="Exit Focus Mode"
-                  aria-label="Exit Focus Mode"
-                  style={{ width:36, height:36, background:'#ef4444', border:'1px solid #dc2626', borderRadius:12, color:'#ffffff', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', backdropFilter:'blur(8px)', boxShadow:'0 4px 14px rgba(0,0,0,0.15)' }}>
-                  <Minimize2 size={16} />
-                </button>
-              </div>
-            )}
+            {!projectorFocused && tabBar}
 
             {/* Standard Comprehensive Top Bar (Hidden only in full focus mode) */}
             {!projectorFocused && (
@@ -1603,6 +1540,16 @@ export const FlashcardMcqView: React.FC<Props> = ({
                   <Maximize2 size={16} />
                 </button>
 
+                {/* Hide Bars / Focus Mode */}
+                <button
+                  onClick={() => setProjectorFocused(true)}
+                  title="Hide Bars • Focus Mode"
+                  aria-label="Hide Bars"
+                  style={{ flexShrink:0, width:36, height:36, background: pillBg, border: `1px solid ${pillBorder}`, borderRadius:12, color: pillText, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}
+                >
+                  <EyeOff size={15} />
+                </button>
+
                 {/* Live Class Room */}
                 {onOpenGroupStudy && (
                   <button
@@ -1693,7 +1640,7 @@ export const FlashcardMcqView: React.FC<Props> = ({
 
             {/* Standard Bottom Navigation Bar (Hidden in focus mode) */}
             {!projectorFocused && (
-              <div style={{ display:'flex', alignItems:'center', padding:'10px 20px', borderTop:`2px solid ${footerBorder}`, background:footerBg, flexShrink:0, gap:10 }}>
+              <div style={{ display:'flex', alignItems:'center', padding:'10px 12px', borderTop:`2px solid ${footerBorder}`, background:footerBg, flexShrink:0, gap:8 }}>
                 {/* Prev Question */}
                 <button
                   onClick={() => {
@@ -1705,21 +1652,23 @@ export const FlashcardMcqView: React.FC<Props> = ({
                   }}
                   disabled={projectorQIndex === 0}
                   style={{
+                    height: 42,
                     background: projectorQIndex === 0 ? (isThemeDark ? '#1e293b' : '#e2e8f0') : '#3b82f6',
                     color: projectorQIndex === 0 ? (isThemeDark ? '#64748b' : '#94a3b8') : '#ffffff',
                     border: 'none',
                     borderRadius: 12,
-                    padding: '10px 18px',
-                    fontSize: 14,
-                    fontWeight: 900,
+                    padding: '0 14px',
+                    fontSize: 13,
+                    fontWeight: 800,
                     cursor: projectorQIndex === 0 ? 'not-allowed' : 'pointer',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 6,
+                    justifyContent: 'center',
+                    gap: 4,
                     flexShrink: 0
                   }}
                 >
-                  <ChevronLeft size={18} /> Prev
+                  <ChevronLeft size={16} /> Prev
                 </button>
 
                 {/* Skip Question */}
@@ -1736,14 +1685,18 @@ export const FlashcardMcqView: React.FC<Props> = ({
                   }}
                   disabled={projectorShowReview || (projectorQIndex === total - 1 && projectorCurrentSelection !== null)}
                   style={{
+                    height: 42,
                     background: isThemeDark ? '#1e293b' : '#fffbeb',
                     color: isThemeDark ? '#fbbf24' : '#b45309',
                     border: `1px solid ${isThemeDark ? '#334155' : '#fcd34d'}`,
                     borderRadius: 12,
-                    padding: '10px 14px',
+                    padding: '0 12px',
                     fontSize: 13,
-                    fontWeight: 900,
+                    fontWeight: 800,
                     cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
                     flexShrink: 0
                   }}
                 >
@@ -1751,35 +1704,37 @@ export const FlashcardMcqView: React.FC<Props> = ({
                 </button>
 
                 {/* Submit Quiz or Progress */}
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   {canSubmit ? (
                     <button
                       onClick={submitProjectorQuiz}
                       style={{
                         width: '100%',
+                        height: 42,
                         background: 'linear-gradient(135deg,#10b981,#059669)',
                         color: '#ffffff',
                         border: 'none',
                         borderRadius: 12,
-                        padding: '10px 18px',
-                        fontSize: 14,
-                        fontWeight: 900,
+                        padding: '0 10px',
+                        fontSize: 13,
+                        fontWeight: 800,
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        gap: 8,
+                        gap: 6,
+                        whiteSpace: 'nowrap',
                         boxShadow: '0 4px 16px rgba(16,185,129,0.35)'
                       }}
                     >
-                      <CheckCircle size={18} /> Submit Quiz ({projectorAnswered.size}/{total})
+                      <CheckCircle size={15} /> Submit ({projectorAnswered.size}/{total})
                     </button>
                   ) : (
-                    <div style={{ width: '100%', display:'flex', flexDirection:'column', alignItems:'center', gap:4, padding:'4px 0' }}>
-                      <div style={{ width:'100%', height:7, background:pillBg, borderRadius:99, overflow:'hidden', border:`1px solid ${pillBorder}` }}>
+                    <div style={{ width: '100%', height: 42, display:'flex', flexDirection:'column', alignItems:'center', justifyContent: 'center', gap:3 }}>
+                      <div style={{ width:'100%', height:6, background:pillBg, borderRadius:99, overflow:'hidden', border:`1px solid ${pillBorder}` }}>
                         <div style={{ height:'100%', background:'#3b82f6', borderRadius:99, width:`${(projectorAnswered.size / submitThreshold) * 100}%`, transition:'width 0.3s' }} />
                       </div>
-                      <span style={{ fontSize:11, fontWeight:700, color:headerSubtext }}>{projectorAnswered.size}/{submitThreshold} MCQ to Submit</span>
+                      <span style={{ fontSize:10, fontWeight:700, color:headerSubtext, whiteSpace: 'nowrap' }}>{projectorAnswered.size}/{submitThreshold} to Submit</span>
                     </div>
                   )}
                 </div>
@@ -1795,22 +1750,31 @@ export const FlashcardMcqView: React.FC<Props> = ({
                   }}
                   disabled={projectorQIndex === total - 1}
                   style={{
+                    height: 42,
                     background: projectorQIndex === total - 1 ? (isThemeDark ? '#1e293b' : '#e2e8f0') : '#3b82f6',
                     color: projectorQIndex === total - 1 ? (isThemeDark ? '#64748b' : '#94a3b8') : '#ffffff',
                     border: 'none',
                     borderRadius: 12,
-                    padding: '10px 18px',
-                    fontSize: 14,
-                    fontWeight: 900,
+                    padding: '0 14px',
+                    fontSize: 13,
+                    fontWeight: 800,
                     cursor: projectorQIndex === total - 1 ? 'not-allowed' : 'pointer',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 6,
+                    justifyContent: 'center',
+                    gap: 4,
                     flexShrink: 0
                   }}
                 >
-                  Next <ChevronRight size={18} />
+                  Next <ChevronRight size={16} />
                 </button>
+              </div>
+            )}
+
+            {/* App Bottom Navigation Bar (Visible in projector mode, hidden in focus mode) */}
+            {!projectorFocused && bottomNav && (
+              <div style={{ zIndex: 25, flexShrink: 0, width: '100%' }}>
+                {bottomNav}
               </div>
             )}
 
@@ -1916,6 +1880,17 @@ export const FlashcardMcqView: React.FC<Props> = ({
                 </div>
               </div>
             )}
+
+            {/* Draggable NSTA Logo Floating Button — moves anywhere on screen, toggles focus mode (hides/shows top bar & bottom bar) */}
+            <DraggableNstaLogoFab
+              isActive={projectorFocused}
+              onToggle={() => setProjectorFocused(f => !f)}
+              appLogo={settings?.appLogo}
+              appName={settings?.appShortName || settings?.appName || 'NSTA'}
+              title={projectorFocused ? 'बॉटम व टॉप बार दिखाएं • Screen pe move kar sakte hain' : 'बॉटम व टॉप बार छुपाएं • Screen pe move kar sakte hain'}
+              defaultPosition={{ bottom: 84, right: 16 }}
+              zIndex={100001}
+            />
           </div>,
           document.body
         );

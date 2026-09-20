@@ -22,6 +22,7 @@ import { hydrateRoutineData } from './utils/routineFirebaseSync';
 import { applyDeduction, getTotalCredits } from './utils/creditSystem';
 import { consumeDeferredStudyCoins } from './utils/studyRewards';
 import { DEFAULT_CREDIT_SUB_PLANS } from './utils/creditSubscriptionUtils';
+import { safeSaveUsersCache, deduplicateInbox } from './utils/safeUtils';
 import { signInAnonymously } from 'firebase/auth';
 import { fetchChapters, fetchLessonContent } from './services/groq';
 import { AppLoadingScreen } from './components/AppLoadingScreen';
@@ -91,6 +92,7 @@ import { initPerfMode } from './utils/performanceMode';
 import { CreditToast } from './components/CreditToast';
 import { HomeStatsToast } from './components/HomeStatsToast';
 import { DailyChallengeRankCard } from './components/DailyChallengeRankCard';
+import { getYesterdayDateKey } from './utils/challengePrizeSystem';
 import { DailyChallengePopup } from './components/DailyChallengePopup';
 import { recordCreditTx } from './utils/creditHistory';
 import { getCreditCost, getRequiredTier } from './utils/creditSystem';
@@ -105,7 +107,7 @@ const App: React.FC = () => {
   const [adminDashCrashed, setAdminDashCrashed] = useState(false);
   const [showAdminCrashPopup, setShowAdminCrashPopup] = useState(false);
 
-  const [appMcqCommunityDraft, setAppMcqCommunityDraft] = useState<{question: string; options: [string,string,string,string]; correctAnswer: number; explanation: string} | null>(null);
+  const [appMcqCommunityDraft, setAppMcqCommunityDraft] = useState<{question: string; statements?: string[]; options: [string,string,string,string]; correctAnswer: number; explanation: string} | null>(null);
 
   const [isAppLoading, setIsAppLoading] = useState(() => sessionStorage.getItem('nst_has_loaded') !== 'true');
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
@@ -788,6 +790,32 @@ const App: React.FC = () => {
   const [lastTestResult, setLastTestResult] = useState<MCQResult | null>(null);
   const [lastTestQuestions, setLastTestQuestions] = useState<MCQItem[] | null>(null);
   const [showDailyRankCard, setShowDailyRankCard] = useState(false);
+
+  // Listen for request to open Daily Challenge Leaderboard & Winner Card from any component
+  useEffect(() => {
+    const handleOpenLeaderboard = () => setShowDailyRankCard(true);
+    window.addEventListener('iic-open-daily-challenge-leaderboard', handleOpenLeaderboard);
+    return () => window.removeEventListener('iic-open-daily-challenge-leaderboard', handleOpenLeaderboard);
+  }, []);
+
+  // Auto-prompt on next day if student has a challenge result from yesterday
+  useEffect(() => {
+    if (!state.user?.id) return;
+    try {
+      const yesterday = getYesterdayDateKey();
+      const seenKey = `nst_yesterday_rank_seen_${yesterday}_${state.user.id}`;
+      if (localStorage.getItem(seenKey) !== '1') {
+        const attempts = JSON.parse(localStorage.getItem(`nst_test_attempts_${state.user.id}`) || '{}');
+        const hasYesterday = Object.values(attempts).some(
+          (a: any) => a && a.isCompleted && a.submittedAt && a.submittedAt.startsWith(yesterday)
+        );
+        if (hasYesterday) {
+          setShowDailyRankCard(true);
+          localStorage.setItem(seenKey, '1');
+        }
+      }
+    } catch {}
+  }, [state.user?.id]);
   const [pendingSessionSummary, setPendingSessionSummary] = useState<SessionCompletePayload | null>(null);
   const [groupedSessions, setGroupedSessions] = useState<SessionCompletePayload[]>([]);
   const [homeToastData, setHomeToastData] = useState<HomeToastData | null>(null);
@@ -915,6 +943,13 @@ const App: React.FC = () => {
       const today = new Date().toDateString();
       const now = new Date();
       let updatedUser = { ...state.user };
+      if (updatedUser.inbox) {
+          const originalLen = updatedUser.inbox.length;
+          updatedUser.inbox = deduplicateInbox(updatedUser.inbox);
+          if (updatedUser.inbox.length !== originalLen) {
+              hasUpdates = true;
+          }
+      }
       let hasUpdates = false;
       let newReward: PendingReward | null = null;
 
@@ -988,7 +1023,7 @@ const App: React.FC = () => {
                           expiresAt: _wExp,
                           isClaimed: false,
                       };
-                      updatedUser.inbox = [_wMsg, ...(updatedUser.inbox || [])];
+                      updatedUser.inbox = deduplicateInbox([_wMsg, ...(updatedUser.inbox || [])]);
                       hasUpdates = true;
                   }
               }
@@ -1070,7 +1105,7 @@ const App: React.FC = () => {
                   durationHours: reward.durationHours || 4,
               };
           }
-          updatedUser.inbox = [inboxMsg, ...existingInbox];
+          updatedUser.inbox = deduplicateInbox([inboxMsg, ...existingInbox]);
           hasUpdates = true;
           setTimeout(() => fireCreditNotify({ type: 'REWARD', message: `${reward.label} received! Mail → Rewards se claim karo.` }), 1000);
       };
@@ -1248,6 +1283,9 @@ const App: React.FC = () => {
                       if (!cloudUser.hasOwnProperty('progress')) mergedUser.progress = prev.user.progress;
                       if (!cloudUser.hasOwnProperty('usageHistory')) mergedUser.usageHistory = prev.user.usageHistory;
                       if (!cloudUser.hasOwnProperty('inbox')) mergedUser.inbox = prev.user.inbox;
+                      if (mergedUser.inbox) {
+                          mergedUser.inbox = deduplicateInbox(mergedUser.inbox);
+                      }
                       if (!cloudUser.hasOwnProperty('topicStrength')) mergedUser.topicStrength = prev.user.topicStrength;
                       if (!cloudUser.hasOwnProperty('subscriptionHistory')) mergedUser.subscriptionHistory = prev.user.subscriptionHistory;
                       if (!cloudUser.hasOwnProperty('activeSubscriptions')) mergedUser.activeSubscriptions = prev.user.activeSubscriptions;
@@ -1526,6 +1564,9 @@ const App: React.FC = () => {
     if (loggedInUserStr) {
       try {
         let user: User = JSON.parse(loggedInUserStr);
+        if (user && user.inbox) {
+            user.inbox = deduplicateInbox(user.inbox);
+        }
 
         if (!user || (!user.id && !user.uid)) {
             console.error("Invalid user object found in storage. Clearing session.");
@@ -1693,7 +1734,7 @@ const App: React.FC = () => {
                           referrer.referredUsersList = rList;
                           referrer.referralCount = rList.filter((r: any) => r.isCompleted).length;
                           allUsers[refIdx] = referrer;
-                          localStorage.setItem('nst_users', JSON.stringify(allUsers));
+                          safeSaveUsersCache(allUsers);
                         }
                       }
                     } catch {}
@@ -2686,7 +2727,7 @@ const App: React.FC = () => {
                     const idx = allUsers.findIndex((u:User) => u.id === updatedUser.id);
                     if (idx !== -1) {
                         allUsers[idx] = updatedUser;
-                        localStorage.setItem('nst_users', JSON.stringify(allUsers));
+                        safeSaveUsersCache(allUsers);
                     }
                 }
                 saveUserToLive(updatedUser);
@@ -3013,6 +3054,12 @@ const App: React.FC = () => {
 
   const handleStartDailyChallenge = async () => {
       if (!state.user) return;
+      const isPaid = state.user.role === 'ADMIN' || ((state.user.subscriptionLevel === 'BASIC' || state.user.subscriptionLevel === 'ULTRA') && (!state.user.subscriptionEndDate || new Date(state.user.subscriptionEndDate).getTime() > Date.now()));
+      if (!isPaid) {
+          setAlertConfig({isOpen: true, message: "🔒 Daily Challenge feature Basic aur Ultra members ke liye hai. Plan upgrade karein!"});
+          handlePopupClose('CHALLENGE');
+          return;
+      }
 
       const config = state.settings.dailyChallengeConfig || { rewardPercentage: 90, mode: 'AUTO', selectedChapterIds: [] };
       const routineData = loadRoutineData(state.user.id);
@@ -3610,7 +3657,14 @@ const App: React.FC = () => {
                     <DailyChallengeRankCard
                         userId={state.user.id}
                         classLevel={state.user.classLevel || '10'}
+                        user={state.user}
+                        settings={state.settings}
+                        onUpdateUser={(updatedUser) => setState(prev => ({ ...prev, user: updatedUser }))}
                         onClose={() => setShowDailyRankCard(false)}
+                        onStartTodayChallenge={() => {
+                            setShowDailyRankCard(false);
+                            setState(prev => ({ ...prev, view: 'UPDATES' }));
+                        }}
                     />
                 )}
                 

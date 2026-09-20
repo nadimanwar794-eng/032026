@@ -849,6 +849,25 @@
 .animate-bounce-up {
     animation: bounce-up 1.6s ease-out forwards;
 }
+
+@keyframes home-card-pop {
+    0% {
+        opacity: 0;
+        transform: translateY(14px) scale(0.98);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.home-routine-card-anim {
+    animation: home-card-pop 0.45s cubic-bezier(0.16, 1, 0.3, 1) 0.05s both;
+}
+
+.home-revhub-card-anim {
+    animation: home-card-pop 0.45s cubic-bezier(0.16, 1, 0.3, 1) 0.22s both;
+}
 @keyframes credit-toast-bar {
     0%   { width: 100%; }
     100% { width: 0%; }

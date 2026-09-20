@@ -36,8 +36,8 @@ export const inlineMd = (s: string): string => {
 // Statement detection helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** A line is a numbered statement: "1. text", "2) text", "Statement 1: text", "कथन I", "कथन 1", "I. text" */
-const STMT_LINE_RE = /^(?:\d+[.)]\s+|(?:Statement|कथन|Assertion|Reason)\s*(?:[0-9IVXivx]+)?\s*[:.\-)]\s*|[IVX]+[.)]\s+).+/i;
+/** A line is a numbered statement: "1. text", "(1) text", "1) text", "Statement 1: text", "कथन I", "कथन 1", "कथन (1)", "I. text", "(i) text", "Assertion/Reason/अभिकथन/कारण" */
+const STMT_LINE_RE = /^(?:(?:\(?\d+[\).\:\-\s]\s*|\(?[IVXivx]+[\).\:\-\s]\s*|\(?[a-dA-D]\)[\s\:\.]*|(?:Statement|कथन|Assertion|Reason|अभिकथन|कारण)\s*(?:\(?\s*[0-9IVXivxABab]+\s*\)?)?\s*[:.\-)]?\s*)).+/i;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Parsed MCQ result
@@ -50,6 +50,23 @@ export interface ParsedMcq {
   /** Rendered HTML for closing line after statements ("Which of above…") */
   suffixHtml: string;
 }
+
+/**
+ * Helper to get explicit statements array from an MCQItem whether stored
+ * as statements (array or multiline string) or statement (singular string/array).
+ */
+export const getRawStatementsArray = (q: any): string[] | null => {
+  if (!q) return null;
+  const rawStmts = q.statements ?? q.statement ?? q.statementsList;
+  if (Array.isArray(rawStmts) && rawStmts.length > 0) {
+    return rawStmts.map((s: any) => String(s || '').trim()).filter(Boolean);
+  }
+  if (typeof rawStmts === 'string' && rawStmts.trim()) {
+    const lines = rawStmts.replace(/<br\s*\/?>/gi, '\n').split('\n').map((l: string) => l.trim()).filter(Boolean);
+    if (lines.length > 0) return lines;
+  }
+  return null;
+};
 
 /**
  * Q&A/Flashcard display rule:
@@ -69,12 +86,12 @@ const renderLine = (text: string) => renderMathInHtml(inlineMd(text));
  * Parse an MCQItem into display-ready HTML parts.
  *
  * Priority:
- *  1. If `q.statements` is already populated → use it (just apply markdown + math)
- *  2. Otherwise scan `q.question` line-by-line and auto-extract numbered items
+ *  1. If `q.statements` (or `q.statement`) is populated → use it (apply markdown + math)
+ *  2. Otherwise scan `q.question` line-by-line and auto-extract numbered statement items
  */
 // Only references to content that has already been shown signal a closing line.
 // "निम्नलिखित..." introduces the statements and must stay BEFORE them.
-const SUFFIX_TRIGGER_RE = /(?:which\s+of\s+the\s+(?:above|following)|which\s+of\s+the\s+above|above\s+(?:statements?|are)|(?:उपर्युक्त|उपरोक्त)(?:\s+कथनों?)?)/i;
+const SUFFIX_TRIGGER_RE = /(?:which\s+of\s+the\s+(?:above|following)|which\s+of\s+the\s+above|above\s+(?:statements?|are)|(?:उपर्युक्त|उपरोक्त)(?:\s+कथनों?)?|कूट\b|कूट\s+का|सही\s+विकल्प|select\s+the\s+correct|choose\s+the\s+correct)/i;
 
 // "निम्नलिखित..." / "following statements" = intro line → must stay BEFORE statements.
 const INTRO_TRIGGER_RE = /निम्नलिखित|following\s+(?:statement|कथन)/i;
@@ -93,16 +110,10 @@ const splitIntroAndSuffix = (line: string): { intro: string; suffix: string } | 
 };
 
 export const parseMcqQuestion = (q: MCQItem): ParsedMcq => {
+  const explicitStmts = getRawStatementsArray(q);
   // ── Case 1: statements already in data ──────────────────────────────────
-  // q.question may hold:
-  //   (a) "intro text"
-  //   (b) "intro text\n\nउपर्युक्त में से…?"
-  //   (c) "उपर्युक्त में से…?"  (no intro — happens when question starts with statements)
-  //   (d) "निम्नलिखित…: उपरोक्त…?" — single line with both intro AND suffix
-  // We split it so the closing question lands in suffixHtml (shown AFTER statement boxes),
-  // not in questionHtml (shown BEFORE them).
-  if (q.statements && q.statements.length > 0) {
-    const rawQ  = q.question.replace(/<br\s*\/?>/gi, '\n');
+  if (explicitStmts && explicitStmts.length > 0) {
+    const rawQ  = (q.question || '').replace(/<br\s*\/?>/gi, '\n');
     const qLines = rawQ.split('\n').map(l => l.trim()).filter(Boolean);
 
     const introLines: string[] = [];
@@ -131,15 +142,24 @@ export const parseMcqQuestion = (q: MCQItem): ParsedMcq => {
 
     return {
       questionHtml: introLines.length ? renderLine(introLines.join('<br/>')) : '',
-      statements:   q.statements.map(renderLine),
+      statements:   explicitStmts.map(renderLine),
       suffixHtml:   suffLines.length  ? renderLine(suffLines.join('<br/>'))  : '',
     };
   }
 
   // ── Case 2: auto-extract from question text ──────────────────────────────
-  // Normalise: convert <br/> HTML breaks to \n, then split
-  const rawText = q.question.replace(/<br\s*\/?>/gi, '\n');
-  const lines   = rawText.split('\n').map(l => l.trim()).filter(Boolean);
+  // Normalise: convert <br/> HTML breaks to \n
+  let rawText = (q.question || '').replace(/<br\s*\/?>/gi, '\n');
+
+  // If there are no line breaks but statements are embedded horizontally (e.g. "कथन 1: ... कथन 2: ...")
+  // insert clean linebreaks before statement and suffix triggers
+  if (!rawText.includes('\n')) {
+    rawText = rawText
+      .replace(/(?<=[^\n])\s*(?=(?:(?:कथन|Statement)\s*(?:\(?\s*[0-9IVXivxABab]+\s*\)?)?\s*[:.\-)]|\(?\d+[\).\:\-]\s*|\(?[IVXivx]+[\).\:\-]\s*))/gi, '\n')
+      .replace(/(?<=[^\n])\s*(?=(?:उपर्युक्त|उपरोक्त|निम्नलिखित\s+में\s+से|कूट\b|which\s+of\s+the\s+above))/gi, '\n');
+  }
+
+  const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
 
   const preLines:    string[] = [];
   const stmtLines:   string[] = [];
@@ -158,12 +178,19 @@ export const parseMcqQuestion = (q: MCQItem): ParsedMcq => {
       }
     } else if (phase === 'stmts') {
       if (STMT_LINE_RE.test(line)) {
-        // Next numbered item
+        // Next numbered statement item
         stmtLines.push(line);
-      } else {
-        // Non-numbered line after statements = closing question or extra context
+      } else if (SUFFIX_TRIGGER_RE.test(line) || /^(?:कूट\b|कूट\s+का|सही\s+विकल्प|select|choose|find|\?)/i.test(line)) {
+        // Reached suffix trigger line
         phase = 'suffix';
         suffixLines.push(line);
+      } else {
+        // Line continuation of the previous statement (multi-line statement)
+        if (stmtLines.length > 0) {
+          stmtLines[stmtLines.length - 1] += ' ' + line;
+        } else {
+          preLines.push(line);
+        }
       }
     } else {
       suffixLines.push(line);

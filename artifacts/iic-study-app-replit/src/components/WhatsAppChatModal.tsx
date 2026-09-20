@@ -3028,6 +3028,41 @@ export const WhatsAppChatModal: React.FC<Props> = ({
   const isGroupAdmin = selectedGroup ? (selectedGroup.creatorId === user.id || selectedGroup.members?.[user.id]?.role === 'ADMIN') : false;
   const isGroupMember = selectedGroup ? !!selectedGroup.members?.[user.id] : false;
 
+  const userTier = (user?.subscriptionLevel || 'FREE')?.toUpperCase();
+  const isAdmin = user?.role === 'ADMIN' || (user as any)?.isAdmin;
+  const isPaidUser = isAdmin || (
+    (userTier === 'ULTRA' || userTier === 'BASIC' || user?.isPremium) &&
+    (!user?.subscriptionEndDate || new Date(user.subscriptionEndDate).getTime() > Date.now())
+  );
+
+  if (!isPaidUser) {
+    return (
+      <div
+        className="fixed inset-0 z-[300] bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200"
+        id="whatsapp-chat-locked-overlay"
+      >
+        <div className="w-full max-w-md bg-slate-900 border border-indigo-500/40 rounded-3xl p-6 shadow-2xl flex flex-col items-center text-center text-slate-100">
+          <div className="w-16 h-16 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 mb-4">
+            <Lock size={32} />
+          </div>
+          <h3 className="text-xl font-black text-white mb-2">Nsta Messenger Lock Hai</h3>
+          <p className="text-sm text-slate-400 mb-6 leading-relaxed">
+            Nsta Messenger (Classmates Chat, Groups & Voice Notes) sirf <b>Basic</b> aur <b>Ultra</b> plan ke members ke liye available hai.
+          </p>
+          <div className="flex gap-3 w-full">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 py-3 rounded-xl border border-slate-700 font-bold text-sm text-slate-300 hover:bg-slate-800 transition-all cursor-pointer"
+            >
+              Band Karein
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 z-[300] bg-slate-950/70 backdrop-blur-md flex items-center justify-center p-0 md:p-4 animate-in fade-in duration-200">
       <div className="w-full h-full md:max-w-2xl md:h-[92vh] md:rounded-3xl bg-slate-100 dark:bg-slate-950 flex flex-col shadow-2xl overflow-hidden border border-purple-500/20">

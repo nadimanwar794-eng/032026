@@ -38,12 +38,15 @@ import { getUserTier, getEffectiveNotesTier, filterHtmlByTier, injectSectionTier
 import { getLevelFromScore } from '../utils/levelSystem';
 import { getActiveBoost, tryEarnScore, subtractDailyScore, getMcqStreakBonus } from '../utils/scoreSystem';
 import { fireCreditNotify } from '../utils/creditNotify';
+import DraggableNstaLogoFab from './DraggableNstaLogoFab';
 import { ReadingScoreSession, ReadingScoreState } from '../utils/readingScoreEngine';
 import { ReadingScoreHUD } from './ReadingScoreHUD';
 import { PdfViewer } from './PdfViewer';
 import { useAppTheme } from '../utils/themeContext';
 import { fireSessionComplete } from '../utils/sessionNotify';
 import { deferStudyCoins } from '../utils/studyRewards';
+import { getMcqStatements } from '../utils/mcqStructure';
+import { extractStatements } from '../utils/mcqParser';
 
 
 interface Props {
@@ -75,7 +78,7 @@ interface Props {
   onAdminEdit?: () => void;
   /** Class 6-12: kya yeh subject ka pehla lesson hai? Pehla lesson sab ke liye free hota hai. */
   isFirstChapter?: boolean;
-  onSendToMcqCommunity?: (draft: { question: string; options: [string,string,string,string]; correctAnswer: number; explanation: string }) => void;
+  onSendToMcqCommunity?: (draft: { question: string; statements?: string[]; options: [string,string,string,string]; correctAnswer: number; explanation: string }) => void;
   /** Session khatam hone pe pending coins pass karo — App 4s baad HOME pe add karega */
   onSessionCreditsEarned?: (credits: number) => void;
 }
@@ -953,31 +956,24 @@ export const LessonView: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Main FAB button — in schoolMode: direct focus toggle; otherwise open menu */}
-      <button
-        onClick={() => schoolMode ? setIsImmersive(v => !v) : setFabOpen(v => !v)}
-        className="shadow-2xl flex items-center justify-center"
-        style={{
-          position: 'fixed',
-          bottom: fabBottom,
-          right: '16px',
-          width: '52px',
-          height: '52px',
-          borderRadius: '50%',
-          background: fabOpen ? 'rgba(79,70,229,0.95)' : isImmersive ? 'rgba(30,27,75,0.95)' : 'rgba(15,23,42,0.88)',
-          border: fabOpen ? '2.5px solid rgba(99,102,241,0.9)' : isImmersive ? '2.5px solid rgba(99,102,241,0.9)' : '2.5px solid rgba(255,255,255,0.5)',
-          backdropFilter: 'blur(10px)',
-          zIndex: 9200,
-          transition: 'background 0.2s',
-        }}
+      {/* Main FAB button — draggable anywhere on screen, in schoolMode: direct focus toggle; otherwise open menu */}
+      <DraggableNstaLogoFab
+        isActive={isImmersive || fabOpen}
+        onToggle={() => (schoolMode ? setIsImmersive(v => !v) : setFabOpen(v => !v))}
+        appLogo={settings?.appLogo}
+        appName={settings?.appShortName || settings?.appName || 'NSTA'}
         title={schoolMode ? (isImmersive ? 'Exit Focus Mode' : 'Focus Mode') : (fabOpen ? 'Close menu' : 'Options')}
+        defaultPosition={{ bottom: fabBottom, right: 16 }}
+        zIndex={9200}
       >
         {schoolMode ? (
-          isImmersive
-            ? <X size={22} style={{ color: '#fff', pointerEvents: 'none' }} />
-            : settings?.appLogo
-              ? <img src={settings.appLogo} alt="App" style={{ width: '38px', height: '38px', objectFit: 'contain', borderRadius: '50%', pointerEvents: 'none' }} />
-              : <span style={{ fontSize: '18px', fontWeight: 900, color: '#fff', pointerEvents: 'none' }}>{(settings?.appShortName || settings?.appName || 'A').charAt(0)}</span>
+          isImmersive ? (
+            <X size={22} style={{ color: '#fff', pointerEvents: 'none' }} />
+          ) : settings?.appLogo ? (
+            <img src={settings.appLogo} alt="App" style={{ width: '38px', height: '38px', objectFit: 'contain', borderRadius: '50%', pointerEvents: 'none' }} />
+          ) : (
+            <span style={{ fontSize: '18px', fontWeight: 900, color: '#fff', pointerEvents: 'none' }}>{(settings?.appShortName || settings?.appName || 'A').charAt(0)}</span>
+          )
         ) : fabOpen ? (
           <X size={22} style={{ color: '#fff', pointerEvents: 'none' }} />
         ) : settings?.appLogo ? (
@@ -987,9 +983,7 @@ export const LessonView: React.FC<Props> = ({
             {(settings?.appShortName || settings?.appName || 'A').charAt(0)}
           </span>
         )}
-        {!fabOpen && !schoolMode && <span style={{ position: 'absolute', top: '3px', right: '3px', width: '10px', height: '10px', borderRadius: '50%', background: isImmersive ? '#6366f1' : '#22c55e', border: '2px solid #fff', pointerEvents: 'none' }} />}
-        {schoolMode && !isImmersive && <span style={{ position: 'absolute', top: '3px', right: '3px', width: '10px', height: '10px', borderRadius: '50%', background: '#22c55e', border: '2px solid #fff', pointerEvents: 'none' }} />}
-      </button>
+      </DraggableNstaLogoFab>
     </>,
     document.body
   );
@@ -3303,7 +3297,17 @@ export const LessonView: React.FC<Props> = ({
                                                                            const opts = q.options.length === 4
                                                                                ? q.options as [string,string,string,string]
                                                                                : ([...q.options, '', '', '', ''].slice(0, 4) as [string,string,string,string]);
-                                                                           onSendToMcqCommunity({ question: q.question, options: opts, correctAnswer: q.correctAnswer, explanation: (q as any).explanation || '' });
+                                                                           const stmts = getMcqStatements(q);
+                                                                            let finalStmts = stmts;
+                                                                            let cleanQ = (q.question || '').replace(/<br\s*\/?>/gi, '\n').trim();
+                                                                            if (finalStmts.length === 0) {
+                                                                                const ext = extractStatements(cleanQ);
+                                                                                if (ext.statements.length > 0) {
+                                                                                    finalStmts = ext.statements;
+                                                                                    cleanQ = ext.cleanedQuestion.replace(/<br\s*\/?>/gi, '\n').trim();
+                                                                                }
+                                                                            }
+                                                                            onSendToMcqCommunity({ question: cleanQ, statements: finalStmts.length > 0 ? finalStmts : undefined, options: opts, correctAnswer: q.correctAnswer, explanation: (q as any).explanation || '' });
                                                                        }}
                                                                        className="w-6 h-6 rounded-full flex items-center justify-center active:scale-90 transition-all bg-violet-100 text-violet-600"
                                                                        title="MCQ Community mein bhejo"
@@ -3425,7 +3429,17 @@ export const LessonView: React.FC<Props> = ({
                                                                 const opts = q.options.length === 4
                                                                     ? q.options as [string,string,string,string]
                                                                     : ([...q.options, '', '', '', ''].slice(0, 4) as [string,string,string,string]);
-                                                                onSendToMcqCommunity({ question: q.question, options: opts, correctAnswer: q.correctAnswer, explanation: (q as any).explanation || '' });
+                                                                const stmts = getMcqStatements(q);
+                                                                let finalStmts = stmts;
+                                                                let cleanQ = (q.question || '').replace(/<br\s*\/?>/gi, '\n').trim();
+                                                                if (finalStmts.length === 0) {
+                                                                    const ext = extractStatements(cleanQ);
+                                                                    if (ext.statements.length > 0) {
+                                                                        finalStmts = ext.statements;
+                                                                        cleanQ = ext.cleanedQuestion.replace(/<br\s*\/?>/gi, '\n').trim();
+                                                                    }
+                                                                }
+                                                                onSendToMcqCommunity({ question: cleanQ, statements: finalStmts.length > 0 ? finalStmts : undefined, options: opts, correctAnswer: q.correctAnswer, explanation: (q as any).explanation || '' });
                                                             }}
                                                             className="w-7 h-7 rounded-full flex items-center justify-center active:scale-90 transition-all bg-violet-100 text-violet-600"
                                                             title="MCQ Community mein bhejo"

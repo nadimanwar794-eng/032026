@@ -179,6 +179,10 @@ function getNotesForSubject(sub: RoutineCategorySubject, allNotes: LucentEntry[]
     const ns = (n.subject || 'other').toLowerCase().trim();
     if (sub.bookName && nb !== sub.bookName) return false;
     if (sub.classLevel && nc !== sub.classLevel) return false;
+    if (sub.board && sub.board !== 'ALL_BOARDS') {
+      const noteBoard = (n as any).board;
+      if (noteBoard && noteBoard !== sub.board && noteBoard !== 'ALL_BOARDS') return false;
+    }
     return ns === sub.subjectId;
   });
 }
@@ -1322,7 +1326,7 @@ function RoutineSetupSheet({ allNotes, currentMode, currentBoard, currentClass, 
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<'SCHOOL' | 'COMPETITION' | null>(currentMode);
-  const [board, setBoard] = useState<string | null>(currentBoard);
+  const [board, setBoard] = useState<string | null>(currentBoard || 'BSEB');
   const [classLevel, setClassLevel] = useState(currentClass || '');
   const [selectedBooks, setSelectedBooks] = useState<Set<string>>(() => {
     if (!isUltraUser) {
@@ -1337,13 +1341,21 @@ function RoutineSetupSheet({ allNotes, currentMode, currentBoard, currentClass, 
 
   const availableClasses = useMemo(() => {
     const s = new Set<string>();
+    const targetBoard = board || 'BSEB';
     allNotes.forEach(n => {
       const cl = (n as any).classLevel;
       // School mode mein sirf numeric classes dikhao — COMPETITION etc. exclude karo
-      if (cl && !isNaN(Number(cl))) s.add(String(cl));
+      if (cl && !isNaN(Number(cl))) {
+        const nb = (n as any).board;
+        if (targetBoard && targetBoard !== 'ALL_BOARDS' && nb && nb !== targetBoard && nb !== 'ALL_BOARDS') return;
+        s.add(String(cl));
+      }
     });
+    if (s.size === 0) {
+      ['9', '10', '11', '12'].forEach(c => s.add(c));
+    }
     return Array.from(s).sort((a, b) => Number(a) - Number(b));
-  }, [allNotes]);
+  }, [allNotes, board]);
 
   const availableBooks = useMemo(() => {
     const s = new Set<string>();
@@ -1369,7 +1381,7 @@ function RoutineSetupSheet({ allNotes, currentMode, currentBoard, currentClass, 
   }, [allNotes]);
 
   const selectedBook = Array.from(selectedBooks)[0] || '';
-  const canSave = mode === 'SCHOOL' ? !!classLevel : mode === 'COMPETITION' ? selectedBooks.size > 0 : false;
+  const canSave = mode === 'SCHOOL' ? (!!classLevel && !!board) : mode === 'COMPETITION' ? selectedBooks.size > 0 : false;
 
   return (
     <div className="fixed inset-0 z-[600] flex items-end bg-slate-900/60 backdrop-blur-sm" onClick={onClose}>
@@ -1426,23 +1438,54 @@ function RoutineSetupSheet({ allNotes, currentMode, currentBoard, currentClass, 
           </div>
 
           {mode === 'SCHOOL' && (
-            <label className="block">
-              <span className="block text-xs font-black text-slate-600 mb-1.5">Class</span>
-              <div className="relative">
-                <select
-                  value={classLevel}
-                  onChange={e => setClassLevel(e.target.value)}
-                  className="w-full appearance-none rounded-xl border-2 border-blue-200 bg-blue-50 px-4 py-3 pr-10 text-sm font-black text-blue-800 outline-none focus:border-blue-500"
-                >
-                  <option value="">Class chuno</option>
-                  {availableClasses.map(cl => <option key={cl} value={cl}>Class {cl}</option>)}
-                </select>
-                <ChevronDown size={16} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-blue-400" />
+            <div className="space-y-3">
+              <div>
+                <span className="block text-xs font-black text-slate-600 mb-1.5">Board Chuno</span>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { id: 'BSEB', label: 'BSEB', sub: 'Bihar Board', icon: '🏛️' },
+                    { id: 'NCERT_HI', label: 'NCERT', sub: 'हिंदी माध्यम', icon: '📖' },
+                    { id: 'NCERT_EN', label: 'NCERT', sub: 'English Medium', icon: '📘' },
+                  ].map(b => {
+                    const isSelected = (board || 'BSEB') === b.id;
+                    return (
+                      <button
+                        key={b.id}
+                        type="button"
+                        onClick={() => setBoard(b.id)}
+                        className={`p-2.5 rounded-2xl border text-center transition-all ${
+                          isSelected
+                            ? 'border-blue-600 bg-blue-50 text-blue-900 shadow-sm ring-2 ring-blue-500/20'
+                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        <span className="text-xl block mb-1">{b.icon}</span>
+                        <span className="text-xs font-black block leading-tight">{b.label}</span>
+                        <span className="text-[9px] text-slate-500 font-medium block mt-0.5">{b.sub}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-              {availableClasses.length === 0 && (
-                <span className="block text-xs text-slate-400 font-medium mt-2">Koi class notes nahi mili — pehle notes add karo.</span>
-              )}
-            </label>
+
+              <label className="block">
+                <span className="block text-xs font-black text-slate-600 mb-1.5">Class</span>
+                <div className="relative">
+                  <select
+                    value={classLevel}
+                    onChange={e => setClassLevel(e.target.value)}
+                    className="w-full appearance-none rounded-xl border-2 border-blue-200 bg-blue-50 px-4 py-3 pr-10 text-sm font-black text-blue-800 outline-none focus:border-blue-500"
+                  >
+                    <option value="">Class chuno</option>
+                    {availableClasses.map(cl => <option key={cl} value={cl}>Class {cl}</option>)}
+                  </select>
+                  <ChevronDown size={16} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-blue-400" />
+                </div>
+                {availableClasses.length === 0 && (
+                  <span className="block text-xs text-slate-400 font-medium mt-2">Koi class notes nahi mili — pehle notes add karo.</span>
+                )}
+              </label>
+            </div>
           )}
 
           {mode === 'COMPETITION' && (
@@ -1582,10 +1625,11 @@ function RoutineSetupSheet({ allNotes, currentMode, currentBoard, currentClass, 
 }
 
 // ── Add Category Sheet ────────────────────────────────────────────────────────
-function AddCategorySheet({ allNotes, existingCategories, routineMode, selectedClass, selectedBook, selectedBooks, onAdd, onClose }: {
+function AddCategorySheet({ allNotes, existingCategories, routineMode, selectedBoard, selectedClass, selectedBook, selectedBooks, onAdd, onClose }: {
   allNotes: LucentEntry[];
   existingCategories: RoutineCategory[];
   routineMode: 'SCHOOL' | 'COMPETITION' | null;
+  selectedBoard?: string | null;
   selectedClass: string | null;
   selectedBook: string | null;
   selectedBooks?: string[];
@@ -1596,28 +1640,36 @@ function AddCategorySheet({ allNotes, existingCategories, routineMode, selectedC
   const [categoryName, setCategoryName] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  // Filter notes by user's chosen mode/class/books
+  // Filter notes by user's chosen mode/board/class/books
   const modeFilteredNotes = useMemo(() => {
-    if (routineMode === 'SCHOOL' && selectedClass) {
-      return allNotes.filter(n => String((n as any).classLevel) === String(selectedClass));
+    if (routineMode === 'SCHOOL') {
+      return allNotes.filter(n => {
+        if (!isMultiPageRoutineNote(n)) return false;
+        if (selectedClass && String((n as any).classLevel) !== String(selectedClass)) return false;
+        if (selectedBoard && selectedBoard !== 'ALL_BOARDS') {
+          const nb = (n as any).board;
+          if (nb && nb !== selectedBoard && nb !== 'ALL_BOARDS') return false;
+        }
+        return true;
+      });
     }
     if (routineMode === 'COMPETITION') {
       if (selectedBooks && selectedBooks.length > 0) {
         const bookSet = new Set(selectedBooks);
-        return allNotes.filter(n => bookSet.has((n as any).bookName?.trim() || ''));
+        return allNotes.filter(n => isMultiPageRoutineNote(n) && bookSet.has((n as any).bookName?.trim() || ''));
       }
       if (selectedBook) {
-        return allNotes.filter(n => ((n as any).bookName?.trim() || '') === selectedBook);
+        return allNotes.filter(n => isMultiPageRoutineNote(n) && ((n as any).bookName?.trim() || '') === selectedBook);
       }
     }
-    return allNotes;
-  }, [allNotes, routineMode, selectedClass, selectedBook, selectedBooks]);
+    return allNotes.filter(n => isMultiPageRoutineNote(n));
+  }, [allNotes, routineMode, selectedBoard, selectedClass, selectedBook, selectedBooks]);
 
   const available = useMemo(() => getAvailableSubjectSlots(modeFilteredNotes), [modeFilteredNotes]);
 
   // Label shown at top of sheet
   const sourceLabel = routineMode === 'SCHOOL' && selectedClass
-    ? `📚 Class ${selectedClass} ke notes`
+    ? `📚 ${selectedBoard && selectedBoard !== 'ALL_BOARDS' ? `${selectedBoard} · ` : ''}Class ${selectedClass} ke notes`
     : routineMode === 'COMPETITION'
       ? selectedBooks && selectedBooks.length > 0
         ? `📖 ${selectedBooks.length === 1 ? selectedBooks[0] : `${selectedBooks.length} books`} ke notes`
@@ -1677,6 +1729,7 @@ function AddCategorySheet({ allNotes, existingCategories, routineMode, selectedC
         subjectId: item.subjectId,
         bookName: item.bookName,
         classLevel: item.classLevel,
+        board: routineMode === 'SCHOOL' ? (selectedBoard || 'BSEB') : undefined,
         displayName: item.displayName,
         emoji: item.emoji,
         currentLessonIndex: 0,
@@ -1836,11 +1889,12 @@ function SlotRow({ icon, label, count, unlocked, cost, userCredits, locked, lock
 }
 
 // ── Category Edit Sheet ───────────────────────────────────────────────────────
-function CategoryEditSheet({ category, allNotes, existingCategories, routineMode, selectedClass, selectedBook, selectedBooks, onUpdateSubjects, onClose }: {
+function CategoryEditSheet({ category, allNotes, existingCategories, routineMode, selectedBoard, selectedClass, selectedBook, selectedBooks, onUpdateSubjects, onClose }: {
   category: RoutineCategory;
   allNotes: LucentEntry[];
   existingCategories: RoutineCategory[];
   routineMode: 'SCHOOL' | 'COMPETITION' | null;
+  selectedBoard?: string | null;
   selectedClass: string | null;
   selectedBook: string | null;
   selectedBooks?: string[];
@@ -1849,20 +1903,28 @@ function CategoryEditSheet({ category, allNotes, existingCategories, routineMode
 }) {
   const [subjects, setSubjects] = useState<RoutineCategorySubject[]>(category.subjects);
 
-  // Available notes filtered by mode
+  // Available notes filtered by mode and board
   const modeFilteredNotes = useMemo(() => {
-    if (routineMode === 'SCHOOL' && selectedClass) {
-      return allNotes.filter(n => String((n as any).classLevel) === String(selectedClass));
+    if (routineMode === 'SCHOOL') {
+      return allNotes.filter(n => {
+        if (!isMultiPageRoutineNote(n)) return false;
+        if (selectedClass && String((n as any).classLevel) !== String(selectedClass)) return false;
+        if (selectedBoard && selectedBoard !== 'ALL_BOARDS') {
+          const nb = (n as any).board;
+          if (nb && nb !== selectedBoard && nb !== 'ALL_BOARDS') return false;
+        }
+        return true;
+      });
     }
     if (routineMode === 'COMPETITION') {
       if (selectedBooks && selectedBooks.length > 0) {
         const bookSet = new Set(selectedBooks);
-        return allNotes.filter(n => bookSet.has((n as any).bookName?.trim() || ''));
+        return allNotes.filter(n => isMultiPageRoutineNote(n) && bookSet.has((n as any).bookName?.trim() || ''));
       }
-      if (selectedBook) return allNotes.filter(n => ((n as any).bookName?.trim() || '') === selectedBook);
+      if (selectedBook) return allNotes.filter(n => isMultiPageRoutineNote(n) && ((n as any).bookName?.trim() || '') === selectedBook);
     }
-    return allNotes;
-  }, [allNotes, routineMode, selectedClass, selectedBook, selectedBooks]);
+    return allNotes.filter(n => isMultiPageRoutineNote(n));
+  }, [allNotes, routineMode, selectedBoard, selectedClass, selectedBook, selectedBooks]);
 
   const available = useMemo(() => getAvailableSubjectSlots(modeFilteredNotes), [modeFilteredNotes]);
 
@@ -1897,6 +1959,7 @@ function CategoryEditSheet({ category, allNotes, existingCategories, routineMode
       subjectId: item.subjectId,
       bookName: item.bookName,
       classLevel: item.classLevel,
+      board: routineMode === 'SCHOOL' ? (selectedBoard || 'BSEB') : undefined,
       displayName: item.displayName,
       emoji: item.emoji,
       currentLessonIndex: 0,
@@ -2112,7 +2175,10 @@ interface MyRoutineProps {
     mcqHistory?: any[];
     credits?: number; bonusCredits?: number; giftedCredits?: number; giftedCreditsExpiry?: string;
     diamonds?: number; role?: string;
+    board?: string; classLevel?: string;
   };
+  activeBoard?: string;
+  activeClass?: string;
   lucentNotes?: any[];
   onBack: () => void;
   onUserUpdate?: (u: any) => void;
@@ -2127,7 +2193,7 @@ interface MyRoutineProps {
   challenge20s?: any[];
 }
 
-export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], onBack, onUserUpdate, onGoToRevision, settings, onOpenRevisionHub, onPracticeMistakes, onOpenLesson, onStartChallenge20, onClaimChallenge20, challenge20s = [] }) => {
+export const MyRoutine: React.FC<MyRoutineProps> = ({ user, activeBoard, activeClass, lucentNotes = [], onBack, onUserUpdate, onGoToRevision, settings, onOpenRevisionHub, onPracticeMistakes, onOpenLesson, onStartChallenge20, onClaimChallenge20, challenge20s = [] }) => {
   const theme = useAppTheme();
   const userId = user?.id || 'guest';
   const mcqHistory: any[] = user?.mcqHistory || [];
@@ -2140,26 +2206,38 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
   const [data, setDataRaw] = useState<RoutineData>(() => {
     const d = loadRoutineData(userId);
     const reset = checkAndResetDaily(d);
-    return ensureTodayClaimEntry(reset, getUserSubTier(user));
+    const effBoard = reset.selectedBoard || activeBoard || (user as any)?.board || 'BSEB';
+    const effClass = reset.selectedClass || activeClass || (user as any)?.classLevel || '10';
+    const initialMode = reset.routineMode || 'SCHOOL';
+    const ensured: RoutineData = {
+      ...reset,
+      routineMode: initialMode,
+      selectedBoard: initialMode === 'COMPETITION' ? null : effBoard,
+      selectedClass: initialMode === 'COMPETITION' ? null : (reset.selectedClass || effClass),
+    };
+    return ensureTodayClaimEntry(ensured, getUserSubTier(user));
   });
 
   // Routine notes must strictly be multi-page books, excluding Sar Sangrah
   // and respecting the user's selected book(s) and board/class.
   const routineNotes = useMemo(() => {
+    const effectiveBoard = data.routineMode === 'SCHOOL'
+      ? (data.selectedBoard || activeBoard || (user as any)?.board || 'BSEB')
+      : null;
     return allNotes.filter(n => {
       if (!isMultiPageRoutineNote(n)) return false;
 
       if (data.routineMode === 'SCHOOL') {
         if ((n as any).classLevel === 'COMPETITION') return false;
 
-        // Filter by user's selected board
-        if (data.selectedBoard && data.selectedBoard !== 'ALL_BOARDS' && data.selectedBoard !== '') {
+        // Strict filter by user's selected board
+        if (effectiveBoard && effectiveBoard !== 'ALL_BOARDS') {
            const noteBoard = (n as any).board;
-           if (noteBoard && noteBoard !== data.selectedBoard && noteBoard !== 'ALL_BOARDS') return false;
+           if (noteBoard && noteBoard !== effectiveBoard && noteBoard !== 'ALL_BOARDS') return false;
         }
 
         // Filter by user's selected class
-        if (data.selectedClass && (n as any).classLevel && (n as any).classLevel !== data.selectedClass) {
+        if (data.selectedClass && (n as any).classLevel && String((n as any).classLevel) !== String(data.selectedClass)) {
           return false;
         }
       } else if (data.routineMode === 'COMPETITION') {
@@ -2173,7 +2251,7 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
       }
       return true;
     });
-  }, [allNotes, data.routineMode, data.selectedBoard, data.selectedClass, data.selectedBooks, data.selectedBook]);
+  }, [allNotes, data.routineMode, data.selectedBoard, activeBoard, (user as any)?.board, data.selectedClass, data.selectedBooks, data.selectedBook]);
   const [showCatManager, setShowCatManager] = useState(false);
   const [showAddCat, setShowAddCat] = useState(false);
   const [editingCatId, setEditingCatId] = useState<string | null>(null);
@@ -2193,8 +2271,12 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
   const setData = useCallback((updater: (prev: RoutineData) => RoutineData) => {
     setDataRaw(prev => {
       const next = updater(prev);
-      saveRoutineData(userId, next);
-      scheduleRoutineSync(userId, next); // debounced Firebase backup
+      if (next !== prev) {
+        setTimeout(() => {
+          saveRoutineData(userId, next);
+          scheduleRoutineSync(userId, next); // debounced Firebase backup
+        }, 0);
+      }
       return next;
     });
   }, [userId]);
@@ -2431,37 +2513,42 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
     setData(prev => ({ ...prev, subjects: prev.subjects.map(s => s.id === subId ? { ...s, routineApplied: !s.routineApplied } : s) }));
   };
   const handleCatChangeStart = (catId: string, subjectId: string, newIdx: number) => {
+    const cats = data.routineCategories || [];
+    const cat = cats.find(c => c.id === catId);
+    if (!cat) return;
+    const sub = cat.subjects.find(s => s.subjectId === subjectId);
+    if (!sub) return;
+
+    const cost = getSkipCost(sub.currentLessonIndex, newIdx);
+    const userCredits = (user.credits || 0) + (user.bonusCredits || 0);
+
+    if (cost > userCredits) {
+      showToast(`Coins kam hain! Chahiye: ${cost}🪙`, 'error');
+      return;
+    }
+
+    if (cost > 0 && onUserUpdate) {
+      const u = { ...user, credits: Math.max(0, (user.credits || 0) - cost) };
+      onUserUpdate(u);
+      try { saveUserToLive(u); } catch (_) {}
+    }
+
     setData(prev => {
-      const cats = [...(prev.routineCategories || [])];
-      const ci = cats.findIndex(c => c.id === catId);
+      const currentCats = [...(prev.routineCategories || [])];
+      const ci = currentCats.findIndex(c => c.id === catId);
       if (ci === -1) return prev;
 
-      const cat = { ...cats[ci] };
-      const subjects = [...cat.subjects];
+      const targetCat = { ...currentCats[ci] };
+      const subjects = [...targetCat.subjects];
       const si = subjects.findIndex(s => s.subjectId === subjectId);
       if (si === -1) return prev;
 
-      const sub = subjects[si];
-      const cost = getSkipCost(sub.currentLessonIndex, newIdx);
-      const userCredits = (user.credits || 0) + (user.bonusCredits || 0);
+      subjects[si] = { ...subjects[si], currentLessonIndex: newIdx };
+      targetCat.subjects = subjects;
+      currentCats[ci] = targetCat;
 
-      if (cost > userCredits) {
-        showToast(`Coins kam hain! Chahiye: ${cost}🪙`, 'error');
-        return prev;
-      }
-
-      if (cost > 0 && onUserUpdate) {
-        const u = { ...user, credits: Math.max(0, (user.credits || 0) - cost) };
-        onUserUpdate(u);
-        try { saveUserToLive(u); } catch (_) {}
-      }
-
-      subjects[si] = { ...sub, currentLessonIndex: newIdx };
-      cat.subjects = subjects;
-      cats[ci] = cat;
-
-      const next = { ...prev, routineCategories: cats };
-      syncRoutineNow(userId, next);
+      const next = { ...prev, routineCategories: currentCats };
+      setTimeout(() => syncRoutineNow(userId, next), 0);
       return next;
     });
   };
@@ -2510,14 +2597,14 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
             setData(prev => {
               // Build storage key for the current (old) class/book context
               const oldKey = prev.routineMode === 'SCHOOL' && prev.selectedClass
-                ? `SCHOOL_${prev.selectedClass}`
+                ? `SCHOOL_${prev.selectedBoard || 'BSEB'}_${prev.selectedClass}`
                 : prev.routineMode === 'COMPETITION' && (prev.selectedBooks || []).length > 0
                   ? `COMPETITION_${[...(prev.selectedBooks || [])].sort().join('+')}`
                   : null;
 
               // Build storage key for the new class/book context
               const newKey = mode === 'SCHOOL' && classLevel
-                ? `SCHOOL_${classLevel}`
+                ? `SCHOOL_${board || 'BSEB'}_${classLevel}`
                 : mode === 'COMPETITION' && books.length > 0
                   ? `COMPETITION_${[...books].sort().join('+')}`
                   : null;
@@ -2542,8 +2629,10 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
                 routineCategoriesByClass: byClass,
               };
               // Immediate Firebase sync — config change is important
-              syncRoutineNow(userId, next);
-              window.dispatchEvent(new CustomEvent('iic-routine-updated'));
+              setTimeout(() => {
+                syncRoutineNow(userId, next);
+                window.dispatchEvent(new CustomEvent('iic-routine-updated'));
+              }, 0);
               return next;
             });
             setShowRoutineSetup(false);
@@ -2584,6 +2673,7 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
             allNotes={allNotes}
             existingCategories={categories}
             routineMode={data.routineMode}
+            selectedBoard={data.selectedBoard || activeBoard || (user as any)?.board || 'BSEB'}
             selectedClass={data.selectedClass}
             selectedBook={data.selectedBook}
             selectedBooks={data.selectedBooks || []}
@@ -2598,6 +2688,7 @@ export const MyRoutine: React.FC<MyRoutineProps> = ({ user, lucentNotes = [], on
           existingCategories={categories}
           onAdd={handleAddCategory}
           routineMode={data.routineMode}
+          selectedBoard={data.selectedBoard || activeBoard || (user as any)?.board || 'BSEB'}
           selectedClass={data.selectedClass}
           selectedBook={data.selectedBook}
           selectedBooks={data.selectedBooks || []}

@@ -174,9 +174,17 @@ export const SubjectSelection: React.FC<Props> = ({
   listCardBg, listCardBorder,
 }) => {
   const appTheme = useAppTheme();
-  const subjects = getSubjectsList(classLevel, stream, board, settings).filter(
-    sub => !(settings?.hiddenSubjects || []).includes(sub.id)
-  );
+  const subjects = useMemo(() => {
+    const list = getSubjectsList(classLevel, stream, board, settings).filter(
+      sub => !(settings?.hiddenSubjects || []).includes(sub.id)
+    );
+    const seen = new Set<string>();
+    return list.filter(s => {
+      if (!s || !s.id || seen.has(s.id)) return false;
+      seen.add(s.id);
+      return true;
+    });
+  }, [classLevel, stream, board, settings]);
   const currentBoard = board || 'CBSE';
   const isCompetition = classLevel === 'COMPETITION';
   const isSchoolClass = !isCompetition && ['6','7','8','9','10','11','12'].includes(String(classLevel));

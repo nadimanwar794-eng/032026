@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <!-- Static (pre-JS) theming so browser chrome, website-to-APK/TWA wrappers,
+         and the OS status/navigation bar are themed correctly from first paint.
+         Keep in sync with the manifest theme_color/background_color in vite.config.ts
+         and with the dynamic theme-color updates in StudentDashboard.tsx. -->
+    <meta name="theme-color" content="#030717" />
+    <meta name="background-color" content="#030717" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="NSTA" />
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+    <title>NSTA</title>
+    <meta name="description" content="NSTA - Comprehensive learning platform with syllabus, notes, audio studio, MCQs, and student progress tracking." />
+    <meta name="robots" content="index, follow" />
+    <meta property="og:title" content="NSTA" />
+    <meta property="og:description" content="NSTA - Comprehensive learning platform with syllabus, notes, audio studio, MCQs, and student progress tracking." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="NSTA" />
+    <meta name="twitter:description" content="NSTA - Comprehensive learning platform with syllabus, notes, audio studio, MCQs, and student progress tracking." />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+      // Start the app splash clock before the React bundle begins loading.
+      // The HTML fallback below covers the gap between the native PWA splash
+      // and React mounting without introducing a blank frame.
+      window.__nstaBootStartedAt = Date.now();
+    </script>
+    <style>
+      #pre-react-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        width: 100vw;
+        height: 100vh;
+        min-height: 100dvh;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: space-between;
+        padding: 4rem 1.5rem 3rem;
+        overflow: hidden;
+        color: #e2e8f0;
+        font-family: Inter, system-ui, sans-serif;
+        user-select: none;
+        background: radial-gradient(circle at 50% 18%, #1e1b4b 0%, #0c1033 40%, #030717 100%);
+        background-color: #030717;
+      }
+      #pre-react-splash::before {
+        content: "";
+        position: absolute;
+        top: 25%;
+        left: 50%;
+        width: 30rem;
+        height: 30rem;
+        border-radius: 999px;
+        pointer-events: none;
+        transform: translate(-50%, -50%);
+        background: radial-gradient(circle, rgba(245, 158, 11, .18) 0%, rgba(56, 189, 248, .12) 40%, transparent 70%);
+        filter: blur(55px);
+      }
+      #pre-react-splash::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        bottom: 2.5rem;
+        width: 26rem;
+        height: 16rem;
+        border-radius: 999px;
+        pointer-events: none;
+        transform: translateX(-50%);
+        background: radial-gradient(circle, rgba(99, 102, 241, .22) 0%, transparent 70%);
+        filter: blur(60px);
+      }
+      .pre-react-splash-brand,
+      .pre-react-splash-footer {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+      }
+      .pre-react-splash-brand {
+        margin-top: auto;
+        margin-bottom: auto;
+      }
+      .pre-react-splash-logo {
+        width: 9rem;
+        height: 9rem;
+        object-fit: contain;
+        border-radius: 1.5rem;
+        filter: drop-shadow(0 0 25px rgba(245, 158, 11, .38));
+      }
+      .pre-react-splash-title {
+        margin: 1.5rem 0 0;
+        color: #fcd34d;
+        font-size: clamp(2.25rem, 9vw, 3rem);
+        font-weight: 900;
+        letter-spacing: .18em;
+        line-height: 1;
+        text-shadow: 0 2px 14px rgba(245, 158, 11, .4);
+      }
+      .pre-react-splash-subtitle {
+        margin: .5rem 0 0;
+        color: #7dd3fc;
+        font-size: .8rem;
+        font-weight: 700;
+        letter-spacing: .12em;
+        text-transform: uppercase;
+      }
+      .pre-react-splash-pill {
+        margin-top: 1rem;
+        padding: .25rem .875rem;
+        border: 1px solid rgba(251, 191, 36, .3);
+        border-radius: 999px;
+        color: #fde68a;
+        background: rgba(255, 255, 255, .05);
+        font-size: .6875rem;
+        font-weight: 800;
+        letter-spacing: .12em;
+        text-transform: uppercase;
+      }
+      .pre-react-splash-footer {
+        gap: .5rem;
+      }
+      .pre-react-splash-starting {
+        display: flex;
+        align-items: center;
+        gap: .5rem;
+        color: #94a3b8;
+        font-size: .75rem;
+        font-weight: 600;
+      }
+      .pre-react-splash-dot {
+        width: .5rem;
+        height: .5rem;
+        border-radius: 999px;
+        background: #fbbf24;
+        box-shadow: 0 0 0 rgba(251, 191, 36, .7);
+        animation: pre-react-splash-pulse 1.5s infinite;
+      }
+      .pre-react-splash-version {
+        color: #64748b;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: .625rem;
+      }
+      @keyframes pre-react-splash-pulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: .45; transform: scale(.75); }
+      }
+    </style>
+    <script type="module" crossorigin src="/assets/index-Baj02UUK.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/vendor-charts-CNLMPrl7.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-pdf-xnfXjaZ9.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-export-D_eD1q-M.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-firebase-CeUyAARm.js">
+    <link rel="stylesheet" crossorigin href="/assets/vendor-pdf-CklNgMkf.css">
+    <link rel="stylesheet" crossorigin href="/assets/index-BRNCE581.css">
+  <link rel="manifest" href="/manifest.webmanifest"></head>
+  <body style="background:radial-gradient(circle at 50% 18%, #1e1b4b 0%, #0c1033 40%, #030717 100%);margin:0">
+    <div id="root">
+    </div>
+    <div id="pre-react-splash" aria-hidden="true">
+      <div class="pre-react-splash-brand">
+        <img
+          class="pre-react-splash-logo"
+          src="/branding/nsta-logo.png"
+          alt=""
+          onerror="this.onerror=null;this.src='/icons/icon-512.png'"
+        />
+        <h1 class="pre-react-splash-title">NSTA</h1>
+        <p class="pre-react-splash-subtitle">National Study &amp; Tracking App</p>
+        <div class="pre-react-splash-pill">Learn · Grow · Lead</div>
+      </div>
+      <div class="pre-react-splash-footer">
+        <div class="pre-react-splash-starting">
+          <span class="pre-react-splash-dot"></span>
+          <span>Starting App...</span>
+        </div>
+        <span class="pre-react-splash-version">NSTA</span>
+      </div>
+    </div>
+    <script>
+      const bootSplash = document.getElementById('pre-react-splash');
+      const bootElapsed = Date.now() - window.__nstaBootStartedAt;
+      window.setTimeout(() => bootSplash?.remove(), Math.max(0, 3000 - bootElapsed));
+    </script>
+  </body>
+</html>

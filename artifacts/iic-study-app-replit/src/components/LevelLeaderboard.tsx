@@ -279,6 +279,36 @@ export const LevelLeaderboard: React.FC<Props> = ({ user, settings, onBack }) =>
       </div>
 
       <div className="px-4 py-4 space-y-4">
+        {/* Daily Challenge Yesterday Result & Prizes Quick Banner */}
+        <div 
+          onClick={() => {
+            window.dispatchEvent(new CustomEvent('iic-open-daily-challenge-leaderboard'));
+          }}
+          className="bg-gradient-to-r from-amber-500/20 via-yellow-500/15 to-orange-500/20 border border-amber-500/40 rounded-2xl p-3.5 flex items-center justify-between gap-3 cursor-pointer hover:border-amber-400/60 transition-all active:scale-98 shadow-md"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-yellow-600 text-black flex items-center justify-center font-black text-lg shrink-0 shadow-sm">
+              🏆
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-xs font-black text-amber-300 uppercase tracking-tight">
+                  Daily Challenge: Kal Ka Leaderboard & Prizes
+                </h3>
+                <span className="px-1.5 py-0.2 bg-amber-400 text-black text-[9px] font-black rounded">
+                  NEW
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-300 mt-0.5">
+                Dekhein kal kiski kya rank aayi aur kitna % prize mila →
+              </p>
+            </div>
+          </div>
+          <span className="text-xs font-black text-amber-400 shrink-0 bg-amber-500/10 px-3 py-1.5 rounded-xl border border-amber-500/30">
+            Open ➔
+          </span>
+        </div>
+
         {/* Category Tabs */}
         <div className="flex flex-wrap gap-2">
           {tabs.map(t => (

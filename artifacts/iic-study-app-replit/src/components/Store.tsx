@@ -140,6 +140,31 @@ const DEFAULT_diamondUnifiedTemplates = [
   }
 ];
 
+/* ─── 12:00 AM Midnight Reset Live Countdown Hook ─── */
+const getMidnightResetCountdown = (): string => {
+  const now = new Date();
+  const midnight = new Date(now);
+  midnight.setHours(24, 0, 0, 0);
+  const diff = Math.max(0, midnight.getTime() - now.getTime());
+  const h = Math.floor(diff / 3600000);
+  const m = Math.floor((diff % 3600000) / 60000);
+  const s = Math.floor((diff % 60000) / 1000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(h)}h ${pad(m)}m ${pad(s)}s`;
+};
+
+const useMidnightCountdown = () => {
+  const [countdown, setCountdown] = useState<string>(getMidnightResetCountdown);
+
+  useEffect(() => {
+    const update = () => setCountdown(getMidnightResetCountdown());
+    const timer = setInterval(update, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  return countdown;
+};
+
 /* ─── Subscription History ─── */
 const SubHistory: React.FC<{ user: User; onBack: () => void }> = ({ user, onBack }) => {
   const history = user.subscriptionHistory || [];
@@ -302,6 +327,7 @@ function TierDailyClaimCard({
   onUpdateUser?: (u: any) => void;
 }) {
   const subTier: UserSubTier = getUserSubTier(u ?? {});
+  const resetCountdown = useMidnightCountdown();
   const [routineData, setRoutineDataRaw] = useState(() => {
     const d = loadRoutineData(userId);
     const reset = checkAndResetDaily(d);
@@ -370,10 +396,16 @@ function TierDailyClaimCard({
           </button>
         </>
       ) : (
-        <div className="py-1.5 rounded-xl flex items-center justify-center gap-1.5"
+        <div className="py-2 px-3 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-1.5"
           style={{ background: 'rgba(52,211,153,0.10)', border: `1px solid ${C.greenBorder}` }}>
-          <Check size={12} color={C.green} />
-          <span className="text-xs font-black" style={{ color: C.green }}>Aaj ka {label} Reward claim ho gaya! ({dailyAmt} {unitSymbol})</span>
+          <div className="flex items-center gap-1.5">
+            <Check size={12} color={C.green} />
+            <span className="text-xs font-black" style={{ color: C.green }}>Aaj ka {label} Reward claim ho gaya! ({dailyAmt} {unitSymbol})</span>
+          </div>
+          <span className="text-[10px] font-mono font-bold text-emerald-300 bg-black/40 px-2 py-0.5 rounded border border-emerald-500/20 inline-flex items-center gap-1">
+            <span>⏳ 12 AM Reset:</span>
+            <span>{resetCountdown}</span>
+          </span>
         </div>
       )}
     </div>
@@ -668,6 +700,7 @@ const CompareMatrix: React.FC<CompareMatrixProps> = ({
 /* ─── Main Store Screen Component ─── */
 
 export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, initialTier }) => {
+  const resetCountdown = useMidnightCountdown();
   const [tierType, setTierType] = useState<'SUBSCRIPTION' | 'COMPARE' | 'CREDITS' | 'DIAMONDS' | 'EXCHANGE' | 'HISTORY'>(() =>
     initialTier || 'SUBSCRIPTION'
   );
@@ -2145,12 +2178,20 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
                           className="w-full py-2.5 rounded-xl font-black text-xs text-slate-950 bg-gradient-to-r from-amber-400 to-yellow-300 hover:opacity-95 active:scale-[0.98] transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
                         >
                           <Gift size={14} />
-                          {claimingStorePass ? 'Claim Ho Raha Hai...' : `Aaj Ke +${sub.dailyCredits} Credits Claim Karein ������`}
+                          {claimingStorePass ? 'Claim Ho Raha Hai...' : `Aaj Ke +${sub.dailyCredits} Credits Claim Karein 🪙`}
                         </button>
                       ) : (
-                        <div className="py-2 px-3 rounded-xl bg-amber-900/40 border border-amber-400/20 text-center text-xs font-bold text-amber-300 flex items-center justify-center gap-1.5">
-                          <Check size={14} />
-                          ✓ Aaj ka claim ho gaya (+{sub.dailyCredits} 🪙) · Agle credits kal raat 12:00 AM par milenge
+                        <div className="py-2.5 px-3 rounded-xl bg-amber-950/80 border border-amber-400/30 text-center text-xs font-bold text-amber-300 flex flex-col gap-1.5 shadow-sm">
+                          <div className="flex items-center justify-center gap-1.5 text-amber-300">
+                            <Check size={14} className="text-amber-400 shrink-0" />
+                            <span>✓ Aaj ka claim ho gaya (+{sub.dailyCredits} 🪙)</span>
+                          </div>
+                          <div className="flex items-center justify-center flex-wrap gap-1.5 text-[11px] text-amber-200/90 font-medium">
+                            <span>Agle credits kal raat 12:00 AM reset par milenge:</span>
+                            <span className="font-mono font-black text-amber-300 bg-black/60 px-2 py-0.5 rounded-md border border-amber-400/30 inline-flex items-center gap-1">
+                              <span className="text-amber-400">⏳</span> {resetCountdown}
+                            </span>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -2288,7 +2329,18 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
                       {claimingDiamonds ? 'Claiming...' : `Aaj Ke +${user.diamondSubscription.dailyDiamonds} 💎 Claim Karein`}
                     </button>
                   ) : (
-                    <p className="text-[11px] text-center text-slate-400">✓ Aaj ka claim ho gaya!</p>
+                    <div className="py-2.5 px-3 rounded-xl bg-sky-950/70 border border-sky-400/30 flex flex-col sm:flex-row items-center justify-between gap-2 shadow-sm text-xs">
+                      <div className="flex items-center gap-1.5 text-slate-200 font-bold">
+                        <Check size={14} className="text-sky-400 shrink-0" />
+                        <span>✓ Aaj ka claim ho gaya!</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[11px] text-sky-200 font-medium">
+                        <span className="text-slate-400">12:00 AM Reset in:</span>
+                        <span className="font-mono font-black text-sky-300 bg-black/60 px-2 py-0.5 rounded-md border border-sky-400/30 inline-flex items-center gap-1">
+                          <span className="text-sky-400">⏳</span> {resetCountdown}
+                        </span>
+                      </div>
+                    </div>
                   )}
                 </div>
               )}

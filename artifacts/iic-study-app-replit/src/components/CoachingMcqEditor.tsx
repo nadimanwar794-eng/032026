@@ -224,24 +224,34 @@ export function CoachingMcqEditor({ value, onChange, accent = 'emerald', compact
 
                 <div className="rounded-lg border border-indigo-100 bg-indigo-50/60 p-2 space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <label className="text-[9px] font-black text-indigo-700 uppercase">Numbered Statements (optional)</label>
-                    <button type="button" onClick={() => addStatement(index)} className="text-[10px] font-bold text-indigo-600 hover:underline">+ Statement</button>
-                  </div>
-                  {(mcq.statements || []).map((statement, statementIndex) => (
-                    <div key={statementIndex} className="flex items-start gap-1">
-                      <span className="text-[10px] font-black text-indigo-500 pt-2">{statementIndex + 1}.</span>
-                      <textarea
-                        value={statement}
-                        onChange={e => updateStatement(index, statementIndex, e.target.value)}
-                        className="flex-1 p-1.5 border border-indigo-100 rounded text-[11px] outline-none min-h-[38px] resize-y focus:border-indigo-400"
-                        placeholder={`Statement ${statementIndex + 1}`}
-                      />
-                      <button type="button" onClick={() => removeStatement(index, statementIndex)} className="p-1 text-red-400 hover:text-red-600">
-                        <Trash2 size={11} />
-                      </button>
+                    <label className="text-[9px] font-black text-indigo-700 uppercase">Numbered Statements / कथन (optional)</label>
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={() => addStatement(index)} className="text-[10px] font-bold text-indigo-600 hover:underline">+ Statement</button>
                     </div>
-                  ))}
-                  {(mcq.statements || []).length === 0 && <p className="text-[9px] text-indigo-400">Agar statements nahi hain to khaali chhod sakte hain.</p>}
+                  </div>
+                  <textarea
+                    value={(mcq.statements || []).join('\n')}
+                    onChange={e => {
+                      const lines = e.target.value.split('\n').map(l => l.trim()).filter(Boolean);
+                      updateItem(index, { statements: lines.length > 0 ? lines : undefined });
+                    }}
+                    placeholder="Statements (kathan) yahan likhein — har statement nayi line me"
+                    rows={2}
+                    className="w-full p-1.5 border border-indigo-200 bg-white rounded text-xs outline-none focus:border-indigo-500 placeholder-indigo-300 resize-none"
+                  />
+                  {(mcq.statements || []).length > 0 && (
+                    <div className="space-y-1">
+                      {mcq.statements!.map((statement, statementIndex) => (
+                        <div key={statementIndex} className="flex items-start gap-1 bg-white/70 p-1 rounded border border-indigo-50">
+                          <span className="text-[10px] font-black text-indigo-500 pt-1">{statementIndex + 1}.</span>
+                          <span className="flex-1 text-[11px] text-slate-700 font-medium leading-snug">{statement}</span>
+                          <button type="button" onClick={() => removeStatement(index, statementIndex)} className="p-1 text-red-400 hover:text-red-600">
+                            <Trash2 size={11} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">

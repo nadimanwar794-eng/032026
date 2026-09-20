@@ -93,6 +93,7 @@ export const ALL_FEATURES: Feature[] = [
         group: 'TOOLS',
         surfaceLevel: 1,
         adminVisible: true,
+        requiredSubscription: 'BASIC',
         icon: 'Users',
         description: 'Live synchronized classrooms, interactive whiteboard and live MCQ battles.',
     },
@@ -448,7 +449,7 @@ export const ALL_FEATURES: Feature[] = [
     { id: 'TEXT_STYLE_CUSTOMIZATION', label: 'Text Style Customization', group: 'TOOLS', surfaceLevel: 2, requiredSubscription: 'BASIC', adminVisible: true, description: 'Customize reader fonts and typography.' },
     { id: 'TEXT_COLOR_CUSTOMIZATION', label: 'Text Color Customization', group: 'TOOLS', surfaceLevel: 2, requiredSubscription: 'BASIC', adminVisible: true, description: 'Customize reader text palette colors.' },
     { id: 'CORRECTION_MODE', label: 'Correction Mode', group: 'TOOLS', surfaceLevel: 2, requiredSubscription: 'BASIC', adminVisible: true, description: 'Submit error corrections in reading notes.' },
-    { id: 'SUGGESTIONS_PANEL', label: 'Suggestions Panel', group: 'TOOLS', surfaceLevel: 2, requiredSubscription: 'ULTRA', adminVisible: true, description: 'Exclusive feedback & suggestions portal for Ultra members.' },
+    { id: 'SUGGESTIONS_PANEL', label: 'Suggestions Panel', group: 'TOOLS', surfaceLevel: 2, requiredSubscription: 'BASIC', adminVisible: true, description: 'Feedback & suggestions portal for all members.' },
     { id: 'ULTRA_MODE', label: 'Ultra Mode (Chunk Notes)', group: 'CONTENT', surfaceLevel: 2, requiredSubscription: 'ULTRA', adminVisible: true, description: 'Exclusive HTML styled rich reader mode for Ultra members.' },
     { id: 'AI_STUDIO', label: 'AI Studio', group: 'SOUL', surfaceLevel: 2, adminVisible: true, description: 'Control AI Studio features.' },
 

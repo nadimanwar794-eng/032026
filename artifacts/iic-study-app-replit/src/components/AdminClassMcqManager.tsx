@@ -1,10 +1,10 @@
 // @ts-nocheck
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Save, Trash2, ChevronRight, ArrowLeft, Plus, BookOpen, Edit2, X, ArrowRight, Copy, Library } from 'lucide-react';
 import { parseMCQText } from '../utils/mcqParser';
 import { saveTopicNotes } from '../utils/revisionTrackerV2';
 import { saveMcqLesson, deleteMcqLesson, subscribeMcqLessons } from '../firebase';
-import { getClassSubjectOptions, getLucentSubjectOptions } from '../constants';
+import { getClassSubjectOptions, getLucentSubjectOptions, isSubjectMatch, LUCENT_SUBJECT_OPTIONS_BASE } from '../constants';
 
 const CLASSES = ['6', '7', '8', '9', '10', '11', '12', 'COMPETITION'];
 
@@ -111,18 +111,167 @@ export const AdminClassMcqManager: React.FC<Props> = ({ settings, onSave }) => {
     return unsub;
   }, []);
 
+  // Subject list for current class: combines standard syllabus subjects + any subjects from saved lessons/notes
+  const subjectsList = useMemo(() => {
+    if (!selectedClass) return [];
+    const base = subjectsForClass(selectedClass, settings);
+    const seen = new Set(base.map(s => s.trim().toLowerCase()));
+    const extra: string[] = [];
+    allLessons
+      .filter(l => l.classLevel === selectedClass && l.subject)
+      .forEach(l => {
+        const s = String(l.subject).trim();
+        if (s && !seen.has(s.toLowerCase())) {
+          seen.add(s.toLowerCase());
+          extra.push(s);
+        }
+      });
+    return [...base, ...extra];
+  }, [selectedClass, settings, allLessons]);
+
+  // Auto-sync: if settings.lucentNotes has lessons not in allLessons, auto-sync them!
+  const autoSyncDoneRef = useRef(false);
+  useEffect(() => {
+    if (autoSyncDoneRef.current) return;
+    const lucentNotes: any[] = settings?.lucentNotes || [];
+    if (!lucentNotes.length) return;
+    const existingTitles = new Set(allLessons.map(l => String(l.lessonTitle || '').trim().toLowerCase()));
+    const missing = lucentNotes.filter(n => n?.lessonTitle?.trim() && !existingTitles.has(n.lessonTitle.trim().toLowerCase()));
+    if (missing.length > 0) {
+      autoSyncDoneRef.current = true;
+      console.log(`[AdminClassMcqManager] Found ${missing.length} unsynced notes, auto-syncing to mcq_lessons...`);
+      (async () => {
+        for (const n of missing) {
+          try {
+            const cls = (n.classLevel && String(n.classLevel).trim() && String(n.classLevel).trim() !== 'ALL') ? String(n.classLevel).trim() : 'COMPETITION';
+            let subjName = n.subject;
+            if (cls === 'COMPETITION') {
+              const opt = getLucentSubjectOptions(settings).find(o => o.id === n.subject || o.name.trim().toLowerCase() === n.subject.trim().toLowerCase());
+              subjName = opt?.name || LUCENT_SUBJECT_OPTIONS_BASE.find(o => o.id === n.subject)?.name || n.subject;
+            } else {
+              const opt = getClassSubjectOptions(cls).find(o => o.id === n.subject || o.name.trim().toLowerCase() === n.subject.trim().toLowerCase());
+              subjName = opt?.name || n.subject;
+            }
+            const isTopicMcq = (m: any) => {
+              if (!m?.question?.trim()) return false;
+              const t = String(m.topic || '').trim().toLowerCase();
+              return t !== '' && t !== 'general' && t !== 'सामान्य' && t !== 'general mcq' && t !== 'general mcqs';
+            };
+            const pageMcqs = (n.pages || []).flatMap((p: any) =>
+              (p.mcqs || []).filter(isTopicMcq)
+            );
+            const topics = [...new Set(pageMcqs.map((q: any) => q.topic).filter(Boolean))] as string[];
+            const lesson = {
+              id: `clsnotes_${n.id || Date.now()}`,
+              classLevel: cls,
+              subject: subjName || 'General',
+              board: n.board || null,
+              bookName: n.bookName || null,
+              lessonTitle: n.lessonTitle.trim(),
+              mcqs: pageMcqs || [],
+              mcqCount: pageMcqs.length,
+              topics,
+              topicCount: topics.length,
+              topicNotes: [],
+              createdAt: n.createdAt || new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              sourceClassNotesId: n.id,
+            };
+            await saveMcqLesson(lesson);
+          } catch (e) {
+            console.warn('[AdminClassMcqManager] auto-sync note error:', e);
+          }
+        }
+      })();
+    }
+  }, [allLessons, settings]);
+
+  // Sync all notes from settings.lucentNotes to mcq_lessons manually
+  const [syncingAllNotes, setSyncingAllNotes] = useState(false);
+  const handleSyncAllNotes = async () => {
+    const lucentNotes: any[] = settings?.lucentNotes || [];
+    if (!lucentNotes.length) {
+      showAlert('ℹ️ Koi Notes nahi mile sync karne ke liye.');
+      return;
+    }
+    setSyncingAllNotes(true);
+    let syncedCount = 0;
+    try {
+      const isTopicMcq = (m: any) => {
+        if (!m?.question?.trim()) return false;
+        const t = String(m.topic || '').trim().toLowerCase();
+        return t !== '' && t !== 'general' && t !== 'सामान्य' && t !== 'general mcq' && t !== 'general mcqs';
+      };
+      for (const n of lucentNotes) {
+        if (!n || !n.lessonTitle || !n.lessonTitle.trim()) continue;
+        const cls = (n.classLevel && String(n.classLevel).trim() && String(n.classLevel).trim() !== 'ALL') ? String(n.classLevel).trim() : 'COMPETITION';
+        let subjName = n.subject;
+        if (cls === 'COMPETITION') {
+          const opt = getLucentSubjectOptions(settings).find(o => o.id === n.subject || o.name.trim().toLowerCase() === n.subject.trim().toLowerCase());
+          subjName = opt?.name || LUCENT_SUBJECT_OPTIONS_BASE.find(o => o.id === n.subject)?.name || n.subject;
+        } else {
+          const opt = getClassSubjectOptions(cls).find(o => o.id === n.subject || o.name.trim().toLowerCase() === n.subject.trim().toLowerCase());
+          subjName = opt?.name || n.subject;
+        }
+        const pageMcqs = (n.pages || []).flatMap((p: any) =>
+          (p.mcqs || []).filter(isTopicMcq)
+        );
+        const existing = allLessons.find(l => l.id === `clsnotes_${n.id}` || l.sourceClassNotesId === n.id);
+        const rawMcqs = (existing && Array.isArray(existing.mcqs) && existing.mcqs.length > 0)
+          ? existing.mcqs
+          : pageMcqs;
+        const currentMcqs = rawMcqs.filter(isTopicMcq);
+        const topics = [...new Set(currentMcqs.map((q: any) => q.topic).filter(Boolean))] as string[];
+
+        const lesson = {
+          id: `clsnotes_${n.id || Date.now()}`,
+          classLevel: cls,
+          subject: subjName || 'General',
+          board: n.board || existing?.board || null,
+          bookName: n.bookName || existing?.bookName || null,
+          lessonTitle: n.lessonTitle.trim(),
+          mcqs: currentMcqs || [],
+          mcqCount: (currentMcqs || []).length,
+          topics,
+          topicCount: topics.length,
+          topicNotes: existing?.topicNotes || [],
+          createdAt: existing?.createdAt || n.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          sourceClassNotesId: n.id,
+        };
+        await saveMcqLesson(lesson);
+        syncedCount++;
+      }
+      showAlert(`✅ ${syncedCount} notes Revision Hub me sync ho gaye!`);
+    } catch (e: any) {
+      showAlert(`❌ Sync error: ${e?.message || 'Failed'}`);
+    } finally {
+      setSyncingAllNotes(false);
+    }
+  };
+
   // Lessons filtered for current class+subject+board
-  const filteredLessons = allLessons.filter(
-    l => l.classLevel === selectedClass && l.subject === selectedSubject && (boardFilter === '' || l.board === boardFilter)
-  );
+  const filteredLessons = allLessons.filter(l => {
+    if (l.classLevel !== selectedClass) return false;
+    const subMatch = isSubjectMatch(l.subject, selectedSubject, selectedClass, settings);
+    if (!subMatch) return false;
+    if (boardFilter !== '' && l.board && l.board !== boardFilter) return false;
+    return true;
+  });
 
   // Count lessons per subject for subject screen
   const lessonCountForSubject = (cls: string, sub: string) =>
-    allLessons.filter(l => l.classLevel === cls && l.subject === sub && (boardFilter === '' || l.board === boardFilter)).length;
+    allLessons.filter(l => {
+      if (l.classLevel !== cls) return false;
+      const subMatch = isSubjectMatch(l.subject, sub, cls, settings);
+      if (!subMatch) return false;
+      if (boardFilter !== '' && l.board && l.board !== boardFilter) return false;
+      return true;
+    }).length;
 
   // Count total lessons per class for class screen
   const lessonCountForClass = (cls: string) =>
-    allLessons.filter(l => l.classLevel === cls && (boardFilter === '' || l.board === boardFilter)).length;
+    allLessons.filter(l => l.classLevel === cls && (boardFilter === '' || !l.board || l.board === boardFilter)).length;
 
   // Reusable board switcher bar
   const BoardBar = (
@@ -144,43 +293,45 @@ export const AdminClassMcqManager: React.FC<Props> = ({ settings, onSave }) => {
 
   const handleSaveLesson = async () => {
     if (!lessonTitle.trim()) { showAlert('❌ Lesson title daalein'); return; }
-    if (!pasteText.trim())   { showAlert('❌ MCQ paste karein'); return; }
     setSaving(true);
     try {
       const raw = pasteText.trim();
-      const normalized = normalizeMcqPaste(raw);
-      const result = parseMCQText(normalized);
-      const ts = Date.now();
-      const parsed = (result?.questions || []).map((q: any, i: number) => ({
-        id: `mcq_${ts}_${i}_${Math.random().toString(36).slice(2)}`,
-        questionNumber: q.questionNumber,
-        question: (q.question || '').replace(/<br\/?>/g, '\n').replace(/^Q?\s*\d+[.)]\s*/i, '').trim(),
-        options: (q.options || ['', '', '', '']).slice(0, 4),
-        correctAnswer: q.correctAnswer ?? 0,
-        statements: (q.statements && q.statements.length > 0) ? q.statements : undefined,
-        topic: (q.topic || '').trim() || undefined,
-        explanation: (q.explanation || '').trim() || undefined,
-        concept: (q.concept || '').trim() || undefined,
-        examTip: (q.examTip || '').trim() || undefined,
-        difficultyLevel: q.difficultyLevel || undefined,
-      }));
-      if (!parsed.length) {
-        showAlert('❌ Parse nahi hua. Format: <TOPIC: naam>\nQ1. sawaal?\nA) opt\nAnswer: B) text');
-        setSaving(false); return;
-      }
-
-      // Save <NOTE: ...> blocks
+      let parsed: any[] = [];
       const notesToSave: { title: string; content: string }[] = [];
-      const noteRegex = /<NOTE:\s*([^>]+)>([\s\S]*?)<\/NOTE[^>]*>/gi;
-      let m: RegExpExecArray | null;
-      while ((m = noteRegex.exec(raw)) !== null) {
-        const title = m[1].trim(); const content = m[2].trim();
-        if (title && content) notesToSave.push({ title, content });
-      }
-      if (notesToSave.length) saveTopicNotes(notesToSave);
 
-      const topics = [...new Set(parsed.map((q: any) => q.topic).filter(Boolean))] as string[];
-      const lessonId = editingLesson ? editingLesson.id : `lesson_${ts}_${Math.random().toString(36).slice(2)}`;
+      if (raw.length > 0) {
+        const normalized = normalizeMcqPaste(raw);
+        const result = parseMCQText(normalized);
+        const ts = Date.now();
+        parsed = (result?.questions || []).map((q: any, i: number) => ({
+          id: `mcq_${ts}_${i}_${Math.random().toString(36).slice(2)}`,
+          questionNumber: q.questionNumber,
+          question: (q.question || '').replace(/<br\/?>/g, '\n').replace(/^Q?\s*\d+[.)]\s*/i, '').trim(),
+          options: (q.options || ['', '', '', '']).slice(0, 4),
+          correctAnswer: q.correctAnswer ?? 0,
+          statements: (q.statements && q.statements.length > 0) ? q.statements : undefined,
+          topic: (q.topic || '').trim() || undefined,
+          explanation: (q.explanation || '').trim() || undefined,
+          concept: (q.concept || '').trim() || undefined,
+          examTip: (q.examTip || '').trim() || undefined,
+          difficultyLevel: q.difficultyLevel || undefined,
+        }));
+        if (!parsed.length) {
+          showAlert('❌ Parse nahi hua. Format: <TOPIC: naam>\nQ1. sawaal?\nA) opt\nAnswer: B) text');
+          setSaving(false); return;
+        }
+
+        // Save <NOTE: ...> blocks
+        const noteRegex = /<NOTE:\s*([^>]+)>([\s\S]*?)<\/NOTE[^>]*>/gi;
+        let m: RegExpExecArray | null;
+        while ((m = noteRegex.exec(raw)) !== null) {
+          const title = m[1].trim(); const content = m[2].trim();
+          if (title && content) notesToSave.push({ title, content });
+        }
+        if (notesToSave.length) saveTopicNotes(notesToSave);
+      }
+
+      const lessonId = editingLesson ? editingLesson.id : `lesson_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
       // Merge topicNotes: keep existing + add new ones (dedup by title)
       const existingNotes: { title: string; content: string }[] = editingLesson?.topicNotes || [];
@@ -191,25 +342,31 @@ export const AdminClassMcqManager: React.FC<Props> = ({ settings, onSave }) => {
         else mergedNotes.push(n);
       }
 
+      const existingMcqs = editingLesson ? (editingLesson.mcqs || []) : [];
+      const allMcqs = [...existingMcqs, ...parsed];
+      const allTopics = [...new Set(allMcqs.map((q: any) => q.topic).filter(Boolean))] as string[];
+
       const lesson = {
         id: lessonId,
-        classLevel: selectedClass,
-        subject: selectedSubject,
-        board: boardFilter || null,
-        bookName: bookName.trim() || null,
+        classLevel: editingLesson?.classLevel || selectedClass,
+        subject: editingLesson?.subject || selectedSubject,
+        board: editingLesson?.board ?? (boardFilter || null),
+        bookName: bookName.trim() || editingLesson?.bookName || null,
         lessonTitle: lessonTitle.trim(),
-        mcqs: editingLesson ? [...(editingLesson.mcqs || []), ...parsed] : parsed,
-        mcqCount: (editingLesson ? (editingLesson.mcqs || []).length : 0) + parsed.length,
-        topics,
-        topicCount: topics.length,
+        mcqs: allMcqs,
+        mcqCount: allMcqs.length,
+        topics: allTopics,
+        topicCount: allTopics.length,
         topicNotes: mergedNotes,
         createdAt: editingLesson ? editingLesson.createdAt : new Date().toISOString(),
         updatedAt: new Date().toISOString(),
+        sourceClassNotesId: editingLesson?.sourceClassNotesId || null,
       };
 
       await saveMcqLesson(lesson);
       const noteMsg = notesToSave.length ? ` + ${notesToSave.length} note(s)` : '';
-      showAlert(`✅ ${parsed.length} MCQ save ho gaye! Lesson: "${lessonTitle.trim()}"${noteMsg}`);
+      const mcqMsg = parsed.length > 0 ? `✅ ${parsed.length} MCQ save ho gaye! ` : (editingLesson ? '✅ Lesson update ho gaya! ' : '✅ Naya Lesson create ho gaya! ');
+      showAlert(`${mcqMsg}Lesson: "${lessonTitle.trim()}"${noteMsg}`);
       setPasteText('');
       if (!editingLesson) { setLessonTitle(''); setBookName(''); }
       setScreen('LESSON_LIST');
@@ -320,6 +477,19 @@ export const AdminClassMcqManager: React.FC<Props> = ({ settings, onSave }) => {
         </span>
         <ChevronRight size={16} className="text-amber-500" />
       </button>
+
+      {/* Sync All Notes to Revision Hub button */}
+      <div className="pt-2">
+        <button
+          onClick={handleSyncAllNotes}
+          disabled={syncingAllNotes}
+          className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 text-xs font-bold hover:bg-indigo-100 active:scale-95 transition-all disabled:opacity-50 shadow-sm"
+        >
+          <span className={syncingAllNotes ? 'animate-spin' : ''}>🔄</span>
+          {syncingAllNotes ? 'Notes sync ho rahe hain...' : 'Sync All Admin Notes to Revision Hub'}
+        </button>
+        <p className="text-[10px] text-slate-400 text-center mt-1">Admin Dashboard ke sabhi notes ko Revision Hub lessons me sync karein.</p>
+      </div>
     </div>
   );
 
@@ -331,7 +501,7 @@ export const AdminClassMcqManager: React.FC<Props> = ({ settings, onSave }) => {
         <ArrowLeft size={14} /> Back to Classes
       </button>
       <p className="text-xs font-bold text-slate-500 uppercase mb-2">Class {selectedClass} — Subject Choose Karein</p>
-      {subjectsForClass(selectedClass!, settings).map(sub => {
+      {subjectsList.map(sub => {
         const cnt = lessonCountForSubject(selectedClass!, sub);
         return (
           <button key={sub} onClick={() => { setSelectedSubject(sub); setScreen('LESSON_LIST'); }}
@@ -687,20 +857,20 @@ function LessonCard({ lesson, onEdit, onDelete, onDeleteMcq, onMove, onCopy }: {
     <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
       {/* Header */}
       <div className="px-4 py-3 flex items-start gap-3">
-        <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center shrink-0">
+        <div onClick={onEdit} className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center shrink-0 cursor-pointer hover:bg-indigo-100 transition-colors" title="Click to add MCQs">
           <BookOpen size={18} className="text-indigo-600" />
         </div>
-        <div className="flex-1 min-w-0">
+        <div onClick={onEdit} className="flex-1 min-w-0 cursor-pointer group">
           {lesson.bookName && (
             <div className="flex items-center gap-1 mb-0.5">
               <Library size={9} className="text-emerald-600 shrink-0" />
               <span className="text-[9px] font-bold text-emerald-700 truncate">{lesson.bookName}</span>
             </div>
           )}
-          <p className="font-black text-slate-800 text-sm truncate">{lesson.lessonTitle}</p>
+          <p className="font-black text-slate-800 text-sm truncate group-hover:text-indigo-600 transition-colors">{lesson.lessonTitle}</p>
           <div className="flex flex-wrap gap-1 mt-1">
-            <span className="text-[9px] font-bold bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-full">
-              {lesson.mcqCount} MCQs
+            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${lesson.mcqCount > 0 ? 'bg-indigo-100 text-indigo-700' : 'bg-amber-100 text-amber-700'}`}>
+              {lesson.mcqCount > 0 ? `${lesson.mcqCount} MCQs` : '0 MCQs · Click to Add MCQs'}
             </span>
             {(lesson.topics || []).slice(0, 3).map((t: string) => (
               <span key={t} className="text-[9px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full truncate max-w-[100px]">

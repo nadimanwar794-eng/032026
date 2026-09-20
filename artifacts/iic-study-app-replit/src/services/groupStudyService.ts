@@ -91,12 +91,26 @@ export interface GroupStudyHostSync {
   timestamp: number;
 }
 
+export type StudyRoomMcqType = 'MCQ_PRACTICE' | 'PROJECTOR_MODE' | 'REVISION_HUB';
+
+export interface McqAnswerOutcome {
+  isCorrect: boolean;
+  baseXp: number;
+  streakBonusXp: number;
+  netXpChange: number;
+  currentStreak: number;
+  maxStreak: number;
+  streakBrokenAt?: number;
+  earnedPoints: number;
+}
+
 export interface GroupStudyRoom {
   id: string;
   name: string;
   subject: string;
   description?: string;
   code: string;
+  password: string;
   isPrivate: boolean;
   hostId: string;
   hostName: string;
@@ -105,6 +119,10 @@ export interface GroupStudyRoom {
   lastActive: number;
   maxMembers: number;
   mode: 'STUDY' | 'LIVE_MCQ' | 'LIVE_CLASS';
+  mcqType: StudyRoomMcqType;
+  durationMinutes: number;
+  expiresAt: number;
+  isExpired?: boolean;
   timer: {
     durationMinutes: number;
     startTime: number | null;
@@ -123,6 +141,8 @@ export interface GroupStudyRoom {
     title: string;
     currentQuestionIndex: number;
     totalQuestions: number;
+    autoAdvance?: boolean;
+    autoAdvanceSeconds?: number;
     questionStartTime: number;
     durationPerQuestion: number;
     status: 'WAITING' | 'QUESTION' | 'REVEAL' | 'ENDED';
@@ -131,10 +151,30 @@ export interface GroupStudyRoom {
       name: string;
       score: number;
       correctCount: number;
+      wrongCount?: number;
       totalAnswered: number;
       lastAnswerTime?: number;
       selectedOption?: number;
+      currentStreak?: number;
+      maxStreak?: number;
+      userXp?: number;
+      streakBonusXp?: number;
     }>;
+    questionAnswers?: Record<
+      number,
+      Record<
+        string,
+        {
+          userId: string;
+          userName: string;
+          userPhotoURL?: string;
+          selectedOption: number;
+          isCorrect: boolean;
+          timeTakenSec: number;
+          timestamp: number;
+        }
+      >
+    >;
   };
   hostSync?: GroupStudyHostSync;
   members?: Record<string, GroupStudyMember>;
@@ -142,152 +182,8 @@ export interface GroupStudyRoom {
 }
 
 // ── Built-in Quick Battle Question Sets ──────────────────────────────────────────
-export const CURATED_MCQ_SETS: Array<{ id: string; name: string; subject: string; emoji: string; questions: GroupStudyMcqQuestion[] }> = [
-  {
-    id: 'lucent_gk_mixed',
-    name: 'Lucent Samanya Gyan (General Knowledge Top 10)',
-    subject: 'General Knowledge',
-    emoji: '🏆',
-    questions: [
-      {
-        question: 'भारत के संविधान में मूल अधिकार (Fundamental Rights) किस देश से लिए गए हैं?',
-        options: ['संयुक्त राज्य अमेरिका (USA)', 'रूस (USSR)', 'ब्रिटेन', 'कनाडा'],
-        correctIndex: 0,
-        explanation: 'भारतीय संविधान में मौलिक अधिकार संयुक्त राज्य अमेरिका (USA) के संविधान से प्रेरित हैं।'
-      },
-      {
-        question: 'प्रकाश वर्ष (Light Year) किसका मात्रक (Unit) है?',
-        options: ['समय', 'दूरी', 'प्रकाश की तीव्रता', 'द्रव्यमान'],
-        correctIndex: 1,
-        explanation: 'प्रकाश वर्ष खगोलीय दूरी (Astronomical Distance) मापने की इकाई है।'
-      },
-      {
-        question: 'हड़प्पा सभ्यता की खोज किस वर्ष में हुई थी?',
-        options: ['1921', '1925', '1935', '1942'],
-        correctIndex: 0,
-        explanation: 'दयाराम साहनी ने 1921 में हड़प्पा की खोज की थी।'
-      },
-      {
-        question: 'मानव शरीर की सबसे बड़ी ग्रंथि (Largest Gland) कौन सी है?',
-        options: ['अग्न्याशय (Pancreas)', 'यकृत (Liver)', 'थायरॉइड', 'पीयूष ग्रंथि'],
-        correctIndex: 1,
-        explanation: 'यकृत (Liver) मानव शरीर की सबसे बड़ी ग्रंथि है।'
-      },
-      {
-        question: 'गायत्री मंत्र का उल्लेख किस वेद में मिलता है?',
-        options: ['सामवेद', 'यजुर्वेद', 'ऋग्वेद', 'अथर्ववेद'],
-        correctIndex: 2,
-        explanation: 'गायत्री मंत्र ऋग्वेद के तीसरे मंडल में सूर्य देवता (सावित्री) को समर्पित है।'
-      },
-      {
-        question: 'किस गैस को "लाफिंग गैस" (Laughing Gas) कहा जाता है?',
-        options: ['नाइट्रोजन डाइऑक्साइड', 'नाइट्रस ऑक्साइड (N2O)', 'सल्फर डाइऑक्साइड', 'कार्बन मोनोऑक्साइड'],
-        correctIndex: 1,
-        explanation: 'नाइट्रस ऑक्साइड (N2O) को लाफिंग गैस कहा जाता है।'
-      },
-      {
-        question: 'भारतीय राष्ट्रीय कांग्रेस (INC) की स्थापना 1885 में किसके द्वारा की गई थी?',
-        options: ['ए. ओ. ह्यूम', 'महात्मा गांधी', 'दादाभाई नौरोजी', 'बाल गंगाधर तिलक'],
-        correctIndex: 0,
-        explanation: 'ए. ओ. ह्यूम (A. O. Hume) ने 1885 में भारतीय राष्ट्रीय कांग्रेस की स्थापना की थी।'
-      },
-      {
-        question: 'भारत का सबसे बड़ा नेशनल पार्क (National Park) कौन सा है?',
-        options: ['जिम कॉर्बेट', 'काजीरंगा', 'हेमिस नेशनल पार्क', 'कान्हा नेशनल पार्क'],
-        correctIndex: 2,
-        explanation: 'लद्दाख में स्थित हेमिस नेशनल पार्क भारत का सबसे बड़ा राष्ट्रीय उद्यान है।'
-      },
-      {
-        question: 'विटामिन C का रासायनिक नाम (Chemical Name) क्या है?',
-        options: ['एस्कॉर्बिक एसिड', 'थायमिन', 'टोकोफेरॉल', 'रेटिनॉल'],
-        correctIndex: 0,
-        explanation: 'विटामिन C का रासायनिक नाम एस्कॉर्बिक एसिड (Ascorbic Acid) है।'
-      },
-      {
-        question: 'कंप्यूटर का मस्तिष्क (Brain of Computer) किसे कहा जाता है?',
-        options: ['RAM', 'CPU', 'Hard Disk', 'Motherboard'],
-        correctIndex: 1,
-        explanation: 'CPU (Central Processing Unit) को कंप्यूटर का मस्तिष्क कहा जाता है।'
-      }
-    ]
-  },
-  {
-    id: 'science_rapid',
-    name: 'General Science Rapid Fire (सामान्य विज्ञान)',
-    subject: 'Science',
-    emoji: '⚡',
-    questions: [
-      {
-        question: 'रक्त का pH मान (pH Value of Blood) लगभग कितना होता है?',
-        options: ['6.4', '7.4', '8.2', '7.0'],
-        correctIndex: 1,
-        explanation: 'मानव रक्त का pH मान लगभग 7.4 (हल्का क्षारीय) होता है।'
-      },
-      {
-        question: 'ध्वनि की गति (Speed of Sound) अधिकतम किस माध्यम में होती है?',
-        options: ['ठोस (Solid/Steel)', 'पानी (Water)', 'हवा (Air)', 'निर्वात (Vacuum)'],
-        correctIndex: 0,
-        explanation: 'ध्वनि की गति ठोस (विशेषकर स्टील) में सबसे अधिक होती है और निर्वात में शून्य होती है।'
-      },
-      {
-        question: 'विद्युत धारा (Electric Current) मापने का यंत्र कौन सा है?',
-        options: ['वोल्टमीटर', 'एमीटर (Ammeter)', 'गैल्वेनोमीटर', 'ओहममीटर'],
-        correctIndex: 1,
-        explanation: 'विद्युत धारा को एमीटर (Ammeter) से मापा जाता है।'
-      },
-      {
-        question: 'सौर ऊर्जा को विद्युत ऊर्जा में बदलने वाले उपकरण को क्या कहते हैं?',
-        options: ['सोलर सेल (Photovoltaic Cell)', 'ट्रांसफार्मर', 'डायनेमो', 'इन्वर्टर'],
-        correctIndex: 0,
-        explanation: 'सोलर सेल (Photovoltaic Cell) सूर्य के प्रकाश को सीधे विद्युत में बदलता है।'
-      },
-      {
-        question: 'ओजोन परत (Ozone Layer) वायुमंडल के किस मंडल में पाई जाती है?',
-        options: ['क्षोभमंडल (Troposphere)', 'समतापमंडल (Stratosphere)', 'मध्यमंडल (Mesosphere)', 'आयनमंडल'],
-        correctIndex: 1,
-        explanation: 'ओजोन परत समतापमंडल (Stratosphere) में स्थित है।'
-      }
-    ]
-  },
-  {
-    id: 'polity_history',
-    name: 'Polity & Constitution (भारतीय राजव्यवस्था)',
-    subject: 'Polity',
-    emoji: '📜',
-    questions: [
-      {
-        question: 'भारतीय संविधान सभा के स्थायी अध्यक्ष कौन थे?',
-        options: ['डॉ. राजेंद्र प्रसाद', 'डॉ. बी. आर. अंबेडकर', 'पं. जवाहरलाल नेहरू', 'सच्चिदानंद सिन्हा'],
-        correctIndex: 0,
-        explanation: '11 दिसंबर 1946 को डॉ. राजेंद्र प्रसाद को स्थायी अध्यक्ष चुना गया था।'
-      },
-      {
-        question: 'संविधान के किस अनुच्छेद के तहत वित्तीय आपातकाल (Financial Emergency) लगाया जाता है?',
-        options: ['अनुच्छेद 352', 'अनुच्छेद 356', 'अनुच्छेद 360', 'अनुच्छेद 368'],
-        correctIndex: 2,
-        explanation: 'अनुच्छेद 360 के तहत राष्ट्रपति वित्तीय आपातकाल की घोषणा कर सकते हैं।'
-      },
-      {
-        question: 'भारत के मुख्य चुनाव आयुक्त की नियुक्ति कौन करता है?',
-        options: ['प्रधानमंत्री', 'राष्ट्रपति', 'मुख्य न्यायाधीश', 'लोकसभा अध्यक्ष'],
-        correctIndex: 1,
-        explanation: 'भारत के राष्ट्रपति मुख्य चुनाव आयुक्त की नियुक्ति करते हैं।'
-      },
-      {
-        question: 'पंचायती राज व्यवस्था सबसे पहले किस राज्य में लागू हुई थी?',
-        options: ['राजस्थान (नागौर)', 'आंध्र प्रदेश', 'उत्तर प्रदेश', 'गुजरात'],
-        correctIndex: 0,
-        explanation: '2 अक्टूबर 1959 को राजस्थान के नागौर जिले में पहली बार पंचायती राज लागू हुआ था।'
-      },
-      {
-        question: 'संविधान की प्रारूप समिति (Drafting Committee) के अध्यक्ष कौन थे?',
-        options: ['डॉ. बी. आर. अंबेडकर', 'के. एम. मुंशी', 'बी. एन. राव', 'सरदार पटेल'],
-        correctIndex: 0,
-        explanation: 'डॉ. भीमराव अंबेडकर प्रारूप समिति के अध्यक्ष थे।'
-      }
-    ]
-  }
-];
+// Strictly only real MCQs created or loaded in the app will be displayed (no dummy/hardcoded questions)
+export const CURATED_MCQ_SETS: Array<{ id: string; name: string; subject: string; emoji: string; questions: GroupStudyMcqQuestion[] }> = [];
 
 // ── Room Code Generator ────────────────────────────────────────────────────────
 export const generateRoomCode = (): string => {
@@ -302,7 +198,7 @@ export const generateRoomCode = (): string => {
 // ── Local Fallback Cache for Smooth Experience ──────────────────────────────
 const LOCAL_ROOMS_KEY = 'iic_cached_study_rooms';
 
-const getCachedRooms = (): Record<string, GroupStudyRoom> => {
+export const getCachedRooms = (): Record<string, GroupStudyRoom> => {
   try {
     const raw = localStorage.getItem(LOCAL_ROOMS_KEY);
     return raw ? JSON.parse(raw) : {};
@@ -311,10 +207,42 @@ const getCachedRooms = (): Record<string, GroupStudyRoom> => {
   }
 };
 
-const saveCachedRoom = (room: GroupStudyRoom) => {
+export const saveCachedRoom = (room: GroupStudyRoom) => {
   try {
     const map = getCachedRooms();
     map[room.id] = room;
+    localStorage.setItem(LOCAL_ROOMS_KEY, JSON.stringify(map));
+  } catch {}
+};
+
+const CREATED_ROOMS_KEY = 'nst_my_created_rooms_v1';
+
+export const markRoomAsCreatedByMe = (roomId: string) => {
+  try {
+    const raw = localStorage.getItem(CREATED_ROOMS_KEY);
+    const ids: string[] = raw ? JSON.parse(raw) : [];
+    if (!ids.includes(roomId)) {
+      ids.push(roomId);
+      localStorage.setItem(CREATED_ROOMS_KEY, JSON.stringify(ids));
+    }
+  } catch {}
+};
+
+export const isRoomCreatedByMe = (roomId: string, hostId?: string, currentUserId?: string): boolean => {
+  if (hostId && currentUserId && hostId === currentUserId) return true;
+  if (auth.currentUser && hostId && hostId === auth.currentUser.uid) return true;
+  try {
+    const raw = localStorage.getItem(CREATED_ROOMS_KEY);
+    const ids: string[] = raw ? JSON.parse(raw) : [];
+    if (ids.includes(roomId)) return true;
+  } catch {}
+  return false;
+};
+
+export const removeCachedRoom = (roomId: string) => {
+  try {
+    const map = getCachedRooms();
+    delete map[roomId];
     localStorage.setItem(LOCAL_ROOMS_KEY, JSON.stringify(map));
   } catch {}
 };
@@ -325,8 +253,21 @@ export const subscribeToActiveRooms = (callback: (rooms: GroupStudyRoom[]) => vo
   const unsubscribe = onValue(roomsRef, (snap) => {
     const val = snap.val();
     const localMap = getCachedRooms();
-    const map: Record<string, GroupStudyRoom> = { ...localMap, ...(val || {}) };
-    const list: GroupStudyRoom[] = Object.values(map);
+    const merged: Record<string, GroupStudyRoom> = { ...localMap };
+
+    if (val && typeof val === 'object') {
+      Object.entries(val).forEach(([k, v]: [string, any]) => {
+        if (v && !v.isDeleted) {
+          merged[k] = v;
+          saveCachedRoom(v);
+        } else if (v?.isDeleted) {
+          delete merged[k];
+          removeCachedRoom(k);
+        }
+      });
+    }
+
+    const list: GroupStudyRoom[] = Object.values(merged).filter(r => !r.isDeleted);
     // Filter rooms active in the last 12 hours
     const now = Date.now();
     const activeList = list.filter((r) => {
@@ -337,7 +278,7 @@ export const subscribeToActiveRooms = (callback: (rooms: GroupStudyRoom[]) => vo
     callback(activeList);
   }, (err) => {
     console.warn('RTDB study rooms listen warning, using local cache:', err);
-    const localList = Object.values(getCachedRooms());
+    const localList = Object.values(getCachedRooms()).filter(r => !r.isDeleted);
     callback(localList);
   });
 
@@ -349,12 +290,20 @@ export const subscribeToRoom = (roomId: string, callback: (room: GroupStudyRoom 
   const roomRef = ref(rtdb, `group_study_rooms/${roomId}`);
   const unsubscribe = onValue(roomRef, (snap) => {
     const val = snap.val();
-    if (val) {
+    if (val && !val.isDeleted) {
       saveCachedRoom(val);
       callback(val);
+    } else if (val?.isDeleted) {
+      removeCachedRoom(roomId);
+      callback(null);
     } else {
+      // RTDB value is null; check local cache before assuming deleted
       const cached = getCachedRooms()[roomId];
-      callback(cached || null);
+      if (cached && !cached.isDeleted) {
+        callback(cached);
+      } else {
+        callback(null);
+      }
     }
   }, (err) => {
     console.warn(`RTDB subscribe error for room ${roomId}, using cache:`, err);
@@ -370,10 +319,13 @@ export const createGroupRoom = async (
   roomData: {
     name: string;
     subject: string;
+    password: string;
     description?: string;
     isPrivate?: boolean;
     maxMembers?: number;
     mode?: 'STUDY' | 'LIVE_MCQ' | 'LIVE_CLASS';
+    mcqType?: StudyRoomMcqType;
+    durationMinutes?: number;
   },
   host: {
     id: string;
@@ -382,6 +334,11 @@ export const createGroupRoom = async (
     level?: number;
   }
 ): Promise<string> => {
+  const cleanPassword = (roomData.password || '').trim();
+  if (!cleanPassword) {
+    throw new Error('Room Password is required to create and start a room!');
+  }
+
   const roomsRef = ref(rtdb, 'group_study_rooms');
   const newRoomRef = push(roomsRef);
   const roomId = newRoomRef.key || `room_${Date.now()}`;
@@ -401,39 +358,48 @@ export const createGroupRoom = async (
     statusText: 'Hosting Room',
   };
 
+  const durationMinutes = roomData.durationMinutes && roomData.durationMinutes > 0 ? roomData.durationMinutes : 30;
+  const expiresAt = now + durationMinutes * 60 * 1000;
+  const mcqType = roomData.mcqType || 'PROJECTOR_MODE';
+
   const initialRoom: GroupStudyRoom = {
     id: roomId,
-    name: roomData.name.trim() || `${host.name}'s Study Session`,
+    name: roomData.name.trim() || `${host.name}'s MCQ Arena`,
     subject: roomData.subject || 'General Knowledge',
     description: roomData.description?.trim() || '',
     code,
+    password: cleanPassword,
     isPrivate: !!roomData.isPrivate,
     hostId: effectiveHostId,
     hostName: host.name,
     hostPhotoURL: host.photoURL,
     createdAt: now,
     lastActive: now,
-    maxMembers: Math.min(Math.max(roomData.maxMembers || 30, 5), 50),
-    mode: roomData.mode || 'STUDY',
+    maxMembers: Math.min(Math.max(roomData.maxMembers || 30, 5), 100),
+    mode: 'LIVE_MCQ',
+    mcqType,
+    durationMinutes,
+    expiresAt,
+    isExpired: false,
     timer: {
-      durationMinutes: 25,
-      startTime: null,
-      isPaused: true,
-      remainingSeconds: 25 * 60,
+      durationMinutes,
+      startTime: now,
+      isPaused: false,
+      remainingSeconds: durationMinutes * 60,
     },
     liveClass: {
       isActive: false,
-      title: 'Welcome to Live Class',
-      lectureNotes: '📌 Pinned Lecture Notes\n• Topics to cover today:\n1. Core Concepts & Definitions\n2. Key Formulas / Dates\n3. Rapid MCQ Discussion',
+      title: 'Welcome to Live MCQ Room',
+      lectureNotes: '',
       classUrl: '',
     },
     liveMcq: {
       isActive: false,
-      title: 'Rapid MCQ Battle',
+      title: `${roomData.subject || 'Lesson'} MCQ Battle`,
       currentQuestionIndex: 0,
       totalQuestions: 0,
       questionStartTime: 0,
-      durationPerQuestion: 20,
+      durationPerQuestion: mcqType === 'REVISION_HUB' ? 15 : (mcqType === 'PROJECTOR_MODE' ? 25 : 20),
       status: 'WAITING',
       questions: [],
       scores: {},
@@ -446,7 +412,7 @@ export const createGroupRoom = async (
         id: 'welcome_msg',
         userId: effectiveHostId,
         userName: 'IIC Study Bot',
-        text: `🎉 Room created by ${host.name}! Welcome to the group study session.`,
+        text: `🎉 Room created by ${host.name}! Mode: ${mcqType === 'REVISION_HUB' ? '⚡ MCQ +' : '🎯 MCQ'}. Room duration: ${durationMinutes} mins.`,
         timestamp: now,
         type: 'SYSTEM',
       }
@@ -573,6 +539,7 @@ export const leaveGroupRoom = async (roomId: string, userId: string, userName: s
       if (remaining === 0) {
         // All members left; delete room to save space
         await remove(ref(rtdb, `group_study_rooms/${roomId}`));
+        removeCachedRoom(roomId);
       } else {
         // Send leave message
         const chatRef = ref(rtdb, `group_study_rooms/${roomId}/chat`);
@@ -589,6 +556,27 @@ export const leaveGroupRoom = async (roomId: string, userId: string, userName: s
     }
   } catch (err) {
     console.error('Error leaving group room:', err);
+  }
+};
+
+// ── Delete / Destroy a Room (Host or Admin Only) ───────────────────────────────
+export const deleteGroupRoom = async (roomId: string): Promise<void> => {
+  try {
+    // 1. Remove from local cache immediately
+    removeCachedRoom(roomId);
+
+    // 2. Mark as deleted in RTDB so real-time subscribers immediately disconnect
+    try {
+      await update(ref(rtdb, `group_study_rooms/${roomId}`), { isDeleted: true });
+    } catch {}
+
+    // 3. Remove room node from Firebase RTDB
+    const roomRef = ref(rtdb, `group_study_rooms/${roomId}`);
+    await remove(roomRef);
+  } catch (err) {
+    console.error('Error deleting group room from RTDB:', err);
+    // Even if RTDB fails or has permission issues, clean local cache
+    removeCachedRoom(roomId);
   }
 };
 
@@ -687,7 +675,8 @@ export const startLiveMcqBattle = async (
   roomId: string,
   quizTitle: string,
   questions: GroupStudyMcqQuestion[],
-  durationPerQuestion: number = 20
+  durationPerQuestion: number = 20,
+  autoAdvance: boolean = true
 ): Promise<void> => {
   const now = Date.now();
   const liveMcqData = {
@@ -697,9 +686,11 @@ export const startLiveMcqBattle = async (
     totalQuestions: questions.length,
     questionStartTime: now,
     durationPerQuestion,
+    autoAdvance,
     status: 'QUESTION' as const,
     questions,
     scores: {},
+    questionAnswers: {},
   };
 
   await update(ref(rtdb, `group_study_rooms/${roomId}`), {
@@ -715,9 +706,29 @@ export const startLiveMcqBattle = async (
     id: newMsgRef.key,
     userId: 'system',
     userName: 'IIC Battle Arena',
-    text: `🎯 Live MCQ Battle Started: "${quizTitle}" (${questions.length} Questions)! Get ready!`,
+    text: `🎯 Live MCQ Battle Started: "${quizTitle}" (${questions.length} Questions, ${durationPerQuestion}s per question)! Get ready!`,
     timestamp: now,
     type: 'SYSTEM',
+  });
+};
+
+// ── Update Question Timer Duration During Battle ──
+export const setRoomMcqDuration = async (
+  roomId: string,
+  durationPerQuestion: number
+): Promise<void> => {
+  await update(ref(rtdb, `group_study_rooms/${roomId}/liveMcq`), {
+    durationPerQuestion,
+  });
+};
+
+// ── Update Auto Advance Setting ──
+export const setRoomMcqAutoAdvance = async (
+  roomId: string,
+  autoAdvance: boolean
+): Promise<void> => {
+  await update(ref(rtdb, `group_study_rooms/${roomId}/liveMcq`), {
+    autoAdvance,
   });
 };
 
@@ -733,6 +744,7 @@ export const advanceMcqQuestion = async (roomId: string, nextIndex: number, isFi
   if (isFinished) {
     await update(ref(rtdb, `group_study_rooms/${roomId}/liveMcq`), {
       status: 'ENDED',
+      isActive: false,
     });
   } else {
     await update(ref(rtdb, `group_study_rooms/${roomId}/liveMcq`), {
@@ -749,20 +761,61 @@ export const submitMcqAnswer = async (
   userName: string,
   isCorrect: boolean,
   timeTakenSec: number,
-  selectedOption: number
-): Promise<void> => {
+  selectedOption: number,
+  currentQuestionIndex?: number,
+  userPhotoURL?: string
+): Promise<McqAnswerOutcome> => {
   const userScoreRef = ref(rtdb, `group_study_rooms/${roomId}/liveMcq/scores/${userId}`);
   const snap = await get(userScoreRef);
   const current = snap.val() || {
     name: userName,
     score: 0,
     correctCount: 0,
+    wrongCount: 0,
     totalAnswered: 0,
+    currentStreak: 0,
+    maxStreak: 0,
+    userXp: 0,
+    streakBonusXp: 0,
   };
 
-  // Speed-based point bonus:
-  // Base points = 100 for correct
-  // Speed bonus up to 50 points (faster = more points)
+  const oldStreak = current.currentStreak || 0;
+  let newCurrentStreak = 0;
+  let maxStreak = current.maxStreak || 0;
+  let baseXp = 0;
+  let streakBonusXp = 0;
+  let streakBrokenAt: number | undefined = undefined;
+
+  if (isCorrect) {
+    // Sahi jawab pe +5 XP
+    baseXp = 5;
+    newCurrentStreak = oldStreak + 1;
+    maxStreak = Math.max(maxStreak, newCurrentStreak);
+  } else {
+    // Galat jawab pe -2 XP
+    baseXp = -2;
+    // Streak toot gaya -> Break par bonus milega (3 pe 10, 5 pe 15, 7 pe 20, 10 pe 20)
+    // "aur han suno ye strik jab tutegabtab milega xp aysa na ki 3/5/7 sba pe alag alag xp mil raha ho agar 7 strik hai to 3/5wala xp na mikega"
+    if (oldStreak >= 10) {
+      streakBonusXp = 20;
+      streakBrokenAt = oldStreak;
+    } else if (oldStreak >= 7) {
+      streakBonusXp = 20;
+      streakBrokenAt = oldStreak;
+    } else if (oldStreak >= 5) {
+      streakBonusXp = 15;
+      streakBrokenAt = oldStreak;
+    } else if (oldStreak >= 3) {
+      streakBonusXp = 10;
+      streakBrokenAt = oldStreak;
+    }
+    newCurrentStreak = 0;
+  }
+
+  const netXpChange = baseXp + streakBonusXp;
+  const newUserXp = Math.max(0, (current.userXp || 0) + netXpChange);
+
+  // Speed-based point bonus for room leaderboard:
   const speedBonus = isCorrect ? Math.max(0, Math.round(50 - (timeTakenSec * 2))) : 0;
   const earnedPoints = isCorrect ? (100 + speedBonus) : 0;
 
@@ -770,17 +823,123 @@ export const submitMcqAnswer = async (
     name: userName,
     score: (current.score || 0) + earnedPoints,
     correctCount: (current.correctCount || 0) + (isCorrect ? 1 : 0),
+    wrongCount: (current.wrongCount || 0) + (isCorrect ? 0 : 1),
     totalAnswered: (current.totalAnswered || 0) + 1,
+    currentStreak: newCurrentStreak,
+    maxStreak,
+    userXp: newUserXp,
+    streakBonusXp: (current.streakBonusXp || 0) + streakBonusXp,
     lastAnswerTime: Date.now(),
     selectedOption,
   });
+
+  // Also record this specific question's answer for live per-question stats & final review
+  if (typeof currentQuestionIndex === 'number') {
+    try {
+      const qAnswerRef = ref(
+        rtdb,
+        `group_study_rooms/${roomId}/liveMcq/questionAnswers/${currentQuestionIndex}/${userId}`
+      );
+      await set(qAnswerRef, {
+        userId,
+        userName,
+        userPhotoURL: userPhotoURL || '',
+        selectedOption,
+        isCorrect,
+        timeTakenSec,
+        timestamp: Date.now(),
+      });
+    } catch (e) {
+      console.warn('Could not save questionAnswer snapshot:', e);
+    }
+  }
+
+  return {
+    isCorrect,
+    baseXp,
+    streakBonusXp,
+    netXpChange,
+    currentStreak: newCurrentStreak,
+    maxStreak,
+    streakBrokenAt,
+    earnedPoints,
+  };
+};
+
+/**
+ * When the quiz or room ends, if a student has an active unbroken streak of 3+,
+ * award their streak bonus upon session conclusion so they don't miss out.
+ */
+export const awardFinalStreakBonus = async (
+  roomId: string,
+  userId: string
+): Promise<number> => {
+  try {
+    const userScoreRef = ref(rtdb, `group_study_rooms/${roomId}/liveMcq/scores/${userId}`);
+    const snap = await get(userScoreRef);
+    if (!snap.exists()) return 0;
+    const current = snap.val();
+    const streak = current.currentStreak || 0;
+    if (streak < 3) return 0;
+
+    let bonus = 0;
+    if (streak >= 10) bonus = 20;
+    else if (streak >= 7) bonus = 20;
+    else if (streak >= 5) bonus = 15;
+    else if (streak >= 3) bonus = 10;
+
+    if (bonus > 0) {
+      await update(userScoreRef, {
+        currentStreak: 0,
+        userXp: (current.userXp || 0) + bonus,
+        streakBonusXp: (current.streakBonusXp || 0) + bonus,
+      });
+    }
+    return bonus;
+  } catch (e) {
+    console.warn('awardFinalStreakBonus error:', e);
+    return 0;
+  }
 };
 
 export const endLiveMcqBattle = async (roomId: string): Promise<void> => {
   await update(ref(rtdb, `group_study_rooms/${roomId}`), {
-    mode: 'STUDY',
+    mode: 'LIVE_MCQ',
     'liveMcq/isActive': false,
     'liveMcq/status': 'ENDED',
+  });
+};
+
+export const autoSubmitRoom = async (roomId: string): Promise<void> => {
+  const now = Date.now();
+  await update(ref(rtdb, `group_study_rooms/${roomId}`), {
+    isExpired: true,
+    lastActive: now,
+    mode: 'LIVE_MCQ',
+    'liveMcq/isActive': false,
+    'liveMcq/status': 'ENDED',
+    'timer/remainingSeconds': 0,
+  });
+
+  const chatRef = ref(rtdb, `group_study_rooms/${roomId}/chat`);
+  const newMsgRef = push(chatRef);
+  await set(newMsgRef, {
+    id: newMsgRef.key,
+    userId: 'system',
+    userName: 'IIC Study Arena',
+    text: '⏰ Room time expired! The session has been auto-submitted. Check your final score and XP results below!',
+    timestamp: now,
+    type: 'SYSTEM',
+  });
+};
+
+export const setRoomMcqType = async (
+  roomId: string,
+  mcqType: StudyRoomMcqType
+): Promise<void> => {
+  await update(ref(rtdb, `group_study_rooms/${roomId}`), {
+    mcqType,
+    lastActive: Date.now(),
   });
 };
 
@@ -810,8 +969,13 @@ export const syncHostActivity = async (
       ...cleaned,
       timestamp: Date.now(),
     });
-  } catch (err) {
-    console.error('Failed to sync host activity:', err);
+  } catch (err: any) {
+    const msg = String(err?.message || err || '');
+    if (msg.includes('PERMISSION_DENIED') || msg.includes('Permission denied')) {
+      // Non-fatal permission boundary on RTDB sync for non-host participants or restricted nodes
+      return;
+    }
+    console.warn('Failed to sync host activity:', err);
   }
 };
 
@@ -826,8 +990,12 @@ export const syncHostNotesState = async (
       ...cleaned,
       isOpen: true,
     });
-  } catch (err) {
-    console.error('Failed to sync host notes:', err);
+  } catch (err: any) {
+    const msg = String(err?.message || err || '');
+    if (msg.includes('PERMISSION_DENIED') || msg.includes('Permission denied')) {
+      return;
+    }
+    console.warn('Failed to sync host notes:', err);
   }
 };
 
@@ -867,8 +1035,12 @@ export const broadcastHostMcq = async (
     await update(ref(rtdb, `group_study_rooms/${roomId}`), {
       lastActive: now,
     });
-  } catch (err) {
-    console.error('Failed to broadcast host MCQ:', err);
+  } catch (err: any) {
+    const msg = String(err?.message || err || '');
+    if (msg.includes('PERMISSION_DENIED') || msg.includes('Permission denied')) {
+      return;
+    }
+    console.warn('Failed to broadcast host MCQ:', err);
   }
 };
 
@@ -889,8 +1061,12 @@ export const submitStudentLiveAnswer = async (
       timeTaken,
       timestamp: Date.now(),
     });
-  } catch (err) {
-    console.error('Failed to submit student live answer:', err);
+  } catch (err: any) {
+    const msg = String(err?.message || err || '');
+    if (msg.includes('PERMISSION_DENIED') || msg.includes('Permission denied')) {
+      return;
+    }
+    console.warn('Failed to submit student live answer:', err);
   }
 };
 
@@ -898,8 +1074,12 @@ export const revealHostMcqAnswer = async (roomId: string): Promise<void> => {
   try {
     const statusRef = ref(rtdb, `group_study_rooms/${roomId}/hostSync/activeMcq/status`);
     await set(statusRef, 'REVEAL');
-  } catch (err) {
-    console.error('Failed to reveal MCQ answer:', err);
+  } catch (err: any) {
+    const msg = String(err?.message || err || '');
+    if (msg.includes('PERMISSION_DENIED') || msg.includes('Permission denied')) {
+      return;
+    }
+    console.warn('Failed to reveal MCQ answer:', err);
   }
 };
 
@@ -910,8 +1090,12 @@ export const closeHostMcq = async (roomId: string): Promise<void> => {
       isOpen: false,
       status: 'ENDED',
     });
-  } catch (err) {
-    console.error('Failed to close host MCQ:', err);
+  } catch (err: any) {
+    const msg = String(err?.message || err || '');
+    if (msg.includes('PERMISSION_DENIED') || msg.includes('Permission denied')) {
+      return;
+    }
+    console.warn('Failed to close host MCQ:', err);
   }
 };
 

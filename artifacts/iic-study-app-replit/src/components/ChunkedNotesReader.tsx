@@ -4,6 +4,7 @@ import { Volume2, Square, BookOpen, Star, Palette, Check, Type, RotateCcw, Searc
 import { AdminWhiteBoard } from './AdminWhiteBoard';
 import { rotateScreen, isDesktopModeOn, setDesktopMode } from '../utils/displayPrefs';
 import { saveSuggestion, auth, findDuplicateSuggestionByPoint, incrementSuggestionReportCount, updateSuggestionLeaderboard } from '../firebase';
+import { FREE_DAILY_FIX_LIMIT, getFreeDailyFixUsedCount, getFreeDailyFixRemaining, incrementFreeDailyFixCount } from '../utils/freeFixLimit';
 import { speakText, stopSpeech } from '../utils/textToSpeech';
 import { splitIntoTopics, splitNoteSections, NotesTopic as Topic } from '../utils/notesSplitter';
 import { READING_FONTS, TOP_10_READING_FONTS, ensureReadingFontLoaded, getReadingFontById, ReadingFont } from '../utils/notesFonts';
@@ -626,6 +627,17 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
   const [submittedPointIndices, setSubmittedPointIndices] = useState<Set<number>>(new Set());
   // Reset submitted set when the note identity changes (component reused across different notes)
   useEffect(() => { setSubmittedPointIndices(new Set()); }, [noteKey]);
+
+  // 💡 Fix / Correction Daily Free Limit tracking (2 uses/day for free users, unlimited for Basic/Ultra/Admin)
+  const effectiveUserId = readingScoreConfig?.userId || auth.currentUser?.uid || 'guest';
+  const [freeFixUsedToday, setFreeFixUsedToday] = useState<number>(() => getFreeDailyFixUsedCount(effectiveUserId));
+
+  useEffect(() => {
+    setFreeFixUsedToday(getFreeDailyFixUsedCount(effectiveUserId));
+  }, [effectiveUserId]);
+
+  const freeFixRemaining = Math.max(0, FREE_DAILY_FIX_LIMIT - freeFixUsedToday);
+  const canAccessFix = _canAccessSmart || freeFixRemaining > 0;
 
   // Smart TTS suggestion — detect rapid manual tapping
   const TTS_SUGGEST_KEY = 'iic_tts_suggest_seen';
@@ -1455,7 +1467,10 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
             <div style={{ borderTop: '2px solid #f59e0b', background: 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 12px', flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ fontSize: 12 }}>✏️</span>
-                <span style={{ fontSize: 9, fontWeight: 900, color: '#92400e', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Correction Mode — Kisi bhi point ke samne ✏️ tap karo</span>
+                <span style={{ fontSize: 9, fontWeight: 900, color: '#92400e', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                  Correction Mode — Kisi bhi point ke samne ✏️ tap karo
+                  {!_canAccessSmart && ` (Free: ${freeFixRemaining}/${FREE_DAILY_FIX_LIMIT} bache)`}
+                </span>
               </div>
               <button type="button" onClick={() => { setShowSuggestionPanel(false); setInlineCorrectionIdx(null); setInlineCorrectionText(''); setInlineCorrectionDone(false); setInlineCorrectionError(false); }} style={{ background: 'rgba(146,64,14,0.1)', border: 'none', borderRadius: 6, width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#92400e', fontSize: 11, fontWeight: 900 }}>✕</button>
             </div>
@@ -1632,21 +1647,35 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                   </span>
                 </button>
               )}
-              {/* 💡 Suggestion/Correction — hidden in school mode */}
+              {/* 💡 Suggestion/Correction — free users get 2 daily uses, Basic/Ultra unlimited */}
               {!hideFix && (
                 <button type="button" onClick={() => {
-                  if (!_canAccessSmart) {
-                    alert('🔒 Correction Mode feature Basic aur Ultra members ke liye hai. Upgrade karein!');
+                  if (!_canAccessSmart && freeFixRemaining <= 0) {
+                    alert(`🔒 Aaj ka Free Fix limit (${FREE_DAILY_FIX_LIMIT}/${FREE_DAILY_FIX_LIMIT}) pura ho gaya hai!\n\nKal aapko dobara 2 free fixes milenge, ya Unlimited access ke liye Basic ya Ultra plan upgrade karein.`);
                     return;
                   }
                   setShowSuggestionPanel(s => !s);
                   setShowControls(false);
                 }}
-                  title={!_canAccessSmart ? "🔒 Correction Mode (Basic+ Required)" : "Correction / Fix"}
-                  style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '6px 4px', background: showSuggestionPanel ? '#fef3c7' : 'transparent', cursor: 'pointer', border: 'none', borderLeft: '1px solid #e2e8f0', opacity: !_canAccessSmart ? 0.75 : 1 }}>
+                  title={
+                    _canAccessSmart
+                      ? "Correction / Fix (Unlimited)"
+                      : freeFixRemaining > 0
+                        ? `Correction / Fix (Aaj ${freeFixRemaining}/${FREE_DAILY_FIX_LIMIT} Free bache hain)`
+                        : "🔒 Aaj ka Free Fix limit pura (2/2) — Basic/Ultra required"
+                  }
+                  style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '6px 4px', background: showSuggestionPanel ? '#fef3c7' : 'transparent', cursor: 'pointer', border: 'none', borderLeft: '1px solid #e2e8f0', opacity: (!canAccessFix) ? 0.75 : 1 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                     <Lightbulb size={12} style={{ color: showSuggestionPanel ? '#d97706' : '#64748b' }} />
-                    {!_canAccessSmart && <span style={{ fontSize: 9 }}>🔒</span>}
+                    {!_canAccessSmart && (
+                      freeFixRemaining > 0 ? (
+                        <span style={{ fontSize: 7, fontWeight: 900, color: '#15803d', background: '#dcfce7', padding: '0px 3px', borderRadius: 4, lineHeight: 1 }}>
+                          {freeFixRemaining}
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: 9 }}>🔒</span>
+                      )
+                    )}
                   </div>
                   <span style={{ fontSize: 8, fontWeight: 700, textTransform: 'uppercase', color: showSuggestionPanel ? '#d97706' : '#94a3b8', letterSpacing: '0.05em', lineHeight: 1 }}>Fix</span>
                 </button>
@@ -1661,19 +1690,14 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
               {/* Font Style */}
               <button type="button"
                 onClick={() => {
-                  if (!_canAccessSmart) {
-                    alert('🔒 Text Style Customization feature Basic aur Ultra members ke liye hai. Upgrade karein!');
-                    return;
-                  }
                   setShowFontFamilyMenu(true);
                   setShowControls(false);
                   TOP_10_READING_FONTS.forEach(f => ensureReadingFontLoaded(f.gfontParam));
                 }}
-                title={!_canAccessSmart ? "🔒 Text Style Customization (Basic+ Required)" : "Style"}
-                style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '6px 4px', background: activeFont ? '#eef2ff' : 'transparent', cursor: 'pointer', border: 'none', borderRight: '1px solid #e2e8f0', opacity: !_canAccessSmart ? 0.75 : 1 }}>
+                title="Style"
+                style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '6px 4px', background: activeFont ? '#eef2ff' : 'transparent', cursor: 'pointer', border: 'none', borderRight: '1px solid #e2e8f0' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                   <Type size={12} style={{ color: activeFont ? '#6366f1' : '#64748b' }} />
-                  {!_canAccessSmart && <span style={{ fontSize: 9 }}>🔒</span>}
                 </div>
                 <span style={{ fontSize: 8, fontWeight: 700, textTransform: 'uppercase', color: activeFont ? '#6366f1' : '#94a3b8', letterSpacing: '0.05em', lineHeight: 1 }}>Style</span>
               </button>
@@ -1682,18 +1706,13 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
               {!textColorOverride ? (
                 <div style={{ flex: 1, position: 'relative', borderRight: '1px solid #e2e8f0' }}>
                   <button type="button" onClick={() => {
-                    if (!_canAccessSmart) {
-                      alert('🔒 Text Color Customization feature Basic aur Ultra members ke liye hai. Upgrade karein!');
-                      return;
-                    }
                     setShowColorMenu(s => !s);
                   }}
-                    title={!_canAccessSmart ? "🔒 Text Color Customization (Basic+ Required)" : "Color"}
-                    style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '6px 4px', background: 'transparent', cursor: 'pointer', border: 'none', opacity: !_canAccessSmart ? 0.75 : 1 }}>
+                    title="Color"
+                    style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '6px 4px', background: 'transparent', cursor: 'pointer', border: 'none' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                       <Palette size={10} style={{ color: '#64748b' }} />
                       <span style={{ width: 10, height: 10, borderRadius: '50%', border: '2px solid #cbd5e1', backgroundColor: textColor, display: 'inline-block' }} />
-                      {!_canAccessSmart && <span style={{ fontSize: 9 }}>🔒</span>}
                     </div>
                     <span style={{ fontSize: 8, fontWeight: 700, textTransform: 'uppercase', color: '#94a3b8', letterSpacing: '0.05em', lineHeight: 1 }}>Color</span>
                   </button>
@@ -1871,21 +1890,35 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                   <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', color: isSavedOffline ? '#16a34a' : '#94a3b8', letterSpacing: '0.05em', lineHeight: 1 }}>{isSavedOffline ? 'Saved' : 'Save'}</span>
                 </button>
               )}
-              {/* Fix — school mode mein chhupa */}
+              {/* Fix — free users get 2 daily uses, Basic/Ultra unlimited */}
               {!hideFix && (
                 <button type="button" onClick={() => {
-                  if (!_canAccessSmart) {
-                    alert('🔒 Correction Mode feature Basic aur Ultra members ke liye hai. Upgrade karein!');
+                  if (!_canAccessSmart && freeFixRemaining <= 0) {
+                    alert(`🔒 Aaj ka Free Fix limit (${FREE_DAILY_FIX_LIMIT}/${FREE_DAILY_FIX_LIMIT}) pura ho gaya hai!\n\nKal aapko dobara 2 free fixes milenge, ya Unlimited access ke liye Basic ya Ultra plan upgrade karein.`);
                     return;
                   }
                   setShowSuggestionPanel(s => !s);
                   setShowControls(false);
                 }}
-                  title={!_canAccessSmart ? "🔒 Correction Mode (Basic+ Required)" : "Correction / Fix"}
-                  style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '10px 4px', background: showSuggestionPanel ? '#fef3c7' : 'transparent', cursor: 'pointer', border: 'none', borderLeft: onSaveOffline ? '1px solid #e2e8f0' : 'none', opacity: !_canAccessSmart ? 0.75 : 1 }}>
+                  title={
+                    _canAccessSmart
+                      ? "Correction / Fix (Unlimited)"
+                      : freeFixRemaining > 0
+                        ? `Correction / Fix (Aaj ${freeFixRemaining}/${FREE_DAILY_FIX_LIMIT} Free bache hain)`
+                        : "🔒 Aaj ka Free Fix limit pura (2/2) — Basic/Ultra required"
+                  }
+                  style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '10px 4px', background: showSuggestionPanel ? '#fef3c7' : 'transparent', cursor: 'pointer', border: 'none', borderLeft: onSaveOffline ? '1px solid #e2e8f0' : 'none', opacity: (!canAccessFix) ? 0.75 : 1 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                     <Lightbulb size={14} style={{ color: showSuggestionPanel ? '#d97706' : '#64748b' }} />
-                    {!_canAccessSmart && <span style={{ fontSize: 9 }}>🔒</span>}
+                    {!_canAccessSmart && (
+                      freeFixRemaining > 0 ? (
+                        <span style={{ fontSize: 8, fontWeight: 900, color: '#15803d', background: '#dcfce7', padding: '0px 4px', borderRadius: 4, lineHeight: 1 }}>
+                          {freeFixRemaining}
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: 9 }}>🔒</span>
+                      )
+                    )}
                   </div>
                   <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', color: showSuggestionPanel ? '#d97706' : '#94a3b8', letterSpacing: '0.05em', lineHeight: 1 }}>Fix</span>
                 </button>
@@ -1895,19 +1928,14 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
             <div style={{ borderTop: '1px solid #e2e8f0', background: 'linear-gradient(180deg, #e8edf3 0%, #f1f5f9 100%)', display: 'flex', alignItems: 'stretch', boxShadow: 'inset 0 -2px 0 #d1d9e0' }}>
               <button type="button"
                 onClick={() => {
-                  if (!_canAccessSmart) {
-                    alert('🔒 Text Style Customization feature Basic aur Ultra members ke liye hai. Upgrade karein!');
-                    return;
-                  }
                   setShowFontFamilyMenu(true);
                   setShowControls(false);
                   TOP_10_READING_FONTS.forEach(f => ensureReadingFontLoaded(f.gfontParam));
                 }}
-                title={!_canAccessSmart ? "🔒 Text Style Customization (Basic+ Required)" : "Style"}
-                style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '10px 4px', background: activeFont ? '#eef2ff' : 'transparent', cursor: 'pointer', border: 'none', borderRight: '1px solid #e2e8f0', opacity: !_canAccessSmart ? 0.75 : 1 }}>
+                title="Style"
+                style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '10px 4px', background: activeFont ? '#eef2ff' : 'transparent', cursor: 'pointer', border: 'none', borderRight: '1px solid #e2e8f0' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                   <Type size={14} style={{ color: activeFont ? '#6366f1' : '#64748b' }} />
-                  {!_canAccessSmart && <span style={{ fontSize: 9 }}>🔒</span>}
                 </div>
                 <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', color: activeFont ? '#6366f1' : '#94a3b8', letterSpacing: '0.05em', lineHeight: 1 }}>Style</span>
               </button>
@@ -1915,18 +1943,13 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
               {!textColorOverride ? (
                 <div style={{ flex: 1, position: 'relative', borderRight: '1px solid #e2e8f0' }}>
                   <button type="button" onClick={() => {
-                    if (!_canAccessSmart) {
-                      alert('🔒 Text Color Customization feature Basic aur Ultra members ke liye hai. Upgrade karein!');
-                      return;
-                    }
                     setShowColorMenu(s => !s);
                   }}
-                    title={!_canAccessSmart ? "🔒 Text Color Customization (Basic+ Required)" : "Color"}
-                    style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '10px 4px', background: 'transparent', cursor: 'pointer', border: 'none', opacity: !_canAccessSmart ? 0.75 : 1 }}>
+                    title="Color"
+                    style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, padding: '10px 4px', background: 'transparent', cursor: 'pointer', border: 'none' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                       <Palette size={12} style={{ color: '#64748b' }} />
                       <span style={{ width: 8, height: 8, borderRadius: '50%', border: '2px solid #cbd5e1', backgroundColor: textColor, display: 'inline-block' }} />
-                      {!_canAccessSmart && <span style={{ fontSize: 9 }}>🔒</span>}
                     </div>
                     <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', color: '#94a3b8', letterSpacing: '0.05em', lineHeight: 1 }}>Color</span>
                   </button>
@@ -2428,10 +2451,6 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                   onPointerDown={(e) => { e.stopPropagation(); }}
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (!_canAccessSmart) {
-                      alert('🔒 Correction Mode feature Basic aur Ultra members ke liye hai. Upgrade karein!');
-                      return;
-                    }
                     try { if (navigator.vibrate) navigator.vibrate(30); } catch {}
                     if (inlineCorrectionIdx === idx) {
                       setInlineCorrectionIdx(null);
@@ -2474,7 +2493,14 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                     <div style={{ textAlign: 'center', padding: '6px 0' }}>
                       <div style={{ fontSize: 22, marginBottom: 4 }}>✅</div>
                       <p style={{ fontSize: 11, fontWeight: 900, color: '#15803d', marginBottom: 2 }}>Report bhej diya!</p>
-                      <p style={{ fontSize: 10, color: '#78350f' }}>Admin review karega aur galti theek karega.</p>
+                      <p style={{ fontSize: 10, color: '#78350f' }}>
+                        Admin review karega aur galti theek karega.
+                        {!_canAccessSmart && (
+                          <span style={{ display: 'block', marginTop: 3, fontWeight: 700, color: '#b45309' }}>
+                            (Aaj ke Free Fixes: {Math.max(0, FREE_DAILY_FIX_LIMIT - freeFixUsedToday)}/{FREE_DAILY_FIX_LIMIT} bache hain)
+                          </span>
+                        )}
+                      </p>
                       <button
                         type="button"
                         onClick={() => { setInlineCorrectionIdx(null); setInlineCorrectionText(''); setInlineCorrectionDone(false); setInlineCorrectionError(false); }}
@@ -2514,6 +2540,11 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                             setInlineCorrectionDone(true);
                             return;
                           }
+                          // Guard: daily limit for free users
+                          if (!_canAccessSmart && getFreeDailyFixRemaining(effectiveUserId) <= 0) {
+                            alert(`🔒 Aaj ka Free Fix limit (${FREE_DAILY_FIX_LIMIT}/${FREE_DAILY_FIX_LIMIT}) pura ho gaya hai!\n\nKal aapko dobara 2 free fixes milenge, ya Unlimited access ke liye Basic ya Ultra plan upgrade karein.`);
+                            return;
+                          }
                           setInlineCorrectionSubmitting(true);
                           setInlineCorrectionError(false);
                           try {
@@ -2528,6 +2559,10 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                                 const dupUid = firebaseUser?.uid || readingScoreConfig?.userId || 'anonymous';
                                 const dupName = firebaseUser?.displayName || firebaseUser?.email?.split('@')[0] || 'Student';
                                 updateSuggestionLeaderboard(dupUid, dupName, 'reported').catch(() => {});
+                                if (!_canAccessSmart) {
+                                  const updatedUsed = incrementFreeDailyFixCount(effectiveUserId);
+                                  setFreeFixUsedToday(updatedUsed);
+                                }
                                 setSubmittedPointIndices(prev => new Set(prev).add(idx));
                                 setInlineCorrectionDone(true);
                                 return;
@@ -2552,6 +2587,10 @@ export const ChunkedNotesReader: React.FC<Props> = ({ content, className, langua
                             });
                             // Update permanent leaderboard record
                             updateSuggestionLeaderboard(reporterUid, reporterName, 'reported').catch(() => {});
+                            if (!_canAccessSmart) {
+                              const updatedUsed = incrementFreeDailyFixCount(effectiveUserId);
+                              setFreeFixUsedToday(updatedUsed);
+                            }
                             setSubmittedPointIndices(prev => new Set(prev).add(idx));
                             setInlineCorrectionDone(true);
                           } catch (e) {

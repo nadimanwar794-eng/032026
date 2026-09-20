@@ -20,6 +20,7 @@
  */
 
 import { getLevelInfo } from './levelSystem';
+import { safeSaveUsersCache } from './safeUtils';
 
 const LEVEL_RATIOS: Record<number, [number, number]> = {
   1:  [1.00, 0.00],
@@ -143,7 +144,7 @@ export const applyDeduction = <T extends CreditUser>(
               referralCommissionBalance: newBal,
               referralCommissionLogs: updatedLogs,
             };
-            localStorage.setItem('nst_users', JSON.stringify(allUsers));
+            safeSaveUsersCache(allUsers);
           }
         }
       }

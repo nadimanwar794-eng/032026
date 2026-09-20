@@ -8,8 +8,11 @@ import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import {
   ArrowLeft, BookOpen, BrainCircuit, CalendarCheck,
   Clock, Target, ChevronRight, Zap, CheckCircle, Lock, Rocket,
-  Search, Filter, X, ChevronDown, ChevronUp, Layers, ListFilter, Sparkles, Check
+  Search, Filter, X, ChevronDown, ChevronUp, Layers, ListFilter, Sparkles, Check,
+  Trophy, Gift, Award, Medal
 } from 'lucide-react';
+import { DailyChallengeRankCard } from './DailyChallengeRankCard';
+import { getYesterdayDateKey, isChallengePrizeClaimed } from '../utils/challengePrizeSystem';
 import { loadRoutineData, getUserSubTier, getDailyClaimAmount } from '../utils/routineStorage';
 import { getLevelInfo } from '../utils/levelSystem';
 import { getDueItems, getAllBuckets, bucketKey, markNotesReviewed, type WeakBucket } from '../utils/revisionTrackerV2';
@@ -254,6 +257,7 @@ export const DailyEventPage: React.FC<Props> = ({
   const [refreshTick, setRefreshTick] = useState(0);
   const [challengeTick, setChallengeTick] = useState(0);
   const [claimingChallengeId, setClaimingChallengeId] = useState<string | null>(null);
+  const [showYesterdayRankModal, setShowYesterdayRankModal] = useState(false);
 
   // 3-Tier Hierarchy & Subject-Wise state for Revision Hub
   const [selectedRevisionSubjectId, setSelectedRevisionSubjectId] = useState<string>('ALL');
@@ -310,6 +314,17 @@ export const DailyEventPage: React.FC<Props> = ({
     () => challenge20s.filter(challenge => isDailyChallenge20(challenge)),
     [challenge20s],
   );
+
+  const activeDailyChallenge = useMemo(() => dailyChallenges[0] || null, [dailyChallenges]);
+  const activeDailyStatus = useMemo(() => {
+    if (!activeDailyChallenge) return { completed: false, claimed: false };
+    return dailyChallengeStatuses.get(activeDailyChallenge.id) || { completed: false, claimed: false };
+  }, [activeDailyChallenge, dailyChallengeStatuses]);
+
+  const yesterdayDateKey = useMemo(() => getYesterdayDateKey(), []);
+  const isYesterdayClaimed = useMemo(() => {
+    return isChallengePrizeClaimed(yesterdayDateKey, user.id);
+  }, [yesterdayDateKey, user.id, challengeTick]);
 
   const handleChallengeClaim = useCallback(async (challenge: Challenge20) => {
     if (!onClaimChallenge20 || claimingChallengeId) return;
@@ -420,7 +435,8 @@ export const DailyEventPage: React.FC<Props> = ({
       if (!subjects.length) return null;
       const si = (cat.currentSubjectIndex || 0) % subjects.length;
       const sub = subjects[si];
-      // Find notes for this subject (only multi-page books, excluding Sar Sangrah)
+      // Find notes for this subject (only multi-page books, excluding Sar Sangrah, respecting board)
+      const targetBoard = sub.board || routineData?.selectedBoard || (user as any)?.board || 'BSEB';
       const notes = lucentNotes.filter((n: any) => {
         const nb = (n.bookName || '').trim();
         const nc = n.classLevel || '';
@@ -433,6 +449,13 @@ export const DailyEventPage: React.FC<Props> = ({
         if (bookLower.includes('sar sangrah') || bookLower.includes('saar sangrah') || bookLower.includes('sar-sangrah')) return false;
         if (sub.bookName && nb !== sub.bookName) return false;
         if (sub.classLevel && nc !== sub.classLevel) return false;
+        // Board filter: in SCHOOL mode or when classLevel is present, enforce board
+        if (routineData?.routineMode === 'SCHOOL' || sub.classLevel || nc) {
+          if (targetBoard && targetBoard !== 'ALL_BOARDS') {
+            const nbBoard = (n as any).board;
+            if (nbBoard && nbBoard !== targetBoard && nbBoard !== 'ALL_BOARDS') return false;
+          }
+        }
         return ns === sub.subjectId;
       });
       if (!notes.length) return null;
@@ -863,6 +886,101 @@ export const DailyEventPage: React.FC<Props> = ({
     <div>
 
       <div className="px-4 pt-4 space-y-4 pb-6">
+
+        {/* ── 0. DAILY CHALLENGE 2.0 & YESTERDAY RESULT ── */}
+        <SectionCard
+          emoji="🏆"
+          title="Daily Challenge 2.0"
+          subtitle="Kal ka result, leaderboard & % prizes"
+          accent="#f59e0b"
+          actionLabel="Kal Ka Result ➔"
+          onAction={() => setShowYesterdayRankModal(true)}
+        >
+          <div className="space-y-3">
+            {/* Kal Ka Leaderboard & Winner List Banner */}
+            <div className="bg-gradient-to-r from-amber-500/15 via-yellow-500/10 to-orange-500/15 border border-amber-300/70 rounded-2xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-yellow-600 text-white flex items-center justify-center font-black shadow-sm shrink-0">
+                  <Trophy size={20} className="drop-shadow" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-xs font-black text-slate-800 uppercase tracking-tight">
+                      Kal Ke Challenge Ka Leaderboard & Winner List
+                    </h4>
+                    {!isYesterdayClaimed && (
+                      <span className="px-2 py-0.5 bg-amber-500 text-black text-[9px] font-black rounded-full animate-pulse">
+                        Prize Available!
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Dekhein kal kiski kya rank aayi aur apna % prize claim karein!
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowYesterdayRankModal(true)}
+                className="w-full sm:w-auto px-4 py-2 rounded-xl text-xs font-black bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-black shadow-sm flex items-center justify-center gap-1.5 active:scale-95 transition-all cursor-pointer shrink-0"
+              >
+                <span>🏆 Dekhein Kiski Kya Rank Aayi</span>
+              </button>
+            </div>
+
+            {/* Aaj Ka Daily Challenge Card */}
+            {activeDailyChallenge && (
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded-lg bg-violet-100 text-violet-700 text-[10px] font-black uppercase">
+                      Aaj Ka Challenge
+                    </span>
+                    <span className="text-xs font-black text-slate-700">
+                      {activeDailyChallenge.title}
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-bold text-slate-400">
+                    {activeDailyChallenge.questions?.length || 20} Qs • {activeDailyChallenge.durationMinutes || 60}m
+                  </span>
+                </div>
+
+                {activeDailyStatus.completed ? (
+                  activeDailyStatus.claimed ? (
+                    <div className="w-full py-2 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-center gap-1.5 text-xs font-black text-emerald-700">
+                      <CheckCircle size={15} />
+                      <span>Aaj Ka Challenge Complete (+100 XP Claimed)</span>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleChallengeClaim(activeDailyChallenge)}
+                      disabled={Boolean(claimingChallengeId)}
+                      className="w-full py-2 rounded-xl text-xs font-black bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-sm flex items-center justify-center gap-1.5 active:scale-95 transition-all cursor-pointer"
+                    >
+                      <Gift size={15} />
+                      <span>{claimingChallengeId ? 'Claiming...' : '🎁 Claim +100 XP Reward'}</span>
+                    </button>
+                  )
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onStartChallenge20) {
+                        onStartChallenge20(activeDailyChallenge);
+                      }
+                    }}
+                    className="w-full py-2 rounded-xl text-xs font-black bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white shadow-sm flex items-center justify-center gap-1.5 active:scale-95 transition-all cursor-pointer"
+                  >
+                    <Rocket size={15} />
+                    <span>Start Aaj Ka Challenge (Fair Leaderboard) →</span>
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </SectionCard>
 
         {/* ── 1. ROUTINE ─────────────────────────────────────────────────── */}
         <SectionCard
@@ -2211,6 +2329,23 @@ export const DailyEventPage: React.FC<Props> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {showYesterdayRankModal && (
+        <DailyChallengeRankCard
+          userId={user.id}
+          classLevel={user.classLevel || '10'}
+          user={user}
+          settings={settings}
+          onUpdateUser={onUpdateUser}
+          onClose={() => setShowYesterdayRankModal(false)}
+          onStartTodayChallenge={() => {
+            setShowYesterdayRankModal(false);
+            if (activeDailyChallenge && onStartChallenge20) {
+              onStartChallenge20(activeDailyChallenge);
+            }
+          }}
+        />
       )}
 
     </div>

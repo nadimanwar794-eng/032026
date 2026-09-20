@@ -21,9 +21,13 @@ import { applyDeduction, getTotalCredits } from '../utils/creditSystem';
 import { CreditConfirmationModal } from './CreditConfirmationModal';
 import { renderMathInHtml } from '../utils/mathUtils';
 import { UNLOCK_COSTS } from '../utils/limits';
+import { isSubjectMatch } from '../constants';
 import McqQuestionDisplay from './McqQuestionDisplay';
 import McqPracticeCard from './McqPracticeCard';
 import McqQuestionNavigator from './McqQuestionNavigator';
+import { hapticMedium } from '../utils/haptic';
+import { getMcqStatements } from '../utils/mcqStructure';
+import { extractStatements } from '../utils/mcqParser';
 
 type HubTab = 'MCQ' | 'REVISION' | 'PERFORMANCE';
 
@@ -41,10 +45,14 @@ interface Props {
   onNavigateContent?: (type: 'PDF' | 'MCQ', chapterId: string, topicName?: string, subjectName?: string) => void;
   onUpdateUser?: (user: User) => void;
   onMcqAnswer?: (isCorrect: boolean) => boolean;
-  onSendToMcqCommunity?: (draft: { question: string; options: [string,string,string,string]; correctAnswer: number; explanation: string }) => void;
+  onSendToMcqCommunity?: (draft: { question: string; statements?: string[]; options: [string,string,string,string]; correctAnswer: number; explanation: string }) => void;
   /** If set, auto-navigate to this lesson's MCQ on open — matched by lessonTitle (Routine / Daily Event shortcut, coins already paid by caller) */
   initialLessonTitle?: string | null;
   autoStartMcq?: boolean;
+  appName?: string;
+  appLogo?: string;
+  onRestoreBottomNav?: (explicitState?: boolean) => void;
+  isBottomNavVisible?: boolean;
 }
 
 const TABS: { id: HubTab; label: string; icon: React.ReactNode }[] = [
@@ -88,11 +96,43 @@ const TIER_STYLES: Record<string, { bg: string; text: string; label: string }> =
 
 export const RevisionHubScreen: React.FC<Props> = ({
   user, settings, onBack, onTabChange, onNavigateContent, onUpdateUser, onMcqAnswer, onSendToMcqCommunity,
-  initialLessonTitle, autoStartMcq
+  initialLessonTitle, autoStartMcq,
+  appName, appLogo, onRestoreBottomNav, isBottomNavVisible
 }) => {
   const theme = useAppTheme();
   const primary = theme.primary || '#6366f1';
   const [activeTab, setActiveTab]           = useState<HubTab>(autoStartMcq ? 'REVISION' : 'MCQ');
+  const [showTopBar, setShowTopBar]                 = useState(true);
+  const [localBottomNavVisible, setLocalBottomNavVisible] = useState(false);
+  const activeBottomNavVisible = typeof isBottomNavVisible === 'boolean' ? isBottomNavVisible : localBottomNavVisible;
+
+  const officialNstaLogo = (appLogo && !appLogo.includes('placeholder'))
+    ? appLogo
+    : (settings?.appLogo && !settings.appLogo.includes('placeholder'))
+      ? settings.appLogo
+      : '/branding/nsta-logo.svg';
+
+  const handleToggleNavBars = () => {
+    try { hapticMedium(); } catch (_) {}
+    if (showTopBar && activeBottomNavVisible) {
+      // Second tap: Hide BOTH top bar and bottom navigation!
+      setShowTopBar(false);
+      onRestoreBottomNav?.(false);
+      setLocalBottomNavVisible(false);
+    } else if (!showTopBar && !activeBottomNavVisible) {
+      // Tap to restore: Bring back BOTH top bar and bottom navigation!
+      setShowTopBar(true);
+      onRestoreBottomNav?.(true);
+      setLocalBottomNavVisible(true);
+    } else {
+      // First tap (top bar is visible, bottom nav was hidden):
+      // Show navigation bar!
+      setShowTopBar(true);
+      onRestoreBottomNav?.(true);
+      setLocalBottomNavVisible(true);
+    }
+  };
+
   const [mcqSelectedClass, setMcqSelectedClass]     = useState<string | null>(null);
   const [mcqSelectedSubject, setMcqSelectedSubject] = useState<string | null>(null);
   const [mcqSelectedLesson, setMcqSelectedLesson]   = useState<any | null>(null);
@@ -100,6 +140,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
   const [showMonthlySheet, setShowMonthlySheet]     = useState(false);
 
   const [sessionActive, setSessionActive]   = useState(false);
+  const [sessionSeconds, setSessionSeconds] = useState(0);
   const [sessionQIndex, setSessionQIndex]   = useState(0);
   const [sessionAnswers, setSessionAnswers] = useState<(number | null)[]>([]);
   const [sessionDone, setSessionDone]       = useState(false);
@@ -143,26 +184,20 @@ export const RevisionHubScreen: React.FC<Props> = ({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialLessonTitle, allLessons]);
 
-  // Helper: returns true if this MCQ has a real topic (non-empty, non-"General").
-  // "General" is the default label mcqParser assigns to MCQs pasted without
-  // <TOPIC: ...> tags — it effectively means "no topic" and must be treated
-  // the same as a blank topic throughout Revision Hub.
+  // Helper: excludes blank-topic MCQs and "General" MCQs (only real topic-wise MCQs allowed in Revision Hub)
   const isRealTopicMcq = (q: any) => {
-    const t = String(q?.topic ?? '').trim();
-    return t !== '' && t.toLowerCase() !== 'general';
+    if (!q || (!q.question && !q.id)) return false;
+    const topic = String(q.topic || '').trim();
+    if (!topic) return false;
+    const lower = topic.toLowerCase();
+    return lower !== 'general' && lower !== 'सामान्य' && lower !== 'general mcq' && lower !== 'general mcqs';
   };
 
-  // Only show lessons that have at least one real topic-wise MCQ.
-  // This cleanly excludes:
-  //   • Pure page-sync lessons (all MCQs are "General" / no-topic)
-  //   • Draft/incomplete lessons with no lessonTitle
-  // Lessons that mix page MCQs ("General") with proper topic MCQs are still
-  // shown — the "General" MCQs are filtered out below in classMcqs.
+  // Show all valid lessons that have a title (even if 0 MCQs, student sees chapter title with "Coming Soon")
   const hubLessons = useMemo(
     () => allLessons.filter(l => {
       if (!l.lessonTitle || !String(l.lessonTitle).trim()) return false;
-      const mcqs: any[] = Array.isArray(l.mcqs) ? l.mcqs : [];
-      return mcqs.some(isRealTopicMcq);
+      return true;
     }),
     [allLessons],
   );
@@ -186,7 +221,10 @@ export const RevisionHubScreen: React.FC<Props> = ({
 
   // Lessons available for current class + subject
   const subjectLessons = hubLessons.filter(
-    l => l.classLevel === mcqSelectedClass && l.subject === mcqSelectedSubject
+    l => l.classLevel === mcqSelectedClass && (
+      l.subject === mcqSelectedSubject ||
+      isSubjectMatch(l.subject, mcqSelectedSubject, mcqSelectedClass, settings)
+    )
   );
 
   // MCQs from the selected lesson — only real topic-wise MCQs.
@@ -280,6 +318,11 @@ export const RevisionHubScreen: React.FC<Props> = ({
   }
 
   function handleLessonClick(lesson: any) {
+    const validMcqs = (Array.isArray(lesson.mcqs) ? lesson.mcqs : []).filter(isRealTopicMcq);
+    if (validMcqs.length === 0) {
+      alert(`⏳ "${lesson.lessonTitle}"\n\nIs lesson mein abhi Topic-wise MCQs upload nahi huye hain (Coming Soon).\nAdmin jald hi questions add karenge. Tab tak aap iska Notes section padh sakte hain!`);
+      return;
+    }
     if (!onUpdateUser) { setMcqSelectedLesson(lesson); return; }
     setPendingLesson(lesson);
     setCoinModal({
@@ -455,9 +498,18 @@ export const RevisionHubScreen: React.FC<Props> = ({
     }
   }
 
+  useEffect(() => {
+    if (!sessionActive || sessionDone) return;
+    const interval = setInterval(() => {
+      setSessionSeconds(prev => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [sessionActive, sessionDone]);
+
   function resetSession() {
     setSessionActive(false);
     setSessionDone(false);
+    setSessionSeconds(0);
     setSessionQIndex(0);
     setSessionAnswers([]);
     setSessionMcqs([]);
@@ -498,45 +550,76 @@ export const RevisionHubScreen: React.FC<Props> = ({
   return (
     <div className="fixed inset-0 z-[350] flex flex-col bg-white" style={{ height: '100dvh' }}>
 
-      {/* ── Top Bar ── */}
-      <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-slate-100 shadow-sm shrink-0">
-        <button
-          onClick={handleBack}
-          className="p-2 rounded-full bg-slate-100 hover:bg-slate-200 active:scale-95 transition-all"
-          aria-label="Back"
-        >
-          <ArrowLeft size={18} className="text-slate-700" />
-        </button>
-        <div className="flex-1 min-w-0">
-          <h1 className="text-base font-black text-slate-800 leading-none truncate">{titleText}</h1>
-          <p className="text-[11px] text-slate-500 mt-0.5">
-            {sessionActive
-              ? `Topic: ${currentQ?.topic || 'General'}`
-              : (mcqSelectedClass && activeTab === 'MCQ')
-                ? 'MCQ Practice'
-                : 'MCQ · Revision · History · Performance'}
-          </p>
+      {/* ── Top Bar (can be toggled / hidden) ── */}
+      {showTopBar && (
+        <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-slate-100 shadow-sm shrink-0">
+          <button
+            onClick={handleBack}
+            className="p-2 rounded-full bg-slate-100 hover:bg-slate-200 active:scale-95 transition-all"
+            aria-label="Back"
+          >
+            <ArrowLeft size={18} className="text-slate-700" />
+          </button>
+          <div className="flex-1 min-w-0">
+            <h1 className="text-base font-black text-slate-800 leading-none truncate">{titleText}</h1>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              {sessionActive
+                ? `Topic: ${currentQ?.topic || 'Topic Practice'}`
+                : (mcqSelectedClass && activeTab === 'MCQ')
+                  ? 'MCQ Practice'
+                  : 'MCQ · Revision · History · Performance'}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Header NSTA Toggle Button */}
+            <button
+              type="button"
+              onClick={handleToggleNavBars}
+              className={`p-1 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 px-2 active:scale-95 ${
+                activeBottomNavVisible
+                  ? 'bg-purple-600 text-white shadow-xs'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
+              }`}
+              title={
+                activeBottomNavVisible
+                  ? "Top bar aur Bottom navigation hide karein • Tap to hide navigation bars"
+                  : "Bottom navigation dikhayein • Tap to show bottom navigation"
+              }
+            >
+              <img
+                src={officialNstaLogo}
+                alt={appName || "NSTA"}
+                className="w-5 h-5 rounded-md object-contain"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).src = '/branding/nsta-logo.png';
+                }}
+              />
+              <span className="text-[10px] font-black">{appName || 'NSTA'}</span>
+            </button>
+
+            {sessionActive && (
+              <button
+                type="button"
+                onClick={() => setShowSessionNavigator(prev => !prev)}
+                aria-label={showSessionNavigator ? 'Hide question switcher' : 'Show question switcher'}
+                aria-expanded={showSessionNavigator}
+                className={`shrink-0 p-2 rounded-xl border transition-all ${
+                  showSessionNavigator
+                    ? 'bg-indigo-100 border-indigo-300 text-indigo-700'
+                    : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                <List size={18} />
+              </button>
+            )}
+          </div>
         </div>
-         {sessionActive && (
-           <button
-             type="button"
-             onClick={() => setShowSessionNavigator(prev => !prev)}
-             aria-label={showSessionNavigator ? 'Hide question switcher' : 'Show question switcher'}
-             aria-expanded={showSessionNavigator}
-             className={`shrink-0 p-2 rounded-xl border transition-all ${
-               showSessionNavigator
-                 ? 'bg-indigo-100 border-indigo-300 text-indigo-700'
-                 : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'
-             }`}
-           >
-             <List size={18} />
-           </button>
-         )}
-      </div>
+      )}
 
       {/* Progress bar (session only) */}
       {sessionActive && (
-        <div className="h-1 bg-slate-100 shrink-0">
+        <div className={`h-1 bg-slate-100 shrink-0 ${!showTopBar ? 'fixed top-0 left-0 right-0 z-[400]' : ''}`}>
           <div
             className="h-1 transition-all duration-300"
             style={{ width: `${progress}%`, background: primary }}
@@ -544,8 +627,20 @@ export const RevisionHubScreen: React.FC<Props> = ({
         </div>
       )}
 
-      {/* ── Tabs (hidden during session / results) ── */}
-      {!sessionActive && !sessionDone && (
+      {/* ── Minimalist Back button when Top Bar is hidden ── */}
+      {!showTopBar && (
+        <button
+          onClick={handleBack}
+          className="fixed top-3 left-3 z-[450] p-2 rounded-full bg-slate-900/80 hover:bg-slate-900 text-white backdrop-blur shadow-lg active:scale-95 transition-all cursor-pointer"
+          aria-label="Back"
+          title="Back"
+        >
+          <ArrowLeft size={16} className="text-white" />
+        </button>
+      )}
+
+      {/* ── Tabs (hidden during session / results, and hidden when showTopBar is false) ── */}
+      {showTopBar && !sessionActive && !sessionDone && (
         <div className="flex items-center bg-white border-b border-slate-100 shrink-0 overflow-x-auto">
           {TABS.map((tab) => {
             const isActive = activeTab === tab.id;
@@ -570,7 +665,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
       )}
 
       {/* ── Content ── */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden pb-20">
+      <div className={`flex-1 overflow-y-auto overflow-x-hidden ${!showTopBar ? 'pt-4' : ''} ${activeBottomNavVisible ? 'pb-[88px]' : 'pb-20'}`}>
 
         {sessionActive && showSessionNavigator && (
           <div className="px-4 pt-3 max-w-xl mx-auto w-full">
@@ -611,9 +706,11 @@ export const RevisionHubScreen: React.FC<Props> = ({
 
             {/* Running score counter */}
             <div className="flex items-center gap-2">
-              <span className="text-[10px] font-black uppercase tracking-wider bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">
-                {currentQ.topic || 'General'}
-              </span>
+              {currentQ?.topic && (
+                <span className="text-[10px] font-black uppercase tracking-wider bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">
+                  {currentQ.topic}
+                </span>
+              )}
               <button
                 type="button"
                 onClick={() => {
@@ -630,6 +727,10 @@ export const RevisionHubScreen: React.FC<Props> = ({
                 <Slash size={10} /> 50:50
               </button>
               <span className="text-[10px] text-slate-400 ml-auto">{sessionQIndex + 1}/{sessionMcqs.length}</span>
+              <div className="flex items-center gap-1 font-mono font-black text-[10px] px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 shrink-0" title="Practice Timer">
+                <Clock size={10} className="text-indigo-600 animate-pulse" />
+                <span>{Math.floor(sessionSeconds / 60).toString().padStart(2, '0')}:{(sessionSeconds % 60).toString().padStart(2, '0')}</span>
+              </div>
               <div className="flex items-center gap-1.5">
                 <span className="text-[10px] font-black bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full flex items-center gap-1">
                   <CheckCircle size={10} /> {correct}
@@ -676,7 +777,23 @@ export const RevisionHubScreen: React.FC<Props> = ({
                      const opts = (currentQ.options || []).length === 4
                        ? currentQ.options as [string,string,string,string]
                        : ([...(currentQ.options || []), '', '', '', ''].slice(0, 4) as [string,string,string,string]);
-                     onSendToMcqCommunity({ question: currentQ.question, options: opts, correctAnswer: currentQ.correctAnswer ?? 0, explanation: currentQ.explanation || '' });
+                     const stmts = getMcqStatements(currentQ);
+                     let finalStmts = stmts;
+                     let cleanQ = (currentQ.question || '').replace(/<br\s*\/?>/gi, '\n').trim();
+                     if (finalStmts.length === 0) {
+                       const ext = extractStatements(cleanQ);
+                       if (ext.statements.length > 0) {
+                         finalStmts = ext.statements;
+                         cleanQ = ext.cleanedQuestion.replace(/<br\s*\/?>/gi, '\n').trim();
+                       }
+                     }
+                     onSendToMcqCommunity({
+                       question: cleanQ,
+                       statements: finalStmts.length > 0 ? finalStmts : undefined,
+                       options: opts,
+                       correctAnswer: currentQ.correctAnswer ?? 0,
+                       explanation: currentQ.explanation || '',
+                     });
                    }}
                    className="w-7 h-7 rounded-full flex items-center justify-center active:scale-90 transition-all bg-indigo-100 text-indigo-600"
                    title="MCQ Community mein bhejo"
@@ -803,7 +920,9 @@ export const RevisionHubScreen: React.FC<Props> = ({
                           {isCorrect ? '✅' : '❌'}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-[10px] font-black text-slate-400 mb-0.5">Q{qi + 1} · {q.topic || 'General'}</p>
+                          <p className="text-[10px] font-black text-slate-400 mb-0.5">
+                            Q{qi + 1}{q.topic ? ` · ${q.topic}` : ''}
+                          </p>
                           <p className="text-xs font-bold text-slate-800 leading-relaxed line-clamp-2"
                             dangerouslySetInnerHTML={{ __html: renderMathInHtml((q.question || '').replace(/<br\/?>/g, ' ')) }}
                           />
@@ -1017,17 +1136,40 @@ export const RevisionHubScreen: React.FC<Props> = ({
                   <div className="flex-1 text-left min-w-0">
                     <p className="font-bold text-slate-800 text-sm truncate">{lesson.lessonTitle}</p>
                     <div className="flex flex-wrap gap-1 mt-0.5">
-                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: `${primary}18`, color: primary }}>
-                        {(lesson.mcqs || []).filter((q: any) => q.topic && String(q.topic).trim() !== '').length} MCQs
-                      </span>
-                      {(lesson.topics || []).slice(0, 2).map((t: string) => (
-                        <span key={t} className="text-[9px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full truncate max-w-[90px]">
-                          {t}
-                        </span>
-                      ))}
-                      {(lesson.topics || []).length > 2 && (
-                        <span className="text-[9px] text-slate-400">+{lesson.topics.length - 2} more</span>
-                      )}
+                      {(() => {
+                        const validMcqs = (Array.isArray(lesson.mcqs) ? lesson.mcqs : []).filter(isRealTopicMcq);
+                        const cnt = validMcqs.length;
+                        if (cnt === 0) {
+                          return (
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">
+                              ⏳ Coming Soon / 0 MCQs
+                            </span>
+                          );
+                        }
+                        return (
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: `${primary}18`, color: primary }}>
+                            {cnt} MCQs
+                          </span>
+                        );
+                      })()}
+                      {(() => {
+                        const validTopics = (lesson.topics || []).filter((t: string) => {
+                          const s = String(t || '').trim().toLowerCase();
+                          return s && s !== 'general' && s !== 'सामान्य' && s !== 'general mcq' && s !== 'general mcqs';
+                        });
+                        return (
+                          <>
+                            {validTopics.slice(0, 2).map((t: string) => (
+                              <span key={t} className="text-[9px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full truncate max-w-[90px]">
+                                {t}
+                              </span>
+                            ))}
+                            {validTopics.length > 2 && (
+                              <span className="text-[9px] text-slate-400">+{validTopics.length - 2} more</span>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                   <ChevronRight size={16} className="text-slate-400 shrink-0" />
@@ -1051,7 +1193,7 @@ export const RevisionHubScreen: React.FC<Props> = ({
                     {classMcqs.length} Sawaal
                   </span>
                   <span className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 font-bold text-slate-600">
-                    {[...new Set(classMcqs.map((q: any) => q.topic || 'General'))].length} Topics
+                    {[...new Set(classMcqs.map((q: any) => String(q.topic || '').trim()).filter(Boolean))].length} Topics
                   </span>
                 </div>
               </div>
@@ -1059,8 +1201,8 @@ export const RevisionHubScreen: React.FC<Props> = ({
               {/* Topic preview */}
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 space-y-2">
                 <p className="text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2">Topics in this lesson</p>
-                {[...new Set(classMcqs.map((q: any) => q.topic || 'General'))].map((t: any) => {
-                  const cnt = classMcqs.filter((q: any) => (q.topic || 'General') === t).length;
+                {[...new Set(classMcqs.map((q: any) => String(q.topic || '').trim()).filter(Boolean))].map((t: string) => {
+                  const cnt = classMcqs.filter((q: any) => String(q.topic || '').trim() === t).length;
                   return (
                     <div key={t} className="flex items-center justify-between text-sm">
                       <span className="text-slate-700 font-medium truncate flex-1">{t}</span>
@@ -1231,6 +1373,63 @@ export const RevisionHubScreen: React.FC<Props> = ({
           isAutoEnabledInitial={false}
         />
       )}
+
+      {/* ── FLOATING NSTA LOGO BUTTON (PERSISTS ON EVERY PAGE OF REVISION HUB) ── */}
+      <div
+        className={`fixed ${
+          activeBottomNavVisible ? 'bottom-[76px]' : 'bottom-4 sm:bottom-6'
+        } right-3 sm:right-6 z-[450] pointer-events-auto flex items-center gap-2 animate-in fade-in duration-300 transition-all`}
+      >
+        <button
+          id="revision-hub-nsta-fab"
+          type="button"
+          onClick={handleToggleNavBars}
+          className="group relative flex items-center justify-center w-14 h-14 sm:w-15 sm:h-15 rounded-full shadow-2xl active:scale-95 transition-all duration-200 hover:scale-105 cursor-pointer p-1"
+          style={{
+            background: 'radial-gradient(circle, #0f172a 0%, #020617 100%)',
+            border: '2.5px solid rgba(251, 191, 36, 0.9)',
+            boxShadow: '0 8px 25px -2px rgba(124, 58, 237, 0.55), 0 0 16px rgba(251, 191, 36, 0.45)',
+          }}
+          title={
+            (showTopBar && activeBottomNavVisible)
+              ? "Top bar aur Bottom navigation hide karein • Tap to hide navigation bars"
+              : (!showTopBar && !activeBottomNavVisible)
+                ? "Navigation bar wapas layein • Tap to restore navigation bars"
+                : "Bottom navigation layein • Tap to show bottom navigation"
+          }
+          aria-label={
+            (showTopBar && activeBottomNavVisible)
+              ? "Hide top and bottom navigation bars"
+              : "Show navigation bars"
+          }
+        >
+          <div className="w-full h-full rounded-full overflow-hidden flex items-center justify-center bg-slate-900/90">
+            <img
+              src={officialNstaLogo}
+              alt={appName || "NSTA Logo"}
+              className="w-full h-full object-contain p-0.5 rounded-full drop-shadow-md select-none pointer-events-none"
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).src = '/branding/nsta-logo.png';
+              }}
+            />
+          </div>
+
+          {/* Glowing indicator ping: Emerald when bottom nav is active, Amber when hidden/ready */}
+          <span className="absolute top-0 right-0 flex h-3.5 w-3.5">
+            {activeBottomNavVisible ? (
+              <>
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500 border-2 border-slate-950 shadow" />
+              </>
+            ) : (
+              <>
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-amber-500 border-2 border-slate-950 shadow" />
+              </>
+            )}
+          </span>
+        </button>
+      </div>
     </div>
   );
 };

@@ -1,7 +1,7 @@
 // @ts-nocheck
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Lightbulb, ThumbsUp, Send, X, Trash2, MessageSquare, CheckCircle, Clock, RefreshCw, ShieldCheck, Tag, FilePen, AlertCircle, Trophy, Coins, Star, Award, Camera, Download, Maximize2 } from 'lucide-react';
+import { Lightbulb, ThumbsUp, Send, X, Trash2, MessageSquare, CheckCircle, Clock, RefreshCw, ShieldCheck, Tag, FilePen, AlertCircle, Trophy, Coins, Star, Award, Camera, Download, Maximize2, Lock } from 'lucide-react';
 import { uploadImageToImgBB } from '../services/imgbbService';
 import {
   saveSuggestion,
@@ -44,6 +44,7 @@ interface Props {
   user: any;
   isAdmin: boolean;
   onClose: () => void;
+  tierTheme?: any;
 }
 
 const ADMIN_TAGS = [
@@ -68,7 +69,12 @@ const reasonLabel = (reason: string) => {
   return reason;
 };
 
-export function SuggestionsPanel({ user, isAdmin, onClose }: Props) {
+export function SuggestionsPanel({ user, isAdmin, onClose, tierTheme }: Props) {
+  const brandPrimary = tierTheme?.primary || '#f59e0b';
+  const brandMid = tierTheme?.mid || brandPrimary;
+  const brandBorder = (tierTheme as any)?.cardBorderColor || tierTheme?.primary || brandPrimary;
+  const brandGrad = tierTheme?.btnGrad || `linear-gradient(135deg, ${brandPrimary}, ${brandMid})`;
+
   const [tab, setTab] = useState<'feed' | 'submit' | 'history' | 'rank'>('feed');
   const [suggestions, setSuggestions] = useState<SuggestionItem[]>([]);
   const [newText, setNewText] = useState('');
@@ -163,6 +169,9 @@ export function SuggestionsPanel({ user, isAdmin, onClose }: Props) {
         userName,
         userBoard: user?.board || '',
         createdAt: new Date().toISOString(),
+        tier: isPaidUser ? 'VIP' : 'FREE',
+        isVip: isPaidUser,
+        priority: isPaidUser ? 'HIGH' : 'NORMAL',
       });
       updateSuggestionLeaderboard(uid, userName, 'reported').catch(() => {});
       setNewText('');
@@ -230,6 +239,18 @@ export function SuggestionsPanel({ user, isAdmin, onClose }: Props) {
   // Leaderboard rank of current user
   const myRank = leaderboard.findIndex(e => e.uid === uid) + 1;
 
+  const userTier = (user?.subscriptionLevel || 'FREE')?.toUpperCase();
+  const isPaidUser = isAdmin || (
+    (userTier === 'ULTRA' || userTier === 'BASIC' || user?.isPremium) &&
+    (!user?.subscriptionEndDate || new Date(user.subscriptionEndDate).getTime() > Date.now())
+  );
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayUserSubmissions = suggestions.filter(s => s.uid === uid && s.createdAt?.slice(0, 10) === todayStr);
+  const freeDailyLimit = 3;
+  const freeRemainingToday = Math.max(0, freeDailyLimit - todayUserSubmissions.length);
+  const canSubmit = isPaidUser || freeRemainingToday > 0;
+
   return createPortal(
     <>
       {/* Backdrop */}
@@ -243,7 +264,7 @@ export function SuggestionsPanel({ user, isAdmin, onClose }: Props) {
         className="fixed bottom-0 left-0 right-0 z-[99999] flex flex-col rounded-t-3xl overflow-hidden"
         style={{
           background: 'linear-gradient(160deg, #0f0c29 0%, #1a1440 50%, #0d1b2a 100%)',
-          border: '1px solid rgba(245,158,11,0.25)',
+          border: `1px solid ${brandBorder}40`,
           height: '78dvh',
           maxHeight: '78dvh',
         }}
@@ -252,15 +273,15 @@ export function SuggestionsPanel({ user, isAdmin, onClose }: Props) {
         {/* Header */}
         <div
           className="flex items-center justify-between px-4 pt-4 pb-3 shrink-0"
-          style={{ borderBottom: '1px solid rgba(245,158,11,0.15)' }}
+          style={{ borderBottom: `1px solid ${brandBorder}26` }}
         >
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(245,158,11,0.2)' }}>
-              <Lightbulb size={18} className="text-amber-400" />
+            <div className="w-9 h-9 rounded-2xl flex items-center justify-center" style={{ background: `${brandBorder}26`, color: brandPrimary }}>
+              <Lightbulb size={18} />
             </div>
             <div>
               <p className="font-black text-white text-sm leading-tight">Suggestions & Corrections</p>
-              <p className="text-[9px] text-amber-400/70 leading-tight">{suggestions.length} total • Community feedback</p>
+              <p className="text-[9px] text-slate-400 leading-tight">{suggestions.length} total • Community feedback</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -268,7 +289,7 @@ export function SuggestionsPanel({ user, isAdmin, onClose }: Props) {
             {uid && (
               <div
                 className="flex items-center gap-1 px-2.5 py-1 rounded-full"
-                style={{ background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.3)' }}
+                style={{ background: `${brandBorder}20`, border: `1px solid ${brandBorder}40` }}
               >
                 <span style={{ fontSize: 13 }}>🪙</span>
                 <span className="text-[11px] font-black text-amber-300">{userCoins}</span>
@@ -295,13 +316,45 @@ export function SuggestionsPanel({ user, isAdmin, onClose }: Props) {
               <button
                 key={t}
                 onClick={() => { setTab(t); if (t === 'submit') setTimeout(() => textareaRef.current?.focus(), 150); }}
-                className={`flex-1 py-1.5 rounded-xl text-[10px] font-black transition-all ${tab === t ? 'bg-amber-500 text-white shadow' : 'text-slate-400'}`}
-                style={tab !== t ? { background: 'rgba(255,255,255,0.06)' } : {}}
+                className={`flex-1 py-1.5 rounded-xl text-[10px] font-black transition-all ${tab === t ? 'text-white shadow' : 'text-slate-400'}`}
+                style={tab === t ? { background: brandGrad } : { background: 'rgba(255,255,255,0.06)' }}
               >
                 {labels[t]}
               </button>
             );
           })}
+        </div>
+
+        {/* Free vs VIP Tier Difference Status Bar */}
+        <div className="px-4 pb-2 shrink-0">
+          <div className="rounded-xl px-3 py-2 flex items-center justify-between gap-2"
+            style={{
+              background: isPaidUser ? 'linear-gradient(90deg, rgba(245,158,11,0.15) 0%, rgba(217,119,6,0.08) 100%)' : 'rgba(255,255,255,0.04)',
+              border: isPaidUser ? '1px solid rgba(245,158,11,0.35)' : '1px solid rgba(255,255,255,0.08)'
+            }}>
+            <div className="flex items-center gap-2">
+              <span className="text-xs">{isPaidUser ? '👑' : '🆓'}</span>
+              <div>
+                <p className="text-[10px] font-black leading-tight" style={{ color: isPaidUser ? '#fbbf24' : '#cbd5e1' }}>
+                  {isPaidUser ? 'VIP Fast-Track Priority Member' : 'Free Member Tier'}
+                </p>
+                <p className="text-[8px] text-slate-400 leading-tight">
+                  {isPaidUser
+                    ? 'Unlimited Reports • ⚡ 24h Review • 3x Rewards (15🪙 Reply / 50🪙 Resolve)'
+                    : `Daily Quota: ${freeRemainingToday}/${freeDailyLimit} Left • Standard Review • 5🪙 Reward`}
+                </p>
+              </div>
+            </div>
+            {isPaidUser ? (
+              <span className="text-[8px] font-black px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/40 shrink-0">
+                VIP ACTIVE
+              </span>
+            ) : (
+              <span className="text-[8px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700 shrink-0">
+                {freeRemainingToday} Left Today
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Content */}
@@ -385,6 +438,16 @@ export function SuggestionsPanel({ user, isAdmin, onClose }: Props) {
                               </div>
                             </div>
                             <div className="flex items-center gap-1">
+                              {/* VIP or Free Badge */}
+                              {(s.isVip || s.tier === 'VIP') ? (
+                                <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/40 flex items-center gap-0.5">
+                                  👑 VIP
+                                </span>
+                              ) : (
+                                <span className="text-[8px] font-semibold px-1.5 py-0.5 rounded-full bg-slate-800/80 text-slate-400 border border-slate-700">
+                                  Free
+                                </span>
+                              )}
                               {/* Status badge */}
                               <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full" style={{ background: st.bg, color: st.color }}>
                                 {st.label}
@@ -780,12 +843,21 @@ export function SuggestionsPanel({ user, isAdmin, onClose }: Props) {
                     </div>
                   </div>
 
-                  <button onClick={handleSubmit} disabled={(!newText.trim() && !selectedImageFile) || submitting}
-                    className="w-full py-3.5 rounded-2xl text-[13px] font-black text-white flex items-center justify-center gap-2 active:scale-95 transition disabled:opacity-40 cursor-pointer"
-                    style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', boxShadow: '0 4px 20px rgba(245,158,11,0.35)' }}>
-                    {submitting ? <RefreshCw size={16} className="animate-spin" /> : <Send size={16} />}
-                    {submitting ? (isUploadingImage ? 'Photo upload ho rahi hai…' : 'Submit ho raha hai…') : 'Submit Suggestion'}
-                  </button>
+                  {!canSubmit ? (
+                    <div className="w-full p-3.5 rounded-2xl text-center bg-amber-500/10 border border-amber-500/30">
+                      <p className="text-xs font-bold text-amber-300 mb-1">⚠️ Aaj ka Free Quota (3/3) Poora Ho Chuka Hai</p>
+                      <p className="text-[10px] text-slate-400 leading-relaxed">
+                        Aap kal naye suggestions submit kar sakte hain. VIP members ko unlimited reports aur 24h fast-track review milta hai.
+                      </p>
+                    </div>
+                  ) : (
+                    <button onClick={handleSubmit} disabled={(!newText.trim() && !selectedImageFile) || submitting}
+                      className="w-full py-3.5 rounded-2xl text-[13px] font-black text-white flex items-center justify-center gap-2 active:scale-95 transition disabled:opacity-40 cursor-pointer"
+                      style={{ background: brandGrad, boxShadow: `0 4px 20px ${brandPrimary}55` }}>
+                      {submitting ? <RefreshCw size={16} className="animate-spin" /> : <Send size={16} />}
+                      {submitting ? (isUploadingImage ? 'Photo upload ho rahi hai…' : 'Submit ho raha hai…') : (isPaidUser ? 'Submit VIP Priority Suggestion 👑' : `Submit Suggestion (${freeRemainingToday} left today)`)}
+                    </button>
+                  )}
                 </>
               )}
             </div>

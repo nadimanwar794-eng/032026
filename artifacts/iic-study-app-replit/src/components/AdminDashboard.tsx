@@ -15,7 +15,7 @@ import { parseMCQText } from '../utils/mcqParser';
 import { saveTopicNotes } from '../utils/revisionTrackerV2';
 import { TOP_BAR_EFFECTS, EFFECT_CATEGORIES, TopBarEffectsLayer } from '../utils/topBarEffects';
 import { generateSecureRandomString, generateSecureRandomId } from '../utils/cryptoUtils';
-import { saveChapterData, bulkSaveLinks, checkFirebaseConnection, saveSystemSettings, subscribeToUsers, getUsersPage, subscribeToRecentUsers, rtdb, saveUserToLive, db, getChapterData, saveCustomSyllabus, deleteCustomSyllabus, subscribeToUniversalAnalysis, saveAiInteraction, saveSecureKeys, getSecureKeys, subscribeToApiUsage, subscribeToDrafts, resetAllContent, recoverContentFromCache, checkRecoveryStatus, backupAllContentToFirebase, restoreContentFromFirebaseBackup, rebuildContentIndex, deleteHomeworkEntry, deleteLucentEntry, subscribeToDemands, updateDemandStatus, subscribeGlobalChat, subscribeSupportChat, deleteGlobalMessage, deleteSupportMessage, subscribeAllSupportThreads, sendGlobalMessage, sendSupportMessage, subscribeToCompareAnalytics, deleteCompareAnalyticsByQuery, addCompreBookNote, deleteCompreBookNote, getCompreBookNotes, updateCompreBookNote, getAppFeedbacks, exportBackupAsJson, importBackupFromJson, subscribeSuggestions, adminReplySuggestion, deleteSuggestion, reactToSuggestion, resolvesuggestion, applyNoteCorrection, applyMcqCorrection, applyMcqFullEdit, saveMcqLesson, deleteMcqLesson, getUserByMobileOrId } from '../firebase'; // IMPORT FIREBASE
+import { saveChapterData, bulkSaveLinks, checkFirebaseConnection, saveSystemSettings, subscribeToUsers, getUsersPage, subscribeToRecentUsers, rtdb, saveUserToLive, db, getChapterData, saveCustomSyllabus, deleteCustomSyllabus, subscribeToUniversalAnalysis, saveAiInteraction, saveSecureKeys, getSecureKeys, subscribeToApiUsage, subscribeToDrafts, resetAllContent, recoverContentFromCache, checkRecoveryStatus, backupAllContentToFirebase, restoreContentFromFirebaseBackup, rebuildContentIndex, deleteHomeworkEntry, deleteLucentEntry, subscribeToDemands, updateDemandStatus, subscribeGlobalChat, subscribeSupportChat, deleteGlobalMessage, deleteSupportMessage, subscribeAllSupportThreads, sendGlobalMessage, sendSupportMessage, subscribeToCompareAnalytics, deleteCompareAnalyticsByQuery, addCompreBookNote, deleteCompreBookNote, getCompreBookNotes, updateCompreBookNote, getAppFeedbacks, exportBackupAsJson, importBackupFromJson, subscribeSuggestions, adminReplySuggestion, deleteSuggestion, reactToSuggestion, resolvesuggestion, applyNoteCorrection, applyMcqCorrection, applyMcqFullEdit, saveMcqLesson, fetchMcqLesson, deleteMcqLesson, getUserByMobileOrId } from '../firebase'; // IMPORT FIREBASE
 import { subscribeToMaintenance, saveMaintenance, clearMaintenance, markCrashFixed, MaintenanceState, MaintenanceTarget } from '../utils/maintenanceManager';
 import { ref, set, onValue, update, push, get, query as rtdbQueryAdmin, orderByChild as obcAdmin, limitToLast as ltlAdmin } from "firebase/database";
 import { doc, deleteDoc, setDoc, getDocs, collection, writeBatch, deleteField } from "firebase/firestore";
@@ -43,6 +43,7 @@ import { logAdminAction } from '../utils/adminAudit';
 import { ALL_FEATURES } from '../utils/featureRegistry';
 import { HOME_SECTION_REGISTRY } from '../utils/homeSections';
 import { SPLASH_FONTS, getSplashFontById, ensureGoogleFontLoaded } from '../utils/splashFonts';
+import { safeSaveUsersCache } from '../utils/safeUtils';
 import { NstaFeatureManager } from './admin/NstaFeatureManager';
 import { ReferralPrizesManager } from './admin/ReferralPrizesManager';
 import { PlanComparisonManager } from './admin/PlanComparisonManager';
@@ -435,18 +436,29 @@ const MODELS = [
 
 // Safe helper to get subject name for any class/competition to prevent ReferenceError
 const getSubjectNameSafe = (classLevel: string, subjectId: string, localSettings: any): string => {
+    if (!subjectId) return 'General';
     if (classLevel === 'COMPETITION') {
+        const lucentOpts = getLucentSubjectOptions(localSettings);
+        const match = lucentOpts.find(o => o.id === subjectId || o.name.trim().toLowerCase() === subjectId.trim().toLowerCase());
+        if (match) return match.name;
         return LUCENT_SUBJECT_OPTIONS_BASE.find(o => o.id === subjectId)?.name || subjectId;
     }
     try {
         const cn612Level = classLevel as any;
-        const seen = new Set<string>();
         let name = subjectId;
         (['Science', 'Commerce', 'Arts', null] as any[]).forEach((stream: string | null) => {
             getSubjectsList(cn612Level, stream, undefined, localSettings).forEach(s => {
-                if (s.id === subjectId) name = s.name;
+                if (s.id === subjectId || s.name.trim().toLowerCase() === subjectId.trim().toLowerCase()) name = s.name;
             });
         });
+        if (name === subjectId) {
+            const opts = getClassSubjectOptions(classLevel);
+            const found = opts.find(o => o.id === subjectId || o.name.trim().toLowerCase() === subjectId.trim().toLowerCase());
+            if (found) return found.name;
+            const lucentOpts = getLucentSubjectOptions(localSettings);
+            const lucentMatch = lucentOpts.find(o => o.id === subjectId || o.name.trim().toLowerCase() === subjectId.trim().toLowerCase());
+            if (lucentMatch) return lucentMatch.name;
+        }
         return name;
     } catch {
         return subjectId;
@@ -815,6 +827,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   const [mcqFixSuccess, setMcqFixSuccess] = useState<string|null>(null);
   const [mcqEditMode, setMcqEditMode] = useState(false);
   const [mcqEditQuestion, setMcqEditQuestion] = useState('');
+  const [mcqEditStatements, setMcqEditStatements] = useState('');
   const [mcqEditOptions, setMcqEditOptions] = useState<string[]>([]);
   const [chatDmMessages, setChatDmMessages] = useState<any[]>([]);
   const [chatInput, setChatInput] = useState('');
@@ -1214,7 +1227,19 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   // Dynamic subject options — changes based on which classLevel admin selected.
   // For COMPETITION: competition subjects (built-in + custom). For class 6-12: all subjects of that class.
   const activeLucentSubjectOptions: { id: string; name: string }[] = (() => {
-    if (newLucent.classLevel === 'COMPETITION') return [...LUCENT_SUBJECT_OPTIONS_BASE.filter(s => !hiddenLucentSubjectIds.has(s.id)), ...customLucentSubjectsList.filter(s => !(s as any).bookId), ...customBooksList.map(b => ({ id: b.id, name: `📗 ${b.name}` }))];
+    if (newLucent.classLevel === 'COMPETITION') {
+      const allComp = [
+        ...LUCENT_SUBJECT_OPTIONS_BASE.filter(s => !hiddenLucentSubjectIds.has(s.id)),
+        ...customLucentSubjectsList.filter(s => !(s as any).bookId),
+        ...customBooksList.map(b => ({ id: b.id, name: `📗 ${b.name}` })),
+      ];
+      const seen = new Set<string>();
+      return allComp.filter(s => {
+        if (!s || !s.id || seen.has(s.id)) return false;
+        seen.add(s.id);
+        return true;
+      });
+    }
     try {
       const seen = new Set<string>();
       const results: { id: string; name: string }[] = [];
@@ -2147,7 +2172,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
               setUsersLastDoc(lastDoc);
               setUsersHasMore(hasMore);
               prevUsersRef.current = cloudUsers;
-              localStorage.setItem('nst_users', JSON.stringify(cloudUsers));
+              safeSaveUsersCache(cloudUsers);
           }
       }).catch(() => {
           // Fallback: use cached users from localStorage if network fails
@@ -2163,7 +2188,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                       // New user detected — prepend to list
                       setUsers(prev => {
                           const merged = [...newUsers, ...prev.filter(p => !newUsers.some(n => n.id === p.id))];
-                          localStorage.setItem('nst_users', JSON.stringify(merged));
+                          safeSaveUsersCache(merged);
                           prevUsersRef.current = merged;
                           return merged;
                       });
@@ -2386,41 +2411,61 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   // lesson save is never silently skipped. Shows a loading state while saving
   // and only shows success AFTER Firebase confirms the write.
   const [isSavingLucent, setIsSavingLucent] = useState(false);
-  // Class 6-12 Notes Manager entries can embed per-page MCQs. Whenever such an
-  // entry is saved, mirror its MCQs into a `mcq_lessons` doc (keyed off the
-  // Lucent entry's own id, prefixed so it never collides with a lesson
-  // authored directly in Revision Hub's Class MCQ Manager) so they
-  // automatically show up in Revision Hub / student MCQ practice — admin
-  // never has to re-enter the same MCQs in two places. Pure notes-only
-  // entries (the common case) have no MCQs and are left alone. If MCQs are
-  // later removed from an entry, the synced doc is deleted so it doesn't
-  // leave a dangling empty lesson behind.
-  const syncClassNotesMcqsToRevisionHub = async (entry: LucentNoteEntry, subjectName: string) => {
-    const syncedId = `clsnotes_${entry.id}`;
+  // When notes are added or updated in Class 6-12 Notes / Book Notes, ensure a
+  // corresponding lesson document exists in `mcq_lessons` so that:
+  // 1. That lesson title is saved in Revision Hub under the matching class & subject.
+  // 2. Admin can open Revision Hub, click that lesson title, and paste/manage MCQs for it anytime.
+  // 3. Any MCQs added separately by the admin in Revision Hub are preserved and never wiped out.
+  const syncClassNotesMcqsToRevisionHub = async (entry: LucentNoteEntry, subjectName?: string) => {
+    if (!entry || !entry.lessonTitle || !entry.lessonTitle.trim()) return;
+    const entryId = entry.id || Date.now().toString();
+    const syncedId = `clsnotes_${entryId}`;
+    const cleanClassLevel = (entry.classLevel && String(entry.classLevel).trim() && String(entry.classLevel).trim() !== 'ALL')
+      ? String(entry.classLevel).trim()
+      : 'COMPETITION';
+    const resolvedSubject = subjectName || getSubjectNameSafe(cleanClassLevel, entry.subject, localSettings) || entry.subject || 'General';
+
     try {
-      const mcqs = (entry.pages || []).flatMap((p: any) =>
-        (p.mcqs || []).filter((m: any) => m?.question?.trim())
+      const existing = await fetchMcqLesson(syncedId);
+
+      // Only include real topic MCQs (exclude blank topics and 'General' MCQs)
+      const isTopicMcq = (m: any) => {
+        if (!m?.question?.trim()) return false;
+        const t = String(m.topic || '').trim().toLowerCase();
+        return t !== '' && t !== 'general' && t !== 'सामान्य' && t !== 'general mcq' && t !== 'general mcqs';
+      };
+
+      const pageMcqs = (entry.pages || []).flatMap((p: any) =>
+        (p.mcqs || []).filter(isTopicMcq)
       );
-      if (mcqs.length === 0) {
-        await deleteMcqLesson(syncedId).catch(() => {});
-        return;
-      }
+
+      // Preserve MCQs added directly in Revision Hub (real topics only), or fallback to page-level MCQs
+      const rawMcqs = (existing && Array.isArray(existing.mcqs) && existing.mcqs.length > 0)
+        ? existing.mcqs
+        : pageMcqs;
+
+      const currentMcqs = rawMcqs.filter(isTopicMcq);
+
+      const topics = [...new Set(currentMcqs.map((q: any) => q.topic).filter(Boolean))] as string[];
+
       const lesson = {
         id: syncedId,
-        classLevel: entry.classLevel,
-        subject: subjectName,
-        board: (entry as any).board || null,
-        bookName: entry.bookName || null,
-        lessonTitle: entry.lessonTitle,
-        mcqs,
-        mcqCount: mcqs.length,
-        topics: [],
-        topicCount: 0,
-        createdAt: entry.createdAt || new Date().toISOString(),
+        classLevel: cleanClassLevel,
+        subject: resolvedSubject,
+        board: (entry as any).board || existing?.board || null,
+        bookName: entry.bookName || existing?.bookName || null,
+        lessonTitle: entry.lessonTitle.trim(),
+        mcqs: currentMcqs || [],
+        mcqCount: (currentMcqs || []).length,
+        topics,
+        topicCount: topics.length,
+        topicNotes: existing?.topicNotes || [],
+        createdAt: existing?.createdAt || entry.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         sourceClassNotesId: entry.id,
       };
       await saveMcqLesson(lesson);
+      console.log(`[RevisionHubSync] Synced "${lesson.lessonTitle}" (Class ${cleanClassLevel} / ${resolvedSubject}) -> mcq_lessons (${lesson.mcqCount} MCQs)`);
     } catch (e) {
       console.error('[syncClassNotesMcqsToRevisionHub] failed:', e);
     }
@@ -2474,6 +2519,19 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
           if (onUpdateSettings) onUpdateSettings(toSave);
           localStorage.setItem('nst_system_settings', JSON.stringify(toSave));
           await saveSystemSettings(toSave);
+
+          // Guarantee that every note in updatedNotes is synced to mcq_lessons in Revision Hub
+          try {
+            for (const n of updatedNotes) {
+              if (n && n.lessonTitle && n.lessonTitle.trim()) {
+                const sName = getSubjectNameSafe(n.classLevel, n.subject, toSave);
+                await syncClassNotesMcqsToRevisionHub(n, sName);
+              }
+            }
+          } catch (syncErr) {
+            console.warn('[saveLucentEntryDirectly] revision hub sync warning:', syncErr);
+          }
+
           setAlertConfig({ isOpen: true, message: successMsg });
       } catch (e: any) {
           setAlertConfig({ isOpen: true, message: `❌ Save fail hua — dubara try karein. (${e?.message || 'Network error'})` });
@@ -2711,7 +2769,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
           try { users = stored ? JSON.parse(stored) : []; } catch {}
           if (!users.some(u => u.id === item.data.id)) {
               users.push(item.data);
-              localStorage.setItem('nst_users', JSON.stringify(users));
+              safeSaveUsersCache(users);
           } else {
               alert("User ID already exists. Cannot restore.");
               return;
@@ -2789,7 +2847,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
           // Local Update
           const updated = users.filter(u => u.id !== userId);
           setUsers(updated);
-          localStorage.setItem('nst_users', JSON.stringify(updated));
+          safeSaveUsersCache(updated);
           
           // Cloud Update
           if (isFirebaseConnected) {
@@ -2813,7 +2871,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
           if (more.length > 0) {
               setUsers(prev => {
                   const merged = [...prev, ...more.filter(u => !prev.some(p => p.id === u.id))];
-                  localStorage.setItem('nst_users', JSON.stringify(merged));
+                  safeSaveUsersCache(merged);
                   return merged;
               });
               setUsersLastDoc(lastDoc);
@@ -3078,7 +3136,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
       if (!await saveUserToLive(updatedUser)) throw new Error('User account could not be saved to the backend.');
       const updatedList = users.map(u => u.id === editingUser.id ? updatedUser : u);
       setUsers(updatedList);
-      localStorage.setItem('nst_users', JSON.stringify(updatedList));
+      safeSaveUsersCache(updatedList);
 
       setEditingUser(null);
       alert(`✅ ${editingUser.name} subscription updated! (${mode} Grant)`);
@@ -3143,7 +3201,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
       if (!await saveUserToLive(updatedUser)) throw new Error('User account could not be saved to the backend.');
       const updatedList = users.map(u => u.id === dmUser.id ? updatedUser : u);
       setUsers(updatedList);
-      localStorage.setItem('nst_users', JSON.stringify(updatedList));
+      safeSaveUsersCache(updatedList);
 
       setDmUser(null);
       setDmText('');
@@ -4385,7 +4443,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
       if (!await saveUserToLive(updatedUser)) throw new Error('User account could not be saved to the backend.');
       const updatedList = users.map(u => u.id === user.id ? updatedUser : u);
       setUsers(updatedList);
-      localStorage.setItem('nst_users', JSON.stringify(updatedList));
+      safeSaveUsersCache(updatedList);
       
       alert(`✅ ${user.name} promoted to Sub-Admin!`);
       setNewSubAdminId('');
@@ -4407,7 +4465,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
       if (!await saveUserToLive(updatedUser)) throw new Error('User account could not be saved to the backend.');
       const updatedList = users.map(u => u.id === user.id ? updatedUser : u);
       setUsers(updatedList);
-      localStorage.setItem('nst_users', JSON.stringify(updatedList));
+      safeSaveUsersCache(updatedList);
       
       alert(`ℹ️ ${user.name} is now a Student.`);
   };
@@ -7061,6 +7119,56 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                   >
                       <div className={`w-5 h-5 rounded-full bg-white shadow-md transition-transform ${!localSettings.hideNstaMessenger ? 'translate-x-6' : 'translate-x-0'}`} />
                   </button>
+              </div>
+
+              {/* HOME SCREEN ASSEMBLY ANIMATION TOGGLE */}
+              <div id="setting-home-assembly-animation" className="mt-4 p-4 rounded-2xl border border-blue-200 bg-gradient-to-r from-blue-50/70 to-indigo-50/70 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-lg shrink-0 shadow-sm shadow-indigo-300">
+                          ✨
+                      </div>
+                      <div>
+                          <h4 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                              Home Screen 10-15s Cinematic Assembly Animation
+                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${localSettings.enableHomeAssemblyAnimation ? 'bg-indigo-100 text-indigo-800 border border-indigo-300' : 'bg-slate-100 text-slate-600 border border-slate-300'}`}>
+                                  {localSettings.enableHomeAssemblyAnimation ? 'ENABLED (ACTIVE)' : 'DISABLED (OFF)'}
+                              </span>
+                          </h4>
+                          <p className="text-[11px] text-slate-600 mt-0.5">
+                              Pehle screen blank rahegi, phir NSTA Logo aur 10 Tools Orbit assemble hoga, phir baaki Home Page cards assemble honge (Global On/Off).
+                          </p>
+                      </div>
+                  </div>
+                  <div className="flex items-center gap-2.5">
+                    <button
+                      type="button"
+                      id="btn-admin-reset-assembly-animation"
+                      onClick={() => {
+                        try {
+                          localStorage.removeItem('nsta_first_assembly_seen');
+                          sessionStorage.removeItem('nsta_home_assembly_seen');
+                        } catch (_) {}
+                        setLocalSettings({ ...localSettings, enableHomeAssemblyAnimation: true });
+                        alert('✅ Cinematic Assembly Animation reset ho gayi hai! Home tab par visit ya reload karte hi full animation chalegi.');
+                      }}
+                      className="px-2.5 py-1 text-xs font-bold rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition"
+                      title="Reset and force animation on next Home visit"
+                    >
+                      🔄 Reset / Play
+                    </button>
+                    <button
+                      type="button"
+                      id="toggle-home-assembly-animation"
+                      onClick={() => {
+                          const nextVal = !localSettings.enableHomeAssemblyAnimation;
+                          setLocalSettings({ ...localSettings, enableHomeAssemblyAnimation: nextVal });
+                      }}
+                      className={`w-12 h-6 rounded-full transition-colors relative shrink-0 p-0.5 ${localSettings.enableHomeAssemblyAnimation ? 'bg-indigo-600' : 'bg-slate-300'}`}
+                      title={localSettings.enableHomeAssemblyAnimation ? 'Click to Disable Assembly Animation' : 'Click to Enable Assembly Animation'}
+                    >
+                      <div className={`w-5 h-5 rounded-full bg-white shadow-md transition-transform ${localSettings.enableHomeAssemblyAnimation ? 'translate-x-6' : 'translate-x-0'}`} />
+                    </button>
+                  </div>
               </div>
 
               {/* STUDY ROOM CREATION VISIBILITY TOGGLE */}
@@ -11095,6 +11203,21 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           <div key={mcq.id} className="bg-white border border-emerald-100 rounded p-2 relative space-y-1.5">
                                               <button type="button" onClick={() => setNewHomeworkMcqs(prev => prev.filter((_, i) => i !== mIdx))} className="absolute top-1 right-1 p-0.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded"><Trash2 size={11} /></button>
                                               <input type="text" value={mcq.question} onChange={e => setNewHomeworkMcqs(prev => prev.map((m, i) => i === mIdx ? { ...m, question: e.target.value } : m))} placeholder={`Q${mIdx + 1}: Question?`} className="w-full p-1.5 pr-6 border border-slate-200 rounded text-xs outline-none focus:border-emerald-500" />
+                                              <textarea
+                                                  value={Array.isArray(mcq.statements) ? mcq.statements.join('\n') : ((mcq as any).statement || '')}
+                                                  onChange={e => {
+                                                      const val = e.target.value;
+                                                      const arr = val.split('\n').map(s => s.trim()).filter(Boolean);
+                                                      setNewHomeworkMcqs(prev => prev.map((m, i) => i === mIdx ? {
+                                                          ...m,
+                                                          statements: arr.length > 0 ? arr : undefined,
+                                                          statement: val || undefined,
+                                                      } as any : m));
+                                                  }}
+                                                  rows={2}
+                                                  placeholder="Statements / कथन (Optional — Har statement nayi line me)"
+                                                  className="w-full p-1.5 border border-sky-200 bg-sky-50/50 rounded text-xs outline-none focus:border-sky-500 placeholder-slate-400 resize-none"
+                                              />
                                               <div className="grid grid-cols-2 gap-1">
                                                   {mcq.options.map((opt, oi) => (
                                                       <div key={oi} className="flex items-center gap-1">
@@ -11397,6 +11520,25 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                               updated[i] = { ...updated[i], parsedMcqs: mcqs };
                                                               setLocalSettings({...localSettings, homework: updated});
                                                           }} className="w-full p-1.5 pr-6 border border-slate-200 rounded text-xs outline-none focus:border-emerald-500" placeholder={`Q${mIdx + 1}: Question?`} />
+                                                          <textarea
+                                                              value={Array.isArray(mcq.statements) ? mcq.statements.join('\n') : ((mcq as any).statement || '')}
+                                                              onChange={e => {
+                                                                  const val = e.target.value;
+                                                                  const arr = val.split('\n').map(s => s.trim()).filter(Boolean);
+                                                                  const updated = [...(localSettings.homework || [])];
+                                                                  const mcqs = [...(updated[i].parsedMcqs || [])];
+                                                                  mcqs[mIdx] = {
+                                                                      ...mcqs[mIdx],
+                                                                      statements: arr.length > 0 ? arr : undefined,
+                                                                      statement: val || undefined,
+                                                                  };
+                                                                  updated[i] = { ...updated[i], parsedMcqs: mcqs };
+                                                                  setLocalSettings({...localSettings, homework: updated});
+                                                              }}
+                                                              rows={2}
+                                                              placeholder="Statements / कथन (Optional — Har statement nayi line me)"
+                                                              className="w-full p-1.5 border border-sky-200 bg-sky-50/50 rounded text-xs outline-none focus:border-sky-500 placeholder-slate-400 resize-none"
+                                                          />
                                                           <div className="grid grid-cols-2 gap-1">
                                                               {(mcq.options || ['', '', '', '']).map((opt, oi) => (
                                                                   <div key={oi} className="flex items-center gap-1">
@@ -13847,7 +13989,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
       {activeTab === 'BOOK_NOTES_MANAGER' && (
           <ErrorBoundary fallbackLabel="Book Notes Manager" compact>
           {(() => {
-          const BOOK_TYPES = [
+          const rawBookTypes = [
               { id: 'lucent',              label: '📘 Lucent GK',         sub: 'Multi-page entries (Competition)',  active: 'bg-indigo-600 text-white border-indigo-600',   idle: 'bg-white text-indigo-700 border-indigo-200 hover:border-indigo-400' },
               { id: 'sarSangrah',          label: '📒 Sar Sangrah',       sub: 'Page-wise notes + MCQ',            active: 'bg-amber-600 text-white border-amber-600',     idle: 'bg-white text-amber-700 border-amber-200 hover:border-amber-400' },
               { id: 'speedyScience',       label: '🔬 Speedy Science',    sub: 'Page-wise notes + MCQ',            active: 'bg-emerald-600 text-white border-emerald-600', idle: 'bg-white text-emerald-700 border-emerald-200 hover:border-emerald-400' },
@@ -13860,6 +14002,12 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                   idle: 'bg-white text-teal-700 border-teal-200 hover:border-teal-400',
               })),
           ];
+          const seenBtIds = new Set<string>();
+          const BOOK_TYPES = rawBookTypes.filter(b => {
+              if (!b || !b.id || seenBtIds.has(b.id)) return false;
+              seenBtIds.add(b.id);
+              return true;
+          });
           const BOOK_IDS = new Set(BOOK_TYPES.map(b => b.id));
           const isCustomBook = customBooksList.some(b => b.id === newBookNote.targetSubject);
           // Auto-apply stored type from book definition (set at creation time in Settings)
@@ -13880,20 +14028,26 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
               return pa !== pb ? pa - pb : new Date(b.date).getTime() - new Date(a.date).getTime();
           });
 
-          const CN_BOOK_TYPES = [
+          const rawCnBookTypes = [
               { id: 'lucent',              label: '📘 Lucent GK',         active: 'bg-indigo-600 text-white border-indigo-600',   idle: 'bg-white text-indigo-700 border-indigo-200 hover:border-indigo-400' },
               { id: 'sarSangrah',          label: '📒 Sar Sangrah',       active: 'bg-amber-600 text-white border-amber-600',     idle: 'bg-white text-amber-700 border-amber-200 hover:border-amber-400' },
               { id: 'speedyScience',       label: '🔬 Speedy Science',    active: 'bg-emerald-600 text-white border-emerald-600', idle: 'bg-white text-emerald-700 border-emerald-200 hover:border-emerald-400' },
               { id: 'speedySocialScience', label: '🌍 Speedy Social Sci', active: 'bg-rose-600 text-white border-rose-600',       idle: 'bg-white text-rose-700 border-rose-200 hover:border-rose-400' },
               ...((localSettings.lucentNotes || []) as any[]).reduce((acc: {id:string;label:string;active:string;idle:string}[], entry: any) => {
                   const name = (entry.bookName?.trim()) || '';
-                  if (!name || name === 'Lucent GK') return acc;
+                  if (!name || name === 'Lucent GK' || name.toLowerCase() === 'lucent' || name.toLowerCase() === 'lucent gk') return acc;
                   const id = name.toLowerCase().replace(/[^a-z0-9]/g, '_');
                   if (!acc.find(b => b.id === id)) acc.push({ id, label: `📘 ${name}`, active: 'bg-indigo-600 text-white border-indigo-600', idle: 'bg-white text-indigo-700 border-indigo-200 hover:border-indigo-400' });
                   return acc;
               }, []),
               ...customBooksList.map(b => ({ id: b.id, label: `📗 ${b.name}`, active: 'bg-teal-600 text-white border-teal-600', idle: 'bg-white text-teal-700 border-teal-200 hover:border-teal-400' })),
           ];
+          const seenCnIds = new Set<string>();
+          const CN_BOOK_TYPES = rawCnBookTypes.filter(b => {
+              if (!b || !b.id || seenCnIds.has(b.id)) return false;
+              seenCnIds.add(b.id);
+              return true;
+          });
 
           const handleCnLoadAll = async () => {
               setCnNotesLoading(true);
@@ -16728,6 +16882,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                               setMcqFixSuccess(null);
                                                               setMcqEditMode(false);
                                                               setMcqEditQuestion(s.mcqQuestion || '');
+                                                              setMcqEditStatements(Array.isArray((s as any).mcqStatements) ? (s as any).mcqStatements.join('\n') : '');
                                                               setMcqEditOptions(s.mcqOptions ? [...s.mcqOptions] : []);
                                                           }}
                                                           className="w-full py-1.5 text-[10px] font-black text-blue-700 rounded-xl border border-blue-200 bg-blue-50 hover:bg-blue-100 flex items-center justify-center gap-1.5 transition-all"
@@ -16757,6 +16912,16 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                                       rows={2}
                                                                       className="w-full p-1.5 border border-purple-200 rounded-lg text-[10px] outline-none resize-none bg-purple-50 placeholder:text-slate-400"
                                                                       placeholder="Question text edit karo..."
+                                                                  />
+                                                                  <p className="text-[8px] font-black text-purple-700 uppercase mt-1">Statements (कथन - 1 line = 1 statement):</p>
+                                                                  <textarea
+                                                                      value={mcqEditStatements}
+                                                                      onChange={e => setMcqEditStatements(e.target.value)}
+                                                                      rows={2}
+                                                                      className="w-full p-1.5 border border-purple-200 rounded-lg text-[10px] outline-none resize-none bg-purple-50 placeholder:text-slate-400"
+                                                                      placeholder="उदा:
+1. कथन 1...
+2. कथन 2..."
                                                                   />
                                                                   <p className="text-[8px] font-black text-purple-700 uppercase mt-1">Options:</p>
                                                                   {mcqEditOptions.map((opt, oi) => (
@@ -16818,7 +16983,8 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                                       setMcqFixSaving(true);
                                                                       try {
                                                                           if (mcqEditMode) {
-                                                                              await applyMcqFullEdit(s.chapterKey, s.mcqId || '', mcqFixAnswer, mcqEditQuestion, mcqEditOptions, s.mcqQuestion);
+                                                                              const parsedStmts = mcqEditStatements.trim() ? mcqEditStatements.split('\n').map(x => x.trim()).filter(Boolean) : undefined;
+                                                                              await applyMcqFullEdit(s.chapterKey, s.mcqId || '', mcqFixAnswer, mcqEditQuestion, mcqEditOptions, s.mcqQuestion, parsedStmts);
                                                                           } else {
                                                                               await applyMcqCorrection(s.chapterKey, s.mcqId || '', mcqFixAnswer, s.mcqQuestion);
                                                                           }
@@ -20120,6 +20286,23 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                                       <Trash2 size={12} />
                                                                   </button>
                                                               </div>
+                                                              <textarea
+                                                                  value={Array.isArray(q.statements) ? q.statements.join('\n') : ((q as any).statement || '')}
+                                                                  onChange={e => {
+                                                                      const val = e.target.value;
+                                                                      const arr = val.split('\n').map(s => s.trim()).filter(Boolean);
+                                                                      const updated = [...editingMcqs];
+                                                                      updated[qIdx] = {
+                                                                          ...updated[qIdx],
+                                                                          statements: arr.length > 0 ? arr : undefined,
+                                                                          statement: val || undefined,
+                                                                      };
+                                                                      setEditingMcqs(updated);
+                                                                  }}
+                                                                  rows={2}
+                                                                  placeholder="Statements / कथन (Optional — Har statement nayi line me)"
+                                                                  className="w-full p-1.5 border border-sky-200 bg-sky-50/50 rounded text-xs outline-none focus:border-sky-500 placeholder-slate-400 resize-none mb-1"
+                                                              />
 
                                                               <div className="grid grid-cols-2 gap-1 mb-1">
                                                                   {q.options.map((opt, oIdx) => (

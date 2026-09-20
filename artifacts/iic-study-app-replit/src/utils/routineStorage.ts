@@ -34,6 +34,7 @@ export interface RoutineCategorySubject {
   subjectId: string;
   bookName: string;
   classLevel?: string;
+  board?: string;
   displayName: string;
   emoji: string;
   currentLessonIndex: number;
@@ -218,7 +219,9 @@ export function saveRoutineData(userId: string, data: RoutineData): void {
   try {
     localStorage.setItem(`${STORAGE_KEY}_${userId}`, JSON.stringify(data));
     if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('iic-routine-updated', { detail: { userId, data } }));
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('iic-routine-updated', { detail: { userId, data } }));
+      }, 0);
     }
   } catch {}
 }
@@ -285,7 +288,18 @@ export function generateDailyTask(data: RoutineData, lucentNotes?: any[]): Daily
   // Build subject → sorted notes map from real lucentNotes
   const notesBySubject: Record<string, any[]> = {};
   if (lucentNotes && lucentNotes.length > 0) {
+    const targetBoard = data.selectedBoard || 'BSEB';
     lucentNotes.forEach(n => {
+      if (data.routineMode === 'SCHOOL') {
+        if (targetBoard && targetBoard !== 'ALL_BOARDS') {
+          const nb = (n as any).board;
+          if (nb && nb !== targetBoard && nb !== 'ALL_BOARDS') return;
+        }
+        if (data.selectedClass) {
+          const cl = (n as any).classLevel;
+          if (cl && String(cl) !== String(data.selectedClass)) return;
+        }
+      }
       const sid = (n.subject || 'other').toLowerCase().trim();
       if (!notesBySubject[sid]) notesBySubject[sid] = [];
       notesBySubject[sid].push(n);

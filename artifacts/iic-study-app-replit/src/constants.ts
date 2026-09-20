@@ -167,6 +167,36 @@ export const getClassSubjectOptions = (classLevel: string): { id: string; name: 
   }
 };
 
+/**
+ * Universal subject matcher that bridges English IDs (e.g. 'ancient_india', 'biology')
+ * and display names (e.g. 'प्राचीन भारत', 'जीव विज्ञान') across both Competition and Class 6-12 modes.
+ */
+export const isSubjectMatch = (lessonSub?: string, targetSub?: string, classLevel?: string, settings?: any): boolean => {
+  if (!lessonSub || !targetSub) return false;
+  const l = lessonSub.trim().toLowerCase();
+  const t = targetSub.trim().toLowerCase();
+  if (l === t) return true;
+
+  // Check Lucent / Competition subjects
+  const lucentOpts = getLucentSubjectOptions(settings);
+  const lOpt = lucentOpts.find(o => o.id.toLowerCase() === l || o.name.trim().toLowerCase() === l);
+  const tOpt = lucentOpts.find(o => o.id.toLowerCase() === t || o.name.trim().toLowerCase() === t);
+  if (lOpt && tOpt && lOpt.id === tOpt.id) return true;
+  if (lOpt && lOpt.name.trim().toLowerCase() === t) return true;
+  if (tOpt && tOpt.name.trim().toLowerCase() === l) return true;
+
+  // Check Class 6-12 subjects
+  if (classLevel && classLevel !== 'COMPETITION') {
+    const classOpts = getClassSubjectOptions(classLevel);
+    const lcOpt = classOpts.find(o => o.id.toLowerCase() === l || o.name.trim().toLowerCase() === l);
+    const tcOpt = classOpts.find(o => o.id.toLowerCase() === t || o.name.trim().toLowerCase() === t);
+    if (lcOpt && tcOpt && lcOpt.id === tcOpt.id) return true;
+    if (lcOpt && lcOpt.name.trim().toLowerCase() === t) return true;
+    if (tcOpt && tcOpt.name.trim().toLowerCase() === l) return true;
+  }
+  return false;
+};
+
 export const getSubjectsList = (classLevel: string, stream: string | null, board?: string, settingsObj?: any): Subject[] => {
   const isSenior = ['11', '12'].includes(classLevel);
   let pool = { ...DEFAULT_SUBJECTS };
@@ -315,7 +345,13 @@ export const getSubjectsList = (classLevel: string, stream: string | null, board
       }));
   }
 
-  return selectedSubjects;
+  // Deduplicate by ID so no subject (like 'lucent') is returned more than once
+  const seenSubIds = new Set<string>();
+  return selectedSubjects.filter(s => {
+      if (!s || !s.id || seenSubIds.has(s.id)) return false;
+      seenSubIds.add(s.id);
+      return true;
+  });
 };
 
 export const STATIC_SYLLABUS: Record<string, string[]> = FULL_SYLLABUS;

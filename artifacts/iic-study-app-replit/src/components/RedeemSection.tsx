@@ -3,6 +3,7 @@ import { Gift, ArrowRight, AlertCircle, CheckCircle, Map, ExternalLink, X } from
 import { User, SystemSettings, SubscriptionHistoryEntry } from '../types';
 import { SUBSCRIPTION_BONUS } from '../utils/levelSystem';
 import { activateDiamondSub } from '../utils/diamondUtils';
+import { safeSaveUsersCache, safeSetItem } from '../utils/safeUtils';
 import { ref, get, update, runTransaction } from "firebase/database";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { rtdb, db, saveUserToLive } from "../firebase";
@@ -373,11 +374,11 @@ export const RedeemSection: React.FC<Props> = ({ user, onSuccess }) => {
                 const userIdx = allUsers.findIndex(u => u.id === user.id);
                 if (userIdx !== -1) {
                     allUsers[userIdx] = updatedUser;
-                    localStorage.setItem('nst_users', JSON.stringify(allUsers));
+                    safeSaveUsersCache(allUsers);
                 }
             } catch (_) {}
         }
-        localStorage.setItem('nst_current_user', JSON.stringify(updatedUser));
+        safeSetItem('nst_current_user', JSON.stringify(updatedUser));
 
         setStatus('SUCCESS');
         setMsg(successMessage);
