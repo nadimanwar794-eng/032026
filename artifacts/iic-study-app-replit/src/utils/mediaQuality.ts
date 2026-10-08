@@ -4,7 +4,7 @@
  * Transforms Cloudinary URLs on-the-fly and manages tier lock rules.
  */
 
-export type VideoQualityLevel = '360p' | '480p' | '720p' | '1080p';
+export type VideoQualityLevel = 'Auto' | '360p' | '480p' | '720p' | '1080p';
 
 export interface QualityOption {
   quality: VideoQualityLevel;
@@ -20,13 +20,14 @@ export interface QualityOption {
  */
 export function getQualityTransformedUrl(originalUrl: string, quality: VideoQualityLevel): string {
   if (!originalUrl) return '';
+  if (quality === 'Auto') return originalUrl;
   if (!originalUrl.includes('cloudinary.com') || !originalUrl.includes('/upload/')) {
     // Return original url as-is for non-Cloudinary videos
     return originalUrl;
   }
 
   // Cloudinary URL transformation mapping
-  const qualityTransformations: Record<VideoQualityLevel, string> = {
+  const qualityTransformations: Record<Exclude<VideoQualityLevel, 'Auto'>, string> = {
     '360p': 'q_auto:eco,w_640,h_360,c_limit,f_auto',
     '480p': 'q_auto:good,w_854,h_480,c_limit,f_auto',
     '720p': 'q_auto:good,w_1280,h_720,c_limit,f_auto',

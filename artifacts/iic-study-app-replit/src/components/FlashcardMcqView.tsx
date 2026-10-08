@@ -699,11 +699,11 @@ export const FlashcardMcqView: React.FC<Props> = ({
       setProjectorWrong(w => w + 1);
       try {
         addMistakes([{
-          question: q.question,
-          options: q.options || [],
-          correctAnswer: q.correctAnswer,
-          explanation: q.explanation || '',
-          topic: q.topic || title || '',
+          question: pq.question,
+          options: pq.options || [],
+          correctAnswer: pq.correctAnswer,
+          explanation: pq.explanation || '',
+          topic: pq.topic || title || '',
           chapterTitle: title || '',
           subjectName: subject || '',
           classLevel: user?.classLevel || '',

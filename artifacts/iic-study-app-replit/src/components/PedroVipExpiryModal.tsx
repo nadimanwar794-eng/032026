@@ -65,6 +65,7 @@ export const PedroVipExpiryModal: React.FC<PedroVipExpiryModalProps> = ({
         }
       };
     }
+    return undefined;
   }, [isOpen, playVoiceAlert]);
 
   if (!isOpen) return null;

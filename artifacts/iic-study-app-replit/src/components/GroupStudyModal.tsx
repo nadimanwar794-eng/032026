@@ -5775,7 +5775,7 @@ Aao dekhte hain kisme kitna hai dum! 🏆`;
                           }`}
                         >
                           {/* ── EARLY SUBMITTED STATE: Waiting for Room Timer to Complete ── */}
-                          {hasStudentSubmittedEarly && !currentRoom.isExpired && currentRoom.liveMcq?.status !== 'ENDED' && totalTestSecondsLeft > 0 ? (
+                          {hasStudentSubmittedEarly && !currentRoom.isExpired && totalTestSecondsLeft > 0 ? (
                             <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-5 rounded-3xl bg-slate-900/95 border border-emerald-500/40 shadow-2xl animate-in zoom-in-95 duration-200">
                               <div className="w-16 h-16 rounded-full bg-emerald-500/20 border-2 border-emerald-400 text-emerald-400 flex items-center justify-center text-3xl shadow-lg">
                                 <CheckCircle2 size={36} className="text-emerald-400 animate-pulse" />

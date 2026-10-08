@@ -512,7 +512,7 @@ export const ProfileCameraModal: React.FC<ProfileCameraModalProps> = ({
                   onClick={() => {
                     setCapturedCameraPreview(null);
                     if (activeTab === 'CAMERA') {
-                      startCamera(facingMode);
+                      startCamera();
                     }
                   }}
                   className="flex-1 py-2.5 rounded-xl border border-white/20 text-slate-300 hover:bg-white/5 text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
@@ -660,7 +660,7 @@ export const ProfileCameraModal: React.FC<ProfileCameraModalProps> = ({
                   onClick={() => {
                     setImageToCrop(null);
                     if (activeTab === 'CAMERA') {
-                      startCamera(facingMode);
+                      startCamera();
                     }
                   }}
                   className="flex-1 py-2.5 rounded-xl border border-white/20 text-slate-300 hover:bg-white/5 text-xs font-bold transition-all"

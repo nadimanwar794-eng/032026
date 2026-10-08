@@ -39,6 +39,7 @@ export const StudyModeRulesModal: React.FC<StudyModeRulesModalProps> = ({
         }, 10);
       };
     }
+    return undefined;
   }, [isOpen, initialTab, currentMode]);
 
   if (!isOpen) return null;

@@ -120,6 +120,7 @@ export function MaintenanceScreen({
       }, 700);
       return () => clearTimeout(timer);
     }
+    return undefined;
   }, [compact, speakMaintenanceMessage]);
 
   const handleRetry = () => {

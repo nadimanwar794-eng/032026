@@ -8,7 +8,7 @@ import {
 import { Pedro3DMascot, type PedroMascotPose } from './Pedro3DMascot';
 import type { PedroItemDetail, PedroCategory, PedroPageConfig } from '../types';
 import { loadRoutineData } from '../utils/routineStorage';
-import { PedroEngine, PEDRO_LEVELS, type PedroLevelConfig, type PedroEnergyStatus, type PedroPenaltyState } from '../utils/engines/pedroEngine';
+import { PedroEngine, PEDRO_LEVELS, type PedroL8OverdriveInfo, type PedroLevelConfig, type PedroEnergyStatus, type PedroPenaltyState } from '../utils/engines/pedroEngine';
 import { pedroSpeak, stopPedroVoice, playSoftChime } from '../utils/pedroVoiceManager';
 
 export type { PedroItemDetail, PedroCategory, PedroPageConfig };
@@ -1306,7 +1306,7 @@ export const PedroAssistant: React.FC<PedroAssistantProps> = ({
   const [isMinimized, setIsMinimized] = useState<boolean>(false);
 
   // Navigation tabs inside Pedro Dialog: Guide (Default), Powers, Rules, Energy (4 pages)
-  const [activeMainTab, setActiveMainTab] = useState<'GUIDE' | 'POWERS' | 'RULES' | 'ENERGY'>('GUIDE');
+  const [activeMainTab, setActiveMainTab] = useState<'GUIDE' | 'POWERS' | 'RULES' | 'ENERGY' | 'OPTIONS'>('GUIDE');
   const [expandedOptionId, setExpandedOptionId] = useState<string | null>(null);
 
   // Pedro Action Options: "Kya karna hai & Kaise karna hai"
@@ -1500,7 +1500,7 @@ export const PedroAssistant: React.FC<PedroAssistantProps> = ({
   }, [user, studyTimerSeconds]);
 
   // User tier & mailbox rewards state
-  const isUltraUser = user?.subscriptionTier === 'ULTRA' || user?.subscriptionTier === 'LIFETIME';
+  const isUltraUser = user?.subscriptionLevel === 'ULTRA' || user?.subscriptionTier === 'LIFETIME';
 
   // Level 8 Overdrive state (24h active window, 6-7 day recharge cycle, 2x XP + credits)
   const [l8Overdrive, setL8Overdrive] = useState<PedroL8OverdriveInfo>(() =>
@@ -1987,7 +1987,7 @@ export const PedroAssistant: React.FC<PedroAssistantProps> = ({
     } else if (action === 'READ_ROW2_NAME') {
       pointAndSpotlight('#topbar-row2-greeting', () => {
         const row2El = document.getElementById('topbar-row2-greeting');
-        const stName = row2El?.getAttribute('data-student-name') || userName || 'Student';
+        const stName = row2El?.getAttribute('data-student-name') || user?.name || 'Student';
         speakText(`Hey ${stName}! Yeh Row 2 par aapka greeting aur student naam hai.`, () => {
           restoreMenuAfterDemo('Any doubt?');
         });
@@ -3028,7 +3028,12 @@ export const PedroAssistant: React.FC<PedroAssistantProps> = ({
                             </span>
                           </h5>
                           <p className="text-[10.5px] text-slate-300">
-                            {energyStatus.message}
+                            {energyStatus.tiredReason ||
+                              (energyStatus.isSleeping
+                                ? 'Padhai ya Streak Freeze se Pedro ko wapas jagayein.'
+                                : energyStatus.isUltraShielded
+                                ? 'Ultra shield Pedro ko hamesha active rakhta hai.'
+                                : 'Padhai jaari rakhein—Pedro full energy mein hai.')}
                           </p>
                         </div>
                       </div>
@@ -3037,7 +3042,7 @@ export const PedroAssistant: React.FC<PedroAssistantProps> = ({
                           ? 'bg-amber-400 text-slate-950 animate-pulse'
                           : 'bg-emerald-500 text-slate-950'
                       }`}>
-                        {energyStatus.energyPercent}%
+                        {energyStatus.energyPct}%
                       </span>
                     </div>
 
@@ -3048,7 +3053,7 @@ export const PedroAssistant: React.FC<PedroAssistantProps> = ({
                             ? 'bg-gradient-to-r from-purple-600 to-amber-500'
                             : 'bg-gradient-to-r from-emerald-400 via-teal-400 to-cyan-400'
                         }`}
-                        style={{ width: `${Math.max(5, energyStatus.energyPercent)}%` }}
+                        style={{ width: `${Math.max(5, energyStatus.energyPct)}%` }}
                       />
                     </div>
 
@@ -3775,7 +3780,7 @@ export const FloatingPedroWidget: React.FC<FloatingPedroWidgetProps> = ({
               size={effectiveLevel >= 4 ? 84 : 70}
               pose={effectivePose}
               isSpeaking={isSpeakingLive}
-              isPointing={isPointingPose || authWelcomePhase === 'inspect_name'}
+              isPointing={isPointingPose}
               isDragging={isDragging}
               isBoosterActive={effectiveBooster}
               isNaraj={false}

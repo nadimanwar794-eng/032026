@@ -555,7 +555,6 @@ export const dispatchSmartNotification = async (payload: SmartNotificationPayloa
           badge: '/favicon.svg',
           tag: senderId ? `req-${senderId}` : 'friend-request',
           vibrate: [200, 100, 200],
-          renotify: true,
           data: { url, category, senderId }
         });
       } else {
@@ -604,7 +603,7 @@ export const testDelayedBackgroundNotification = async (delaySeconds = 5): Promi
     if ('serviceWorker' in navigator) {
       const reg = await getFcmServiceWorkerRegistration();
       setTimeout(() => {
-        reg.showNotification('🎉 Background Notification Test!', {
+        showNotification(reg, '🎉 Background Notification Test!', {
           body: 'Aapki app band hone par bhi notification bilkul sahi kaam kar raha hai! (Lock Screen Test Successful)',
           icon: '/icons/icon-192.png',
           badge: '/favicon.svg',

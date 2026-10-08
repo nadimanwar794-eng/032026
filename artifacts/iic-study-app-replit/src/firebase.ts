@@ -4171,7 +4171,7 @@ export const reactToSuggestion = async (suggestionId: string, uid: string, react
 const claimSuggestionReward = async (
     suggestionId: string,
     rewardKey: 'reply' | 'resolve'
-): Promise<{ uid: string; userName: string } | null> => {
+): Promise<{ uid: string; userName: string; isVip: boolean } | null> => {
     const r = ref(rtdb, `suggestions/${suggestionId}/rewardedFor/${rewardKey}`);
     let claimed = false;
     let ownerUid = '';

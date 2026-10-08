@@ -143,15 +143,19 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
   communityBackgroundImage,
   communityBackgroundOpacity,
 }) => {
-  const isGuestUser = !user?.email && user?.provider !== 'email' && user?.provider !== 'google' && !!(user?.isGuest || user?.isAnonymous || user?.role === 'GUEST');
+  const isGuestUser =
+    !user?.email &&
+    user?.provider !== 'manual' &&
+    user?.provider !== 'google' &&
+    !!(user?.isGuest || user?.isAnonymous);
   const [guestModalOpen, setGuestModalOpen] = useState(false);
   const [guestModalContext, setGuestModalContext] = useState('Community Interaction');
-  const { appTheme } = useAppTheme();
+  const appTheme = useAppTheme();
   const isAdminOrSubUser =
     isAdmin ||
     user.role === 'ADMIN' ||
     user.role === 'SUB_ADMIN' ||
-    user.role === 'SUBADMIN' ||
+    user.isSubAdmin === true ||
     user.role?.toLowerCase() === 'admin' ||
     user.role?.toLowerCase() === 'subadmin';
 
@@ -175,7 +179,7 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
   const [videoUploadProgress, setVideoUploadProgress] = useState(0);
   const [isHdQuality, setIsHdQuality] = useState(false);
   const [isOfficialPost, setIsOfficialPost] = useState(false);
-  const [postCategory, setPostCategory] = useState<'GENERAL' | 'DOUBT' | 'BUG_REPORT'>('GENERAL');
+  const [postCategory, setPostCategory] = useState<'GENERAL' | 'DOUBT' | 'BUG_REPORT' | 'NOTES_FIX'>('GENERAL');
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [isCroppingPostImage, setIsCroppingPostImage] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -2300,7 +2304,7 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
                                       src={resolveTelegramUrl(comm.imageUrl)}
                                       alt="Comment attachment"
                                       className="max-h-48 w-full object-cover rounded-lg cursor-pointer hover:opacity-95 transition-opacity"
-                                      onClick={() => setLightboxImageUrl(resolveTelegramUrl(comm.imageUrl) || null)}
+                                      onClick={() => setLightboxImageUrl(resolveTelegramUrl(comm.imageUrl || '') || null)}
                                       loading="lazy"
                                       onError={(e) => {
                                         const target = e.currentTarget;
@@ -2312,7 +2316,7 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
                                     />
                                     <button
                                       type="button"
-                                      onClick={() => setLightboxImageUrl(resolveTelegramUrl(comm.imageUrl) || null)}
+                                      onClick={() => setLightboxImageUrl(resolveTelegramUrl(comm.imageUrl || '') || null)}
                                       className="absolute bottom-1.5 right-1.5 p-1 bg-black/60 hover:bg-black/80 text-white rounded-md text-[10px] flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer shadow-xs"
                                       title="Bada karein"
                                     >

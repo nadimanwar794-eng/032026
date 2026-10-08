@@ -299,6 +299,7 @@ export const CommunityInfoFeed: React.FC<CommunityInfoFeedProps> = ({
       return () => unsubscribe();
     } catch (err) {
       console.warn('[CommunityInfoFeed] Error listener:', err);
+      return undefined;
     }
   }, []);
 

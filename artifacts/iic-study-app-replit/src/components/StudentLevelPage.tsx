@@ -1041,8 +1041,8 @@ export const StudentLevelPage: React.FC<StudentLevelPageProps> = ({
                                       background: isCurrentStep ? userSubTier.bgColor : undefined,
                                       borderColor: isCurrentStep ? userSubTier.color : 'rgba(255,255,255,0.06)',
                                       border: '1px solid',
-                                      ringColor: isCurrentStep ? userSubTier.color : undefined,
-                                    }}
+                                      '--tw-ring-color': isCurrentStep ? userSubTier.color : undefined,
+                                    } as React.CSSProperties}
                                   >
                                     <div className="text-[10px] font-black" style={{ color: isCurrentStep ? userSubTier.color : '#f1f5f9' }}>
                                       Rank {r}
@@ -1095,8 +1095,8 @@ export const StudentLevelPage: React.FC<StudentLevelPageProps> = ({
                                     style={{
                                       background: isCurrentGreek ? `${g.color}18` : undefined,
                                       borderColor: isCurrentGreek ? g.color : undefined,
-                                      ringColor: isCurrentGreek ? g.color : undefined,
-                                    }}
+                                      '--tw-ring-color': isCurrentGreek ? g.color : undefined,
+                                    } as React.CSSProperties}
                                   >
                                     <div className="flex items-center justify-between text-[10px] font-black mb-1">
                                       <span style={{ color: g.color }}>{g.sym} {g.name} Branch</span>
@@ -1157,8 +1157,8 @@ export const StudentLevelPage: React.FC<StudentLevelPageProps> = ({
                                     style={{
                                       background: isCurrentMetal ? `${m.color}20` : undefined,
                                       borderColor: isCurrentMetal ? m.color : undefined,
-                                      ringColor: isCurrentMetal ? m.color : undefined,
-                                    }}
+                                      '--tw-ring-color': isCurrentMetal ? m.color : undefined,
+                                    } as React.CSSProperties}
                                   >
                                     <div className="flex items-center gap-1 text-[10px] font-black">
                                       <span>{m.emoji}</span>

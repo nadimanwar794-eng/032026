@@ -116,6 +116,7 @@ export interface User {
   password?: string;
   displayName?: string;
   photoUrl?: string;
+  profilePhoto?: string;
   name: string;
   mobile: string;
   email: string;
@@ -165,6 +166,7 @@ export interface User {
   
   // READING & PROGRESS SETTINGS
   sequentialReadingDisabled?: boolean; // When true, Basic/Ultra user has chosen to disable sequential page reading (jump to any page)
+  studyMode?: 'WITHOUT_CREDIT' | 'CREDIT';
   
   // Soft Delete / Ban Logic
   isArchived?: boolean; // Acts as Soft Delete / Recycle Bin
@@ -234,9 +236,6 @@ export interface User {
   giftedCredits?: number; // Admin-gifted credits (separate from earned/bonus)
   giftedCreditsExpiry?: string; // ISO date when gifted credits expire
   lastLevelNotified?: number; // Last level the user was shown a level-up celebration for
-  pedroLevel?: number; // Pedro mascot's own independent companion level (1-8), distinct from student academic level
-  pedroXp?: number; // Pedro's companion experience points
-  pedroColorScheme?: 'classic' | 'cyber'; // Saved Pedro 3D color scheme
   claimedLevelRewards?: number[]; // Array of level numbers (2..15) whose coin rewards have been claimed
   dailyMcqDate?: string; // YYYY-MM-DD for daily MCQ tracking
   dailyMcqCount?: number; // MCQs attempted today
@@ -1764,6 +1763,7 @@ export interface Chapter {
 
 export interface MCQItem {
   question: string;
+  subject?: string;
   /** Stable exam question number used by Revision Hub tracking (Q1, Q2...). */
   questionNumber?: string | number;
   statements?: string[];

@@ -19,6 +19,7 @@ interface LevelShowcaseModalProps {
   score?: number;
   isOpen: boolean;
   onClose: () => void;
+  onOpenRoadmap?: () => void;
 }
 
 export const playRankChime = () => {
@@ -64,6 +65,7 @@ export const LevelShowcaseModal: React.FC<LevelShowcaseModalProps> = ({
   score: propScore,
   isOpen,
   onClose,
+  onOpenRoadmap,
 }) => {
   const [copied, setCopied] = useState(false);
 
@@ -248,6 +250,19 @@ ${isPinnacle ? '👑 PINNACLE CHAMPION: Level 15 (Absolute Legend) Diamond Gamma
 
           {/* Action Buttons */}
           <div className="w-full flex items-center gap-2 mt-4 pt-1">
+            {onOpenRoadmap && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  requestAnimationFrame(onOpenRoadmap);
+                }}
+                className="flex-1 py-2.5 px-3 rounded-xl text-xs font-black text-cyan-100 bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-300/20 active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <ArrowRight size={14} />
+                <span>View Roadmap</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={handleCopyRank}

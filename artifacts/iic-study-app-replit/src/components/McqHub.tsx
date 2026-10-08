@@ -86,7 +86,7 @@ export interface BattleMcqItem {
   statements?: string[];
   options: string[];
   correctAnswer: number;
-  explanation?: string;
+  explanation: string;
   upvotes?: number;
   votes?: Record<string, number>; // userId -> optionIndex
 }
@@ -217,6 +217,7 @@ export const McqHub: React.FC<McqHubProps> = ({
       return unsub;
     } catch (err) {
       console.warn('Failed to subscribe to mcq lessons', err);
+      return undefined;
     }
   }, []);
 
@@ -1204,6 +1205,7 @@ export const McqHub: React.FC<McqHubProps> = ({
       return () => unsubscribe();
     } else {
       setBattleLoading(false);
+      return undefined;
     }
   }, []);
 
@@ -1635,7 +1637,7 @@ export const McqHub: React.FC<McqHubProps> = ({
       statements: parsedStatements,
       options: [newOptA.trim(), newOptB.trim(), newOptC.trim(), newOptD.trim()],
       correctAnswer: newCorrectIdx,
-      explanation: newExplanation.trim() || undefined,
+      explanation: newExplanation.trim() || '',
       upvotes: 0,
       votes: {},
     };
@@ -2276,7 +2278,7 @@ export const McqHub: React.FC<McqHubProps> = ({
 
                       {/* Question Text & Statements with McqQuestionDisplay */}
                       <div className="mb-3">
-                        <McqQuestionDisplay q={q} isDarkMode={isDarkMode} />
+                        <McqQuestionDisplay q={q} variant={isDarkMode ? 'dark' : 'default'} />
                       </div>
 
                       {/* Options with clear highlighting */}
@@ -2498,7 +2500,7 @@ export const McqHub: React.FC<McqHubProps> = ({
 
                   {/* Question Text with Math rendering */}
                   <div className="mb-3">
-                    <McqQuestionDisplay q={currentQ} isDarkMode={isDarkMode} />
+                    <McqQuestionDisplay q={currentQ} variant={isDarkMode ? 'dark' : 'default'} />
                   </div>
 
                   {/* 4 Options */}
@@ -2897,7 +2899,7 @@ export const McqHub: React.FC<McqHubProps> = ({
 
                     {/* Question Text & Statements */}
                     <div className="mb-3">
-                      <McqQuestionDisplay q={currentBattleItem} isDarkMode={isDarkMode} />
+                      <McqQuestionDisplay q={currentBattleItem} variant={isDarkMode ? 'dark' : 'default'} />
                     </div>
 
                     {/* 4 Options */}
@@ -3085,7 +3087,7 @@ export const McqHub: React.FC<McqHubProps> = ({
 
                     {/* Question Text & Statements */}
                     <div className="mb-4">
-                      <McqQuestionDisplay q={battle} isDarkMode={isDarkMode} />
+                      <McqQuestionDisplay q={battle} variant={isDarkMode ? 'dark' : 'default'} />
                     </div>
 
                     {/* Options list */}

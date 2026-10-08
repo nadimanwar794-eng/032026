@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { PedroEngine } from '../utils/engines/pedroEngine';
 
-export type PedroMascotPose = 'idle' | 'look_left' | 'look_right' | 'wave' | 'spin' | 'pointing' | 'sleep' | 'reading' | 'toss_head' | 'headless_booster' | 'wink' | 'smile_wink' | 'naraj' | 'angry' | 'upset' | 'sad';
+export type PedroMascotPose = 'idle' | 'look_left' | 'look_right' | 'look_around' | 'wave' | 'celebrating' | 'spin' | 'pointing' | 'sleep' | 'reading' | 'toss_head' | 'headless_booster' | 'wink' | 'smile_wink' | 'naraj' | 'angry' | 'upset' | 'sad';
 
 export type PedroColorScheme = 'classic' | 'cyber';
 
@@ -193,7 +193,7 @@ export const Pedro3DMascotComponent: React.FC<Pedro3DMascotProps> = ({
 
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return;
+    if (!container) return undefined;
 
     // Check WebGL availability
     const checkWebGLSupport = (): boolean => {
@@ -208,7 +208,7 @@ export const Pedro3DMascotComponent: React.FC<Pedro3DMascotProps> = ({
 
     if (!checkWebGLSupport()) {
       setHasWebGLError(true);
-      return;
+      return undefined;
     }
 
     let renderer: THREE.WebGLRenderer | null = null;
@@ -860,7 +860,7 @@ export const Pedro3DMascotComponent: React.FC<Pedro3DMascotProps> = ({
 
     // Stop auto-rotate on user manual drag
     const handleStartDrag = () => {
-      controls.autoRotate = false;
+      controls!.autoRotate = false;
     };
     const handleEndDrag = () => {
       setTimeout(() => {
@@ -992,8 +992,8 @@ export const Pedro3DMascotComponent: React.FC<Pedro3DMascotProps> = ({
           bookGroupRef.current.scale.set(0.001, 0.001, 0.001);
         }
 
-        controls.update();
-        renderer.render(scene, camera);
+        controls!.update();
+        renderer!.render(scene, camera);
         animFrameIdRef.current = requestAnimationFrame(animate);
         return;
       }
@@ -1635,8 +1635,8 @@ export const Pedro3DMascotComponent: React.FC<Pedro3DMascotProps> = ({
         bookGroupRef.current.visible = false;
       }
 
-      controls.update();
-      renderer.render(scene, camera);
+      controls!.update();
+      renderer!.render(scene, camera);
       animFrameIdRef.current = requestAnimationFrame(animate);
     };
 
@@ -1680,6 +1680,7 @@ export const Pedro3DMascotComponent: React.FC<Pedro3DMascotProps> = ({
     } catch (err) {
       console.warn('[Pedro3DMascot] WebGL initialization failed, switching to 2D fallback:', err);
       setHasWebGLError(true);
+      return undefined;
     }
   }, [size]);
 

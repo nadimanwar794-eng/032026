@@ -263,6 +263,7 @@ export const CommunityToolsFeed: React.FC<CommunityToolsFeedProps> = ({
       return () => unsubscribe();
     } catch (err) {
       console.warn('[CommunityToolsFeed] Error attaching listener:', err);
+      return undefined;
     }
   }, []);
 

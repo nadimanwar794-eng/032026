@@ -375,7 +375,7 @@ export const MathLessonViewer: React.FC<Props> = ({
     };
 
     try {
-      await saveTestResult(resultPayload as any);
+      await saveTestResult(user.id, resultPayload as any);
       await saveUserHistory(user.id, {
         id: resultPayload.id,
         title: `Math MCQ: ${chapterTitle}`,

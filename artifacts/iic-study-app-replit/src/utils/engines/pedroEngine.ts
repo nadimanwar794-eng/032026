@@ -432,7 +432,7 @@ export const PedroEngine = {
 
     const isUltra =
       SubscriptionEngine.isPremium(user) &&
-      (user.subscriptionLevel === 'ULTRA' || user.subscriptionTier === 'ULTRA' || user.subscriptionTier === 'LIFETIME');
+      (user.subscriptionLevel === 'ULTRA' || user.subscriptionTier === 'LIFETIME');
 
     // 2. Ultra / Max subscribers get Pedro Level 8 till subscription!
     if (isUltra) {
@@ -806,7 +806,7 @@ export const PedroEngine = {
 
     const isUltra =
       SubscriptionEngine.isPremium(user) &&
-      (user.subscriptionLevel === 'ULTRA' || user.subscriptionTier === 'ULTRA' || user.subscriptionTier === 'LIFETIME');
+      (user.subscriptionLevel === 'ULTRA' || user.subscriptionTier === 'LIFETIME');
 
     // Ultra users are permanently shielded and immune from sleep!
     if (isUltra) {
