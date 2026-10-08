@@ -1,14 +1,8 @@
-import { Router } from "express";
-import healthRouter from "./health.js";
-import notificationsRouter from "./notifications.js";
-import mediaProxyRouter from "./mediaProxy.js";
-import telegramRouter from "./telegram.js";
+import { Router, type IRouter } from "express";
+import healthRouter from "./health";
 
-const router = Router();
+const router: IRouter = Router();
 
 router.use(healthRouter);
-router.use(notificationsRouter);
-router.use(mediaProxyRouter);
-router.use(telegramRouter);
 
 export default router;
