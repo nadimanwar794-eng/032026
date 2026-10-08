@@ -24,6 +24,28 @@ export interface Feature {
 export const ALL_FEATURES: Feature[] = [
     // --- CORE (Layer 1: Daily Core Actions - Max 6) ---
     {
+        id: 'MATH_MANAGER',
+        label: 'Math Master Manager',
+        group: 'CONTENT',
+        surfaceLevel: 1,
+        adminVisible: true,
+        adminTab: 'MATH_MANAGER',
+        icon: 'Calculator',
+        color: 'blue',
+        description: 'Upload and manage Math Book Pages, Premium Notes, Solutions, and MCQs.'
+    },
+    {
+        id: 'PEDRO_MANAGER',
+        label: 'Pedro AI Robot Guide Master',
+        group: 'CORE',
+        surfaceLevel: 1,
+        adminVisible: true,
+        adminTab: 'PEDRO_MANAGER',
+        icon: 'Bot',
+        color: 'purple',
+        description: 'Control what Pedro says, where, and when across all app features.'
+    },
+    {
         id: 'START_STUDY',
         label: 'Start Study',
         group: 'CORE',

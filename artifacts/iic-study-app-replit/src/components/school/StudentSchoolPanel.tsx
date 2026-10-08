@@ -14,6 +14,7 @@ import {
   Download, Star, Lock
 } from "lucide-react";
 import { currentMonthStr } from "../../school-firebase";
+import { uploadImageToTelegram } from "../../services/telegramStorageService";
 
 interface Props {
   schoolId: string;
@@ -139,12 +140,18 @@ export const StudentSchoolPanel: React.FC<Props> = ({
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) { alert("Photo 5MB se chhoti honi chahiye."); return; }
+    if (file.size > 20 * 1024 * 1024) { alert("Photo 20MB se chhoti honi chahiye."); return; }
     setPhotoUploading(true);
     try {
-      const base64 = await compressImageToBase64(file);
-      await updateStudent(schoolId, studentId, { photoUrl: base64 });
-      setStudentData(prev => prev ? { ...prev, photoUrl: base64 } : prev);
+      let photoUrl = '';
+      try {
+        photoUrl = await uploadImageToTelegram(file, `school_student_${studentId}.jpg`, 'School Student Profile');
+      } catch (tgErr) {
+        console.warn('Telegram upload fallback to compressed base64:', tgErr);
+        photoUrl = await compressImageToBase64(file);
+      }
+      await updateStudent(schoolId, studentId, { photoUrl });
+      setStudentData(prev => prev ? { ...prev, photoUrl } : prev);
     } catch (err) {
       alert("Photo upload failed. Please try again.");
     } finally {

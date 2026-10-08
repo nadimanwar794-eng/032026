@@ -1,9 +1,10 @@
 // @ts-nocheck
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { User, MCQItem, MCQResult, TopicItem, SystemSettings } from '../types';
-import { X, CheckCircle, ArrowRight, Loader2, BrainCircuit, AlertCircle, List, Tag, Trophy, TrendingDown, Minus, TrendingUp, Star, Calendar, ChevronRight, Tv, RotateCw, Maximize2, Minimize2, LayoutGrid, Volume2, VolumeX } from 'lucide-react';
+import { X, CheckCircle, ArrowRight, Loader2, BrainCircuit, AlertCircle, List, Tag, Trophy, TrendingDown, Minus, TrendingUp, Star, Calendar, ChevronRight, Tv, RotateCw, Maximize2, Minimize2, LayoutGrid, Volume2, VolumeX, Clock, Sparkles, RotateCcw, FastForward, CheckCircle2 } from 'lucide-react';
 import { renderMathInHtml, formatExplanationHtml } from '../utils/mathUtils';
+import { getSkipDurationSeconds, formatDurationLabel, SkipEntry } from '../utils/officialMcqBank';
 import { rotateScreen } from '../utils/displayPrefs';
 import { getChapterData, saveUserToLive, saveTestResult, saveUserHistory, saveDemand } from '../firebase';
 import { storage } from '../utils/storage';
@@ -95,6 +96,58 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
     const [mcqStreak, setMcqStreak] = useState(0);
     const [soundActive, setSoundActive] = useState<boolean>(() => isSoundEnabled());
 
+    // ── Auto-Skip Ladder & 2nd Chance Re-attempt State ──
+    const [todaySkipEntries, setTodaySkipEntries] = useState<Record<number, SkipEntry>>({});
+    const [todaySkipped, setTodaySkipped] = useState<Set<number>>(new Set());
+    const [isReattemptPhase, setIsReattemptPhase] = useState<boolean>(false);
+    const [reattemptRound, setReattemptRound] = useState<number>(0); // 0 = 30s, 1 = 2nd chance (1m), 2 = 3rd & last chance (5m)
+    const [roundInitialCount, setRoundInitialCount] = useState<number>(0);
+    const [todaySecondsLeft, setTodaySecondsLeft] = useState<number>(30);
+    const [todayMaxSeconds, setTodayMaxSeconds] = useState<number>(30);
+
+    const [todaySkipToast, setTodaySkipToast] = useState<{
+        id: number;
+        questionNumber: number;
+        nextDurationSeconds: number;
+        message: string;
+        subMessage?: string;
+        isAuto: boolean;
+    } | null>(null);
+
+    const [secondChanceModal, setSecondChanceModal] = useState<{
+        isOpen: boolean;
+        unsolvedCount: number;
+        initialRoundCount?: number;
+        remainingIndexes: number[];
+        round: number;
+        chanceLabel: string;
+        nextDuration: number;
+    } | null>(null);
+    const [reattemptIndices, setReattemptIndices] = useState<number[]>([]);
+
+    const getChanceLabel = (round: number) => {
+        if (round <= 1) return '2nd Chance';
+        return '3rd Chance';
+    };
+
+    // ── 2nd Chance Unsolved Live Tracker (e.g. 1/10, 2/10) ──
+    const activeUnsolvedIndices = useMemo(() => {
+        if (!isReattemptPhase) return [];
+        if (reattemptIndices.length > 0) return reattemptIndices;
+        return interleavedQuestions.map((_, i) => i).filter(i => answers[i] === undefined);
+    }, [isReattemptPhase, reattemptIndices, interleavedQuestions, answers]);
+
+    const currentUnsolvedPos = useMemo(() => {
+        if (!isReattemptPhase) return 1;
+        const idx = activeUnsolvedIndices.indexOf(qIndex);
+        return idx >= 0 ? idx + 1 : 1;
+    }, [isReattemptPhase, activeUnsolvedIndices, qIndex]);
+
+    const totalUnsolvedInRound = useMemo(() => {
+        if (!isReattemptPhase) return 0;
+        return roundInitialCount || activeUnsolvedIndices.length || 1;
+    }, [isReattemptPhase, roundInitialCount, activeUnsolvedIndices]);
+
     const toggleSound = () => {
         const next = !soundActive;
         setSoundActive(next);
@@ -127,11 +180,21 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [isProjectorMode, soundActive]);
 
-    // Timer
+    // Timer: Active MCQ session awards 30 XP per active minute (0 credit) per user mandate
     useEffect(() => {
-        const timer = setInterval(() => setTotalTime(prev => prev + 1), 1000);
+        const timer = setInterval(() => {
+            setTotalTime(prev => {
+                const next = prev + 1;
+                if (next > 0 && next % 60 === 0 && user?.id) {
+                    try {
+                        tryEarnScore(user.id, 30, user.subscriptionLevel, user.isPremium, 0, 'TODAY_MCQ_ACTIVE_TIME', undefined, undefined, 'Today MCQ Active Minute');
+                    } catch (_) {}
+                }
+                return next;
+            });
+        }, 1000);
         return () => clearInterval(timer);
-    }, []);
+    }, [user?.id, user?.subscriptionLevel, user?.isPremium]);
 
     // ── Load ALL topics upfront, then interleave ──────────────────────────
     useEffect(() => {
@@ -228,6 +291,296 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
         loadAll();
     }, []);
 
+    // ── Sync per-question timer duration whenever qIndex or round changes ──
+    useEffect(() => {
+        if (interleavedQuestions.length === 0) return;
+        const isAnswered = answers[qIndex] !== undefined;
+        if (isAnswered) {
+            setTodaySecondsLeft(0);
+            return;
+        }
+
+        const skipEntry = todaySkipEntries[qIndex];
+        let duration = 30;
+        if (isReattemptPhase && skipEntry) {
+            duration = getSkipDurationSeconds(skipEntry.skipCount);
+        } else if (isReattemptPhase) {
+            duration = getSkipDurationSeconds(reattemptRound);
+        } else {
+            duration = 30;
+        }
+        setTodaySecondsLeft(duration);
+        setTodayMaxSeconds(duration);
+    }, [qIndex, isReattemptPhase, reattemptRound, interleavedQuestions.length, answers[qIndex]]);
+
+    // ── Per-question countdown timer interval (30s initial, escalating ladder on re-attempt) ──
+    useEffect(() => {
+        if (loading || interleavedQuestions.length === 0 || (secondChanceModal && secondChanceModal.isOpen)) return;
+        if (answers[qIndex] !== undefined) return; // already answered
+
+        const interval = setInterval(() => {
+            setTodaySecondsLeft(prev => {
+                if (prev <= 1) {
+                    clearInterval(interval);
+                    handleTodayAutoSkip(qIndex, false);
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+
+        return () => clearInterval(interval);
+    }, [qIndex, answers[qIndex], loading, interleavedQuestions.length, secondChanceModal, isReattemptPhase]);
+
+    // ── Auto-skip notification toast ──
+    const showTodaySkipToast = (qNum: number, nextDuration: number, isAuto: boolean, curDuration: number, isFinalChance: boolean = false) => {
+        if (soundActive) playSoundWrong();
+        setTodaySkipToast({
+            id: Date.now(),
+            questionNumber: qNum,
+            nextDurationSeconds: isFinalChance ? 0 : nextDuration,
+            message: isAuto
+                ? `⏳ ${formatDurationLabel(curDuration)} Time Up! Q#${qNum} Auto-Skip ho gaya`
+                : `⏭️ Q#${qNum} Skip kiya gaya`,
+            subMessage: isFinalChance
+                ? `⚠️ Yeh aakhri (3rd) chance tha — iske baad aur chance nahi milega!`
+                : `Agla mauka ${formatDurationLabel(nextDuration)} timer ke sath aayega!`,
+            isAuto,
+        });
+    };
+
+    useEffect(() => {
+        if (!todaySkipToast) return;
+        const t = setTimeout(() => setTodaySkipToast(null), 4500);
+        return () => clearTimeout(t);
+    }, [todaySkipToast]);
+
+    // ── Auto-skip / Manual-skip Handler for Today Session ──
+    const handleTodayAutoSkip = (qIdx: number, isManual: boolean = false) => {
+        const total = interleavedQuestions.length;
+        if (total === 0) return;
+        if (answers[qIdx] !== undefined) {
+            handleTodayNext();
+            return;
+        }
+
+        const prevSkips = todaySkipEntries[qIdx]?.skipCount || 0;
+        const newSkipCount = isReattemptPhase ? reattemptRound + 1 : Math.max(1, prevSkips + 1);
+        const nextDur = getSkipDurationSeconds(newSkipCount);
+        const curDur = todayMaxSeconds || 30;
+        const isFinalChance = isReattemptPhase && reattemptRound >= 2;
+
+        showTodaySkipToast(qIdx + 1, nextDur, !isManual, curDur, isFinalChance);
+
+        const updatedSkips: Record<number, SkipEntry> = {
+            ...todaySkipEntries,
+            [qIdx]: {
+                skipCount: newSkipCount,
+                lastSkippedAt: Date.now(),
+                nextDurationSeconds: nextDur,
+            },
+        };
+        setTodaySkipEntries(updatedSkips);
+        setTodaySkipped(prev => new Set(prev).add(qIdx));
+
+        if (isReattemptPhase) {
+            const remaining = interleavedQuestions
+                .map((_, i) => i)
+                .filter(i => answers[i] === undefined && i !== qIdx);
+
+            const nextIdx = remaining.find(i => i > qIdx);
+            if (nextIdx !== undefined) {
+                // Move to next unanswered question in this round without popup
+                setQIndex(nextIdx);
+            } else {
+                // Reached end of this re-attempt round pass!
+                const stillUnsolved: number[] = [];
+                for (let i = 0; i < total; i++) {
+                    if (answers[i] === undefined) stillUnsolved.push(i);
+                }
+                if (answers[qIdx] === undefined && !stillUnsolved.includes(qIdx)) {
+                    stillUnsolved.push(qIdx);
+                }
+
+                if (stillUnsolved.length === 0 || reattemptRound >= 2) {
+                    // 3rd chance (reattemptRound === 2) is the LAST chance — no 4th chance!
+                    finishSession(answers);
+                } else {
+                    const nextRound = reattemptRound + 1;
+                    const nextDur = getSkipDurationSeconds(nextRound);
+                    const label = getChanceLabel(nextRound);
+                    setSecondChanceModal({
+                        isOpen: true,
+                        unsolvedCount: stillUnsolved.length,
+                        initialRoundCount: roundInitialCount || total,
+                        remainingIndexes: stillUnsolved,
+                        round: nextRound,
+                        chanceLabel: label,
+                        nextDuration: nextDur,
+                    });
+                }
+            }
+        } else {
+            if (qIdx < total - 1) {
+                setQIndex(qIdx + 1);
+            } else {
+                const stillUnsolved: number[] = [];
+                for (let i = 0; i < total; i++) {
+                    if (answers[i] === undefined && i !== qIdx) stillUnsolved.push(i);
+                }
+                if (answers[qIdx] === undefined && !stillUnsolved.includes(qIdx)) {
+                    stillUnsolved.push(qIdx);
+                }
+
+                if (stillUnsolved.length > 0) {
+                    setSecondChanceModal({
+                        isOpen: true,
+                        unsolvedCount: stillUnsolved.length,
+                        initialRoundCount: total,
+                        remainingIndexes: stillUnsolved,
+                        round: 1,
+                        chanceLabel: '2nd Chance',
+                        nextDuration: 60,
+                    });
+                } else {
+                    finishSession(answers);
+                }
+            }
+        }
+    };
+
+    const handleTodayNext = () => {
+        const total = interleavedQuestions.length;
+        if (isReattemptPhase) {
+            const remaining = interleavedQuestions
+                .map((_, i) => i)
+                .filter(i => answers[i] === undefined && i !== qIndex);
+            
+            const nextIdx = remaining.find(i => i > qIndex);
+            if (nextIdx !== undefined) {
+                // Move to next question without popup
+                setQIndex(nextIdx);
+            } else {
+                // Reached end of this re-attempt round pass!
+                const stillUnsolved: number[] = [];
+                for (let i = 0; i < total; i++) {
+                    if (answers[i] === undefined) stillUnsolved.push(i);
+                }
+
+                if (stillUnsolved.length === 0 || reattemptRound >= 2) {
+                    // 3rd chance (reattemptRound === 2) is the LAST chance — no 4th chance!
+                    finishSession(answers);
+                } else {
+                    const nextRound = reattemptRound + 1;
+                    const nextDur = getSkipDurationSeconds(nextRound);
+                    const label = getChanceLabel(nextRound);
+                    setSecondChanceModal({
+                        isOpen: true,
+                        unsolvedCount: stillUnsolved.length,
+                        initialRoundCount: roundInitialCount || total,
+                        remainingIndexes: stillUnsolved,
+                        round: nextRound,
+                        chanceLabel: label,
+                        nextDuration: nextDur,
+                    });
+                }
+            }
+        } else {
+            if (qIndex < total - 1) {
+                setQIndex(prev => prev + 1);
+            } else {
+                const stillUnsolved: number[] = [];
+                for (let i = 0; i < total; i++) {
+                    if (answers[i] === undefined) stillUnsolved.push(i);
+                }
+                if (stillUnsolved.length > 0) {
+                    setSecondChanceModal({
+                        isOpen: true,
+                        unsolvedCount: stillUnsolved.length,
+                        initialRoundCount: total,
+                        remainingIndexes: stillUnsolved,
+                        round: 1,
+                        chanceLabel: '2nd Chance',
+                        nextDuration: 60,
+                    });
+                } else {
+                    finishSession(answers);
+                }
+            }
+        }
+    };
+
+    const handleAcceptTodaySecondChance = () => {
+        if (!secondChanceModal) return;
+        if (soundActive) playSoundClick();
+
+        const remaining = secondChanceModal.remainingIndexes || [];
+        const firstTarget = remaining.length > 0 ? remaining[0] : 0;
+        const targetRound = secondChanceModal.round;
+
+        setIsReattemptPhase(true);
+        setReattemptRound(targetRound);
+        setRoundInitialCount(secondChanceModal.initialRoundCount || remaining.length);
+        setReattemptIndices(remaining);
+        setSecondChanceModal(null);
+        setQIndex(firstTarget);
+
+        const dur = secondChanceModal.nextDuration || 60;
+        setTodaySecondsLeft(dur);
+        setTodayMaxSeconds(dur);
+
+        const updatedSkips = { ...todaySkipEntries };
+        remaining.forEach((idx) => {
+            const prevSkip = updatedSkips[idx]?.skipCount || 0;
+            const newSkipCount = Math.max(targetRound, prevSkip + 1);
+            updatedSkips[idx] = {
+                skipCount: newSkipCount,
+                lastSkippedAt: Date.now(),
+                nextDurationSeconds: dur,
+            };
+        });
+        setTodaySkipEntries(updatedSkips);
+
+        setTodaySkipToast({
+            id: Date.now(),
+            questionNumber: firstTarget + 1,
+            nextDurationSeconds: dur,
+            message: `🎯 ${secondChanceModal.chanceLabel} Round Shuru!`,
+            subMessage: `${remaining.length} Unsolved Questions ke liye har question par ${formatDurationLabel(dur)} mila hai!`,
+            isAuto: false,
+        });
+    };
+
+    const handleDeclineTodaySecondChance = () => {
+        setSecondChanceModal(null);
+        finishSession(answers);
+    };
+
+    const handleTodaySubmitClick = () => {
+        const total = interleavedQuestions.length;
+        const stillUnsolved: number[] = [];
+        for (let i = 0; i < total; i++) {
+            if (answers[i] === undefined) stillUnsolved.push(i);
+        }
+
+        if (stillUnsolved.length > 0 && (!isReattemptPhase || reattemptRound < 2)) {
+            const nextRound = isReattemptPhase ? reattemptRound + 1 : 1;
+            const nextDurSeconds = getSkipDurationSeconds(nextRound);
+            const label = getChanceLabel(nextRound);
+            setSecondChanceModal({
+                isOpen: true,
+                unsolvedCount: stillUnsolved.length,
+                initialRoundCount: isReattemptPhase ? (roundInitialCount || stillUnsolved.length) : total,
+                remainingIndexes: stillUnsolved,
+                round: nextRound,
+                chanceLabel: label,
+                nextDuration: nextDurSeconds,
+            });
+        } else {
+            finishSession(answers);
+        }
+    };
+
     // ── Answer handler ────────────────────────────────────────────────────
     const handleAnswer = (optionIdx: number) => {
         if (answers[qIndex] !== undefined) return;
@@ -248,18 +601,21 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                 hapticCorrect();
                 const newStreak = mcqStreak + 1;
                 setMcqStreak(newStreak);
-                const pts = tryEarnScore(user.id, 2, _tier, _subValid, 0, 'REVISION_MCQ_CORRECT');
+                const pts = tryEarnScore(user.id, 5, _tier, _subValid, 0, 'REVISION_MCQ_CORRECT');
                 const bonus = getMcqStreakBonus(newStreak);
                 const bonusPts = bonus > 0 ? tryEarnScore(user.id, bonus, _tier, _subValid, 0, `REVISION_MCQ_STREAK_${newStreak}`) : 0;
                 const totalPts = pts + bonusPts;
-                // Credits = ⅙ (routine on) ya ⅛ (routine off) of pts earned
+                // Credits = ⅙ (routine on) ya ⅛ (routine off) of pts earned (Only if Credit Economy is ON)
+                const isCreditEconomy = user.studyMode === 'CREDIT';
                 const _routineOn = loadRoutineData(user.id).enabled;
                 const _creditRatio = _routineOn ? (1 / 6) : (1 / 8);
-                const _creditsEarned = totalPts > 0 ? Math.max(1, Math.floor(totalPts * _creditRatio)) : 0;
+                const _creditsEarned = (isCreditEconomy && totalPts > 0) ? Math.max(1, Math.floor(totalPts * _creditRatio)) : 0;
                 if (totalPts > 0) {
                     const _u = userRef.current;
                     if (_u && onUpdateUser) {
-                        deferStudyCoins(_u.id, _creditsEarned);
+                        if (_creditsEarned > 0) {
+                            deferStudyCoins(_u.id, _creditsEarned);
+                        }
                         const updated = {
                             ..._u,
                             totalScore: (_u.totalScore || 0) + totalPts,
@@ -269,31 +625,88 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                         // Home-sync key update — yahi pts ab credit sync se skip honge
                         try { localStorage.setItem(`nst_credit_sync_score_${_u.id}`, String((_u.totalScore || 0) + totalPts)); } catch {}
                     }
-                    showMcqScore(totalPts, _creditsEarned);
+                    showMcqScore(totalPts, isCreditEconomy ? _creditsEarned : undefined);
                 }
             } else {
                 playSoundWrong();
                 hapticWrong();
                 setMcqStreak(0);
-                subtractDailyScore(user.id, 1);
+                subtractDailyScore(user.id, 2);
                 const _u = userRef.current;
                 if (_u && onUpdateUser) {
-                    const updated = { ..._u, totalScore: Math.max(0, (_u.totalScore || 0) - 1) };
+                    const updated = { ..._u, totalScore: Math.max(0, (_u.totalScore || 0) - 2) };
                     onUpdateUser(updated);
                     saveUserToLive(updated);
                 }
-                showMcqScore(-1);
+                showMcqScore(-2);
             }
         }
 
         const newAnswers = { ...answers, [qIndex]: optionIdx };
         setAnswers(newAnswers);
 
+        // Remove from skipped list if answered
+        setTodaySkipped(prev => {
+            const next = new Set(prev);
+            next.delete(qIndex);
+            return next;
+        });
+
         setTimeout(() => {
-            if (qIndex < interleavedQuestions.length - 1) {
-                setQIndex(prev => prev + 1);
+            if (isReattemptPhase) {
+                const remaining = interleavedQuestions
+                    .map((_, i) => i)
+                    .filter(i => newAnswers[i] === undefined && i !== qIndex);
+                
+                const nextIdx = remaining.find(i => i > qIndex);
+                if (nextIdx !== undefined) {
+                    setQIndex(nextIdx);
+                } else {
+                    // Reached end of this re-attempt round pass!
+                    const stillUnsolved: number[] = [];
+                    for (let i = 0; i < interleavedQuestions.length; i++) {
+                        if (newAnswers[i] === undefined) stillUnsolved.push(i);
+                    }
+
+                    if (stillUnsolved.length === 0) {
+                        finishSession(newAnswers);
+                    } else {
+                        const nextRound = reattemptRound + 1;
+                        const nextDur = getSkipDurationSeconds(nextRound);
+                        const label = getChanceLabel(nextRound);
+                        setSecondChanceModal({
+                            isOpen: true,
+                            unsolvedCount: stillUnsolved.length,
+                            initialRoundCount: roundInitialCount || interleavedQuestions.length,
+                            remainingIndexes: stillUnsolved,
+                            round: nextRound,
+                            chanceLabel: label,
+                            nextDuration: nextDur,
+                        });
+                    }
+                }
             } else {
-                finishSession(newAnswers);
+                if (qIndex < interleavedQuestions.length - 1) {
+                    setQIndex(prev => prev + 1);
+                } else {
+                    const stillUnsolved: number[] = [];
+                    for (let i = 0; i < interleavedQuestions.length; i++) {
+                        if (newAnswers[i] === undefined) stillUnsolved.push(i);
+                    }
+                    if (stillUnsolved.length > 0) {
+                        setSecondChanceModal({
+                            isOpen: true,
+                            unsolvedCount: stillUnsolved.length,
+                            initialRoundCount: interleavedQuestions.length,
+                            remainingIndexes: stillUnsolved,
+                            round: 1,
+                            chanceLabel: '2nd Chance',
+                            nextDuration: 60,
+                        });
+                    } else {
+                        finishSession(newAnswers);
+                    }
+                }
             }
         }, 500);
     };
@@ -839,21 +1252,88 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                     )}
                 </div>
             )}
+            {/* ── FLOATING SKIP TOAST NOTIFICATION ── */}
+            {todaySkipToast && (
+                <div className="fixed top-14 left-1/2 -translate-x-1/2 z-50 max-w-sm w-[92%] bg-slate-900/95 text-white p-3.5 rounded-2xl shadow-2xl border border-amber-500/40 backdrop-blur-md animate-in slide-in-from-top duration-200">
+                    <div className="flex items-center gap-2.5">
+                        <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0">
+                            <Clock className="w-5 h-5 text-amber-400 animate-pulse" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <p className="text-xs font-black text-amber-300 leading-snug">{todaySkipToast.message}</p>
+                            <p className="text-[11px] font-bold text-slate-300 mt-0.5">{todaySkipToast.subMessage}</p>
+                        </div>
+                        <button 
+                            type="button" 
+                            onClick={() => setTodaySkipToast(null)} 
+                            className="p-1 rounded-lg text-slate-400 hover:text-white"
+                        >
+                            <X size={14} />
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {/* Header */}
             <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0 z-10 shadow-sm">
                 <div className="flex items-center gap-2">
                     <button onClick={() => {
-                        if (Object.keys(answers).length > 0) finishSession(answers);
+                        if (Object.keys(answers).length > 0) handleTodaySubmitClick();
                         else onClose();
                     }} className="p-2 bg-slate-100 rounded-full text-slate-600 hover:bg-slate-200">
                         <ArrowRight size={18} className="rotate-180" />
                     </button>
                     <div>
-                        <p className="text-xs font-black text-slate-800">Q {qIndex + 1} / {interleavedQuestions.length}</p>
-                        <p className="text-[10px] text-slate-400">{topicsDoneSet.size} topic{topicsDoneSet.size !== 1 ? 's' : ''} chal rahe hain</p>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                            {isReattemptPhase ? (
+                                <>
+                                    <span className="text-xs font-black text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                                        ⚡ {getChanceLabel(reattemptRound)}: {currentUnsolvedPos}/{totalUnsolvedInRound} Unsolved
+                                    </span>
+                                    <span className="text-[11px] font-bold text-slate-500">
+                                        (Q {qIndex + 1} / {interleavedQuestions.length})
+                                    </span>
+                                </>
+                            ) : (
+                                <>
+                                    <p className="text-xs font-black text-slate-800">Q {qIndex + 1} / {interleavedQuestions.length}</p>
+                                    <span className="px-1.5 py-0.5 rounded-md bg-purple-50 border border-purple-200 text-purple-700 font-bold text-[9px]">
+                                        🎯 Round 1
+                                    </span>
+                                </>
+                            )}
+                        </div>
+                        <p className="text-[10px] text-slate-400">
+                            {isReattemptPhase
+                                ? `${totalUnsolvedInRound - (currentUnsolvedPos - 1)} bache hue hain`
+                                : `${topicsDoneSet.size} topic${topicsDoneSet.size !== 1 ? 's' : ''} chal rahe hain`
+                            }
+                        </p>
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
+                    {/* Active Question Countdown Timer */}
+                    {answers[qIndex] !== undefined ? (
+                        <span className="flex items-center gap-1 text-[11px] font-black px-2 py-1 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-300">
+                            <CheckCircle2 size={12} className="text-emerald-600" />
+                            <span>Solved</span>
+                        </span>
+                    ) : (
+                        <div 
+                            className={`flex items-center gap-1 font-mono font-black text-xs px-2.5 py-1 rounded-xl border transition-all ${
+                                todaySecondsLeft <= 5
+                                    ? 'bg-rose-100 text-rose-700 border-rose-300 animate-pulse'
+                                    : todaySecondsLeft <= 15
+                                    ? 'bg-amber-100 text-amber-800 border-amber-300'
+                                    : 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                            }`}
+                            title={`${todaySecondsLeft}s remaining before auto-skip`}
+                        >
+                            <Clock size={12} className={todaySecondsLeft <= 5 ? 'text-rose-600 animate-spin' : 'text-emerald-600'} />
+                            <span>{todaySecondsLeft}s</span>
+                        </div>
+                    )}
+
                     <button
                         onClick={() => setShowSidebar(prev => !prev)}
                         aria-label={showSidebar ? 'Hide question switcher' : 'Show question switcher'}
@@ -893,8 +1373,8 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                         {soundActive ? <Volume2 size={15} /> : <VolumeX size={15} />}
                     </button>
                     <button
-                        onClick={() => finishSession(answers)}
-                        className="bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow hover:bg-green-700"
+                        onClick={handleTodaySubmitClick}
+                        className="bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow hover:bg-green-700 active:scale-95"
                     >
                         Submit
                     </button>
@@ -908,6 +1388,18 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                     style={{ width: `${((qIndex + 1) / interleavedQuestions.length) * 100}%` }}
                 />
             </div>
+
+            {/* Per-question countdown bar */}
+            {answers[qIndex] === undefined && todayMaxSeconds > 0 && (
+                <div className="h-1 bg-slate-100 w-full overflow-hidden">
+                    <div 
+                        className={`h-full transition-all duration-1000 ease-linear ${
+                            todaySecondsLeft <= 5 ? 'bg-rose-500' : todaySecondsLeft <= 15 ? 'bg-amber-500' : 'bg-emerald-500'
+                        }`}
+                        style={{ width: `${Math.max(0, (todaySecondsLeft / todayMaxSeconds) * 100)}%` }}
+                    />
+                </div>
+            )}
 
             {showSidebar && (
                 <div className="px-4 pt-3 bg-slate-50 border-b border-slate-100">
@@ -968,6 +1460,99 @@ export const TodayMcqSession: React.FC<Props> = ({ user, topics, onClose, onComp
                     })}
                 </div>
             </div>
+
+            {/* ── 2ND CHANCE CONFIRMATION MODAL (Ladder Re-attempt) ── */}
+            {secondChanceModal && secondChanceModal.isOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4 animate-in fade-in duration-200">
+                    <div className="max-w-md w-full rounded-3xl p-6 bg-white border border-slate-200 text-slate-900 shadow-2xl flex flex-col gap-4 text-center transform transition-all animate-in zoom-in-95">
+                        <div className="mx-auto w-16 h-16 rounded-3xl bg-gradient-to-tr from-amber-500 via-orange-500 to-amber-600 flex items-center justify-center text-white shadow-xl shadow-orange-500/30">
+                            <Sparkles size={32} className="animate-pulse" />
+                        </div>
+
+                        <div className="flex flex-col gap-1.5">
+                            <div className="inline-flex items-center gap-1.5 mx-auto px-3 py-1 rounded-full text-xs font-black bg-amber-100 text-amber-800 border border-amber-300">
+                                <RotateCcw size={12} />
+                                <span>Round Complete • Re-attempt Choice</span>
+                            </div>
+                            <h3 className="text-xl sm:text-2xl font-black text-slate-900 leading-tight">
+                                {secondChanceModal.initialRoundCount && secondChanceModal.initialRoundCount > secondChanceModal.unsolvedCount ? (
+                                    <span>
+                                        Aapne {secondChanceModal.initialRoundCount} me se{' '}
+                                        <span className="text-emerald-600 underline font-black">
+                                            {Math.max(0, secondChanceModal.initialRoundCount - secondChanceModal.unsolvedCount)}
+                                        </span>{' '}
+                                        solve kiye,{' '}
+                                        <span className="text-amber-600 underline decoration-amber-500 underline-offset-4">
+                                            {secondChanceModal.unsolvedCount}
+                                        </span>{' '}
+                                        abhi bhi baaki hain!
+                                    </span>
+                                ) : (
+                                    <span>
+                                        Aap <span className="text-amber-600 underline decoration-amber-500 underline-offset-4">{secondChanceModal.unsolvedCount}</span> Question nahi bana paye!
+                                    </span>
+                                )}
+                            </h3>
+                            <p className="text-sm font-bold text-slate-600">
+                                Kya aapko {secondChanceModal.chanceLabel} chahiye? 🎯
+                            </p>
+                        </div>
+
+                        {/* Status Summary Card */}
+                        <div className="p-3 rounded-2xl bg-amber-50/70 border border-amber-200/80 text-xs text-amber-950 font-semibold text-center leading-relaxed">
+                            📌 <strong className="font-bold">Round Summary:</strong> Aapne{' '}
+                            <span className="font-black text-slate-900">{secondChanceModal.initialRoundCount || interleavedQuestions.length}</span> me se{' '}
+                            <span className="font-black text-emerald-700">
+                                {Math.max(0, (secondChanceModal.initialRoundCount || interleavedQuestions.length) - secondChanceModal.unsolvedCount)}
+                            </span>{' '}
+                            solve kiye,{' '}
+                            <span className="font-black text-amber-700">{secondChanceModal.unsolvedCount}</span> abhi bhi baaki hain.
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 p-3 rounded-2xl bg-slate-50 border border-slate-200 text-xs">
+                            <div className="flex flex-col items-center justify-center p-2 rounded-xl bg-emerald-50 border border-emerald-200">
+                                <span className="text-[10px] font-bold text-emerald-700 uppercase">Hal Kiye Gaye</span>
+                                <span className="text-base font-black text-emerald-600">
+                                    {Object.keys(answers).length}
+                                </span>
+                            </div>
+                            <div className="flex flex-col items-center justify-center p-2 rounded-xl bg-amber-50 border border-amber-200">
+                                <span className="text-[10px] font-bold text-amber-700 uppercase">Nahi Bane (Remaining)</span>
+                                <span className="text-base font-black text-amber-600">
+                                    {secondChanceModal.unsolvedCount}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-left text-amber-900 leading-relaxed flex items-start gap-2.5">
+                            <Clock className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                            <div>
+                                <strong className="font-bold">{secondChanceModal.chanceLabel} Rule:</strong> Chhute huye questions ko hal karne ke liye har question par <span className="font-black underline">{formatDurationLabel(secondChanceModal.nextDuration)}</span> ka timer milega!{secondChanceModal.round >= 2 ? ' ⚠️ Yeh aakhri (3rd) chance hai — iske baad 4th chance nahi milega!' : ' Agar abhi score jama karna chahte hain toh Submit button dabayein.'}
+                            </div>
+                        </div>
+
+                        <div className="flex flex-col gap-2.5 mt-1">
+                            <button
+                                type="button"
+                                onClick={handleAcceptTodaySecondChance}
+                                className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-600 text-white font-black text-sm sm:text-base shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2 cursor-pointer active:scale-98 transition-all"
+                            >
+                                <RotateCcw size={18} />
+                                <span>Haan, {secondChanceModal.chanceLabel} Chahiye ⚡ ({formatDurationLabel(secondChanceModal.nextDuration)} Timer)</span>
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={handleDeclineTodaySecondChance}
+                                className="w-full py-3 px-4 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer active:scale-98 transition-all"
+                            >
+                                <CheckCircle2 size={16} className="text-slate-500" />
+                                <span>Nahi, Test Submit Karein 📤 (Final Result)</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* ── Projector Mode Overlay ── */}
             {isProjectorMode && interleavedQuestions.length > 0 && createPortal((() => {

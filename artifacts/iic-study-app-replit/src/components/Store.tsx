@@ -1,15 +1,21 @@
 // @ts-nocheck
 import React, { useState, useEffect } from 'react';
 import { User, CreditPackage, SystemSettings, PlanCompareGroup } from '../types';
-import { DEFAULT_PLAN_COMPARE_GROUPS } from '../constants/planComparisonDefaults';
+import {
+  DEFAULT_PLAN_COMPARE_GROUPS,
+  DEFAULT_VIP_CREDIT_OFF_COMPARE_GROUPS,
+  DEFAULT_VIP_PLUS_CREDIT_ON_COMPARE_GROUPS,
+} from '../constants/planComparisonDefaults';
+import { DEFAULT_PLAN_COMPARISON } from '../constants';
 import { db, saveUserToLive } from '../firebase';
 import { doc, updateDoc } from 'firebase/firestore';
 import {
-  Sparkles, Check, MessageSquare, Lock, Ticket, ShieldCheck, Star,
+  Sparkles, Check, MessageSquare, Lock, Ticket, ShieldCheck, Shield, Star,
   ChevronRight, ChevronDown, Flame, BadgeCheck, History, TrendingDown,
   Calendar, Clock, Crown, DollarSign, ArrowLeft, Zap, Gift, Coins,
   Package, Wallet, X, ArrowLeftRight
 } from 'lucide-react';
+import { GuestRestrictionModal } from './GuestRestrictionModal';
 import { getLevelInfo, getScoreDiscountFromScore, getNextLevelInfo, getLevelProgress, getLevelDailyLimitsWithOverride, UNLIMITED } from '../utils/levelSystem';
 import { SCORE_MULTIPLIERS, getDailyScoreLimit, getUserScoreMultiplier } from '../utils/scoreSystem';
 import { addSubscription, isSubscriptionFromCoins } from '../utils/subscriptionUtils';
@@ -38,6 +44,13 @@ import {
   claimDailyDiamonds,
   canClaimDailyDiamonds,
 } from '../utils/diamondUtils';
+import {
+  getVipPlusDiamondsPerDay,
+  getVipPlusBasePrice,
+  getVipPlusOriginalPrice,
+  getPlanDurationDays,
+  isVipPlusUser,
+} from '../utils/vipPlusUtils';
 
 interface Props {
   user: User;
@@ -47,7 +60,7 @@ interface Props {
   onBack?: () => void;
   themeColor?: string;
   tierTheme?: any;
-  initialTier?: 'SUBSCRIPTION' | 'CREDITS' | 'DIAMONDS' | 'EXCHANGE' | 'HISTORY';
+  initialTier?: 'SUBSCRIPTION' | 'VIP_PLUS' | 'CREDITS' | 'DIAMONDS' | 'EXCHANGE' | 'HISTORY';
 }
 
 /* ─── Fixed Color Palette ─── */
@@ -326,6 +339,7 @@ function TierDailyClaimCard({
   settings?: SystemSettings;
   onUpdateUser?: (u: any) => void;
 }) {
+  const isVipPlus = u?.vipPlusTier === 'PRO_PLUS' || u?.vipPlusTier === 'MAX_PLUS';
   const subTier: UserSubTier = getUserSubTier(u ?? {});
   const resetCountdown = useMidnightCountdown();
   const [routineData, setRoutineDataRaw] = useState(() => {
@@ -334,26 +348,40 @@ function TierDailyClaimCard({
     return ensureTodayClaimEntry(reset, getUserSubTier(u ?? {}), settings);
   });
 
+  // Pro and Max daily claims are removed. Only VIP+ users have daily diamond claims.
+  if (!isVipPlus) return null;
+
   const unclaimed = getUnclaimedCoins(routineData, targetTier);
-  const isTargetActive = subTier === targetTier;
 
-  if (!isTargetActive && unclaimed <= 0) return null;
+  const isMax = targetTier === 'MAX_PRO' || u?.vipPlusTier === 'MAX_PLUS';
+  const dailyAmt = isVipPlus
+    ? (u.dailyVipDiamonds || (u.vipPlusTier === 'MAX_PLUS' ? 50 : 25))
+    : getDailyClaimAmount(targetTier, settings);
 
-  const dailyAmt = getDailyClaimAmount(targetTier, settings);
-  const isMax = targetTier === 'MAX_PRO';
-  const unitSymbol = isMax ? '💎' : '🪙';
-  const unitLabel = isMax ? 'Diamonds' : 'Credits';
-  const grad = isMax ? 'linear-gradient(135deg,#7c3aed,#a855f7,#e879f9)' : 'linear-gradient(135deg,#0891b2,#22d3ee,#67e8f9)';
-  const borderC = isMax ? C.maxBorder : C.proBorder;
-  const bgC = isMax ? C.maxBg : C.proBg;
-  const label = isMax ? 'Ultra VIP' : 'Pro';
+  const unitSymbol = (isMax || isVipPlus) ? '💎' : '🪙';
+  const unitLabel = (isMax || isVipPlus) ? 'Diamonds' : 'Credits';
+  const grad = isVipPlus
+    ? (isMax ? 'linear-gradient(135deg,#a855f7,#ec4899,#f43f5e)' : 'linear-gradient(135deg,#06b6d4,#0ea5e9,#3b82f6)')
+    : (isMax ? 'linear-gradient(135deg,#7c3aed,#a855f7,#e879f9)' : 'linear-gradient(135deg,#0891b2,#22d3ee,#67e8f9)');
+  const borderC = isVipPlus
+    ? (isMax ? 'rgba(236,72,153,0.45)' : 'rgba(6,182,212,0.45)')
+    : (isMax ? C.maxBorder : C.proBorder);
+  const bgC = isVipPlus
+    ? (isMax ? 'rgba(236,72,153,0.12)' : 'rgba(6,182,212,0.12)')
+    : (isMax ? C.maxBg : C.proBg);
+  const label = u?.vipPlusTier === 'MAX_PLUS'
+    ? 'MAX+ VIP'
+    : u?.vipPlusTier === 'PRO_PLUS'
+    ? 'PRO+ VIP'
+    : (isMax ? 'Ultra VIP' : 'Pro');
 
   const handleClaim = async () => {
     const { data: updated, earned } = claimAllPendingCoins(routineData, targetTier);
-    if (earned > 0 && onUpdateUser && u) {
-      const updatedUser = isMax
-        ? { ...u, diamonds: (u.diamonds || 0) + earned }
-        : { ...u, credits: (u.credits || 0) + earned };
+    const claimAmount = isVipPlus ? dailyAmt : earned;
+    if (claimAmount > 0 && onUpdateUser && u) {
+      const updatedUser = (isMax || isVipPlus)
+        ? { ...u, diamonds: (u.diamonds || 0) + claimAmount }
+        : { ...u, credits: (u.credits || 0) + claimAmount };
       if (!await saveUserToLive(updatedUser)) {
         window.alert("Reward save nahi ho paaya. Internet check karke dobara try karein.");
         return;
@@ -418,7 +446,8 @@ interface CompareMatrixProps {
   user: User;
   settings?: SystemSettings;
   onUserUpdate: (user: User) => void;
-  onGoToSubscription: () => void;
+  onGoToSubscription?: () => void;
+  mode?: 'CREDIT_OFF' | 'CREDIT_ON';
 }
 
 const CompareMatrix: React.FC<CompareMatrixProps> = ({
@@ -426,263 +455,208 @@ const CompareMatrix: React.FC<CompareMatrixProps> = ({
   settings,
   onUserUpdate,
   onGoToSubscription,
+  mode = 'CREDIT_ON',
 }) => {
-  const [isUpdatingSeq, setIsUpdatingSeq] = useState(false);
-  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const isCreditOff = mode === 'CREDIT_OFF';
 
-  const groups: PlanCompareGroup[] =
-    settings?.planComparisonData && settings.planComparisonData.length > 0
-      ? settings.planComparisonData
-      : DEFAULT_PLAN_COMPARE_GROUPS;
-
-  const isBasic = Boolean(user?.isPremium && user?.subscriptionLevel === 'BASIC');
-  const isUltra = Boolean(user?.isPremium && user?.subscriptionLevel === 'ULTRA');
-  const isVip = isBasic || isUltra;
-  const isSeqActive = isVip ? !user?.sequentialReadingDisabled : true;
-
-  const showToast = (msg: string) => {
-    setToastMsg(msg);
-    setTimeout(() => setToastMsg(null), 3200);
+  const sanitizeGroups = (groups: PlanCompareGroup[]): PlanCompareGroup[] => {
+    return (groups || []).map(grp => {
+      let items = (grp.items || []).filter(
+        it => it.id !== 'DAILY_REWARDS' && !it.label?.toLowerCase().includes('daily store reward')
+      );
+      if (grp.id === 'grp-account') {
+        const hasPedro = items.some(
+          it => it.id === 'PEDRO_LEVEL_8' || it.label?.toLowerCase().includes('pedro level 8')
+        );
+        if (!hasPedro) {
+          items.push({
+            id: 'PEDRO_LEVEL_8',
+            label: 'Pedro Level 8',
+            free: '—',
+            basic: '—',
+            ultra: '✔ Pedro Level 8 (Till Subscription)',
+            tooltip: 'Pedro Level 8 instant unlock is exclusive to Ultra (Max) tier till active subscription.'
+          });
+        }
+      }
+      return { ...grp, items };
+    });
   };
 
-  const handleToggleSequential = async () => {
-    if (!isVip) {
-      showToast('🔒 Sequential Reading Free users ke liye hamesha ON rehta hai!');
-      return;
+  const defaultSource = sanitizeGroups(
+    isCreditOff
+      ? (settings?.vipCreditOffData && settings.vipCreditOffData.length > 0
+          ? settings.vipCreditOffData
+          : DEFAULT_VIP_CREDIT_OFF_COMPARE_GROUPS)
+      : (settings?.vipPlusCreditOnData && settings.vipPlusCreditOnData.length > 0
+          ? settings.vipPlusCreditOnData
+          : (settings?.planComparisonData && settings.planComparisonData.length > 0
+              ? settings.planComparisonData
+              : DEFAULT_VIP_PLUS_CREDIT_ON_COMPARE_GROUPS))
+  );
+
+  const [customGroups, setCustomGroups] = useState<PlanCompareGroup[]>(defaultSource);
+
+  useEffect(() => {
+    if (isCreditOff) {
+      if (settings?.vipCreditOffData && settings.vipCreditOffData.length > 0) {
+        setCustomGroups(sanitizeGroups(settings.vipCreditOffData));
+      } else {
+        setCustomGroups(sanitizeGroups(DEFAULT_VIP_CREDIT_OFF_COMPARE_GROUPS));
+      }
+    } else {
+      if (settings?.vipPlusCreditOnData && settings.vipPlusCreditOnData.length > 0) {
+        setCustomGroups(sanitizeGroups(settings.vipPlusCreditOnData));
+      } else if (settings?.planComparisonData && settings.planComparisonData.length > 0) {
+        setCustomGroups(sanitizeGroups(settings.planComparisonData));
+      } else {
+        setCustomGroups(sanitizeGroups(DEFAULT_VIP_PLUS_CREDIT_ON_COMPARE_GROUPS));
+      }
     }
-    try {
-      setIsUpdatingSeq(true);
-      const nextDisabled = !user.sequentialReadingDisabled;
-      const uRef = doc(db, 'users', user.id);
-      await updateDoc(uRef, { sequentialReadingDisabled: nextDisabled });
-      const updated = { ...user, sequentialReadingDisabled: nextDisabled };
-      onUserUpdate(updated);
-      showToast(
-        nextDisabled
-          ? '🔓 Sequential Reading OFF: Free Page Navigation active!'
-          : '🔒 Sequential Reading ON: Sequence lock enabled!'
-      );
-    } catch (err) {
-      console.error(err);
-      showToast('❌ Setting update nahi ho payi.');
-    } finally {
-      setIsUpdatingSeq(false);
+  }, [settings?.vipCreditOffData, settings?.vipPlusCreditOnData, settings?.planComparisonData, isCreditOff]);
+
+  const renderCellBadge = (rawVal: string, tier: 'free' | 'basic' | 'ultra') => {
+    const val = (rawVal || '').trim();
+    
+    const isConfigurable = val.includes('Configurable');
+    const isLockStrict = val.includes('Always ON (Strict)');
+    const isLockIconOnly = val === '🔒';
+    
+    const isFreeWithCheck = val.includes('✔');
+    const isRed = val.includes('❌') || val.toLowerCase().includes('reduced');
+    const isAmber = val.includes('🔓') || val.includes('🪙');
+    const isDiamond = val.includes('💎') && !val.includes('🪙');
+    const isUltraPurple = tier === 'ultra' && (val.includes('Multiple') || val.includes('Unlimited') || val.includes('Diamonds') || val.includes('3,000') || val.includes('3,500') || val.includes('2.0x') || val.includes('10%') || val.includes('4 Slots') || val.includes('Instant') || isConfigurable);
+
+    let colorClass = 'text-slate-300 font-normal';
+    if (isConfigurable) {
+      colorClass = tier === 'ultra' ? 'text-fuchsia-300 font-bold' : 'text-emerald-400 font-bold';
+    } else if (isLockStrict || isLockIconOnly) {
+      colorClass = 'text-amber-400 font-bold text-xs sm:text-sm';
+    } else if (isRed) {
+      colorClass = 'text-rose-400 font-bold';
+    } else if (isUltraPurple) {
+      colorClass = 'text-fuchsia-300 font-bold';
+    } else if (tier === 'basic' && val.includes('Instant')) {
+      colorClass = 'text-emerald-400 font-bold';
+    } else if (isFreeWithCheck || val === 'No Penalty') {
+      colorClass = 'text-emerald-400 font-bold';
+    } else if (isAmber) {
+      colorClass = 'text-amber-300 font-bold';
+    } else if (isDiamond) {
+      colorClass = 'text-cyan-300 font-bold';
+    } else if (val === 'Free' || val === 'free') {
+      colorClass = 'text-slate-300 font-medium';
     }
+
+    return (
+      <span className={`${colorClass} text-[9px] sm:text-xs break-words leading-tight inline-block px-1 py-0.5 rounded`}>
+        {val}
+      </span>
+    );
   };
 
   return (
     <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      {/* ── TOAST NOTIFICATION ── */}
-      {toastMsg && (
-        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 backdrop-blur-md text-white px-4 py-2.5 rounded-2xl text-xs font-bold shadow-2xl border border-sky-400/50 flex items-center gap-2 animate-in slide-in-from-top-2">
-          <span className="text-sky-400">⚡</span>
-          <span>{toastMsg}</span>
-        </div>
-      )}
-
-      {/* ── SEQUENTIAL PAGE READING CONTROL CARD ── */}
-      <div className="rounded-3xl p-5 border border-sky-500/30 bg-gradient-to-br from-sky-950/60 via-slate-900/70 to-slate-950/90 shadow-2xl relative overflow-hidden backdrop-blur-md">
-        <div className="absolute -top-12 -right-12 w-36 h-36 bg-sky-500/15 rounded-full blur-2xl pointer-events-none" />
+      {/* ── FEATURE COMPARISON MATRIX CONTAINER ── */}
+      <div className="rounded-2xl sm:rounded-3xl p-3 sm:p-5 border border-sky-500/20 bg-[#070c18] shadow-2xl overflow-hidden relative">
+        <div className="absolute -top-10 -right-10 w-48 h-48 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-10 -left-10 w-48 h-48 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
         
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-start sm:items-center gap-3.5">
-            <div
-              className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-xl shrink-0 border ${
-                isSeqActive
-                  ? 'bg-sky-500/20 text-sky-400 border-sky-400/30 shadow-[0_0_15px_rgba(56,189,248,0.2)]'
-                  : 'bg-emerald-500/20 text-emerald-400 border-emerald-400/30 shadow-[0_0_15px_rgba(52,211,153,0.2)]'
-              }`}
-            >
-              {isSeqActive ? '📖' : '📑'}
-            </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-sm sm:text-base font-black text-white">Sequential Page Reading</h3>
-                {isVip ? (
-                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-400/30">
-                    {user?.subscriptionLevel} VIP Control ⚙️
-                  </span>
-                ) : (
-                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/30">
-                    🔒 Always ON (Free Plan)
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                {isVip
-                  ? isSeqActive
-                    ? 'Sequence lock active — Pehle ka page poora padhne ke baad hi agla page unlock hoga.'
-                    : 'Sequence lock disabled — Free page navigation active! Aap kisi bhi page par direct ja sakte hain.'
-                  : 'Free account me Page 1 poora padhne ke baad hi Page 2 unlock hota hai. Isko apni marzi se band karne ke liye Basic ya Ultra plan lijiye.'}
-              </p>
-            </div>
+        {/* Header with cyan border box matching screenshot */}
+        <div className="text-center mb-5 sm:mb-7">
+          <div className="inline-block px-4 py-2 sm:px-6 sm:py-2.5 rounded-2xl border-2 border-cyan-400 bg-gradient-to-r from-sky-950 via-[#07172c] to-blue-950 shadow-[0_0_25px_rgba(6,182,212,0.35)]">
+            <h2 className="text-sm sm:text-xl md:text-2xl font-black text-white tracking-wide">
+              {isCreditOff
+                ? 'VIP Feature Comparison Matrix (CRADIT OFF)'
+                : 'VIP+ Feature Comparison Matrix (CRADIT ON)'}
+            </h2>
           </div>
-
-          {/* Interactive Switch or Upgrade Action */}
-          <div className="flex items-center gap-3 shrink-0 self-end sm:self-center">
-            {isVip ? (
-              <button
-                onClick={handleToggleSequential}
-                disabled={isUpdatingSeq}
-                className={`px-4 py-2.5 rounded-2xl text-xs font-black flex items-center gap-2.5 transition active:scale-95 shadow-lg border ${
-                  isSeqActive
-                    ? 'bg-sky-500/20 text-sky-300 border-sky-400/40 hover:bg-sky-500/30'
-                    : 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40 hover:bg-emerald-500/30'
-                }`}
-              >
-                <div
-                  className={`w-8 h-4 rounded-full relative transition-colors ${
-                    isSeqActive ? 'bg-sky-500' : 'bg-slate-700'
-                  }`}
-                >
-                  <div
-                    className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${
-                      isSeqActive ? 'right-0.5' : 'left-0.5'
-                    }`}
-                  />
-                </div>
-                <span>{isSeqActive ? 'Lock: ON' : 'Lock: OFF (Free Jump)'}</span>
-              </button>
-            ) : (
-              <button
-                onClick={onGoToSubscription}
-                className="px-4 py-2.5 rounded-2xl text-xs font-black bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-lg transition active:scale-95 flex items-center gap-1.5"
-              >
-                <span>⚡ Upgrade Plan</span>
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* ── COMPARISON MATRIX TABLE ── */}
-      <div className="rounded-3xl p-5 border border-sky-400/20 bg-sky-950/20 shadow-xl overflow-hidden relative">
-        <div className="absolute -top-10 -right-10 w-32 h-32 bg-sky-500/10 rounded-full blur-2xl pointer-events-none" />
-        
-        <div className="text-center mb-6">
-          <span className="inline-block px-3 py-1 rounded-full bg-sky-500/20 text-sky-400 text-[10px] font-black uppercase tracking-widest mb-2 border border-sky-400/20">
-            Full Transparency
-          </span>
-          <h2 className="text-xl font-black text-white">Feature Comparison Matrix</h2>
-          <p className="text-xs text-slate-400 mt-1">See exactly what you get across Free, Basic, and Ultra tiers</p>
+          <p className="text-xs sm:text-sm text-slate-400 mt-2">
+            See exactly what you get across Free, Basic, and Ultra tiers
+          </p>
         </div>
 
-        <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-sky-500/30 scrollbar-track-transparent">
-          <table className="w-full text-left min-w-[700px] border-collapse">
+        {/* Matrix Table */}
+        <div className="overflow-x-auto -mx-1 sm:mx-0 scrollbar-thin scrollbar-thumb-sky-500/30 scrollbar-track-transparent">
+          <table className="w-full text-left min-w-[360px] sm:min-w-[660px] border-collapse table-fixed">
             <thead>
               <tr>
-                <th className="p-3 border-b-2 border-white/10 text-xs font-black text-slate-300 w-[28%]">
+                <th className="p-2 sm:p-3 text-[10px] sm:text-xs font-bold text-slate-400 w-[31%] sm:w-[28%] align-bottom">
                   Feature / Module
                 </th>
-                <th className="p-3 border-b-2 border-slate-700 text-center w-[24%] bg-slate-900/40 rounded-tl-xl border-l border-t border-slate-700/50">
-                  <div className="text-[10px] uppercase text-slate-400 font-bold">Standard</div>
-                  <div className="text-sm font-black text-slate-200 mt-0.5">Free User</div>
-                </th>
-                <th className="p-3 border-b-2 border-sky-500/40 text-center w-[24%] bg-sky-900/20 border-l border-t border-sky-500/20">
-                  <div className="text-[10px] uppercase text-sky-400 font-bold flex justify-center gap-1">
-                    <span>⭐</span> Pro
+                <th className="p-2 sm:p-3 text-center w-[23%] sm:w-[24%] bg-[#101726] rounded-t-xl border border-white/5 shadow-inner">
+                  <div className="text-[8px] sm:text-[9.5px] uppercase tracking-widest text-slate-400 font-bold leading-none">
+                    STANDARD
                   </div>
-                  <div className="text-sm font-black text-sky-300 mt-0.5">Basic User</div>
-                </th>
-                <th className="p-3 border-b-2 border-purple-500/50 text-center w-[24%] bg-purple-900/30 rounded-tr-xl border-l border-t border-r border-purple-500/30">
-                  <div className="text-[10px] uppercase text-purple-300 font-bold flex justify-center gap-1">
-                    <span>👑</span> Max
+                  <div className="text-[11px] sm:text-sm font-black text-white mt-1 leading-tight">
+                    Free User
                   </div>
-                  <div className="text-sm font-black text-purple-200 mt-0.5">Ultra User</div>
+                </th>
+                <th className="p-2 sm:p-3 text-center w-[23%] sm:w-[24%] bg-[#082038] rounded-t-xl border border-cyan-500/30 shadow-inner">
+                  <div className="text-[8px] sm:text-[9.5px] uppercase tracking-widest text-cyan-400 font-bold flex items-center justify-center gap-1 leading-none">
+                    <span>★</span> PRO
+                  </div>
+                  <div className="text-[11px] sm:text-sm font-black text-cyan-200 mt-1 leading-tight">
+                    Basic User
+                  </div>
+                </th>
+                <th className="p-2 sm:p-3 text-center w-[23%] sm:w-[24%] bg-[#240e36] rounded-t-xl border border-purple-500/30 shadow-inner">
+                  <div className="text-[8px] sm:text-[9.5px] uppercase tracking-widest text-fuchsia-300 font-bold flex items-center justify-center gap-1 leading-none">
+                    <span>♦</span> MAX
+                  </div>
+                  <div className="text-[11px] sm:text-sm font-black text-purple-200 mt-1 leading-tight">
+                    Ultra User
+                  </div>
                 </th>
               </tr>
             </thead>
             <tbody>
-              {groups.map((group, gIdx) => (
+              {customGroups.map((group, gIdx) => (
                 <React.Fragment key={group.id || gIdx}>
-                  {/* Category Header */}
+                  {/* Category Banner Row - matching screenshot */}
                   <tr>
-                    <td colSpan={4} className="py-4 px-2 pt-6">
-                      <div className="flex items-center gap-2">
-                        <div className="h-px bg-slate-700 flex-1" />
-                        <span className="text-xs font-black text-slate-400 uppercase tracking-widest">
-                          {group.category}
-                        </span>
-                        <div className="h-px bg-slate-700 flex-1" />
+                    <td colSpan={4} className="p-1 sm:p-2 pt-4 sm:pt-6">
+                      <div className="w-full py-2 px-3 rounded-lg bg-sky-950/70 border border-sky-600/30 text-sky-400 font-black text-center uppercase tracking-widest text-[11px] sm:text-xs shadow-md">
+                        {group.category}
                       </div>
                     </td>
                   </tr>
                   
-                  {/* Items */}
+                  {/* Feature Items Rows */}
                   {group.items.map((item, iIdx) => {
-                    const isSequential = item.id === 'SEQ_READING' || item.label.toLowerCase().includes('sequential');
-
                     return (
                       <tr
                         key={item.id || iIdx}
-                        className={`group transition-colors ${
-                          isSequential
-                            ? 'bg-sky-500/10 hover:bg-sky-500/15 border-l-2 border-sky-400'
-                            : 'hover:bg-white/[0.02]'
-                        }`}
+                        className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors"
                       >
-                        <td className="p-3 border-b border-white/5 text-xs text-slate-300 font-medium group-hover:text-white transition-colors">
-                          <div className="flex items-center gap-1.5">
-                            <span>{item.label}</span>
+                        {/* Feature Name Column */}
+                        <td className="p-2 sm:p-3 text-[9px] sm:text-xs text-slate-300 font-medium break-words">
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-1">
+                            <span className="leading-tight">
+                              {item.label}
+                            </span>
                             {item.highlight && (
-                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-sky-400/20 text-sky-300 font-bold border border-sky-400/30">
+                              <span className="inline-block text-[7.5px] sm:text-[8.5px] px-1.5 py-0.2 rounded bg-sky-500 text-slate-950 font-black tracking-wider w-fit uppercase">
                                 POPULAR
                               </span>
                             )}
                           </div>
                         </td>
                         
-                        {/* Free Col */}
-                        <td className="p-3 border-b border-l border-white/5 text-center text-xs text-slate-400 bg-slate-900/20">
-                          <span
-                            className={
-                              item.free.includes('❌')
-                                ? 'text-rose-400/80'
-                                : item.free.includes('✅')
-                                ? 'text-emerald-400/80 font-bold'
-                                : item.free.includes('🔒')
-                                ? 'text-amber-400/90 font-bold'
-                                : ''
-                            }
-                          >
-                            {item.free}
-                          </span>
+                        {/* Free User Column */}
+                        <td className="p-2 sm:p-3 border-l border-white/5 text-center bg-[#0d1422]/50 break-words">
+                          {renderCellBadge(item.free, 'free')}
                         </td>
                         
-                        {/* Basic Col */}
-                        <td className="p-3 border-b border-l border-sky-500/10 text-center text-xs text-sky-200/80 bg-sky-900/10 group-hover:bg-sky-900/20 transition-colors">
-                          <span
-                            className={
-                              item.basic.includes('❌')
-                                ? 'text-rose-400'
-                                : item.basic.includes('✅')
-                                ? 'text-emerald-400 font-bold'
-                                : item.basic.includes('⚙️')
-                                ? 'text-sky-300 font-bold'
-                                : ''
-                            }
-                          >
-                            {item.basic}
-                          </span>
+                        {/* Basic User Column */}
+                        <td className="p-2 sm:p-3 border-l border-cyan-500/10 text-center bg-[#071c30]/40 break-words">
+                          {renderCellBadge(item.basic, 'basic')}
                         </td>
                         
-                        {/* Ultra Col */}
-                        <td className="p-3 border-b border-l border-r border-purple-500/20 text-center text-xs text-purple-200/90 bg-purple-900/20 group-hover:bg-purple-900/30 transition-colors">
-                          <span
-                            className={
-                              item.ultra.includes('❌')
-                                ? 'text-rose-400'
-                                : item.ultra.includes('✅')
-                                ? 'text-emerald-400 font-bold'
-                                : item.ultra.includes('⚙️')
-                                ? 'text-purple-300 font-bold'
-                                : item.ultra.includes('Unlimited') || item.ultra.includes('Instant')
-                                ? 'text-amber-300 font-bold'
-                                : ''
-                            }
-                          >
-                            {item.ultra}
-                          </span>
+                        {/* Ultra User Column */}
+                        <td className="p-2 sm:p-3 border-l border-purple-500/10 text-center bg-[#1d0a2d]/40 break-words">
+                          {renderCellBadge(item.ultra, 'ultra')}
                         </td>
                       </tr>
                     );
@@ -691,6 +665,23 @@ const CompareMatrix: React.FC<CompareMatrixProps> = ({
               ))}
             </tbody>
           </table>
+        </div>
+
+        {/* Clean footer note */}
+        <div className="mt-5 pt-3 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] text-slate-400">
+          <div className="flex items-center gap-1.5 text-cyan-300 text-[11px]">
+            <span>✨</span>
+            <span>100% Transparent Tier Comparison · Choose the plan that best fits your preparation goals.</span>
+          </div>
+          {onGoToSubscription && (
+            <button
+              type="button"
+              onClick={onGoToSubscription}
+              className="text-xs font-bold text-sky-400 hover:text-sky-300 transition cursor-pointer"
+            >
+              View Available Plans →
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -701,13 +692,43 @@ const CompareMatrix: React.FC<CompareMatrixProps> = ({
 
 export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, initialTier }) => {
   const resetCountdown = useMidnightCountdown();
-  const [tierType, setTierType] = useState<'SUBSCRIPTION' | 'COMPARE' | 'CREDITS' | 'DIAMONDS' | 'EXCHANGE' | 'HISTORY'>(() =>
-    initialTier || 'SUBSCRIPTION'
-  );
+
+  // Default is OFF unless explicitly turned ON by Admin in Dashboard
+  const isCreditsStoreOn = settings?.showCreditsStore === true;
+  const isDiamondsStoreOn = settings?.showDiamondsStore === true;
+
+  const isCreditEconomy = user.studyMode === 'CREDIT';
+  const isGuestUser = !user?.email && user?.provider !== 'email' && user?.provider !== 'google' && !!(user?.isGuest || user?.isAnonymous || user?.role === 'GUEST');
+  const [guestModalOpen, setGuestModalOpen] = useState(false);
+  const [guestModalFeature, setGuestModalFeature] = useState('Store Purchases & Subscriptions');
+
+  const [tierType, setTierType] = useState<'SUBSCRIPTION' | 'VIP_PLUS' | 'CREDITS' | 'DIAMONDS' | 'EXCHANGE' | 'HISTORY'>(() => {
+    if (initialTier) {
+      if (initialTier === 'CREDITS' && !isCreditsStoreOn) return isCreditEconomy ? 'VIP_PLUS' : 'SUBSCRIPTION';
+      if (initialTier === 'DIAMONDS' && !isDiamondsStoreOn) return isCreditEconomy ? 'VIP_PLUS' : 'SUBSCRIPTION';
+      if (initialTier === 'SUBSCRIPTION') return isCreditEconomy ? 'VIP_PLUS' : 'SUBSCRIPTION';
+      if (initialTier === 'VIP_PLUS') return isCreditEconomy ? 'VIP_PLUS' : 'SUBSCRIPTION';
+      return initialTier;
+    }
+    // Credit ON -> VIP+, Credit OFF -> VIP
+    return isCreditEconomy ? 'VIP_PLUS' : 'SUBSCRIPTION';
+  });
 
   useEffect(() => {
-    if (initialTier) setTierType(initialTier);
-  }, [initialTier]);
+    if (initialTier) {
+      if (initialTier === 'CREDITS' && !isCreditsStoreOn) {
+        setTierType(isCreditEconomy ? 'VIP_PLUS' : 'SUBSCRIPTION');
+      } else if (initialTier === 'DIAMONDS' && !isDiamondsStoreOn) {
+        setTierType(isCreditEconomy ? 'VIP_PLUS' : 'SUBSCRIPTION');
+      } else if (initialTier === 'SUBSCRIPTION' && isCreditEconomy) {
+        setTierType('VIP_PLUS');
+      } else if (initialTier === 'VIP_PLUS' && !isCreditEconomy) {
+        setTierType('SUBSCRIPTION');
+      } else {
+        setTierType(initialTier);
+      }
+    }
+  }, [initialTier, isCreditsStoreOn, isDiamondsStoreOn, isCreditEconomy]);
 
   /* Free Plan Side-by-Side Ad Modal State */
   
@@ -733,7 +754,9 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
   /* Plan Select State */
   const [selectedProPlanId, setSelectedProPlanId] = useState<string | null>(null);
   const [selectedMaxPlanId, setSelectedMaxPlanId] = useState<string | null>(null);
-  const [selectedTierForPurchase, setSelectedTierForPurchase] = useState<'BASIC' | 'ULTRA'>('BASIC');
+  const [selectedProPlusPlanId, setSelectedProPlusPlanId] = useState<string | null>(null);
+  const [selectedMaxPlusPlanId, setSelectedMaxPlusPlanId] = useState<string | null>(null);
+  const [selectedTierForPurchase, setSelectedTierForPurchase] = useState<'BASIC' | 'ULTRA' | 'PRO_PLUS' | 'MAX_PLUS'>('BASIC');
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
 
   const packages = settings?.packages || [];
@@ -754,7 +777,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
         const ok = await saveUserToLive(res.updatedUser);
         if (ok) {
           onUserUpdate(res.updatedUser);
-          setPassClaimSuccessMsg(`🎉 +{res.earned} Daily Credits Claim Ho Gaye! Naya Balance: ${(res.updatedUser.credits || 0).toLocaleString('en-IN')} CR 🪙`);
+          setPassClaimSuccessMsg(`🎉 +${res.earned} Daily Credits Claim Ho Gaye! Naya Balance: ${(res.updatedUser.credits || 0).toLocaleString('en-IN')} CR 🪙`);
           setTimeout(() => setPassClaimSuccessMsg(null), 6000);
         }
       }
@@ -778,9 +801,11 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
       const defaultPlan = subscriptionPlans.find(p => p.name.includes('Monthly')) || subscriptionPlans[0];
       if (!selectedProPlanId) setSelectedProPlanId(defaultPlan.id);
       if (!selectedMaxPlanId) setSelectedMaxPlanId(defaultPlan.id);
+      if (!selectedProPlusPlanId) setSelectedProPlusPlanId(defaultPlan.id);
+      if (!selectedMaxPlusPlanId) setSelectedMaxPlusPlanId(defaultPlan.id);
       if (!selectedPlanId) setSelectedPlanId(defaultPlan.id);
     }
-  }, [subscriptionPlans, selectedProPlanId, selectedMaxPlanId, selectedPlanId]);
+  }, [subscriptionPlans, selectedProPlanId, selectedMaxPlanId, selectedProPlusPlanId, selectedMaxPlusPlanId, selectedPlanId]);
 
   const selectedPlan = subscriptionPlans.find(p => p.id === selectedPlanId);
   const [showSupportModal, setShowSupportModal] = useState(false);
@@ -795,14 +820,20 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
   const [creditConfirmLoading, setCreditConfirmLoading] = useState(false);
 
   const handleCreditPurchase = async (plan: any) => {
+    if (isGuestUser) {
+      setGuestModalFeature('Credit Subscription');
+      setGuestModalOpen(true);
+      return;
+    }
     if (!isCreditSubAllowed) {
       setCreditPurchaseMsg('❌ Admin ne credits se subscription khareedna band kiya hua hai.');
       setTimeout(() => setCreditPurchaseMsg(null), 4000);
       return;
     }
     const isUltra = selectedTierForPurchase === 'ULTRA';
-    if (isUltra) {
-      setCreditPurchaseMsg('❌ Ultra membership credits se nahi kharida ja sakta. Sirf direct payment se liya ja sakta hai.');
+    const isVipPlus = selectedTierForPurchase === 'PRO_PLUS' || selectedTierForPurchase === 'MAX_PLUS';
+    if (isUltra || isVipPlus) {
+      setCreditPurchaseMsg('❌ VIP+ aur Ultra membership credits se nahi kharida ja sakta. Sirf direct payment se liya ja sakta hai.');
       setTimeout(() => setCreditPurchaseMsg(null), 4000);
       return;
     }
@@ -913,24 +944,68 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
     }
     const isSub = purchaseItem.duration !== undefined;
     const isUltraPurchase = selectedTierForPurchase === 'ULTRA';
-    const price = isSub
-      ? (purchaseItem.finalPrice !== undefined ? purchaseItem.finalPrice : (isUltraPurchase ? purchaseItem.ultraPrice : purchaseItem.basicPrice))
-      : purchaseItem.price;
-    const features = isSub ? (isUltraPurchase ? 'PDF + Videos + AI Studio (Max)' : 'MCQ + Notes (Pro)') : `${purchaseItem.credits} Credits`;
+    const isProPlusPurchase = selectedTierForPurchase === 'PRO_PLUS';
+    const isMaxPlusPurchase = selectedTierForPurchase === 'MAX_PLUS';
+
+    let price = purchaseItem.price;
+    if (isSub) {
+      if (purchaseItem.finalPrice !== undefined) {
+        price = purchaseItem.finalPrice;
+      } else if (isMaxPlusPurchase) {
+        price = getVipPlusBasePrice(purchaseItem, 'MAX_PLUS');
+      } else if (isProPlusPurchase) {
+        price = getVipPlusBasePrice(purchaseItem, 'PRO_PLUS');
+      } else if (isUltraPurchase) {
+        price = purchaseItem.ultraPrice;
+      } else {
+        price = purchaseItem.basicPrice;
+      }
+    }
+
+    const dailyDiamonds = (isProPlusPurchase || isMaxPlusPurchase)
+      ? (purchaseItem.dailyDiamonds || getVipPlusDiamondsPerDay(purchaseItem, isMaxPlusPurchase ? 'MAX_PLUS' : 'PRO_PLUS'))
+      : 0;
+
+    const tierLabel = isMaxPlusPurchase ? 'MAX+ (VIP+ Elite with Daily 💎 Diamonds)' :
+      isProPlusPurchase ? 'PRO+ (VIP+ with Daily 💎 Diamonds)' :
+      isUltraPurchase ? 'MAX VIP' : 'PRO';
+
+    const features = isSub
+      ? (isMaxPlusPurchase
+          ? `All Max Features + Daily ${dailyDiamonds} 💎 Diamonds/day`
+          : isProPlusPurchase
+          ? `All Pro Features + Daily ${dailyDiamonds} 💎 Diamonds/day`
+          : isUltraPurchase
+          ? 'PDF + Videos + AI Studio (Max)'
+          : 'MCQ + Notes (Pro)')
+      : `${purchaseItem.credits} Credits`;
+
     const effectiveDisc = purchaseItem.discountPercent !== undefined ? purchaseItem.discountPercent : totalDiscount;
     const discountNote = isSub && effectiveDisc > 0
       ? `\nDiscount Applied: ${effectiveDisc}% OFF${purchaseItem.durDiscount !== undefined ? ` (Duration Discount: ${purchaseItem.durDiscount}% OFF)` : ''}`
       : '';
-    const msg = `Hello Admin, I want to buy:\n\nItem: ${purchaseItem.name} ${isSub ? `(${isUltraPurchase ? 'MAX VIP' : 'PRO'})` : ''}\nPrice: ₹${price}${discountNote}\nUser ID: ${user.id}\nDetails: ${features}\n\nPlease share payment details.`;
+    const diamondNote = dailyDiamonds > 0 ? `\nDaily Diamond Drop: 💎 +${dailyDiamonds} Diamonds / din` : '';
+
+    const msg = `Hello Admin, I want to buy:\n\nItem: ${purchaseItem.name} (${tierLabel})\nPrice: ₹${price}${discountNote}${diamondNote}\nUser ID: ${user.id}\nDetails: ${features}\n\nPlease share payment details / QR code.`;
     window.open(`https://wa.me/91${numEntry.number}?text=${encodeURIComponent(msg)}`, '_blank');
     setShowSupportModal(false);
   };
 
-  const initiatePurchase = (item: any) => { setPurchaseItem(item); setShowSupportModal(true); };
+  const initiatePurchase = (item: any) => {
+    if (isGuestUser) {
+      setGuestModalFeature(item?.name ? `${item.name} Purchase` : 'Subscription / Plan');
+      setGuestModalOpen(true);
+      return;
+    }
+    setPurchaseItem(item);
+    setShowSupportModal(true);
+  };
 
   const isCreditsTab = tierType === 'CREDITS';
   const isDiamondsTab = tierType === 'DIAMONDS';
   const isExchangeTab = tierType === 'EXCHANGE';
+  const isVipPlusTab = tierType === 'VIP_PLUS';
+  const isVipTab = tierType === 'SUBSCRIPTION';
   const isPro = selectedTierForPurchase === 'BASIC';
 
   const ac = isCreditsTab
@@ -939,16 +1014,22 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
     ? { color: C.diamond, bg: C.diamondBg, border: C.diamondBorder, glow: C.diamondGlow, grad: 'linear-gradient(135deg,#0284c7,#38bdf8)', pill: 'rgba(56,189,248,0.14)', label: 'DIAMONDS', emoji: '💎' }
     : isExchangeTab
     ? { color: '#10b981', bg: 'rgba(16,185,129,0.12)', border: 'rgba(16,185,129,0.3)', glow: 'rgba(16,185,129,0.18)', grad: 'linear-gradient(135deg,#059669,#10b981)', pill: 'rgba(16,185,129,0.14)', label: 'EXCHANGE', emoji: '🔄' }
+    : isVipPlusTab || selectedTierForPurchase === 'PRO_PLUS' || selectedTierForPurchase === 'MAX_PLUS'
+    ? { color: '#06b6d4', bg: 'rgba(6,182,212,0.14)', border: 'rgba(6,182,212,0.4)', glow: 'rgba(6,182,212,0.25)', grad: 'linear-gradient(135deg,#0891b2,#06b6d4)', pill: 'rgba(6,182,212,0.2)', label: 'VIP+ ELITE', emoji: '💎' }
     : selectedTierForPurchase === 'BASIC'
     ? { color: C.pro, bg: C.proBg, border: C.proBorder, glow: C.proGlow, grad: C.proGrad, pill: 'rgba(34,211,238,0.14)', label: 'PRO', emoji: '⭐' }
     : { color: C.max, bg: C.maxBg, border: C.maxBorder, glow: C.maxGlow, grad: C.maxGrad, pill: 'rgba(192,132,252,0.14)', label: 'MAX', emoji: '👑' };
 
   const allTabs = [
-    { id: 'SUBSCRIPTION' as const, label: 'VIP Plans',    emoji: '👑', color: '#c084fc', bg: 'rgba(192,132,252,0.16)', border: 'rgba(192,132,252,0.35)', glow: 'rgba(192,132,252,0.25)' },
-    { id: 'COMPARE'      as const, label: 'Compare',      emoji: '⚖️', color: '#38bdf8', bg: 'rgba(56,189,248,0.16)', border: 'rgba(56,189,248,0.35)', glow: 'rgba(56,189,248,0.25)' },
-    { id: 'CREDITS'      as const, label: 'Credits',      emoji: '🪙', color: C.gold,   bg: C.goldBg,                  border: C.goldBorder,            glow: 'rgba(251,191,36,0.22)' },
-    { id: 'DIAMONDS'     as const, label: 'Diamonds',     emoji: '💎', color: C.diamond,bg: C.diamondBg,               border: C.diamondBorder,         glow: C.diamondGlow },
-    { id: 'EXCHANGE'     as const, label: 'Exchange',     emoji: '🔄', color: '#10b981',bg: 'rgba(16,185,129,0.14)', border: 'rgba(16,185,129,0.35)',glow: 'rgba(16,185,129,0.20)' },
+    ...(!settings?.hideSubscriptionsStore ? [
+      ...(isCreditEconomy
+        ? [{ id: 'VIP_PLUS' as const, label: 'VIP+', emoji: '��', color: '#38bdf8', bg: 'rgba(56,189,248,0.18)', border: 'rgba(56,189,248,0.45)', glow: 'rgba(56,189,248,0.35)' }]
+        : [{ id: 'SUBSCRIPTION' as const, label: 'VIP', emoji: '👑', color: '#c084fc', bg: 'rgba(192,132,252,0.16)', border: 'rgba(192,132,252,0.35)', glow: 'rgba(192,132,252,0.25)' }]
+      ),
+    ] : []),
+    ...(isCreditsStoreOn ? [{ id: 'CREDITS' as const, label: 'Credits', emoji: '🪙', color: C.gold, bg: C.goldBg, border: C.goldBorder, glow: 'rgba(251,191,36,0.22)' }] : []),
+    ...(isDiamondsStoreOn ? [{ id: 'DIAMONDS' as const, label: 'Diamonds', emoji: '💎', color: C.diamond, bg: C.diamondBg, border: C.diamondBorder, glow: C.diamondGlow }] : []),
+    ...(!settings?.hideExchangeStore ? [{ id: 'EXCHANGE' as const, label: 'Exchange', emoji: '🔄', color: '#10b981', bg: 'rgba(16,185,129,0.14)', border: 'rgba(16,185,129,0.35)', glow: 'rgba(16,185,129,0.20)' }] : []),
   ];
 
   const isUltraUser = user.isPremium && (user.subscriptionLevel === 'ULTRA' || (user.subscriptionLevel as any) === 'PRO');
@@ -1020,24 +1101,38 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
     return 0;
   };
 
-  const calculatePlanDiscount = (plan: any, isProTier: boolean) => {
+  const calculatePlanDiscount = (plan: any, isProTier: boolean, vipTier?: 'PRO_PLUS' | 'MAX_PLUS') => {
     if (!plan) {
       return {
         durDiscount: 0, subDiscount, userBonusDiscount, baseDiscount: 0,
         eventDiscount: eventDiscountPercent, eventEffectiveDiscount: 0, totalEffectiveDiscount: 0,
-        basePrice: 0, finalPrice: 0, isLifetimePlan: false,
+        basePrice: 0, originalPrice: 0, finalPrice: 0, isLifetimePlan: false,
       };
     }
     const planNameL2 = (plan.name || '').toLowerCase();
     const planDurL2 = (plan.duration || '').toLowerCase();
     const isLifetimePlan = planNameL2.includes('lifetime') || planDurL2.includes('lifetime') || (plan as any).tier === 'LIFETIME';
 
-    const basePrice = isProTier ? plan.basicPrice : plan.ultraPrice;
-    if (isLifetimePlan) {
+    let basePrice = 0;
+    let originalPrice = 0;
+    if (vipTier === 'PRO_PLUS') {
+      basePrice = getVipPlusBasePrice(plan, 'PRO_PLUS');
+      originalPrice = getVipPlusOriginalPrice(plan, 'PRO_PLUS');
+    } else if (vipTier === 'MAX_PLUS') {
+      basePrice = getVipPlusBasePrice(plan, 'MAX_PLUS');
+      originalPrice = getVipPlusOriginalPrice(plan, 'MAX_PLUS');
+    } else {
+      basePrice = isProTier ? plan.basicPrice : plan.ultraPrice;
+      originalPrice = isProTier
+        ? (plan.basicOriginalPrice || (plan.basicPrice ? plan.basicPrice * 2 : 199))
+        : (plan.ultraOriginalPrice || (plan.ultraPrice ? plan.ultraPrice * 2 : 299));
+    }
+
+    if (isLifetimePlan && !vipTier) {
       const lifetimePrice = isProTier ? 9999 : 19999;
       return {
         durDiscount: 0, subDiscount: 0, userBonusDiscount: 0, baseDiscount: 0, eventDiscount: 0,
-        eventEffectiveDiscount: 0, totalEffectiveDiscount: 0, basePrice: lifetimePrice, finalPrice: lifetimePrice,
+        eventEffectiveDiscount: 0, totalEffectiveDiscount: 0, basePrice: lifetimePrice, originalPrice: lifetimePrice * 2, finalPrice: lifetimePrice,
         isLifetimePlan: true,
       };
     }
@@ -1056,7 +1151,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
 
     return {
       durDiscount, subDiscount, userBonusDiscount, baseDiscount, eventDiscount: eventDiscountPercent,
-      eventEffectiveDiscount, totalEffectiveDiscount, basePrice, finalPrice, isLifetimePlan: false,
+      eventEffectiveDiscount, totalEffectiveDiscount, basePrice, originalPrice, finalPrice, isLifetimePlan: false,
     };
   };
 
@@ -1101,7 +1196,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
 
   const defaultBasicFeatures = [
     ...(!isGroupStudyHidden ? ['Group Study: Join Live Rooms & Battles'] : []),
-    'Daily Claim: 50 Credits / Day',
+    'Full Syllabus MCQs & Smart Notes',
     'Daily XP Limit: +66%',
     'XP Multiplier: 1.5X Boost',
     'Credit Off Anywhere: 10%',
@@ -1117,7 +1212,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
 
   const defaultUltraFeatures = [
     ...(!isGroupStudyHidden ? ['👑 Group Study Pro: Host Live Classroom & Battles'] : []),
-    'Daily Claim: 5 Diamonds / Day 💎',
+    'Pedro Level 8 (Till Subscription)',
     'All Basic Features Included',
     '⚡ Ultra Mode (Reading Notes)',
     'Store Discount: +10% (Pro & Max)',
@@ -1133,7 +1228,20 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
     'VIP Golden Crown & Glow',
   ];
 
-  const pageTheme = tierType === 'SUBSCRIPTION' ? {
+  const pageTheme = tierType === 'VIP_PLUS' ? {
+    bg: '#020617',
+    bgGrad: 'radial-gradient(ellipse 130% 80% at 50% -15%, rgba(6,182,212,0.25) 0%, rgba(168,85,247,0.20) 45%, #020617 80%)',
+    heroBg: 'linear-gradient(180deg, #050b1a 0%, #020617 100%)',
+    heroBorder: 'rgba(56,189,248,0.45)',
+    heroGlow1: 'rgba(34,211,238,0.30)',
+    heroGlow2: 'rgba(236,72,153,0.25)',
+    heroIconBg: 'linear-gradient(135deg, #06b6d4 0%, #8b5cf6 50%, #ec4899 100%)',
+    heroIconBorder: 'rgba(56,189,248,0.7)',
+    heroIconShadow: '0 0 24px rgba(6,182,212,0.6)',
+    heroIconColor: '#ffffff',
+    heroTitle: 'VIP+ Elite Passes',
+    heroSub: 'Pro+ & Max+ · Unlimited Power · Daily 💎 Drops & Super XP',
+  } : tierType === 'SUBSCRIPTION' ? {
     bg: '#080a18',
     bgGrad: 'radial-gradient(ellipse 120% 70% at 50% -10%, rgba(124,58,237,0.18) 0%, #080a18 65%)',
     heroBg: 'linear-gradient(180deg, #130e26 0%, #090615 100%)',
@@ -1282,8 +1390,11 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
 
       {/* ── PAYMENT CHOOSER POPUP ── */}
       {showPaymentChooser && selectedPlan && (() => {
-        const isProTarget = selectedTierForPurchase === 'BASIC';
-        const discInfo = calculatePlanDiscount(selectedPlan, isProTarget);
+        const isVipPlus = selectedTierForPurchase === 'PRO_PLUS' || selectedTierForPurchase === 'MAX_PLUS';
+        const isMax = selectedTierForPurchase === 'ULTRA' || selectedTierForPurchase === 'MAX_PLUS';
+        const isProTarget = selectedTierForPurchase === 'BASIC' || selectedTierForPurchase === 'PRO_PLUS';
+        const vipTier = selectedTierForPurchase === 'PRO_PLUS' ? 'PRO_PLUS' : selectedTierForPurchase === 'MAX_PLUS' ? 'MAX_PLUS' : undefined;
+        const discInfo = calculatePlanDiscount(selectedPlan, isProTarget, vipTier);
         const basePrice = discInfo.basePrice;
         const finalPrice = discInfo.finalPrice;
         const effectiveDiscount = discInfo.totalEffectiveDiscount;
@@ -1313,7 +1424,17 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
                 </div>
                 <div className="p-4 space-y-3">
                   <button
-                    onClick={() => { setShowPaymentChooser(false); initiatePurchase({ ...selectedPlan, finalPrice, discountPercent: effectiveDiscount, durDiscount }); }}
+                    onClick={() => {
+                      setShowPaymentChooser(false);
+                      initiatePurchase({
+                        ...selectedPlan,
+                        finalPrice,
+                        discountPercent: effectiveDiscount,
+                        durDiscount,
+                        vipTier,
+                        dailyDiamonds: vipTier ? getVipPlusDiamondsPerDay(selectedPlan, vipTier) : undefined,
+                      });
+                    }}
                     className="w-full p-4 rounded-2xl text-left transition-all active:scale-[0.98] flex items-center gap-3 cursor-pointer"
                     style={{ background: ac.bg, border: `1.5px solid ${ac.border}` }}>
                     <div className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 text-xl font-black"
@@ -1334,7 +1455,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
                     </div>
                     <ChevronRight size={16} color={C.textDim} />
                   </button>
-                  {!isLifetimePlan && selectedTierForPurchase !== 'ULTRA' && (
+                  {!isLifetimePlan && !isMax && !isVipPlus && (
                     isCreditSubAllowed ? (
                       <button
                         onClick={() => { setShowPaymentChooser(false); setShowCreditConfirm(true); }}
@@ -1448,7 +1569,9 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0 flex-1">
               {onBack && (
-                <button onClick={onBack}
+                <button
+                  id="store-back-btn"
+                  onClick={onBack}
                   className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 active:scale-90 transition-transform bg-white/5 border border-white/10 cursor-pointer">
                   <ArrowLeft size={15} color={C.textMuted} />
                 </button>
@@ -1469,72 +1592,106 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
 
             {/* Right: Currency Pills */}
             <div className="flex items-center gap-1.5 shrink-0">
-              <button
-                onClick={() => setTierType('DIAMONDS')}
-                className="flex items-center gap-1 px-2 rounded-xl active:scale-95 transition-all cursor-pointer h-7"
-                style={{
-                  background: 'rgba(56,189,248,0.12)',
-                  border: '1px solid rgba(56,189,248,0.3)',
-                }}
-                title="Diamonds Store"
-              >
-                <span className="text-xs leading-none">💎</span>
-                <span className="font-black text-xs leading-none text-sky-400">
-                  {(user.diamonds ?? 0).toLocaleString('en-IN')}
-                </span>
-                <span className="w-3.5 h-3.5 rounded-full bg-sky-400 text-slate-950 flex items-center justify-center font-black text-[9px] ml-0.5">
-                  +
-                </span>
-              </button>
+              {isDiamondsStoreOn && (
+                <button
+                  id="store-diamonds-pill"
+                  onClick={() => setTierType('DIAMONDS')}
+                  className="flex items-center gap-1 px-2.5 rounded-xl active:scale-95 transition-all cursor-pointer h-7"
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0.05) 100%)',
+                    border: '1px solid rgba(255, 255, 255, 0.22)',
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.20), inset 0 1px 1px rgba(255, 255, 255, 0.25)',
+                    backdropFilter: 'blur(8px)',
+                  }}
+                  title="Diamonds Store"
+                >
+                  <span className="text-xs leading-none">💎</span>
+                  <span className="font-black text-xs leading-none text-white">
+                    {(user.diamonds ?? 0).toLocaleString('en-IN')}
+                  </span>
+                  <span className="w-3.5 h-3.5 rounded-full bg-white/20 text-white flex items-center justify-center font-black text-[9px] ml-0.5 border border-white/30">
+                    +
+                  </span>
+                </button>
+              )}
 
-              <button
-                onClick={() => setTierType('CREDITS')}
-                className="flex items-center gap-1 px-2 rounded-xl active:scale-95 transition-all cursor-pointer h-7"
-                style={{
-                  background: 'rgba(251,191,36,0.12)',
-                  border: '1px solid rgba(251,191,36,0.3)',
-                }}
-                title="Credits Store"
-              >
-                <span className="text-xs leading-none">🪙</span>
-                <span className="font-black text-xs leading-none text-amber-400">
-                  {userCredits.toLocaleString('en-IN')}
-                </span>
-                <span className="w-3.5 h-3.5 rounded-full bg-amber-400 text-slate-950 flex items-center justify-center font-black text-[9px] ml-0.5">
-                  +
-                </span>
-              </button>
+              {isCreditsStoreOn && (
+                <button
+                  id="store-credits-pill"
+                  onClick={() => setTierType('CREDITS')}
+                  className="flex items-center gap-1 px-2.5 rounded-xl active:scale-95 transition-all cursor-pointer h-7"
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0.05) 100%)',
+                    border: '1px solid rgba(255, 255, 255, 0.22)',
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.20), inset 0 1px 1px rgba(255, 255, 255, 0.25)',
+                    backdropFilter: 'blur(8px)',
+                  }}
+                  title="Credits Store"
+                >
+                  <span className="text-xs leading-none">🪙</span>
+                  <span className="font-black text-xs leading-none text-white">
+                    {userCredits.toLocaleString('en-IN')}
+                  </span>
+                  <span className="w-3.5 h-3.5 rounded-full bg-white/20 text-white flex items-center justify-center font-black text-[9px] ml-0.5 border border-white/30">
+                    +
+                  </span>
+                </button>
+              )}
             </div>
           </div>
 
-          {/* Bottom Row: Tabs (Free vs VIP at the very beginning) */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
+          {/* Bottom Row: Tabs (VIP / VIP+, Exchange, History - full width, equal size, large buttons) */}
+          <div className="w-full flex items-stretch gap-2 pt-1 pb-1">
             
-            {/* 2. MAIN TABS (VIP Plans, Credits, Diamonds, Exchange) */}
+            {/* 2. MAIN TABS (VIP / VIP+, Credits, Diamonds, Exchange) */}
             {allTabs.map(tab => {
               const isActive = tierType === tab.id;
               return (
-                <button key={tab.id} onClick={() => setTierType(tab.id as any)}
-                  className="py-1 px-2.5 rounded-xl font-black transition-all flex items-center gap-1 shrink-0 cursor-pointer text-xs"
+                <button
+                  key={tab.id}
+                  id={`store-tab-${tab.id.toLowerCase()}`}
+                  onClick={() => setTierType(tab.id as any)}
+                  className="flex-1 min-w-0 py-2.5 sm:py-3 px-2 rounded-xl sm:rounded-2xl font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer text-xs sm:text-sm active:scale-95 shadow-md"
                   style={isActive
-                    ? { background: tab.bg, border: `1.5px solid ${tab.border}`, boxShadow: `0 0 10px ${tab.glow}`, color: tab.color }
-                    : { background: 'rgba(255,255,255,0.04)', border: `1px solid rgba(255,255,255,0.08)`, color: C.textMuted }}>
-                  <span className="text-xs">{tab.emoji}</span>
-                  <span className="text-[10px]">{tab.label}</span>
+                    ? { background: tab.bg, border: `2px solid ${tab.border}`, boxShadow: `0 0 14px ${tab.glow}`, color: tab.color }
+                    : { background: 'rgba(255,255,255,0.06)', border: `1.5px solid rgba(255,255,255,0.12)`, color: C.textMuted }}>
+                  <span className="text-sm sm:text-base shrink-0">{tab.emoji}</span>
+                  <span className="font-black truncate">{tab.label}</span>
                 </button>
               );
             })}
 
             {/* 3. HISTORY TAB */}
-            <button onClick={() => setTierType('HISTORY')}
-              className="py-1 px-2.5 rounded-xl font-black transition-all flex items-center gap-1 shrink-0 cursor-pointer text-xs"
+            <button
+              id="store-tab-history"
+              onClick={() => setTierType('HISTORY')}
+              className="flex-1 min-w-0 py-2.5 sm:py-3 px-2 rounded-xl sm:rounded-2xl font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer text-xs sm:text-sm active:scale-95 shadow-md"
               style={tierType === 'HISTORY'
-                ? { background: 'rgba(251,191,36,0.12)', border: `1.5px solid rgba(251,191,36,0.35)`, color: C.gold }
-                : { background: 'rgba(255,255,255,0.04)', border: `1px solid rgba(255,255,255,0.08)`, color: C.textMuted }}>
-              <History size={11} />
-              <span className="text-[10px]">History</span>
+                ? { background: 'rgba(251,191,36,0.18)', border: `2px solid rgba(251,191,36,0.5)`, boxShadow: '0 0 14px rgba(251,191,36,0.25)', color: C.gold }
+                : { background: 'rgba(255,255,255,0.06)', border: `1.5px solid rgba(255,255,255,0.12)`, color: C.textMuted }}>
+              <History size={16} className="shrink-0" />
+              <span className="font-black truncate">History</span>
             </button>
           </div>
+
+          {/* Guest Mode Restriction Alert Banner */}
+          {isGuestUser && (
+            <div className="p-3 rounded-2xl bg-amber-500/15 border border-amber-500/35 flex items-center justify-between gap-3 text-xs mt-1">
+              <div className="flex items-center gap-2 text-amber-300 min-w-0">
+                <Shield size={16} className="text-amber-400 shrink-0" />
+                <p className="text-[11px] leading-tight">
+                  <strong>Guest Mode:</strong> Subscriptions ya purchases unlock karne ke liye apna account Google se bind karein.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setGuestModalFeature('Store Subscriptions'); setGuestModalOpen(true); }}
+                className="px-2.5 py-1.5 rounded-xl bg-amber-400 text-slate-950 font-black text-[11px] shrink-0 hover:bg-amber-300 transition-all active:scale-95 cursor-pointer shadow-sm"
+              >
+                Bind Google
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1545,15 +1702,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
         {tierType === 'HISTORY' && <SubHistory user={user} onBack={() => setTierType('SUBSCRIPTION')} />}
 
         
-        {/* ── COMPARE MATRIX ── */}
-        {tierType === 'COMPARE' && (
-          <CompareMatrix
-            user={user}
-            settings={settings}
-            onUserUpdate={onUserUpdate}
-            onGoToSubscription={() => setTierType('SUBSCRIPTION')}
-          />
-        )}
+
 
         {/* ── 2. VIP SUBSCRIPTIONS (CLEAN PRO & MAX PASS CARDS) ── */}
         {tierType === 'SUBSCRIPTION' && (
@@ -1574,16 +1723,8 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
                 </span>
               </div>
             )}
-            {user.isPremium && !isSubscriptionFromCoins(user) && (
-              <TierDailyClaimCard
-                targetTier={user.subscriptionLevel === 'BASIC' ? 'PRO' : 'MAX_PRO'}
-                userId={user.id}
-                user={user}
-                settings={settings}
-                onUpdateUser={onUserUpdate}
-              />
-            )}
 
+            {/* Standard VIP Cards */}
             {(() => {
               const renderVipCard = (tierTarget: 'BASIC' | 'ULTRA') => {
                 const isProTier = tierTarget === 'BASIC';
@@ -1623,15 +1764,14 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
                     <div className="flex items-start justify-between gap-2 mb-2 pb-2 border-b border-white/10">
                       <div>
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <span>{isProTier ? '⭐' : '👑'}</span>
+                          <span className="text-base">{isProTier ? '⭐' : '👑'}</span>
                           <h2 className="text-base font-black text-white">
-                            {isProTier ? 'Pro Learner Pass' : 'Max Elite VIP Pass'}
+                            {isProTier ? 'Pro Learner Pass' : 'Max Pro Elite Pass'}
                           </h2>
-                          <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-amber-400/15 text-amber-300">
-                            {isProTier ? '🪙 +50 Credits/din' : '💎 +5 Diamonds/din'}
-                          </span>
-                          <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-cyan-400/15 text-cyan-300">
-                            ⚡ {isProTier ? '1.5x XP' : '2.0x XP'}
+                          <span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${
+                            isProTier ? 'bg-cyan-400/20 text-cyan-300 border border-cyan-400/30' : 'bg-purple-400/20 text-purple-300 border border-purple-400/30'
+                          }`}>
+                            {isProTier ? 'POPULAR' : 'ALL UNLOCKED'}
                           </span>
                           {discInfo.totalEffectiveDiscount > 0 && (
                             <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-emerald-400/20 text-emerald-300 border border-emerald-400/40">
@@ -1639,8 +1779,12 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
                             </span>
                           )}
                         </div>
-                        <p className="text-[10px] text-slate-300 mt-1">
-                          {subActive ? `Active Plan · ${daysLeft} din baaki` : 'Sabhi features instantly unlock honge'}
+                        <p className="text-[10.5px] text-slate-300 mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
+                          {subActive
+                            ? `Active VIP Plan · ${daysLeft} din baaki`
+                            : isProTier
+                            ? 'Pro Pass: Unlimited MCQs, Notes, Flashcards & Boost'
+                            : 'Max Pass: All Ultra Features, 3000 MCQ/day, AI Super Tools'}
                         </p>
                       </div>
                       <div className="text-right">
@@ -1674,35 +1818,32 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
                       </div>
                     </div>
 
-                    {/* Validity Selector */}
-                    <div className="p-2 rounded-xl bg-black/35 border border-white/5 my-2.5">
-                      <div className="flex items-center justify-between text-[11px] mb-2 px-1">
-                        <span className="font-black text-slate-300 uppercase tracking-wider flex items-center gap-1 text-[10px]">
-                          <Clock size={11} /> VALIDITY CHUNEIN:
-                        </span>
-                        <span className="text-slate-300 font-bold text-[10.5px]">
-                          Total ₹{discInfo.finalPrice.toLocaleString('en-IN')} (₹{perDayCost}/din)
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-4 gap-1.5">
+                    {/* Duration Options */}
+                    <div className="my-2.5">
+                      <div className="grid grid-cols-4 gap-1 sm:gap-1.5">
                         {subscriptionPlans.map(plan => {
-                          const isSel = activePlan.id === plan.id;
+                          const isSel = plan.id === activePlanId;
                           const planDurDisc = getPlanDurationDiscount(plan);
                           return (
-                            <button key={plan.id} type="button" onClick={() => setActivePlanId(plan.id)}
-                              className={`relative py-1.5 px-1 rounded-xl text-center transition-all border text-xs cursor-pointer flex flex-col items-center justify-center ${
+                            <button
+                              key={plan.id}
+                              type="button"
+                              onClick={() => setActivePlanId(plan.id)}
+                              className={`py-1.5 px-1 rounded-xl text-xs font-bold transition flex flex-col items-center justify-center cursor-pointer border ${
                                 isSel
                                   ? (isProTier ? 'bg-cyan-400 text-slate-950 font-black shadow-md border-cyan-300' : 'bg-purple-400 text-slate-950 font-black shadow-md border-purple-300')
                                   : 'bg-white/5 text-slate-300 border-white/10 hover:bg-white/10'
                               }`}>
                               {planDurDisc > 0 && (
-                                <span className={`text-[8px] font-black px-1 py-0.2 rounded-full mb-0.5 leading-tight ${
+                                <span className={`text-[7.5px] sm:text-[8px] font-black px-1 sm:px-1.5 py-0.5 rounded-full mb-0.5 leading-tight whitespace-nowrap ${
                                   isSel ? 'bg-slate-950 text-amber-300' : 'bg-emerald-400/20 text-emerald-300 border border-emerald-400/30'
                                 }`}>
                                   {planDurDisc}% OFF
                                 </span>
                               )}
-                              <span className="leading-tight">{plan.duration || plan.name}</span>
+                              <span className="leading-tight font-black whitespace-nowrap text-[10px] sm:text-xs">
+                                {plan.duration || plan.name}
+                              </span>
                             </button>
                           );
                         })}
@@ -1753,14 +1894,14 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
                       <button type="button"
                         onClick={() => {
                           setSelectedPlanId(activePlan.id);
-                          setSelectedTierForPurchase(isProTier ? 'BASIC' : 'ULTRA');
+                          setSelectedTierForPurchase(tierTarget);
                           setShowPaymentChooser(true);
                         }}
                         className="w-full py-3 rounded-xl font-black text-sm text-white flex items-center justify-center gap-2 shadow-lg cursor-pointer transition active:scale-[0.99]"
                         style={{
                           background: isProTier ? 'linear-gradient(135deg, #06b6d4, #0891b2)' : 'linear-gradient(135deg, #a855f7, #7c3aed)'
                         }}>
-                        <Zap size={16} /> {activePlan.duration || '30 Din'} Subscribe Karein — ₹{discInfo.finalPrice.toLocaleString('en-IN')}
+                        <Zap size={16} className="shrink-0" /> <span className="whitespace-nowrap">{activePlan.duration || '30 Din'}</span> Subscribe Karein — ₹{discInfo.finalPrice.toLocaleString('en-IN')}
                       </button>
 
                       {isCreditSubAllowed && isProTier && !discInfo.isLifetimePlan && (
@@ -1797,11 +1938,320 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
                 {creditPurchaseMsg}
               </div>
             )}
+
+            {/* ── VIP FEATURE COMPARISON MATRIX (CRADIT OFF) ── */}
+            <div className="mt-8 pt-4 border-t border-white/10">
+              <CompareMatrix
+                user={user}
+                settings={settings}
+                onUserUpdate={onUserUpdate}
+                mode="CREDIT_OFF"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* ── 2B. VIP+ ELITE PASSES (PRO+ & MAX+) ── */}
+        {tierType === 'VIP_PLUS' && (
+          <div className="space-y-5">
+            {/* Ultra-Luxe VIP+ Hero Showcase Banner */}
+            <div className="p-5 rounded-3xl bg-gradient-to-r from-slate-950 via-cyan-950/50 to-fuchsia-950/50 border border-cyan-400/40 shadow-2xl relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-bl from-cyan-400/15 via-fuchsia-500/15 to-transparent blur-3xl pointer-events-none" />
+              <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-3.5">
+                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-cyan-400 via-sky-500 to-fuchsia-600 flex items-center justify-center text-3xl shadow-xl shadow-cyan-500/30 shrink-0 border border-white/20 animate-pulse">
+                    💎
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h2 className="text-lg sm:text-xl font-black text-white tracking-wide">VIP+ Elite Passes</h2>
+                      <span className="text-[9px] font-black px-2.5 py-0.5 rounded-full bg-gradient-to-r from-cyan-400 to-fuchsia-400 text-slate-950 font-mono shadow-sm">
+                        ULTRA-PREMIUM
+                      </span>
+                      <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-cyan-400/20 text-cyan-300 border border-cyan-400/40">
+                        DAILY 💎 DROPS
+                      </span>
+                      <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-purple-400/20 text-purple-300 border border-purple-400/40">
+                        2.0x SUPER XP
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-300 mt-1 max-w-xl">
+                      Ultimate VIP+ experience: Saari Premium powers ke saath rozana direct 💎 Diamonds wallet me drop hote hain aur Instant Credit Swap unlock hota hai!
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Daily Diamond Claim Card if active VIP+ */}
+            {user.isPremium && (user.vipPlusTier === 'PRO_PLUS' || user.vipPlusTier === 'MAX_PLUS') && !isSubscriptionFromCoins(user) && (
+              <TierDailyClaimCard
+                targetTier={user.vipPlusTier === 'MAX_PLUS' ? 'MAX_PRO' : 'PRO'}
+                userId={user.id}
+                user={user}
+                settings={settings}
+                onUpdateUser={onUserUpdate}
+              />
+            )}
+
+            {/* VIP+ Cards */}
+            {(() => {
+              const renderVipPlusCard = (tierTarget: 'PRO_PLUS' | 'MAX_PLUS') => {
+                const isProPlus = tierTarget === 'PRO_PLUS';
+                const activePlanId = isProPlus ? selectedProPlusPlanId : selectedMaxPlusPlanId;
+                const setActivePlanId = (id: string) => isProPlus ? setSelectedProPlusPlanId(id) : setSelectedMaxPlusPlanId(id);
+
+                const subActive = user.isPremium && (
+                  user.vipPlusTier === tierTarget ||
+                  (isProPlus && user.subscriptionLevel === 'BASIC') ||
+                  (!isProPlus && (user.subscriptionLevel === 'ULTRA' || (user.subscriptionLevel as any) === 'PRO'))
+                ) && user.subscriptionEndDate && new Date(user.subscriptionEndDate) > new Date();
+
+                const daysLeft = subActive && user.subscriptionEndDate
+                  ? Math.max(0, Math.ceil((new Date(user.subscriptionEndDate).getTime() - Date.now()) / 86400000))
+                  : 0;
+
+                const activePlan = subscriptionPlans.find(p => p.id === activePlanId) || subscriptionPlans[0];
+                if (!activePlan) return null;
+
+                const discInfo = calculatePlanDiscount(activePlan, isProPlus, tierTarget);
+                const planDurationDays = getPlanDurationDays(activePlan);
+                const dailyDiamonds = getVipPlusDiamondsPerDay(activePlan, tierTarget);
+                const totalDiamonds = dailyDiamonds * planDurationDays;
+                const perDayCost = (discInfo.finalPrice / planDurationDays).toFixed(1);
+
+                const baseFeatures = filterGroupStudy(isProPlus ? defaultBasicFeatures : defaultUltraFeatures);
+                const cardFeatures = [
+                  `💎 Daily Claim: +${dailyDiamonds} Diamonds / din`,
+                  `🪙 Total Diamonds: ${totalDiamonds.toLocaleString('en-IN')} 💎`,
+                  `⚡ ${isProPlus ? '1.5x XP Boost' : '2.0x Super XP Boost'}`,
+                  `🔄 Instant Diamond ↔ Credit Swap Ready`,
+                  `🔓 Unlimited MCQs + All Syllabus Pages Unlocked`,
+                  ...baseFeatures.slice(0, 7),
+                ];
+
+                return (
+                  <div key={tierTarget} className="mb-5 rounded-3xl p-5 sm:p-6 border relative overflow-hidden shadow-2xl backdrop-blur-xl"
+                    style={{
+                      background: isProPlus
+                        ? 'linear-gradient(145deg, rgba(6,30,52,0.95) 0%, rgba(2,12,24,0.98) 100%)'
+                        : 'linear-gradient(145deg, rgba(46,10,68,0.95) 0%, rgba(14,3,24,0.98) 100%)',
+                      borderColor: isProPlus ? 'rgba(56,189,248,0.65)' : 'rgba(232,121,249,0.7)',
+                      boxShadow: isProPlus ? '0 16px 48px rgba(6,182,212,0.22), inset 0 1px 0 rgba(255,255,255,0.18)' : '0 16px 48px rgba(217,70,239,0.25), inset 0 1px 0 rgba(255,255,255,0.18)',
+                    }}>
+                    {/* Top Iridescent Accent Bar */}
+                    <div className="absolute top-0 left-0 right-0 h-1.5"
+                      style={{
+                        background: isProPlus
+                          ? 'linear-gradient(90deg, #06b6d4, #38bdf8, #818cf8)'
+                          : 'linear-gradient(90deg, #d946ef, #c084fc, #f43f5e)'
+                      }}
+                    />
+
+                    <div className="flex items-start justify-between gap-3 mb-3 pb-3 border-b border-white/10">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-2xl">{isProPlus ? '⭐💎' : '👑💎'}</span>
+                          <h2 className="text-lg sm:text-xl font-black text-white">
+                            {isProPlus ? 'Pro+ Learner Pass (VIP+)' : 'Max+ Elite Pass (VIP+)'}
+                          </h2>
+                          <span className="text-[9px] font-black px-2.5 py-0.5 rounded-full bg-cyan-400/20 text-cyan-300 border border-cyan-400/40 animate-pulse">
+                            💎 +{dailyDiamonds} Diamonds/din
+                          </span>
+                          <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-purple-400/20 text-purple-300">
+                            ⚡ {isProPlus ? '1.5x XP' : '2.0x XP'}
+                          </span>
+                          {discInfo.totalEffectiveDiscount > 0 && (
+                            <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-emerald-400/20 text-emerald-300 border border-emerald-400/40">
+                              {discInfo.totalEffectiveDiscount}% OFF
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-300 mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
+                          {subActive
+                            ? `Active VIP+ Plan · ${daysLeft} din baaki (${dailyDiamonds} 💎/din claimable)`
+                            : isProPlus
+                            ? 'All Pro Features + Rozana 💎 Diamonds direct wallet me'
+                            : 'All Ultra Max Features + Rozana 💎 Highest Diamonds'}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        {discInfo.totalEffectiveDiscount > 0 ? (
+                          <div className="flex flex-col items-end">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs line-through text-slate-400 font-bold">
+                                ₹{discInfo.basePrice.toLocaleString('en-IN')}
+                              </span>
+                              <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                -{discInfo.totalEffectiveDiscount}%
+                              </span>
+                            </div>
+                            <span className={`text-2xl sm:text-3xl font-black ${isProPlus ? 'text-cyan-300' : 'text-fuchsia-300'}`}>
+                              ₹{discInfo.finalPrice.toLocaleString('en-IN')}
+                            </span>
+                            <span className="text-[9.5px] text-slate-400 block font-medium">
+                              ₹{perDayCost}/din
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col items-end">
+                            <span className={`text-2xl sm:text-3xl font-black ${isProPlus ? 'text-cyan-300' : 'text-fuchsia-300'}`}>
+                              ₹{discInfo.finalPrice.toLocaleString('en-IN')}
+                            </span>
+                            <span className="text-[9.5px] text-slate-400 block font-medium">
+                              ₹{perDayCost}/din
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Validity Selector with Diamond Rates */}
+                    <div className="p-2.5 rounded-2xl bg-black/40 border border-white/10 my-3">
+                      <div className="flex items-center justify-between text-xs mb-2 px-1">
+                        <span className="font-black text-slate-300 uppercase tracking-wider flex items-center gap-1 text-[10px]">
+                          <Clock size={11} /> VALIDITY CHUNEIN (DAILY 💎 RATIO):
+                        </span>
+                        <span className="text-cyan-300 font-bold text-xs">
+                          Total {totalDiamonds.toLocaleString('en-IN')} Diamonds
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-4 gap-1 sm:gap-1.5">
+                        {subscriptionPlans.map(plan => {
+                          const isSel = activePlan.id === plan.id;
+                          const planDurDisc = getPlanDurationDiscount(plan);
+                          const planDiamonds = getVipPlusDiamondsPerDay(plan, tierTarget);
+                          return (
+                            <button key={plan.id} type="button" onClick={() => setActivePlanId(plan.id)}
+                              className={`relative py-2 px-1 rounded-xl text-center transition-all border text-xs cursor-pointer flex flex-col items-center justify-center ${
+                                isSel
+                                  ? (isProPlus ? 'bg-cyan-400 text-slate-950 font-black shadow-lg border-cyan-300' : 'bg-gradient-to-br from-fuchsia-400 to-purple-500 text-white font-black shadow-lg border-fuchsia-300')
+                                  : 'bg-white/5 text-slate-300 border-white/10 hover:bg-white/10'
+                              }`}>
+                              {planDurDisc > 0 && (
+                                <span className={`text-[7.5px] sm:text-[8px] font-black px-1 sm:px-1.5 py-0.5 rounded-full mb-0.5 leading-tight whitespace-nowrap ${
+                                  isSel ? 'bg-slate-950 text-amber-300' : 'bg-emerald-400/20 text-emerald-300 border border-emerald-400/30'
+                                }`}>
+                                  {planDurDisc}% OFF
+                                </span>
+                              )}
+                              <span className="leading-tight font-black whitespace-nowrap text-[10px] sm:text-xs">{plan.duration || plan.name}</span>
+                              <span className={`text-[8.5px] sm:text-[9.5px] font-black mt-0.5 whitespace-nowrap ${isSel ? (isProPlus ? 'text-blue-950' : 'text-amber-200') : 'text-cyan-400'}`}>
+                                💎 {planDiamonds}/d
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Diamond Highlight Box */}
+                    <div className="p-3 rounded-2xl bg-gradient-to-r from-sky-950/80 via-indigo-950/80 to-slate-950 border border-sky-400/40 mb-3 flex items-center justify-between gap-2 shadow-lg">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-400 to-sky-600 flex items-center justify-center text-xl shadow-md shadow-cyan-500/30">💎</div>
+                        <div>
+                          <p className="text-xs font-black text-sky-200 flex items-center gap-1.5">
+                            <span>+{dailyDiamonds} Diamonds Rozana Milenge ({planDurationDays} Din)</span>
+                            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-cyan-400/20 text-cyan-300">AUTO-DROP</span>
+                          </p>
+                          <p className="text-[10px] text-slate-300">
+                            Total {totalDiamonds.toLocaleString('en-IN')} Diamonds seedhe aapke balance me claimable!
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-xs font-mono font-black px-2.5 py-1 rounded-xl bg-cyan-400/20 text-cyan-300 border border-cyan-400/50 shadow-inner shrink-0">
+                        +{dailyDiamonds} 💎/din
+                      </span>
+                    </div>
+
+                    {/* Discount Breakdown Box if discount active */}
+                    {discInfo.totalEffectiveDiscount > 0 && (
+                      <div className="my-2 p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-500/30 text-emerald-200">
+                        <div className="flex items-center justify-between text-xs font-black text-emerald-300 mb-1">
+                          <span className="flex items-center gap-1">
+                            🔥 Flat {discInfo.totalEffectiveDiscount}% Discount Active!
+                          </span>
+                          <span>
+                            ₹{(discInfo.basePrice - discInfo.finalPrice).toLocaleString('en-IN')} Ki Bachat
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-[10px] text-emerald-300/80">
+                          <span>
+                            {[
+                              discInfo.durDiscount > 0 ? `Plan: ${discInfo.durDiscount}%` : null,
+                              discInfo.eventDiscount > 0 ? `Event: ${discInfo.eventDiscount}%` : null,
+                              discInfo.subDiscount > 0 ? `Renewal: ${discInfo.subDiscount}%` : null,
+                              discInfo.userBonusDiscount > 0 ? `Bonus: ${discInfo.userBonusDiscount}%` : null,
+                            ].filter(Boolean).join(' + ') || 'Special Discount'}
+                          </span>
+                          <span className="font-black text-emerald-300">
+                            → Effective: {discInfo.totalEffectiveDiscount}% OFF
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Features list */}
+                    <div className="my-2.5 p-3 rounded-2xl bg-black/40 border border-white/10">
+                      <div className="grid grid-cols-2 gap-2">
+                        {cardFeatures.map((feat, idx) => (
+                          <div key={idx} className="flex items-start gap-1.5 text-xs text-slate-200">
+                            <span className={isProPlus ? 'text-cyan-400 font-black' : 'text-fuchsia-400 font-black'}>✓</span>
+                            <span className="truncate">{feat}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Action button */}
+                    <div className="mt-3">
+                      <button type="button"
+                        onClick={() => {
+                          setSelectedPlanId(activePlan.id);
+                          setSelectedTierForPurchase(tierTarget);
+                          setShowPaymentChooser(true);
+                        }}
+                        className="w-full py-3.5 rounded-2xl font-black text-sm text-white flex items-center justify-center gap-2 shadow-xl cursor-pointer transition active:scale-[0.99]"
+                        style={{
+                          background: isProPlus
+                            ? 'linear-gradient(135deg, #06b6d4, #0284c7)'
+                            : 'linear-gradient(135deg, #d946ef, #9333ea)'
+                        }}>
+                        <Zap size={16} className="shrink-0" /> <span className="whitespace-nowrap">{activePlan.duration || '30 Din'}</span> {isProPlus ? 'PRO+' : 'MAX+'} Subscribe Karein — ₹{discInfo.finalPrice.toLocaleString('en-IN')}
+                      </button>
+                    </div>
+                  </div>
+                );
+              };
+
+              return (
+                <>
+                  {renderVipPlusCard('PRO_PLUS')}
+                  {renderVipPlusCard('MAX_PLUS')}
+                </>
+              );
+            })()}
+
+            {creditPurchaseMsg && (
+              <div className="p-3 rounded-xl text-center text-xs font-bold bg-white/10 text-white border border-white/20">
+                {creditPurchaseMsg}
+              </div>
+            )}
+
+            {/* ── VIP+ FEATURE COMPARISON MATRIX (CRADIT ON) ── */}
+            <div className="mt-8 pt-4 border-t border-white/10">
+              <CompareMatrix
+                user={user}
+                settings={settings}
+                onUserUpdate={onUserUpdate}
+                mode="CREDIT_ON"
+              />
+            </div>
           </div>
         )}
 
         {/* ── 3. CREDITS TAB (PASS WITH 1W WEEKLY OPTION & PACKAGES) ── */}
-        {tierType === 'CREDITS' && (() => {
+        {tierType === 'CREDITS' && isCreditsStoreOn && (() => {
           const rawCreditSubPlans = getCreditSubPlans(settings).filter(p => p.isActive !== false);
           
           const creditSubPlans = rawCreditSubPlans;
@@ -2293,7 +2743,7 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
         })()}
 
         {/* ── 4. DIAMONDS TAB (10 TO 50 💎 / DAY UNIFIED CARDS & INSTANT PACKS) ── */}
-        {tierType === 'DIAMONDS' && (
+        {tierType === 'DIAMONDS' && isDiamondsStoreOn && (
           <div className="space-y-4">
             <div className="rounded-3xl p-5 border border-sky-400/30 bg-sky-950/20">
               <div className="flex justify-between items-center mb-2">
@@ -2669,6 +3119,18 @@ export const Store: React.FC<Props> = ({ user, settings, onUserUpdate, onBack, i
             </div>
           </div>
         )}
+
+        {/* Guest Restriction & Google Binding Modal */}
+        <GuestRestrictionModal
+          isOpen={guestModalOpen}
+          onClose={() => setGuestModalOpen(false)}
+          currentUser={user}
+          onUserUpdated={(updated) => {
+            onUserUpdate(updated);
+          }}
+          featureName={guestModalFeature}
+          customMessage="Guest Account me Subscriptions aur Paid Packs lena allowed nahi hai. Apne account ko Google se bind karein taaki aapka payment, streak aur membership hamesha safe rahe!"
+        />
 
       </div>
     </div>

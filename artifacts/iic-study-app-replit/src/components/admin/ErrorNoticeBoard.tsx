@@ -7,7 +7,7 @@ import {
   ChevronUp, Tag, Copy, Cpu, Globe, Download, EyeOff, Filter, Package,
   MapPin, TrendingUp, AlertOctagon, Shield
 } from 'lucide-react';
-import { AppError } from '../../utils/errorLogger';
+import { AppError, getLocalErrors, clearLocalErrors, markLocalErrorDismissed, triggerTestError } from '../../utils/errorLogger';
 
 interface Props { onBack: () => void; }
 
@@ -55,8 +55,19 @@ function formatTime(ts: number): string {
 function formatFull(ts: number): string {
   return new Date(ts).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
-function getFingerprint(msg: string): string { return msg.slice(0, 90).replace(/\s+/g, ' ').trim(); }
-function safeKey(fp: string): string { return btoa(encodeURIComponent(fp)).replace(/[^a-zA-Z0-9]/g, '').slice(0, 40); }
+function getFingerprint(msg: any): string {
+  if (typeof msg !== 'string') {
+    try { msg = JSON.stringify(msg); } catch { msg = String(msg || 'Unknown Error'); }
+  }
+  return (msg || 'Unknown Error').slice(0, 90).replace(/\s+/g, ' ').trim() || 'Unknown Error';
+}
+function safeKey(fp: string): string {
+  try {
+    return btoa(encodeURIComponent(fp || 'err')).replace(/[^a-zA-Z0-9]/g, '').slice(0, 40) || 'default_key';
+  } catch {
+    return 'key_' + String(fp || '').length;
+  }
+}
 
 // ──────────────────────────────────────────────
 // FilterChips — reusable pill row
@@ -130,11 +141,12 @@ function buildReport(group: ErrorGroup): string {
 // Main component
 // ──────────────────────────────────────────────
 export const ErrorNoticeBoard: React.FC<Props> = ({ onBack }) => {
-  const [errors, setErrors] = useState<Array<AppError & { id: string }>>([]);
+  const [errors, setErrors] = useState<Array<AppError & { id: string }>>(() => getLocalErrors());
   const [resolutions, setResolutions] = useState<Record<string, ErrorResolution>>({});
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState<'all' | 'active' | 'critical' | 'resolved' | 'ignored'>('active');
   const [search, setSearch] = useState('');
+  const [isTestTriggering, setIsTestTriggering] = useState(false);
 
   // Smart filters
   const [componentFilter, setComponentFilter] = useState('ALL');
@@ -157,17 +169,81 @@ export const ErrorNoticeBoard: React.FC<Props> = ({ onBack }) => {
   });
   const [ignoredVersion, setIgnoredVersion] = useState(0); // force re-render after ignore
 
-  // ── Firebase subscriptions ──
+  // ── Firebase & Local subscriptions ──
   useEffect(() => {
+    let unsubSecondary: (() => void) | null = null;
+
+    const processItems = (rtdbItems: Array<AppError & { id: string }>) => {
+      const local = getLocalErrors();
+      const map = new Map<string, AppError & { id: string }>();
+      rtdbItems.forEach(item => {
+        if (item && item.id) map.set(item.id, item);
+      });
+      local.forEach(item => {
+        if (!item || !item.id) return;
+        if (!map.has(item.id)) {
+          map.set(item.id, item);
+        } else {
+          const existing = map.get(item.id)!;
+          if (item.dismissed && !existing.dismissed) {
+            existing.dismissed = true;
+          }
+        }
+      });
+      const merged = Array.from(map.values());
+      merged.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      setErrors(merged);
+      setLoading(false);
+    };
+
     const q = rtdbQuery(ref(rtdb, 'error_logs'), orderByChild('timestamp'), limitToLast(500));
     const unsub = onValue(q, snap => {
       const items: Array<AppError & { id: string }> = [];
-      snap.forEach(child => { items.push({ ...child.val(), id: child.key! }); });
-      items.reverse();
-      setErrors(items);
-      setLoading(false);
-    }, () => setLoading(false));
-    return unsub;
+      if (snap.exists()) {
+        snap.forEach(child => { items.push({ ...child.val(), id: child.key! }); });
+      }
+      processItems(items);
+    }, (err) => {
+      console.warn('[ErrorNoticeBoard] Primary RTDB query failed, attempting raw ref:', err);
+      try {
+        const rawRef = ref(rtdb, 'error_logs');
+        unsubSecondary = onValue(rawRef, rawSnap => {
+          const items: Array<AppError & { id: string }> = [];
+          if (rawSnap.exists()) {
+            rawSnap.forEach(child => { items.push({ ...child.val(), id: child.key! }); });
+          }
+          processItems(items);
+        }, () => {
+          setErrors(getLocalErrors());
+          setLoading(false);
+        });
+      } catch {
+        setErrors(getLocalErrors());
+        setLoading(false);
+      }
+    });
+
+    const handleNewError = () => {
+      setErrors(prev => {
+        const local = getLocalErrors();
+        const map = new Map<string, AppError & { id: string }>();
+        prev.forEach(item => item && item.id && map.set(item.id, item));
+        local.forEach(item => item && item.id && map.set(item.id, item));
+        const merged = Array.from(map.values());
+        merged.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        return merged;
+      });
+    };
+
+    window.addEventListener('nsta-new-error', handleNewError);
+    window.addEventListener('storage', handleNewError);
+
+    return () => {
+      unsub();
+      if (unsubSecondary) unsubSecondary();
+      window.removeEventListener('nsta-new-error', handleNewError);
+      window.removeEventListener('storage', handleNewError);
+    };
   }, []);
 
   useEffect(() => {
@@ -181,7 +257,9 @@ export const ErrorNoticeBoard: React.FC<Props> = ({ onBack }) => {
   const groups = useMemo<ErrorGroup[]>(() => {
     const map = new Map<string, ErrorGroup>();
     for (const err of errors) {
-      const fp = getFingerprint(err.message);
+      if (!err) continue;
+      const rawMsg = err.message || (err as any).name || (err as any).error || 'Unknown Error';
+      const fp = getFingerprint(rawMsg);
       const existing = map.get(fp);
       const e = err as any;
       const comp = err.component
@@ -277,6 +355,10 @@ export const ErrorNoticeBoard: React.FC<Props> = ({ onBack }) => {
 
   // ── Handlers ──
   const handleDismissGroup = async (g: ErrorGroup) => {
+    g.entries.forEach(e => {
+      markLocalErrorDismissed(e.id);
+    });
+    setErrors(prev => prev.map(e => g.entries.some(ge => ge.id === e.id) ? { ...e, dismissed: true } : e));
     await Promise.all(g.entries.filter(e => !e.dismissed).map(e =>
       update(ref(rtdb, `error_logs/${e.id}`), { dismissed: true }).catch(() => {})
     ));
@@ -298,6 +380,8 @@ export const ErrorNoticeBoard: React.FC<Props> = ({ onBack }) => {
 
   const handleDeleteGroup = async (g: ErrorGroup) => {
     if (!window.confirm(`"${g.message.slice(0, 60)}…" — ${g.count} entries delete honge. Confirm?`)) return;
+    const ids = new Set(g.entries.map(e => e.id));
+    setErrors(prev => prev.filter(e => !ids.has(e.id)));
     await Promise.all(g.entries.map(e => remove(ref(rtdb, `error_logs/${e.id}`)).catch(() => {})));
   };
 
@@ -318,10 +402,24 @@ export const ErrorNoticeBoard: React.FC<Props> = ({ onBack }) => {
   };
 
   const handleClearAll = async () => {
-    if (!window.confirm('Sab error logs delete ho jayenge. Confirm?')) return;
+    if (!window.confirm('Sab error logs (Firebase + Local) delete ho jayenge. Confirm?')) return;
     setClearing(true);
-    await Promise.all(errors.map(e => remove(ref(rtdb, `error_logs/${e.id}`)))).catch(() => {});
+    clearLocalErrors();
+    const currentErrors = [...errors];
+    setErrors([]);
+    await Promise.all(currentErrors.map(e => remove(ref(rtdb, `error_logs/${e.id}`)))).catch(() => {});
     setClearing(false);
+  };
+
+  const handleTriggerTest = async () => {
+    setIsTestTriggering(true);
+    try {
+      await triggerTestError();
+    } catch (e) {
+      console.error('Failed to trigger test error:', e);
+    } finally {
+      setIsTestTriggering(false);
+    }
   };
 
   const handleMarkResolved = async (fingerprint: string) => {
@@ -368,11 +466,22 @@ export const ErrorNoticeBoard: React.FC<Props> = ({ onBack }) => {
               <p className="text-[10px] text-slate-500 mt-0.5">Professional crash monitoring — frequency, device, version, resolution</p>
             </div>
           </div>
-          <button onClick={handleClearAll} disabled={clearing || errors.length === 0}
-            className="flex items-center gap-1.5 text-[10px] font-bold text-red-500 bg-red-50 border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-100 disabled:opacity-40 transition-colors">
-            {clearing ? <RefreshCw size={11} className="animate-spin" /> : <Trash2 size={11} />}
-            Clear All
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleTriggerTest}
+              disabled={isTestTriggering}
+              className="flex items-center gap-1.5 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg hover:bg-amber-100 disabled:opacity-40 transition-colors shadow-xs"
+              title="Test error generate karke notice board check karein"
+            >
+              <RefreshCw size={11} className={isTestTriggering ? "animate-spin" : ""} />
+              ⚡ Test Error
+            </button>
+            <button onClick={handleClearAll} disabled={clearing || errors.length === 0}
+              className="flex items-center gap-1.5 text-[10px] font-bold text-red-500 bg-red-50 border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-100 disabled:opacity-40 transition-colors">
+              {clearing ? <RefreshCw size={11} className="animate-spin" /> : <Trash2 size={11} />}
+              Clear All
+            </button>
+          </div>
         </div>
 
         {/* Stats row */}
@@ -461,14 +570,36 @@ export const ErrorNoticeBoard: React.FC<Props> = ({ onBack }) => {
           </div>
         )}
         {!loading && filtered.length === 0 && (
-          <div className="text-center py-12">
+          <div className="text-center py-12 px-4">
             <CheckCircle size={36} className="mx-auto mb-3 text-green-400" />
-            <p className="font-bold text-slate-600">
+            <p className="font-bold text-slate-700 text-sm">
               {filter === 'active' ? 'Koi active error nahi! 🎉' : filter === 'resolved' ? 'Koi resolved error nahi' : filter === 'ignored' ? 'Koi ignored error nahi' : 'Koi error nahi mili'}
             </p>
-            <p className="text-xs text-slate-400 mt-1">
-              {search ? `"${search}" ke liye koi result nahi` : activeFiltersCount > 0 ? 'Filters change karke try karo' : 'Sab thik lag raha hai'}
+            <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+              {search ? `"${search}" ke liye koi result nahi` : activeFiltersCount > 0 ? 'Filters change karke try karo' : totalGroups > 0 ? `Filhal ${totalGroups} error history me recorded hain (dismissed/resolved).` : 'App bilkul smoothly chal rahi hai.'}
             </p>
+
+            {totalGroups > 0 && filter === 'active' && (
+              <div className="mt-3">
+                <button
+                  onClick={() => setFilter('all')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold rounded-xl hover:bg-indigo-100 transition-colors"
+                >
+                  History ke sabhi {totalGroups} errors dekhein (All) →
+                </button>
+              </div>
+            )}
+
+            <div className="mt-4 pt-4 border-t border-slate-100 flex justify-center">
+              <button
+                onClick={handleTriggerTest}
+                disabled={isTestTriggering}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-red-500 to-rose-600 text-white text-xs font-bold rounded-xl hover:opacity-90 shadow-sm transition-all"
+              >
+                <AlertTriangle size={14} />
+                {isTestTriggering ? 'Error generate ho raha hai...' : '⚡ Test Error Bhejkar Notice Board Test Karein'}
+              </button>
+            </div>
           </div>
         )}
 

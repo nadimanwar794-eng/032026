@@ -20,6 +20,7 @@ import { ReadingScoreSession, ReadingScoreState } from '../utils/readingScoreEng
 import { ReadingScoreHUD } from './ReadingScoreHUD';
 import { PaginatedPdfViewer, PaginatedPdfHandle } from './PaginatedPdfViewer';
 import { fireSessionComplete } from '../utils/sessionNotify';
+import { PlayerWatermark } from './PlayerWatermark';
 
 interface Props {
   url: string;
@@ -354,6 +355,9 @@ export const PdfViewer: React.FC<Props> = ({
       onTouchStart={revealHeader}
       onPointerMove={revealHeader}
     >
+      {/* ── Official Corner App Logo Watermark ── */}
+      <PlayerWatermark position="top-right" />
+
       {/* ── PDF fills the full screen, always ── */}
       {!pdfLoadFailed ? (
         <PaginatedPdfViewer

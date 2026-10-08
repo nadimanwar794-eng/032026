@@ -6,6 +6,7 @@ import {
   ArrowLeft, Plus, Trash2, ChevronDown, ChevronUp, Save,
   BookOpen, HelpCircle, FileText, Calendar, X, Edit3, Loader2, School
 } from 'lucide-react';
+import { DirectUploadButton } from './DirectUploadButton';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface CoachingNote { id: string; title: string; content?: string; pageNo?: string; }
@@ -441,8 +442,20 @@ function PdfEditor({ pdfs, onChange, accent }:{ pdfs: CoachingPdf[]; onChange:(p
               className="flex-1 border border-slate-200 rounded-lg px-2 py-1 text-xs outline-none focus:border-indigo-400" />
             <button onClick={()=>del(p.id)} className="text-red-400 hover:text-red-600"><Trash2 size={12}/></button>
           </div>
-          <input value={p.url} onChange={e=>upd(p.id,'url',e.target.value)} placeholder="PDF URL (https://...)"
-            className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs outline-none focus:border-indigo-400" />
+          <div className="space-y-1.5">
+            <DirectUploadButton
+              kind="pdf"
+              compact
+              currentUrl={p.url}
+              onUploaded={(url, file) => {
+                const autoTitle = p.title || file.name.replace(/\.[^/.]+$/, '');
+                onChange(pdfs.map(item => item.id === p.id ? { ...item, url, title: autoTitle } : item));
+              }}
+              onClear={() => {
+                onChange(pdfs.map(item => item.id === p.id ? { ...item, url: '' } : item));
+              }}
+            />
+          </div>
         </div>
       ))}
       <Btn small ghost onClick={add}><Plus size={11}/> PDF Add Karo</Btn>

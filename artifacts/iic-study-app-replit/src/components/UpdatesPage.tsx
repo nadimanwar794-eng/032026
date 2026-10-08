@@ -5,10 +5,12 @@ import {
   Users, School, Building2, ChevronRight, ChevronLeft, Clock, Trophy,
   Flame, CheckCircle, Zap, Tag, Gift, Bell, Calendar,
   ExternalLink, ShieldCheck, ArrowRight, Percent, Globe,
-  Coins, TrendingUp, Palette, Check, Sparkle, Headphones, Lightbulb, Lock
+  Coins, TrendingUp, Palette, Check, Sparkle, Headphones, Lightbulb, Lock,
+  Megaphone, HardDrive
 } from 'lucide-react';
 import type { User, SystemSettings, Challenge20 } from '../types';
 import { isDailyChallenge20, getChallengeDateKey } from '../utils/challengeGenerator';
+import { getLevelInfo } from '../utils/levelSystem';
 
 interface Props {
   user: User;
@@ -27,6 +29,9 @@ interface Props {
   onOpenPracticeMcq?: () => void;
   onOpenAudioStudio?: () => void;
   onOpenSuggestions?: () => void;
+  onOpenContentDemand?: () => void;
+  hasContentDemandAccess?: boolean;
+  onOpenOfflineStorage?: () => void;
   userSchool?: any;
   onOpenSchool?: () => void;
   onOpenSchoolPicker?: () => void;
@@ -35,12 +40,13 @@ interface Props {
   isCoachingAdmin?: boolean;
   onOpenCoaching?: () => void;
   onOpenCoachingPicker?: () => void;
-  onQuickAccess?: (action: 'VIDEO' | 'PROGRESS' | 'STARRED' | 'READING' | 'FLASHCARDS' | 'OFFLINE' | 'ACTIVITY' | 'CREDITS' | 'MISTAKES') => void;
+  onQuickAccess?: (action: 'VIDEO' | 'PROGRESS' | 'STARRED' | 'READING' | 'FLASHCARDS' | 'OFFLINE' | 'ACTIVITY' | 'CREDITS' | 'MISTAKES' | 'LEADERBOARD') => void;
   mistakeCount?: number;
   appName?: string;
   appLogo?: string;
   onRestoreBottomNav?: () => void;
   isBottomNavVisible?: boolean;
+  initialSectionTab?: 'ADVANCE_TOOLS' | 'UPDATES';
 }
 
 interface EventItem {
@@ -94,6 +100,9 @@ export const UpdatesPage: React.FC<Props> = ({
   onOpenPracticeMcq,
   onOpenAudioStudio,
   onOpenSuggestions,
+  onOpenContentDemand,
+  hasContentDemandAccess = true,
+  onOpenOfflineStorage,
   userSchool,
   onOpenSchool,
   onOpenSchoolPicker,
@@ -108,11 +117,18 @@ export const UpdatesPage: React.FC<Props> = ({
   appLogo,
   onRestoreBottomNav,
   isBottomNavVisible = false,
+  initialSectionTab,
 }) => {
   const [activeBannerIdx, setActiveBannerIdx] = useState(0);
-  const [activeSectionTab, setActiveSectionTab] = useState<'ADVANCE_TOOLS' | 'UPDATES'>('ADVANCE_TOOLS');
+  const [activeSectionTab, setActiveSectionTab] = useState<'ADVANCE_TOOLS' | 'UPDATES'>(initialSectionTab || 'ADVANCE_TOOLS');
   const [now, setNow] = useState(Date.now());
   const [isClaiming, setIsClaiming] = useState(false);
+
+  useEffect(() => {
+    if (initialSectionTab) {
+      setActiveSectionTab(initialSectionTab);
+    }
+  }, [initialSectionTab]);
 
   const hasSchool = Boolean(userSchool || (user as any)?.schoolId);
   const hasCoaching = Boolean(userCoachingId || (user as any)?.coachingId || isCoachingAdmin);
@@ -125,6 +141,12 @@ export const UpdatesPage: React.FC<Props> = ({
     const hasValidDate = !user.subscriptionEndDate || new Date(user.subscriptionEndDate).getTime() > Date.now();
     return Boolean((user.isPremium || isSub) && hasValidDate);
   }, [user]);
+
+  // All features are permanently unlocked (Level Roadmap removed)
+  const isMessengerUnlocked = true;
+  const isStudyRoomUnlocked = true;
+  const isDemandUnlocked = true;
+  const isEventsUnlocked = true;
 
   // Live countdown timer ticking every 1 second
   useEffect(() => {
@@ -168,6 +190,10 @@ export const UpdatesPage: React.FC<Props> = ({
 
   // Handler for banner & card action buttons
   const handleEventAction = (ev: EventItem) => {
+    if (!isEventsUnlocked && user?.role !== 'ADMIN') {
+      alert('🔒 Events participation Level 5 (ii) (15,000 XP) par chalega! Abhi aap event details aur countdown preview dekh sakte hain.');
+      return;
+    }
     if (ev.actionType === 'THEME_STUDIO') {
       if (onOpenThemeStudio) {
         onOpenThemeStudio();
@@ -611,6 +637,7 @@ export const UpdatesPage: React.FC<Props> = ({
       }`}>
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <button
+            id="updates-back-btn"
             type="button"
             onClick={onBack}
             className={`p-2 rounded-xl active:scale-95 transition-all cursor-pointer shrink-0 ${
@@ -625,9 +652,15 @@ export const UpdatesPage: React.FC<Props> = ({
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
               <Sparkles size={16} className="text-amber-500 fill-amber-500 animate-pulse shrink-0" />
-              <h1 className="text-sm sm:text-base font-black tracking-tight truncate">Pro+</h1>
+              <h1 className="text-sm sm:text-base font-black tracking-tight truncate">
+                {activeSectionTab === 'UPDATES' ? 'Events & Offers' : 'Pro+'}
+              </h1>
             </div>
-            <p className="text-[10px] text-slate-400 font-medium hidden md:block truncate">1st: Advance Tools • 2nd: Updates</p>
+            <p className="text-[10px] text-slate-400 font-medium hidden md:block truncate">
+              {activeSectionTab === 'UPDATES'
+                ? 'All Live & Upcoming App Events • Exclusive Boosts & Discounts'
+                : '1st: Advance Tools • 2nd: Events & Updates'}
+            </p>
           </div>
         </div>
 
@@ -657,7 +690,7 @@ export const UpdatesPage: React.FC<Props> = ({
             </button>
           )}
           <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
-            PRO+
+            {activeSectionTab === 'UPDATES' ? 'EVENT' : 'PRO+'}
           </span>
         </div>
       </div>
@@ -667,6 +700,7 @@ export const UpdatesPage: React.FC<Props> = ({
         isDarkMode ? 'bg-slate-950/85 border-slate-800/80' : 'bg-white/85 border-slate-200/70'
       }`}>
         <button
+          id="updates-tab-advance-tools"
           type="button"
           onClick={() => setActiveSectionTab('ADVANCE_TOOLS')}
           className={`flex-1 sm:flex-initial px-4 py-2 rounded-xl text-xs font-black shrink-0 transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
@@ -680,6 +714,7 @@ export const UpdatesPage: React.FC<Props> = ({
         </button>
 
         <button
+          id="updates-tab-events-updates"
           type="button"
           onClick={() => setActiveSectionTab('UPDATES')}
           className={`flex-1 sm:flex-initial px-4 py-2 rounded-xl text-xs font-black shrink-0 transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
@@ -689,7 +724,7 @@ export const UpdatesPage: React.FC<Props> = ({
           }`}
           style={activeSectionTab === 'UPDATES' ? { background: themeBtnGrad } : {}}
         >
-          <span>📢 2nd: Updates ({eventsList.length} Events)</span>
+          <span>⚡ 2nd: Events ({eventsList.length})</span>
         </button>
       </div>
 
@@ -729,6 +764,7 @@ export const UpdatesPage: React.FC<Props> = ({
 
           {/* ── CARD 1: DAILY CHALLENGE 2.0 ── */}
           <div
+            id="updates-daily-challenge-card"
             className="nst-card-animated relative rounded-2xl p-4.5 flex flex-col justify-between active:scale-[0.985] transition-all"
             style={homeCardStyle}
           >
@@ -801,12 +837,10 @@ export const UpdatesPage: React.FC<Props> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    if (!isPaidUser) {
-                      alert('🔒 Daily Challenge feature Basic aur Ultra members ke liye hai. Plan upgrade karein!');
-                      return;
-                    }
                     if (activeDaily && onStartDailyChallenge) {
                       onStartDailyChallenge(activeDaily);
+                    } else if (!isPaidUser && onOpenStore) {
+                      onOpenStore();
                     }
                   }}
                   className="w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98"
@@ -836,8 +870,230 @@ export const UpdatesPage: React.FC<Props> = ({
             </div>
           </div>
 
-          {/* ── CARD 2: NSTA MESSENGER ── */}
+          {/* ── CARD 2: NSTA MESSENGER (Unlocks at Level 3 (iv)) ── */}
+          {isMessengerUnlocked && (
+            <div
+              id="updates-messenger-card"
+              className="nst-card-animated relative rounded-2xl p-4.5 flex flex-col justify-between active:scale-[0.985] transition-all"
+              style={homeCardStyle}
+            >
+              <div className="space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-xs"
+                      style={{ background: `${themeBorder}18`, color: themeBorder }}
+                    >
+                      <MessageSquare size={22} />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                        <span>Nsta Messenger</span>
+                        {!isPaidUser && <span className="text-xs">🔒</span>}
+                      </h4>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">Classmates chat, doubts & study groups</p>
+                    </div>
+                  </div>
+                  <span
+                    className="px-2.5 py-1 rounded-xl text-[10px] font-black shrink-0 uppercase tracking-wider shadow-2xs"
+                    style={{
+                      background: isPaidUser ? `${themeBorder}18` : 'rgba(239, 68, 68, 0.15)',
+                      color: isPaidUser ? themeBorder : '#ef4444',
+                      border: isPaidUser ? `1px solid ${themeBorder}35` : '1px solid rgba(239, 68, 68, 0.35)',
+                    }}
+                  >
+                    {isPaidUser ? 'Instant Chat' : '🔒 Basic+'}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 text-[10px] font-bold">
+                  <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
+                    💬 1-on-1 Messages
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
+                    👨‍🦱 Find Classmates
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
+                    🔒 PIN Lock
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!isPaidUser) {
+                      alert('🔒 Nsta Messenger feature Basic aur Ultra members ke liye hai. Plan upgrade karein!');
+                      return;
+                    }
+                    if (onOpenMessenger) onOpenMessenger();
+                  }}
+                  className="w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98"
+                  style={{
+                    background: isPaidUser ? themeBtnGrad : 'linear-gradient(135deg, #64748b, #475569)',
+                    color: '#ffffff',
+                    boxShadow: isPaidUser ? `0 4px 14px ${themePrimary}35` : 'none',
+                  }}
+                >
+                  {isPaidUser ? null : <Lock size={15} />}
+                  <span>{isPaidUser ? 'Open Nsta Messenger →' : '🔒 Open Nsta Messenger (Basic+ Required)'}</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── CARD 4: STUDY ROOM (GROUP STUDY) (Unlocks at Level 3 (v)) ── */}
+          {isStudyRoomUnlocked && (
+            <div
+              id="updates-study-room-card"
+              className="nst-card-animated relative rounded-2xl p-4.5 flex flex-col justify-between active:scale-[0.985] transition-all"
+              style={homeCardStyle}
+            >
+              <div className="space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-xs"
+                      style={{ background: `${themeBorder}18`, color: themeBorder }}
+                    >
+                      <Users size={22} />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                        <span>Study Room</span>
+                      </h4>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">Virtual study rooms with peers & focus timer</p>
+                    </div>
+                  </div>
+                  <span
+                    className="px-2.5 py-1 rounded-xl text-[10px] font-black shrink-0 uppercase tracking-wider shadow-2xs"
+                    style={{
+                      background: `${themeBorder}18`,
+                      color: themeBorder,
+                      border: `1px solid ${themeBorder}35`,
+                    }}
+                  >
+                    {isPaidUser ? 'VIP Unlimited' : 'Free: 2 Rooms/Day'}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 text-[10px] font-bold">
+                  <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
+                    ⏱️ Pomodoro Timer
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
+                    👥 Live Classmates
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
+                    🎧 Silent Study
+                  </span>
+                  {!isPaidUser && (
+                    <span className="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25">
+                      🎁 Free: 2 Rooms / Day
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onOpenStudyRoom) onOpenStudyRoom();
+                  }}
+                  className="w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98"
+                  style={{
+                    background: themeBtnGrad,
+                    color: '#ffffff',
+                    boxShadow: `0 4px 14px ${themePrimary}35`,
+                  }}
+                >
+                  <Users size={15} />
+                  <span>{isPaidUser ? 'Join / Create Study Room →' : 'Join / Create Study Room (Free: 2 Rooms/Day) →'}</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── CARD: CONTENT DEMAND (Unlocks at Level 4 (Entry)) ── */}
+          {isDemandUnlocked && (
+            <div
+              id="updates-content-demand-card"
+              className="nst-card-animated relative rounded-2xl p-4.5 flex flex-col justify-between active:scale-[0.985] transition-all"
+              style={homeCardStyle}
+            >
+              <div className="space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-xs"
+                      style={{ background: `${themeBorder}18`, color: themeBorder }}
+                    >
+                      <Megaphone size={22} />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                        <span>Content Demand</span>
+                        {!hasContentDemandAccess && <span className="text-xs">🔒</span>}
+                      </h4>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Apni pasand ke notes, chapters ya study material ki demand karein
+                      </p>
+                    </div>
+                  </div>
+                  <span
+                    className="px-2.5 py-1 rounded-xl text-[10px] font-black shrink-0 uppercase tracking-wider shadow-2xs"
+                    style={{
+                      background: hasContentDemandAccess ? `${themeBorder}18` : 'rgba(239, 68, 68, 0.15)',
+                      color: hasContentDemandAccess ? themeBorder : '#ef4444',
+                      border: hasContentDemandAccess ? `1px solid ${themeBorder}35` : '1px solid rgba(239, 68, 68, 0.35)',
+                    }}
+                  >
+                    {hasContentDemandAccess ? 'Demand Hub' : '🔒 Basic+'}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 text-[10px] font-bold">
+                  <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
+                    📢 Custom Notes
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
+                    ⚡ Fast Admin Review
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
+                    🎯 Specific Topics
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!hasContentDemandAccess) {
+                      alert('🔒 Content Demand feature Basic aur Ultra members ke liye hai. Plan upgrade karein!');
+                      return;
+                    }
+                    if (onOpenContentDemand) onOpenContentDemand();
+                  }}
+                  className="w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98"
+                  style={{
+                    background: hasContentDemandAccess ? themeBtnGrad : 'linear-gradient(135deg, #64748b, #475569)',
+                    color: '#ffffff',
+                    boxShadow: hasContentDemandAccess ? `0 4px 14px ${themePrimary}35` : 'none',
+                  }}
+                >
+                  {hasContentDemandAccess ? null : <Lock size={15} />}
+                  <span>{hasContentDemandAccess ? 'Demand Content / Notes →' : '🔒 Demand Content (Basic+ Required)'}</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── CARD: OFFLINE STORAGE & DOWNLOADS ── */}
           <div
+            id="updates-offline-card"
             className="nst-card-animated relative rounded-2xl p-4.5 flex flex-col justify-between active:scale-[0.985] transition-all"
             style={homeCardStyle}
           >
@@ -846,39 +1102,40 @@ export const UpdatesPage: React.FC<Props> = ({
                 <div className="flex items-center gap-3">
                   <div
                     className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-xs"
-                    style={{ background: `${themeBorder}18`, color: themeBorder }}
+                    style={{ background: 'rgba(6, 182, 212, 0.15)', color: '#06b6d4' }}
                   >
-                    <MessageSquare size={22} />
+                    <HardDrive size={22} />
                   </div>
                   <div>
                     <h4 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5">
-                      <span>Nsta Messenger</span>
-                      {!isPaidUser && <span className="text-xs">🔒</span>}
+                      <span>Offline Storage & Downloads</span>
                     </h4>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">Classmates chat, doubts & study groups</p>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Bina internet ke saved notes, test series aur downloads access karein
+                    </p>
                   </div>
                 </div>
                 <span
                   className="px-2.5 py-1 rounded-xl text-[10px] font-black shrink-0 uppercase tracking-wider shadow-2xs"
                   style={{
-                    background: isPaidUser ? `${themeBorder}18` : 'rgba(239, 68, 68, 0.15)',
-                    color: isPaidUser ? themeBorder : '#ef4444',
-                    border: isPaidUser ? `1px solid ${themeBorder}35` : '1px solid rgba(239, 68, 68, 0.35)',
+                    background: 'rgba(6, 182, 212, 0.15)',
+                    color: '#06b6d4',
+                    border: '1px solid rgba(6, 182, 212, 0.35)',
                   }}
                 >
-                  {isPaidUser ? 'Instant Chat' : '🔒 Basic+'}
+                  Offline Mode
                 </span>
               </div>
 
               <div className="flex flex-wrap items-center gap-2 text-[10px] font-bold">
                 <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
-                  💬 1-on-1 Messages
+                  💾 Saved Notes
                 </span>
                 <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
-                  👨‍🦱 Find Classmates
+                  ⚡ Zero Data
                 </span>
                 <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
-                  🔒 PIN Lock
+                  📥 Quick Access
                 </span>
               </div>
             </div>
@@ -887,91 +1144,21 @@ export const UpdatesPage: React.FC<Props> = ({
               <button
                 type="button"
                 onClick={() => {
-                  if (!isPaidUser) {
-                    alert('🔒 Nsta Messenger feature Basic aur Ultra members ke liye hai. Plan upgrade karein!');
-                    return;
+                  if (onOpenOfflineStorage) {
+                    onOpenOfflineStorage();
+                  } else if (onQuickAccess) {
+                    onQuickAccess('OFFLINE');
                   }
-                  if (onOpenMessenger) onOpenMessenger();
                 }}
                 className="w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98"
                 style={{
-                  background: isPaidUser ? themeBtnGrad : 'linear-gradient(135deg, #64748b, #475569)',
+                  background: 'linear-gradient(135deg, #06b6d4, #0284c7)',
                   color: '#ffffff',
-                  boxShadow: isPaidUser ? `0 4px 14px ${themePrimary}35` : 'none',
+                  boxShadow: '0 4px 14px rgba(6, 182, 212, 0.35)',
                 }}
               >
-                {isPaidUser ? null : <Lock size={15} />}
-                <span>{isPaidUser ? 'Open Nsta Messenger →' : '🔒 Open Nsta Messenger (Basic+ Required)'}</span>
-              </button>
-            </div>
-          </div>
-
-          {/* ── CARD 4: STUDY ROOM (GROUP STUDY) ── */}
-          <div
-            className="nst-card-animated relative rounded-2xl p-4.5 flex flex-col justify-between active:scale-[0.985] transition-all"
-            style={homeCardStyle}
-          >
-            <div className="space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div
-                    className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-xs"
-                    style={{ background: `${themeBorder}18`, color: themeBorder }}
-                  >
-                    <Users size={22} />
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5">
-                      <span>Study Room</span>
-                      {!isPaidUser && <span className="text-xs">🔒</span>}
-                    </h4>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">Virtual study rooms with peers & focus timer</p>
-                  </div>
-                </div>
-                <span
-                  className="px-2.5 py-1 rounded-xl text-[10px] font-black shrink-0 uppercase tracking-wider shadow-2xs"
-                  style={{
-                    background: isPaidUser ? `${themeBorder}18` : 'rgba(239, 68, 68, 0.15)',
-                    color: isPaidUser ? themeBorder : '#ef4444',
-                    border: isPaidUser ? `1px solid ${themeBorder}35` : '1px solid rgba(239, 68, 68, 0.35)',
-                  }}
-                >
-                  {isPaidUser ? 'Focus Mode' : '🔒 Basic+'}
-                </span>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2 text-[10px] font-bold">
-                <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
-                  ⏱️ Pomodoro Timer
-                </span>
-                <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
-                  👥 Live Classmates
-                </span>
-                <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
-                  🎧 Silent Study
-                </span>
-              </div>
-            </div>
-
-            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
-              <button
-                type="button"
-                onClick={() => {
-                  if (!isPaidUser) {
-                    alert('🔒 Study Room (Focus Mode) feature Basic aur Ultra members ke liye hai. Plan upgrade karein!');
-                    return;
-                  }
-                  if (onOpenStudyRoom) onOpenStudyRoom();
-                }}
-                className="w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98"
-                style={{
-                  background: isPaidUser ? themeBtnGrad : 'linear-gradient(135deg, #64748b, #475569)',
-                  color: '#ffffff',
-                  boxShadow: isPaidUser ? `0 4px 14px ${themePrimary}35` : 'none',
-                }}
-              >
-                {isPaidUser ? null : <Lock size={15} />}
-                <span>{isPaidUser ? 'Join Study Room →' : '🔒 Join Study Room (Basic+ Required)'}</span>
+                <HardDrive size={15} />
+                <span>Open Offline Storage →</span>
               </button>
             </div>
           </div>
@@ -979,6 +1166,7 @@ export const UpdatesPage: React.FC<Props> = ({
           {/* ── CARD 5: SCHOOL PORTAL (Visible only when user is enrolled in a school) ── */}
           {hasSchool && (
             <div
+              id="updates-school-card"
               className="nst-card-animated relative rounded-2xl p-4.5 flex flex-col justify-between active:scale-[0.985] transition-all"
               style={homeCardStyle}
             >
@@ -1072,6 +1260,7 @@ export const UpdatesPage: React.FC<Props> = ({
           {/* ── CARD 6: COACHING PORTAL (Visible only when user is enrolled in coaching) ── */}
           {hasCoaching && (
             <div
+              id="updates-coaching-card"
               className="nst-card-animated relative rounded-2xl p-4.5 flex flex-col justify-between active:scale-[0.985] transition-all"
               style={homeCardStyle}
             >
@@ -1176,77 +1365,6 @@ export const UpdatesPage: React.FC<Props> = ({
             </div>
           )}
 
-          {/* ── CARD 7: SUGGESTIONS & CORRECTIONS ── */}
-          <div
-            className="nst-card-animated relative rounded-2xl p-4.5 flex flex-col justify-between active:scale-[0.985] transition-all"
-            style={homeCardStyle}
-          >
-            <div className="space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div
-                    className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-xs"
-                    style={{ background: `${themeBorder}18`, color: themeBorder }}
-                  >
-                    <Lightbulb size={22} />
-                  </div>
-                  <div className="min-w-0">
-                    <h4 className="text-sm font-black text-slate-900 dark:text-white truncate flex items-center gap-1.5">
-                      <span>Suggestions & Corrections</span>
-                      {!isPaidUser && <span className="text-xs">🔒</span>}
-                    </h4>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Galti ya bug mila? Photo ke saath report karein aur coins jeetein
-                    </p>
-                  </div>
-                </div>
-                <span
-                  className="px-2.5 py-1 rounded-xl text-[10px] font-black shrink-0 uppercase tracking-wider shadow-2xs"
-                  style={{
-                    background: isPaidUser ? `${themeBorder}18` : 'rgba(239, 68, 68, 0.15)',
-                    color: isPaidUser ? themeBorder : '#ef4444',
-                    border: isPaidUser ? `1px solid ${themeBorder}35` : '1px solid rgba(239, 68, 68, 0.35)',
-                  }}
-                >
-                  {isPaidUser ? 'Feedback' : '🔒 Basic+'}
-                </span>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2 text-[10px] font-bold">
-                <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
-                  💡 Bug / Mistake Report
-                </span>
-                <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
-                  📷 Photo Attach
-                </span>
-                <span className="px-2.5 py-1 rounded-lg" style={chipStyle}>
-                  🪙 Earn Coins
-                </span>
-              </div>
-            </div>
-
-            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
-              <button
-                type="button"
-                onClick={() => {
-                  if (!isPaidUser) {
-                    alert('🔒 Suggestions & Corrections feature Basic aur Ultra members ke liye hai. Plan upgrade karein!');
-                    return;
-                  }
-                  if (onOpenSuggestions) onOpenSuggestions();
-                }}
-                className="w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98 text-white"
-                style={{
-                  background: isPaidUser ? themeBtnGrad : 'linear-gradient(135deg, #64748b, #475569)',
-                  boxShadow: isPaidUser ? `0 4px 14px ${themePrimary}35` : 'none',
-                }}
-              >
-                {isPaidUser ? <Lightbulb size={15} /> : <Lock size={15} />}
-                <span>{isPaidUser ? 'Open Suggestions & Corrections →' : '🔒 Open Suggestions & Corrections (Basic+ Required)'}</span>
-              </button>
-            </div>
-          </div>
-
         </div>
       </div>
     )}
@@ -1279,7 +1397,7 @@ export const UpdatesPage: React.FC<Props> = ({
         </div>
 
         {/* Individual Event Cards List */}
-        <div className="space-y-4">
+        <div id="updates-events-list" className="space-y-4">
           {eventsList.map((ev) => {
             const countdown = getEventCountdown(ev);
             return (
@@ -1351,12 +1469,13 @@ export const UpdatesPage: React.FC<Props> = ({
                       onClick={() => handleEventAction(ev)}
                       className="w-full py-2.5 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98"
                       style={{
-                        background: themeBtnGrad,
+                        background: isEventsUnlocked || user?.role === 'ADMIN' ? themeBtnGrad : 'linear-gradient(135deg, #475569, #334155)',
                         color: '#ffffff',
-                        boxShadow: `0 4px 14px ${themePrimary}35`,
+                        boxShadow: isEventsUnlocked || user?.role === 'ADMIN' ? `0 4px 14px ${themePrimary}35` : 'none',
                       }}
                     >
-                      <span>{ev.actionText}</span>
+                      {!isEventsUnlocked && user?.role !== 'ADMIN' && <Lock size={13} className="text-amber-400" />}
+                      <span>{isEventsUnlocked || user?.role === 'ADMIN' ? ev.actionText : `🔒 Level 5 (ii) par chalega (${ev.actionText})`}</span>
                       <ArrowRight size={14} />
                     </button>
                   </div>

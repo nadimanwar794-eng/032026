@@ -18,6 +18,7 @@ export const hapticStrong = () => haptic(60);
 
 /** Correct answer — two short sharp taps (feels like ✅ confirmation) */
 export const hapticCorrect = () => haptic([40, 60, 40]);
+export const hapticSuccess = hapticCorrect;
 
 /** Wrong answer — one long heavy buzz (feels like ❌ warning) */
 export const hapticWrong = () => haptic(120);

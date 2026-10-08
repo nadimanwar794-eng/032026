@@ -13,7 +13,7 @@ import {
 } from "recharts";
 import { getMistakeBankSync, MistakeEntry } from "../utils/mistakeBank";
 import { getScoreLog, ScoreLogEntry } from "../utils/scoreSystem";
-import { getLevelInfo, getNextLevelInfo } from "../utils/levelSystem";
+import { getLevelInfo, getNextLevelInfo, getSubTierInfoFromScore } from "../utils/levelSystem";
 import { getScoreLogFromFirebase } from "../firebase";
 import { getAllBuckets, getDueItems, type TopicBucket } from "../utils/revisionTrackerV2";
 
@@ -255,7 +255,15 @@ function OverviewTab({ user, log, rev }: { user: any; log: ScoreLogEntry[]; rev:
         <div className="bg-gradient-to-r from-amber-50 to-orange-50 px-4 py-2.5 flex items-center justify-between border-t border-orange-100">
           <div className="flex items-center gap-1.5"><span className="text-base">⭐</span><p className="text-sm font-black text-amber-700">+{todayStats.xpToday} XP Aaj</p></div>
           <div className="flex items-center gap-1.5"><span className="text-base">🔥</span><p className="text-sm font-black text-orange-700">{user?.streak || 0} Din Streak</p></div>
-          <div className="flex items-center gap-1.5"><span className="text-base">🏆</span><p className="text-sm font-black text-indigo-700">Lv {levelInfo.level}</p></div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-base">🏆</span>
+            <p className="text-sm font-black text-indigo-700">
+              Lv {levelInfo.level} {(() => {
+                const st = getSubTierInfoFromScore(user?.totalScore || 0);
+                return `[${st.shortBadgeText}]`;
+              })()}
+            </p>
+          </div>
         </div>
         <div className="bg-indigo-50 px-4 py-2.5 border-t border-indigo-100">
           <p className="text-[11px] text-indigo-700 font-medium leading-snug">💬 {todaySummary}</p>
@@ -267,9 +275,21 @@ function OverviewTab({ user, log, rev }: { user: any; log: ScoreLogEntry[]; rev:
         <div className="flex items-center gap-3 mb-3">
           <span className="text-4xl">{levelInfo.emoji}</span>
           <div className="flex-1">
-            <p className="text-xs font-bold opacity-80 uppercase tracking-wide">Level {levelInfo.level}</p>
-            <p className="text-lg font-black leading-tight">{levelInfo.label}</p>
-            <p className="text-xs opacity-75">Total XP: {fmt(user?.totalScore || 0)}</p>
+            {(() => {
+              const st = getSubTierInfoFromScore(user?.totalScore || 0);
+              return (
+                <>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <p className="text-xs font-bold opacity-80 uppercase tracking-wide">Level {levelInfo.level}</p>
+                    <span className="text-[9px] font-black px-1.5 py-0.2 rounded bg-white/20 text-white border border-white/30">
+                      {st.badgeText}
+                    </span>
+                  </div>
+                  <p className="text-lg font-black leading-tight">{levelInfo.label}</p>
+                  <p className="text-xs opacity-75">Total XP: {fmt(user?.totalScore || 0)} · Next: {st.nextStepTitle}</p>
+                </>
+              );
+            })()}
           </div>
           <div className="text-right">
             <p className="text-2xl font-black">🔥 {user?.streak || 0}</p>

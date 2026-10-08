@@ -466,3 +466,111 @@
   display: inline-block;
   transform-origin: center;
 }
+
+/* ── Auto-hide Bottom Navigation Bar & FAB when ANY Modal / Popup is Open ── */
+body.nsta-modal-open [data-iic-bottom-nav],
+body.nsta-modal-open .iic-bottom-nav,
+body.nsta-modal-open [data-nsta-fab],
+body.iic-modal-open [data-iic-bottom-nav],
+body.iic-modal-open .iic-bottom-nav,
+body.iic-modal-open [data-nsta-fab] {
+  display: none !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+}
+
+/* ── Video Player Fullscreen: Hides Top Bar AND Bottom Navigation Completely ── */
+body.nsta-video-fullscreen-active,
+html.nsta-video-fullscreen-active,
+:fullscreen,
+::backdrop,
+*:fullscreen {
+  background-color: #000000 !important;
+}
+
+body.nsta-video-fullscreen-active #top-banner-container,
+body.nsta-video-fullscreen-active [data-iic-topbar],
+body.nsta-video-fullscreen-active .iic-top-bar,
+body.nsta-video-fullscreen-active [data-iic-bottom-nav],
+body.nsta-video-fullscreen-active .iic-bottom-nav,
+body.nsta-video-fullscreen-active [data-iic-float-logo],
+body.nsta-video-fullscreen-active #nsta-floating-trigger,
+body.nsta-video-fullscreen-active [data-nsta-fab],
+html.nsta-video-fullscreen-active #top-banner-container,
+html.nsta-video-fullscreen-active [data-iic-bottom-nav],
+html.nsta-video-fullscreen-active .iic-bottom-nav,
+html.nsta-video-fullscreen-active #nsta-floating-trigger {
+  display: none !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  overflow: hidden !important;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   WALLPAPER ACTIVE: PURE TRANSPARENT CARDS & CONTAINERS
+   Jab background wallpaper laga ho, tab container ka background color
+   hat jayega (transparent). Sabhi cards ka white background hat kar
+   pura transparent ho jayega, sirf card ka border aur text apne-apne
+   color me sharp rahenge.
+   ══════════════════════════════════════════════════════════════ */
+[data-wallpaper-active="true"],
+[data-wallpaper-active="true"] > div,
+[data-wallpaper-active="true"] main,
+[data-wallpaper-active="true"] .dashboard-section-container {
+  background-color: transparent !important;
+  background: transparent !important;
+}
+
+[data-wallpaper-active="true"] .bg-white,
+[data-wallpaper-active="true"] .nst-card-animated,
+[data-wallpaper-active="true"] [data-nst-card="true"],
+[data-wallpaper-active="true"] #home-selected-class-card,
+[data-wallpaper-active="true"] #home-class-6-12-card > button,
+[data-wallpaper-active="true"] #home-practice-set-card > button,
+[data-wallpaper-active="true"] #home-daily-challenge-card > div,
+[data-wallpaper-active="true"] #home-study-room-card > div,
+[data-wallpaper-active="true"] #home-studyroom-card > div,
+[data-wallpaper-active="true"] #home-revision-card > button,
+[data-wallpaper-active="true"] #home-mistakes-card > button,
+[data-wallpaper-active="true"] [style*="background: rgb(255, 255, 255)"],
+[data-wallpaper-active="true"] [style*="background: #ffffff"],
+[data-wallpaper-active="true"] [style*="background:#ffffff"] {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* Ensure inner CTA buttons and badges remain sharp and visible over wallpaper */
+[data-wallpaper-active="true"] .nst-card-animated div[style*="gradient"],
+[data-wallpaper-active="true"] .nst-card-animated [style*="linear-gradient"] {
+  background: inherit;
+}
+
+[data-wallpaper-active="true"] .dark .bg-slate-900,
+[data-wallpaper-active="true"] .dark .bg-slate-800,
+[data-wallpaper-active="true"] .bg-slate-900\/90,
+[data-wallpaper-active="true"] .bg-slate-900\/95,
+[data-wallpaper-active="true"] .bg-slate-50,
+[data-wallpaper-active="true"] .bg-gray-50,
+[data-wallpaper-active="true"] .bg-slate-100 {
+  background-color: transparent !important;
+  background: transparent !important;
+}
+
+/* Ensure modern cards stay beautifully outlined with 3D depth */
+.global-cards-3d .rounded-2xl.border,
+.global-cards-3d .rounded-3xl.border,
+.global-cards-3d [data-nst-card="true"] {
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.85) inset,
+    0 var(--nst-3d-depth, 4px) 0 var(--nst-card-border, rgba(59, 130, 246, 0.45)),
+    0 12px 24px -4px rgba(0, 0, 0, 0.12) !important;
+  transform: translateY(var(--nst-3d-lift, -2px));
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+

@@ -143,6 +143,11 @@ export const splitIntoTopics = (raw: string): NotesTopic[] => {
   let _isFromHtml = false;
   if (/[<][a-zA-Z!\/]/.test(text)) {
     _isFromHtml = true;
+    // Preserve <img> and <figure> before stripHtml by converting them to markdown images
+    text = text.replace(/<figure[^>]*>\s*<img[^>]+src=["']([^"']+)["'][^>]*alt=["']([^"']*)["'][^>]*\/?>.*?<\/figure>/gis, '\n\n![$2]($1)\n\n');
+    text = text.replace(/<img[^>]+src=["']([^"']+)["'][^>]*alt=["']([^"']*)["'][^>]*\/?>/gi, '\n\n![$2]($1)\n\n');
+    text = text.replace(/<img[^>]+alt=["']([^"']*)["'][^>]*src=["']([^"']+)["'][^>]*\/?>/gi, '\n\n![$1]($2)\n\n');
+    text = text.replace(/<img[^>]+src=["']([^"']+)["'][^>]*\/?>/gi, '\n\n![]($1)\n\n');
     text = text
       .replace(/<\s*br\s*\/?\s*>/gi, '\n')
       .replace(/<\/\s*(p|div|li|h[1-6]|tr|section|article)\s*>/gi, '\n')
@@ -161,7 +166,7 @@ export const splitIntoTopics = (raw: string): NotesTopic[] => {
           acc.push('');
           return acc;
         }
-        const startsSpecial = /^(#{1,6}\s|[*\-•]|\d+[.)]\s)/.test(trimmed);
+        const startsSpecial = /^(#{1,6}\s|[*\-•]|\d+[.)]\s|!\[)/.test(trimmed);
         if (startsSpecial || acc.length === 0) {
           acc.push(line);
         } else {
@@ -198,6 +203,13 @@ export const splitIntoTopics = (raw: string): NotesTopic[] => {
     const trimmed = line.trim();
     if (!trimmed) {
       flush();
+      continue;
+    }
+
+    // Direct standalone image check: preserve as separate topic item
+    if (/^!\[[\s\S]*?\]\([\s\S]*?\)$/.test(trimmed)) {
+      flush();
+      topics.push({ text: trimmed, isHeading: false });
       continue;
     }
 
@@ -280,7 +292,14 @@ export const splitIntoTopics = (raw: string): NotesTopic[] => {
     /(?<=[A-Za-z\u0900-\u097F)\]%'"])\s+(?=\d{1,2}[.\s]\s*[A-Z\u0900-\u097F(])/g;
 
   const splitOneTopic = (raw: string): string[] => {
-    let out: string[] = [raw];
+    // Protect markdown images so URLs with punctuation (dots, colons, slashes, query params) are not split!
+    const savedImages: string[] = [];
+    const safeRaw = raw.replace(/!\[([\s\S]*?)\]\(([\s\S]*?)\)/g, (match) => {
+      savedImages.push(match);
+      return `\x00IMG_${savedImages.length - 1}\x00`;
+    });
+
+    let out: string[] = [safeRaw];
     // 1. Hindi danda — always a sentence boundary.
     out = out.flatMap(s => s.split(HINDI_DANDA_BOUNDARY));
     // 2. English sentence-end split (! ?) — "." still handled separately below.
@@ -292,11 +311,19 @@ export const splitIntoTopics = (raw: string): NotesTopic[] => {
     out = out.flatMap(s => s.split(/(?<=[^\s.]{3})\.\s+(?=['"\u2018\u201C\u0900-\u097F\uD83C-\uDBFF\u2600-\u27BF])/g));
     // 3. Section-marker split (for any fragment still > ~80 chars).
     out = out.flatMap(s => (s.length > 80 ? s.split(SECTION_MARKERS) : [s]));
-    return out.map(s => s.trim()).filter(Boolean);
+
+    return out
+      .map(s => s.replace(/\x00IMG_(\d+)\x00/g, (_, i) => savedImages[+i]).trim())
+      .filter(Boolean);
   };
 
   const exploded: NotesTopic[] = [];
   for (const t of topics) {
+    // If the topic is purely an image, keep it untouched
+    if (/^\s*!\[[\s\S]*?\]\([\s\S]*?\)\s*$/.test(t.text)) {
+      exploded.push(t);
+      continue;
+    }
     const cleaned = t.text.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\s+/g, ' ').trim();
     if (!cleaned) continue;
 

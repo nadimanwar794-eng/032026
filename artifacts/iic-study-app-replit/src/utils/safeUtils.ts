@@ -142,41 +142,60 @@ export function compactUserForCache(user: any): any {
   };
 }
 
+// Raw reference to Storage.prototype.setItem to bypass hooks and prevent infinite recursion
+let _rawStorageSetItem: ((this: Storage, key: string, value: string) => void) | null = null;
+try {
+  if (typeof window !== 'undefined' && window.Storage && window.Storage.prototype) {
+    _rawStorageSetItem = window.Storage.prototype.setItem;
+  }
+} catch {}
+
+function rawSetItem(storage: Storage, key: string, value: string): void {
+  if (_rawStorageSetItem) {
+    _rawStorageSetItem.call(storage, key, value);
+  } else {
+    storage.setItem(key, value);
+  }
+}
+
 /**
  * Safely writes 'nst_users' to localStorage without throwing QuotaExceededError.
  * Compacts user objects, limits count if necessary, and catches quota issues gracefully.
  */
+let isSavingUsersCache = false;
 export function safeSaveUsersCache(users: any[]): boolean {
-  if (!Array.isArray(users)) return false;
+  if (!Array.isArray(users) || typeof window === 'undefined' || !window.localStorage) return false;
+  if (isSavingUsersCache) return false;
+  isSavingUsersCache = true;
   try {
     // 1. Compact users to essential cache representation
     const compacted = users.map(compactUserForCache);
 
-    // Try saving compacted users (capped at max 60 to protect quota)
-    const listToSave = compacted.slice(0, 60);
+    // Try saving compacted users (capped at max 40 to protect quota)
+    const listToSave = compacted.slice(0, 40);
     const jsonStr = JSON.stringify(listToSave);
 
     try {
-      localStorage.setItem('nst_users', jsonStr);
+      rawSetItem(window.localStorage, 'nst_users', jsonStr);
       return true;
-    } catch (err: any) {
+    } catch {
       // If quota exceeded, prune storage and try smaller subset
       pruneLocalStorageForQuota();
 
-      // Try with top 20 users
-      const smallerList = compacted.slice(0, 20);
+      // Try with top 15 users
+      const smallerList = compacted.slice(0, 15);
       try {
-        localStorage.setItem('nst_users', JSON.stringify(smallerList));
+        rawSetItem(window.localStorage, 'nst_users', JSON.stringify(smallerList));
         return true;
       } catch {
-        // Try with top 5 users or remove nst_users if localStorage is completely exhausted
+        // Try with top 3 users or remove nst_users if localStorage is completely exhausted
         try {
-          const minimalList = compacted.slice(0, 5);
-          localStorage.setItem('nst_users', JSON.stringify(minimalList));
+          const minimalList = compacted.slice(0, 3);
+          rawSetItem(window.localStorage, 'nst_users', JSON.stringify(minimalList));
           return true;
         } catch {
-          try { localStorage.removeItem('nst_users'); } catch {}
-          console.warn('[safeSaveUsersCache] Quota exceeded; cleared nst_users cache to protect app.');
+          try { window.localStorage.removeItem('nst_users'); } catch {}
+          console.warn('[safeSaveUsersCache] Quota exhausted; cleared nst_users cache to protect device.');
           return false;
         }
       }
@@ -184,6 +203,8 @@ export function safeSaveUsersCache(users: any[]): boolean {
   } catch (e) {
     console.warn('[safeSaveUsersCache] Failed to cache users safely:', e);
     return false;
+  } finally {
+    isSavingUsersCache = false;
   }
 }
 
@@ -193,22 +214,37 @@ export function safeSaveUsersCache(users: any[]): boolean {
  * automatically recover from QuotaExceededError without throwing unhandled exceptions.
  */
 let quotaProtectionInstalled = false;
+let isRecoveringQuota = false;
 export function installStorageQuotaProtection(): void {
   if (quotaProtectionInstalled || typeof window === 'undefined' || !window.localStorage) return;
   try {
-    const originalSetItem = window.localStorage.setItem.bind(window.localStorage);
-    window.localStorage.setItem = function (key: string, value: string) {
+    const proto = window.Storage ? window.Storage.prototype : null;
+    if (!proto || !proto.setItem) return;
+
+    if (!_rawStorageSetItem) {
+      _rawStorageSetItem = proto.setItem;
+    }
+    const origSetItem = _rawStorageSetItem;
+
+    const protectedSetItem = function (this: Storage, key: string, value: string) {
+      if (this !== window.localStorage) {
+        origSetItem.call(this, key, value);
+        return;
+      }
+
+      // If updating nst_users directly, route through safeSaveUsersCache
+      if (key === 'nst_users' && !isSavingUsersCache) {
+        try {
+          const parsed = JSON.parse(value);
+          if (Array.isArray(parsed)) {
+            safeSaveUsersCache(parsed);
+            return;
+          }
+        } catch {}
+      }
+
       try {
-        if (key === 'nst_users') {
-          try {
-            const parsed = JSON.parse(value);
-            if (Array.isArray(parsed)) {
-              safeSaveUsersCache(parsed);
-              return;
-            }
-          } catch {}
-        }
-        originalSetItem(key, value);
+        origSetItem.call(this, key, value);
       } catch (err: any) {
         const isQuota =
           err?.name === 'QuotaExceededError' ||
@@ -217,7 +253,8 @@ export function installStorageQuotaProtection(): void {
           err?.code === 1014 ||
           String(err?.message || '').toLowerCase().includes('quota');
 
-        if (isQuota) {
+        if (isQuota && !isRecoveringQuota) {
+          isRecoveringQuota = true;
           console.warn(`[StorageQuotaProtection] Quota exceeded for "${key}". Recovering...`);
           try {
             if (key === 'nst_users') {
@@ -233,19 +270,28 @@ export function installStorageQuotaProtection(): void {
             }
 
             pruneLocalStorageForQuota();
-            originalSetItem(key, value);
-          } catch (retryErr) {
-            // Backup to sessionStorage if localStorage is completely exhausted
             try {
-              window.sessionStorage.setItem(key, value);
-            } catch {}
-            console.warn(`[StorageQuotaProtection] LocalStorage full for "${key}". Saved to sessionStorage.`);
+              origSetItem.call(this, key, value);
+            } catch {
+              // Backup to sessionStorage if localStorage is completely exhausted
+              try {
+                if (window.sessionStorage) {
+                  origSetItem.call(window.sessionStorage, key, value);
+                }
+              } catch {}
+              console.warn(`[StorageQuotaProtection] LocalStorage full for "${key}". Saved to sessionStorage.`);
+            }
+          } finally {
+            isRecoveringQuota = false;
           }
-        } else {
+        } else if (!isQuota) {
           throw err;
         }
       }
     };
+
+    proto.setItem = protectedSetItem;
+    window.localStorage.setItem = protectedSetItem.bind(window.localStorage);
     quotaProtectionInstalled = true;
   } catch (e) {
     console.warn('[installStorageQuotaProtection] Failed to hook Storage.prototype.setItem:', e);
@@ -288,30 +334,30 @@ export function pruneLocalStorageForQuota(): void {
       try { localStorage.removeItem(k); } catch {}
     }
 
-    // Check if nst_users itself is oversized (> 100KB) and compact it
+    // Check if nst_users itself is oversized (> 50KB) and compact or remove it
     try {
       const usersRaw = localStorage.getItem('nst_users');
-      if (usersRaw && usersRaw.length > 100000) {
+      if (usersRaw && usersRaw.length > 50000) {
         try {
           const parsed = JSON.parse(usersRaw);
           if (Array.isArray(parsed)) {
-            const compacted = parsed.slice(0, 20).map(compactUserForCache);
-            localStorage.setItem('nst_users', JSON.stringify(compacted));
+            const compacted = parsed.slice(0, 10).map(compactUserForCache);
+            rawSetItem(window.localStorage, 'nst_users', JSON.stringify(compacted));
           }
         } catch {
-          localStorage.removeItem('nst_users');
+          try { localStorage.removeItem('nst_users'); } catch {}
         }
       }
     } catch {}
 
-    // Trim oversized array keys to the most recent 20 items
+    // Trim oversized array keys to the most recent 15 items
     for (const k of keysToTrim) {
       try {
         const raw = localStorage.getItem(k);
         if (raw) {
           const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed) && parsed.length > 20) {
-            localStorage.setItem(k, JSON.stringify(parsed.slice(-20)));
+          if (Array.isArray(parsed) && parsed.length > 15) {
+            rawSetItem(window.localStorage, k, JSON.stringify(parsed.slice(-15)));
           }
         }
       } catch {}

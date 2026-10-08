@@ -6,9 +6,13 @@ export interface NstaQuickWheelModalProps {
   isOpen: boolean;
   onClose: () => void;
   onOpenMessenger: () => void;
-  onQuickAccess: (action: 'VIDEO' | 'PROGRESS' | 'STARRED' | 'READING' | 'FLASHCARDS' | 'OFFLINE' | 'ACTIVITY' | 'CREDITS' | 'MISTAKES') => void;
+  onQuickAccess: (action: 'VIDEO' | 'PROGRESS' | 'STARRED' | 'READING' | 'FLASHCARDS' | 'OFFLINE' | 'ACTIVITY' | 'CREDITS' | 'MISTAKES' | 'LEADERBOARD') => void;
+  onOpenPedro?: () => void;
+  onOpenPedro360?: () => void;
+  onOpenEvents?: () => void;
   onGoHome?: () => void;
   mistakeCount?: number;
+  activeEventsCount?: number;
   appName?: string;
   appLogo?: string;
   themePrimary?: string;
@@ -24,8 +28,9 @@ interface WheelToolItem {
   bgGrad: string;
   borderGlow: string;
   badge?: string;
-  type: 'MESSENGER' | 'QUICK';
-  action?: 'VIDEO' | 'PROGRESS' | 'STARRED' | 'READING' | 'FLASHCARDS' | 'OFFLINE' | 'ACTIVITY' | 'CREDITS' | 'MISTAKES';
+  isPremium?: boolean;
+  type: 'MESSENGER' | 'QUICK' | 'PEDRO' | 'PEDRO_360' | 'EVENTS';
+  action?: 'VIDEO' | 'PROGRESS' | 'STARRED' | 'READING' | 'FLASHCARDS' | 'OFFLINE' | 'ACTIVITY' | 'CREDITS' | 'MISTAKES' | 'LEADERBOARD';
 }
 
 export const NstaQuickWheelModal: React.FC<NstaQuickWheelModalProps> = ({
@@ -33,8 +38,12 @@ export const NstaQuickWheelModal: React.FC<NstaQuickWheelModalProps> = ({
   onClose,
   onOpenMessenger,
   onQuickAccess,
+  onOpenPedro,
+  onOpenPedro360,
+  onOpenEvents,
   onGoHome,
   mistakeCount = 0,
+  activeEventsCount = 0,
   appName = 'NSTA',
   appLogo = '/branding/nsta-logo.svg',
   themePrimary = '#6366f1',
@@ -77,7 +86,19 @@ export const NstaQuickWheelModal: React.FC<NstaQuickWheelModalProps> = ({
       emoji: '💬',
       bgGrad: 'linear-gradient(135deg, #ec4899, #8b5cf6)',
       borderGlow: '#ec4899',
+      isPremium: true,
       type: 'MESSENGER',
+    },
+    {
+      id: 'EVENTS',
+      title: 'Events & Offers',
+      fullName: 'Event',
+      shortLabel: 'Event',
+      emoji: '⚡',
+      bgGrad: 'linear-gradient(135deg, #f59e0b, #ef4444)',
+      borderGlow: '#f59e0b',
+      badge: activeEventsCount > 0 ? (activeEventsCount === 1 ? 'LIVE' : `${activeEventsCount} LIVE`) : undefined,
+      type: 'EVENTS',
     },
     {
       id: 'VIDEO',
@@ -91,17 +112,6 @@ export const NstaQuickWheelModal: React.FC<NstaQuickWheelModalProps> = ({
       action: 'VIDEO',
     },
     {
-      id: 'PROGRESS',
-      title: 'Progress & Stats',
-      fullName: 'Progress & Stats',
-      shortLabel: 'Progress',
-      emoji: '📊',
-      bgGrad: 'linear-gradient(135deg, #3b82f6, #06b6d4)',
-      borderGlow: '#3b82f6',
-      type: 'QUICK',
-      action: 'PROGRESS',
-    },
-    {
       id: 'STARRED',
       title: 'Important Notes',
       fullName: 'Important Notes',
@@ -113,37 +123,15 @@ export const NstaQuickWheelModal: React.FC<NstaQuickWheelModalProps> = ({
       action: 'STARRED',
     },
     {
-      id: 'READING',
-      title: 'Continue Reading',
-      fullName: 'Reading Notes',
-      shortLabel: 'Reading',
-      emoji: '📖',
-      bgGrad: 'linear-gradient(135deg, #10b981, #059669)',
-      borderGlow: '#10b981',
+      id: 'LEADERBOARD',
+      title: 'Leaderboard',
+      fullName: 'Leaderboard',
+      shortLabel: 'Leaderboard',
+      emoji: '🏆',
+      bgGrad: 'linear-gradient(135deg, #f59e0b, #d97706)',
+      borderGlow: '#f59e0b',
       type: 'QUICK',
-      action: 'READING',
-    },
-    {
-      id: 'FLASHCARDS',
-      title: 'Flashcards',
-      fullName: 'Flashcards',
-      shortLabel: 'Flashcards',
-      emoji: '🃏',
-      bgGrad: 'linear-gradient(135deg, #8b5cf6, #6366f1)',
-      borderGlow: '#8b5cf6',
-      type: 'QUICK',
-      action: 'FLASHCARDS',
-    },
-    {
-      id: 'OFFLINE',
-      title: 'Offline Storage',
-      fullName: 'Offline Storage',
-      shortLabel: 'Offline',
-      emoji: '💾',
-      bgGrad: 'linear-gradient(135deg, #06b6d4, #0284c7)',
-      borderGlow: '#06b6d4',
-      type: 'QUICK',
-      action: 'OFFLINE',
+      action: 'LEADERBOARD',
     },
     {
       id: 'ACTIVITY',
@@ -179,20 +167,60 @@ export const NstaQuickWheelModal: React.FC<NstaQuickWheelModalProps> = ({
       type: 'QUICK',
       action: 'MISTAKES',
     },
+    {
+      id: 'PEDRO_360',
+      title: 'Pedro 360° Studio',
+      fullName: 'Pedro 360°',
+      shortLabel: 'Pedro 360°',
+      emoji: '🤖',
+      badge: '360°',
+      bgGrad: 'linear-gradient(135deg, #6366f1, #06b6d4)',
+      borderGlow: '#06b6d4',
+      type: 'PEDRO_360',
+    },
+    {
+      id: 'OFFLINE',
+      title: 'Offline Storage & Downloads',
+      fullName: 'Offline Storage & Downloads',
+      shortLabel: 'Downloads',
+      emoji: '📥',
+      bgGrad: 'linear-gradient(135deg, #0284c7, #2563eb)',
+      borderGlow: '#0ea5e9',
+      type: 'QUICK',
+      action: 'OFFLINE',
+    },
   ];
 
   const totalTools = tools.length;
-  const anglePerItem = 360 / totalTools; // 36 degrees per item
+  const anglePerItem = 360 / totalTools;
 
   const handleLaunch = useCallback((tool: WheelToolItem) => {
     hapticStrong();
     onClose();
-    if (tool.type === 'MESSENGER') {
+    if (tool.type === 'EVENTS') {
+      if (onOpenEvents) {
+        onOpenEvents();
+      }
+    } else if (tool.type === 'PEDRO_360') {
+      if (onOpenPedro360) {
+        onOpenPedro360();
+      }
+    } else if (tool.type === 'MESSENGER') {
       onOpenMessenger();
+    } else if (tool.type === 'PEDRO') {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('nst_pedro_hidden');
+        window.dispatchEvent(new CustomEvent('nst-restore-pedro'));
+        window.dispatchEvent(new CustomEvent('nst-show-pedro'));
+        window.dispatchEvent(new CustomEvent('nst-pedro-hidden-change', { detail: { isHidden: false } }));
+      }
+      if (onOpenPedro) {
+        onOpenPedro();
+      }
     } else if (tool.action) {
       onQuickAccess(tool.action);
     }
-  }, [onClose, onOpenMessenger, onQuickAccess]);
+  }, [onClose, onOpenMessenger, onQuickAccess, onOpenPedro, onOpenPedro360, onOpenEvents]);
 
   // Pointer drag to rotate wheel
   const handlePointerDown = (e: React.PointerEvent) => {
@@ -293,7 +321,7 @@ export const NstaQuickWheelModal: React.FC<NstaQuickWheelModalProps> = ({
         <X size={20} />
       </button>
 
-      {/* ── ONLY THE CIRCLE AND ITS 10 TOOLS ── */}
+      {/* ── ONLY THE CIRCLE AND ITS QUICK TOOLS ── */}
       <div
         ref={wheelRef}
         onPointerDown={handlePointerDown}
@@ -342,7 +370,7 @@ export const NstaQuickWheelModal: React.FC<NstaQuickWheelModalProps> = ({
           />
         </div>
 
-        {/* ── THE 10 TOOLS (ALWAYS UPRIGHT / SIDHA — NO ROTATION ON NAME/ICON) ── */}
+        {/* ── QUICK TOOLS (ALWAYS UPRIGHT / SIDHA — NO ROTATION ON NAME/ICON) ── */}
         {tools.map((tool, idx) => {
           const itemAngle = idx * anglePerItem - 90; // -90 deg starts top (12 o'clock)
           const totalAngle = itemAngle + rotation;
@@ -370,26 +398,42 @@ export const NstaQuickWheelModal: React.FC<NstaQuickWheelModalProps> = ({
             >
               {/* Tool Icon Circle / Rounded Box */}
               <div
-                className="relative w-12 h-12 sm:w-[50px] sm:h-[50px] rounded-2xl flex items-center justify-center text-xl shadow-lg border border-white/30 backdrop-blur-md transition-all group-hover:scale-110"
+                className={`relative w-12 h-12 sm:w-[50px] sm:h-[50px] rounded-2xl flex items-center justify-center text-xl shadow-lg border backdrop-blur-md transition-all group-hover:scale-110 ${
+                  tool.isPremium
+                    ? 'border-amber-300 ring-2 ring-amber-400/80 shadow-[0_0_20px_rgba(251,191,36,0.6)]'
+                    : 'border-white/30'
+                }`}
                 style={{
                   background: tool.bgGrad,
-                  boxShadow: `0 6px 16px -2px ${tool.borderGlow}88, inset 0 1px 1px rgba(255, 255, 255, 0.4)`,
+                  boxShadow: tool.isPremium
+                    ? `0 0 25px rgba(251, 191, 36, 0.65), 0 6px 16px -2px ${tool.borderGlow}88, inset 0 1px 1px rgba(255, 255, 255, 0.6)`
+                    : `0 6px 16px -2px ${tool.borderGlow}88, inset 0 1px 1px rgba(255, 255, 255, 0.4)`,
                 }}
               >
                 <span>{tool.emoji}</span>
 
-                {/* Badge for mistakes / notifications */}
-                {tool.badge && (
+                {/* Premium Crown Badge for Messenger */}
+                {tool.isPremium ? (
+                  <span className="absolute -top-2 -right-2 px-1.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500 text-slate-950 text-[8px] font-black flex items-center gap-0.5 border border-amber-200 shadow-md ring-1 ring-amber-400">
+                    <span>👑</span>
+                    <span>PRO</span>
+                  </span>
+                ) : tool.badge ? (
                   <span className="absolute -top-1 -right-1 px-1 min-w-[15px] h-[15px] rounded-full bg-rose-500 text-white text-[8px] font-black flex items-center justify-center border border-slate-900 shadow">
                     {tool.badge}
                   </span>
-                )}
+                ) : null}
               </div>
 
               {/* Tool Name Label — Full name visible without cutting off */}
               <span className="text-[10px] sm:text-[11px] font-black text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)] text-center whitespace-normal mt-1 leading-[1.15] tracking-tight max-w-[78px] break-words">
                 {tool.fullName}
               </span>
+              {tool.isPremium && (
+                <span className="text-[7.5px] font-black uppercase tracking-wider text-amber-300 bg-amber-500/25 px-1.5 py-0.2 rounded-full border border-amber-400/40 mt-0.5 drop-shadow leading-none">
+                  👑 Premium
+                </span>
+              )}
             </button>
           );
         })}

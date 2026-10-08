@@ -12,6 +12,7 @@ import { MCQItem } from '../types';
 import { inlineMd, parseMcqQuestion, shouldShowMcqOptions } from '../utils/mcqRender';
 import { getMcqOptions } from '../utils/mcqStructure';
 import { renderMathInHtml } from '../utils/mathUtils';
+import { resolveTelegramUrl } from '../services/telegramStorageService';
 
 interface Props {
   q: MCQItem;
@@ -39,6 +40,33 @@ const McqQuestionDisplay: React.FC<Props> = ({
   const statementClassName = stmtClassName ||
     `${questionClassName} bg-sky-50 border-l-4 border-sky-300 rounded-xl px-3 py-2 mb-1`;
 
+  const isAbove = q.imagePosition === 'above_question';
+  const isAfterOptions = q.imagePosition === 'after_options';
+  const isBelow = !isAbove && !isAfterOptions; // default: below question
+
+  const imageElement = q.imageUrl ? (
+    <div
+      className={`my-2.5 flex ${
+        q.imageAlign === 'left' ? 'justify-start' : q.imageAlign === 'right' ? 'justify-end' : 'justify-center'
+      }`}
+    >
+      <div
+        className="rounded-xl overflow-hidden border border-slate-300/80 bg-white/90 shadow-sm"
+        style={{
+          width: typeof q.imageWidth === 'number' ? `${q.imageWidth}%` : (q.imageWidth || '100%'),
+          maxWidth: '100%',
+        }}
+      >
+        <img
+          src={resolveTelegramUrl(q.imageUrl)}
+          alt="Question Diagram"
+          className="w-full h-auto object-contain max-h-[360px] sm:max-h-[460px] rounded-xl"
+          loading="lazy"
+        />
+      </div>
+    </div>
+  ) : null;
+
   return (
     <>
       {showQuestionNumber && q.questionNumber !== undefined && (
@@ -46,6 +74,10 @@ const McqQuestionDisplay: React.FC<Props> = ({
           Q{q.questionNumber}.
         </div>
       )}
+
+      {/* Attached Question Diagram: Above Question Stem */}
+      {isAbove && imageElement}
+
       {/* Question stem */}
       {questionHtml && (
         <div
@@ -53,6 +85,9 @@ const McqQuestionDisplay: React.FC<Props> = ({
           dangerouslySetInnerHTML={{ __html: questionHtml }}
         />
       )}
+
+      {/* Attached Question Diagram: Below Question Stem (Default) */}
+      {isBelow && imageElement}
 
       {/* Numbered statements — subtle highlight separates them from the stem */}
       {statements.map((s, i) => (

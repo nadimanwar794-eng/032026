@@ -308,7 +308,7 @@ export const PlanComparisonManager: React.FC<Props> = ({
               <div>
                 <span className="text-[10px] uppercase font-bold text-sky-700">Sequential Page Reading</span>
                 <p className="text-xs font-medium text-sky-900 mt-0.5">
-                  Free: <strong>Always ON</strong> | Basic & Ultra: <strong>Self ON/OFF in Settings</strong>
+                  Free: <strong>Sequential Page Reading</strong> | Basic & Ultra: <strong>0 🪙 / 0 💎</strong>
                 </p>
               </div>
               <span className="text-xs px-2 py-1 rounded-lg bg-sky-200/70 text-sky-800 font-black">Active ⭐</span>

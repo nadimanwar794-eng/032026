@@ -8,6 +8,7 @@
 import { saveScoreLogToFirebase } from '../firebase';
 import { getLevelInfo, getProgressBonus, getDailyLimitBonus } from './levelSystem';
 import { getCreditSubPlanMultiplier } from './creditSubscriptionUtils';
+import { PedroEngine } from './engines/pedroEngine';
 
 export const DAILY_SCORE_LIMIT = 1500;
 
@@ -29,15 +30,7 @@ export const getDailyScoreLimit = (
 ): number => {
   let base = isPremium ? (DAILY_TIER_LIMITS[subscriptionLevel ?? 'FREE'] ?? 1500) : 1500;
 
-  // Level 9+ Daily Limit Multiplier (up to +100% to +500% based on daily study progress)
-  if (userLevel && userLevel >= 9) {
-    const earned = dailyEarned ?? 0;
-    const progressPct = base > 0 ? Math.min(100, Math.round((earned / base) * 100)) : 0;
-    const limitBonusPct = getDailyLimitBonus(userLevel, progressPct);
-    if (limitBonusPct > 0) {
-      base = Math.round(base * (1 + limitBonusPct / 100));
-    }
-  }
+  // Level multipliers permanently removed per user mandate: "multiplier level 14 se 15 tak jate jate 4x 5x ho jata hai uskiye permanent hatega ye"
 
   // Only apply boost if it hasn't expired
   const boostActive = scoreLimitBoostPercent && scoreLimitBoostPercent > 0
@@ -289,8 +282,27 @@ export const tryEarnScore = (
   const lvlProgressBonus = getProgressBonus(effLevel, progressPct);
   const totalBoost = boostPercent + lvlProgressBonus;
 
+  // Primary Study activities (Reading Notes, Writing, PDF, Video, Audio, Lessons, Homework reading)
+  const isPrimaryStudyActivity =
+    activity &&
+    (activity.startsWith('READ_') ||
+      activity.includes('NOTES') ||
+      activity.includes('LESSON') ||
+      activity.includes('PDF') ||
+      activity.includes('VIDEO') ||
+      activity.includes('AUDIO') ||
+      activity.includes('COACHING_HW_NOTES') ||
+      activity.includes('REVISION_READ') ||
+      activity.includes('READING_MODE') ||
+      activity.includes('WRITING_MODE') ||
+      activity.includes('STUDY'));
+
+  // Pedro Level 8 Overdrive: 2x XP for primary study mode
+  const isL8Overdrive = Boolean(isPrimaryStudyActivity && PedroEngine.isL8OverdriveActive(userId, effLevel));
+  const effectiveBase = isL8Overdrive ? baseScore * 2 : baseScore;
+
   const remaining = getRemainingDailyScore(userId, subscriptionLevel, isPremium, scoreLimitBoostPercent, scoreLimitBoostExpiry, effLevel);
-  const calc = calculateScore(baseScore, subscriptionLevel, isPremium, totalBoost, creditActive, activeCreditMult);
+  const calc = calculateScore(effectiveBase, subscriptionLevel, isPremium, totalBoost, creditActive, activeCreditMult);
 
   if (remaining > 0) {
     // Within daily limit — earn normally (capped at remaining)
@@ -301,11 +313,58 @@ export const tryEarnScore = (
       localStorage.setItem(key, String(current + actual));
     } catch {}
     if (actual > 0 && activity) logScoreActivity(userId, activity, actual, label);
+
+    // Pedro Level 8 Overdrive: "Jitna XP study se earn hoga, utne hi Credits student ke wallet me saath-saath add honge"
+    if (isL8Overdrive && actual > 0) {
+      try {
+        const bonusCredits = actual; // 1:1 Matching Free Credits
+        const raw = localStorage.getItem('nst_user') || localStorage.getItem(`nst_user_profile_${userId}`);
+        if (raw) {
+          const u = JSON.parse(raw);
+          u.credits = (u.credits || 0) + bonusCredits;
+          localStorage.setItem('nst_user', JSON.stringify(u));
+          localStorage.setItem(`nst_user_profile_${userId}`, JSON.stringify(u));
+          window.dispatchEvent(
+            new CustomEvent('iic-credits-updated', {
+              detail: { credits: u.credits, bonus: bonusCredits, reason: 'Pedro L8 Overdrive' },
+            })
+          );
+          window.dispatchEvent(
+            new CustomEvent('nst-overdrive-tick-awarded', {
+              detail: { xp: actual, credits: bonusCredits },
+            })
+          );
+        }
+      } catch {}
+    }
+
     return actual;
   } else {
     // Over daily limit — earn at 0.5x rate (does not count against daily tracker)
     const overLimitScore = Math.max(1, Math.round(calc * 0.5));
     if (overLimitScore > 0 && activity) logScoreActivity(userId, `${activity}_OVERLIMIT`, overLimitScore, label);
+    if (isL8Overdrive && overLimitScore > 0) {
+      try {
+        const bonusCredits = overLimitScore; // 1:1 Matching Free Credits
+        const raw = localStorage.getItem('nst_user') || localStorage.getItem(`nst_user_profile_${userId}`);
+        if (raw) {
+          const u = JSON.parse(raw);
+          u.credits = (u.credits || 0) + bonusCredits;
+          localStorage.setItem('nst_user', JSON.stringify(u));
+          localStorage.setItem(`nst_user_profile_${userId}`, JSON.stringify(u));
+          window.dispatchEvent(
+            new CustomEvent('iic-credits-updated', {
+              detail: { credits: u.credits, bonus: bonusCredits, reason: 'Pedro L8 Overdrive' },
+            })
+          );
+          window.dispatchEvent(
+            new CustomEvent('nst-overdrive-tick-awarded', {
+              detail: { xp: overLimitScore, credits: bonusCredits },
+            })
+          );
+        }
+      } catch {}
+    }
     return overLimitScore;
   }
 };

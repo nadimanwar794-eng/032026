@@ -1,32 +1,31 @@
+import { drizzle } from "drizzle-orm/node-postgres";
+import pg from "pg";
 import * as schema from "./schema";
+
+const { Pool } = pg;
 
 let pool: any;
 let db: any;
 
-if (process.env.DATABASE_URL) {
-  try {
-    const pg = (await import("pg")).default;
-    const { drizzle } = await import("drizzle-orm/node-postgres");
-    pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
-    db = drizzle(pool, { schema });
-  } catch {
-    console.warn("[AI Studio] Database connection failed — fallback to mock");
+try {
+  if (!process.env.DATABASE_URL) {
+    throw new Error("DATABASE_URL not set");
   }
-}
-
-if (!db) {
-  console.warn("[AI Studio] DATABASE_URL not set — using mock db");
+  pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  db = drizzle(pool, { schema });
+} catch {
+  console.warn('[AI Studio] Database not connected — using mock');
   const noOp = {
     findMany: async () => [],
     findFirst: async () => null,
     findUnique: async () => null,
     create: async (d: any) => d?.data ?? {},
     update: async (d: any) => d?.data ?? {},
-    delete: async () => ({}),
+    delete: async () => ({})
   };
   db = new Proxy({}, {
-    get: (_, prop) =>
-      prop === "query" ? new Proxy({}, { get: () => noOp }) : async () => [],
+    get: (_, prop) => prop === 'query'
+      ? new Proxy({}, { get: () => noOp }) : async () => [],
   });
   pool = {
     query: async () => ({ rows: [] }),

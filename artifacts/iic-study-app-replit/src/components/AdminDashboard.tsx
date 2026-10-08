@@ -15,7 +15,8 @@ import { parseMCQText } from '../utils/mcqParser';
 import { saveTopicNotes } from '../utils/revisionTrackerV2';
 import { TOP_BAR_EFFECTS, EFFECT_CATEGORIES, TopBarEffectsLayer } from '../utils/topBarEffects';
 import { generateSecureRandomString, generateSecureRandomId } from '../utils/cryptoUtils';
-import { saveChapterData, bulkSaveLinks, checkFirebaseConnection, saveSystemSettings, subscribeToUsers, getUsersPage, subscribeToRecentUsers, rtdb, saveUserToLive, db, getChapterData, saveCustomSyllabus, deleteCustomSyllabus, subscribeToUniversalAnalysis, saveAiInteraction, saveSecureKeys, getSecureKeys, subscribeToApiUsage, subscribeToDrafts, resetAllContent, recoverContentFromCache, checkRecoveryStatus, backupAllContentToFirebase, restoreContentFromFirebaseBackup, rebuildContentIndex, deleteHomeworkEntry, deleteLucentEntry, subscribeToDemands, updateDemandStatus, subscribeGlobalChat, subscribeSupportChat, deleteGlobalMessage, deleteSupportMessage, subscribeAllSupportThreads, sendGlobalMessage, sendSupportMessage, subscribeToCompareAnalytics, deleteCompareAnalyticsByQuery, addCompreBookNote, deleteCompreBookNote, getCompreBookNotes, updateCompreBookNote, getAppFeedbacks, exportBackupAsJson, importBackupFromJson, subscribeSuggestions, adminReplySuggestion, deleteSuggestion, reactToSuggestion, resolvesuggestion, applyNoteCorrection, applyMcqCorrection, applyMcqFullEdit, saveMcqLesson, fetchMcqLesson, deleteMcqLesson, getUserByMobileOrId } from '../firebase'; // IMPORT FIREBASE
+import { saveChapterData, bulkSaveLinks, checkFirebaseConnection, saveSystemSettings, subscribeToUsers, getUsersPage, subscribeToRecentUsers, rtdb, saveUserToLive, db, getChapterData, saveCustomSyllabus, deleteCustomSyllabus, subscribeToUniversalAnalysis, saveAiInteraction, saveSecureKeys, getSecureKeys, subscribeToApiUsage, subscribeToDrafts, resetAllContent, recoverContentFromCache, checkRecoveryStatus, backupAllContentToFirebase, restoreContentFromFirebaseBackup, rebuildContentIndex, deleteHomeworkEntry, deleteLucentEntry, subscribeToDemands, updateDemandStatus, subscribeGlobalChat, subscribeSupportChat, deleteGlobalMessage, deleteSupportMessage, subscribeAllSupportThreads, sendGlobalMessage, sendSupportMessage, subscribeToCompareAnalytics, deleteCompareAnalyticsByQuery, addCompreBookNote, deleteCompreBookNote, getCompreBookNotes, updateCompreBookNote, getAppFeedbacks, exportBackupAsJson, importBackupFromJson, subscribeSuggestions, adminReplySuggestion, deleteSuggestion, reactToSuggestion, resolvesuggestion, applyNoteCorrection, applyMcqCorrection, applyMcqFullEdit, saveMcqLesson, fetchMcqLesson, deleteMcqLesson, getUserByMobileOrId, VAPID_KEY } from '../firebase'; // IMPORT FIREBASE
+import { getStoredFcmToken, getNotificationPermissionStatus, subscribeUserToPush, dispatchSmartNotification } from './NotificationManager';
 import { subscribeToMaintenance, saveMaintenance, clearMaintenance, markCrashFixed, MaintenanceState, MaintenanceTarget } from '../utils/maintenanceManager';
 import { ref, set, onValue, update, push, get, query as rtdbQueryAdmin, orderByChild as obcAdmin, limitToLast as ltlAdmin } from "firebase/database";
 import { doc, deleteDoc, setDoc, getDocs, collection, writeBatch, deleteField } from "firebase/firestore";
@@ -43,10 +44,19 @@ import { logAdminAction } from '../utils/adminAudit';
 import { ALL_FEATURES } from '../utils/featureRegistry';
 import { HOME_SECTION_REGISTRY } from '../utils/homeSections';
 import { SPLASH_FONTS, getSplashFontById, ensureGoogleFontLoaded } from '../utils/splashFonts';
+import { uploadToCloudinary, getOptimizedVideoUrl } from '../services/cloudinaryService';
+import { DirectUploadButton } from './DirectUploadButton';
+import { getVipPlusDiamondsPerDay, getVipPlusBasePrice, getVipPlusOriginalPrice, isVipPlusUser } from '../utils/vipPlusUtils';
 import { safeSaveUsersCache } from '../utils/safeUtils';
 import { NstaFeatureManager } from './admin/NstaFeatureManager';
 import { ReferralPrizesManager } from './admin/ReferralPrizesManager';
 import { PlanComparisonManager } from './admin/PlanComparisonManager';
+import { PedroAdminManager } from './admin/PedroAdminManager';
+import { AdminMathManager } from './AdminMathManager';
+import { AdminLucentMediaModal } from './AdminLucentMediaModal';
+import { getLocalErrors } from '../utils/errorLogger';
+import { uploadImageToImgBB } from '../services/imgbbService';
+import { resolveTelegramUrl } from '../services/telegramStorageService';
 // @ts-ignore
 import JSZip from 'jszip';
 import { Document, Page, pdfjs } from 'react-pdf';
@@ -170,7 +180,9 @@ type AdminTab =
   | 'COACHING_HOMEWORK' // Coaching Homework Manager
   | 'COACHING_MANAGER' // 🏫 Full Coaching School System
   | 'COACHING_CENTRES' // 🏫 Create/Assign/Subscription — Super Admin
-  | 'COMPETITION_MCQ_MANAGER'; // MCQ Practice Manager for Competition Books
+  | 'COMPETITION_MCQ_MANAGER' // MCQ Practice Manager for Competition Books
+  | 'MATH_MANAGER' // 📐 Math Master Manager (Book/Notes/Solution/MCQ)
+  | 'PEDRO_MANAGER'; // 🤖 Pedro AI Robot Guide Master
 
 interface ContentConfig {
     freeLink?: string;
@@ -614,11 +626,18 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   // CONTENT HISTORY LOADER
   // Subscribe to error_logs for admin home notification + critical modal
   useEffect(() => {
-    const logsRef = rtdbQueryAdmin(ref(rtdb, 'error_logs'), obcAdmin('timestamp'), ltlAdmin(500));
-    const unsub = onValue(logsRef, snap => {
-      if (!snap.exists()) { setActiveErrorCount(0); setNewErrorCount(0); setCriticalErrorSummary(null); return; }
-      const items: any[] = [];
-      snap.forEach((child: any) => { items.push({ ...child.val(), id: child.key }); });
+    let rtdbItemsCache: any[] = [];
+
+    const recalculateCounts = () => {
+      const local = getLocalErrors();
+      const map = new Map<string, any>();
+      rtdbItemsCache.forEach(child => { if (child && child.id) map.set(child.id, child); });
+      local.forEach(child => {
+        if (!child || !child.id) return;
+        if (!map.has(child.id)) map.set(child.id, child);
+        else if (child.dismissed) map.get(child.id).dismissed = true;
+      });
+      const items = Array.from(map.values());
       const active = items.filter((e: any) => !e.dismissed);
       setActiveErrorCount(active.length);
       const stored = parseInt(localStorage.getItem('admin_last_seen_error_ts') || '0', 10);
@@ -634,8 +653,30 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
       } else {
         setCriticalErrorSummary(null);
       }
-    }, () => {});
-    return unsub;
+    };
+
+    // Calculate initial metrics from local cache immediately
+    recalculateCounts();
+
+    const logsRef = rtdbQueryAdmin(ref(rtdb, 'error_logs'), obcAdmin('timestamp'), ltlAdmin(500));
+    const unsub = onValue(logsRef, snap => {
+      rtdbItemsCache = [];
+      if (snap.exists()) {
+        snap.forEach((child: any) => { rtdbItemsCache.push({ ...child.val(), id: child.key }); });
+      }
+      recalculateCounts();
+    }, () => {
+      recalculateCounts();
+    });
+
+    window.addEventListener('nsta-new-error', recalculateCounts);
+    window.addEventListener('storage', recalculateCounts);
+
+    return () => {
+      unsub();
+      window.removeEventListener('nsta-new-error', recalculateCounts);
+      window.removeEventListener('storage', recalculateCounts);
+    };
   }, []);
 
   useEffect(() => {
@@ -957,15 +998,20 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
     { id: '11', label: '📚 Class 11' },
     { id: '12', label: '📚 Class 12' },
   ];
-  const [newLucent, setNewLucent] = useState<{ subject: string; bookName: string; classLevel: 'COMPETITION' | '6' | '7' | '8' | '9' | '10' | '11' | '12'; board: '' | 'NCERT_EN' | 'NCERT_HI' | 'BSEB'; lessonTitle: string; pages: LucentPageNote[]; mcqOnly: boolean }>({
+  const [newLucent, setNewLucent] = useState<{ subject: string; bookName: string; classLevel: 'COMPETITION' | '6' | '7' | '8' | '9' | '10' | '11' | '12'; board: '' | 'NCERT_EN' | 'NCERT_HI' | 'BSEB'; lessonTitle: string; pages: LucentPageNote[]; mcqOnly: boolean; videoUrl?: string; pdfUrl?: string; audioUrl?: string }>({
     subject: 'biology',
     bookName: '',
     classLevel: 'COMPETITION',
     board: '',
     lessonTitle: '',
     mcqOnly: false,
+    videoUrl: '',
+    pdfUrl: '',
+    audioUrl: '',
     pages: [{ id: Date.now().toString(), pageNo: '1', content: '', chunkNotes: '', htmlNotes: '' }],
   });
+  const [adminLucentMediaModalEntry, setAdminLucentMediaModalEntry] = useState<LucentNoteEntry | null>(null);
+  const [adminLucentMediaModalPageIndex, setAdminLucentMediaModalPageIndex] = useState<number>(-1);
   // Per-page bulk MCQ paste: keyed by page id -> textarea content. When non-undefined the paste UI is open.
   const [cn612EditingId, setCn612EditingId] = useState<string | null>(null);
   const [cn612FilterClass, setCn612FilterClass] = useState<string>('ALL');
@@ -997,6 +1043,8 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   const [showAddBookUI, setShowAddBookUI] = useState(false);
   const [newBookInput, setNewBookInput] = useState('');
   const [expandedLucentPage, setExpandedLucentPage] = useState<Record<string, boolean>>({});
+  const [isUploadingSplashVideo, setIsUploadingSplashVideo] = useState(false);
+  const [splashVideoUploadProgress, setSplashVideoUploadProgress] = useState(0);
 
   // Normalize common Hindi / shorthand MCQ paste formats so they parse with parseMCQText().
   // Handles: **प्रश्न:**, **प्रश्न 1: text?**, **सही उत्तर:** B) ..., **सही उत्तर: B) ...**,
@@ -1282,6 +1330,12 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
       }
   }, [settings]);
 
+  // ── 5 Pages Wallpaper Manager State (Home, MCQhub, Community, Routine, Profile) ──
+  const [wallpaperPageTab, setWallpaperPageTab] = useState<'HOME' | 'MCQ' | 'COMMUNITY' | 'ROUTINE' | 'PROFILE'>('HOME');
+  const [adminHomeCardTab, setAdminHomeCardTab] = useState<'ALL' | 'ACADEMIC' | 'PRACTICE' | 'DAILY' | 'ROOM' | 'REVISION' | 'MISTAKES'>('ALL');
+  const [isUploadingWallpaper, setIsUploadingWallpaper] = useState(false);
+  const wallpaperInputRef = useRef<HTMLInputElement>(null);
+
   // ── Admin edit deep-link: read nst_admin_edit_pending set by student-side pencil icon ──
   const _pendingAdminEdit = useRef<any>(null);
   const _adminEditApplied = useRef(false);
@@ -1318,6 +1372,9 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                   classLevel: entry.classLevel,
                   board: (entry as any).board || '',
                   lessonTitle: entry.lessonTitle,
+                  videoUrl: entry.videoUrl || '',
+                  pdfUrl: entry.pdfUrl || '',
+                  audioUrl: entry.audioUrl || '',
                   pages: (entry.pages || []).map((p: any) => ({ ...p })),
                   mcqOnly: entry.mcqOnly || false,
               });
@@ -1587,6 +1644,9 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   const [giftCreditsExpiry, setGiftCreditsExpiry] = useState(30); // Days until gifted credits expire
   const [editSubscriptionTier, setEditSubscriptionTier] = useState<'FREE' | 'WEEKLY' | 'MONTHLY' | '3_MONTHLY' | 'YEARLY' | 'LIFETIME' | 'CUSTOM'>('FREE');
   const [editSubscriptionLevel, setEditSubscriptionLevel] = useState<'BASIC' | 'ULTRA'>('BASIC');
+  const [editVipPlusTier, setEditVipPlusTier] = useState<'NONE' | 'PRO_PLUS' | 'MAX_PLUS'>('NONE');
+  const [selectedVipPlusGrantTier, setSelectedVipPlusGrantTier] = useState<'PRO_PLUS' | 'MAX_PLUS'>('PRO_PLUS');
+  const [selectedVipPlusGrantDuration, setSelectedVipPlusGrantDuration] = useState<'WEEKLY' | 'MONTHLY' | '3_MONTHLY' | 'YEARLY' | 'LIFETIME'>('MONTHLY');
   const [editSubscriptionYears, setEditSubscriptionYears] = useState(0);
   const [editSubscriptionMonths, setEditSubscriptionMonths] = useState(0);
   const [editSubscriptionDays, setEditSubscriptionDays] = useState(0);
@@ -1667,11 +1727,26 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
       return start.toISOString();
   };
 
-  const updatePriceForSelection = (tier: typeof editSubscriptionTier, level: typeof editSubscriptionLevel) => {
+  const updatePriceForSelection = (
+      tier: typeof editSubscriptionTier,
+      level: typeof editSubscriptionLevel,
+      vipPlusOverride?: 'NONE' | 'PRO_PLUS' | 'MAX_PLUS'
+  ) => {
+      const activeVipPlus = vipPlusOverride !== undefined ? vipPlusOverride : editVipPlusTier;
       if (tier !== 'FREE' && tier !== 'CUSTOM' && editingUser) {
           const tierPrices = subPrices[tier as keyof typeof subPrices];
           if (tierPrices) {
               let basePrice = tierPrices[level];
+              if (activeVipPlus === 'PRO_PLUS' || activeVipPlus === 'MAX_PLUS') {
+                  const matchedPlan = (localSettings.subscriptionPlans || []).find(
+                      (p: any) => p.id?.toUpperCase() === tier || (tier === 'WEEKLY' && p.duration?.toLowerCase().includes('week')) || (tier === 'MONTHLY' && p.duration?.toLowerCase().includes('month') && !p.duration?.toLowerCase().includes('3')) || (tier === '3_MONTHLY' && (p.duration?.toLowerCase().includes('3') || p.duration?.toLowerCase().includes('quarter'))) || (tier === 'YEARLY' && p.duration?.toLowerCase().includes('year'))
+                  );
+                  if (matchedPlan) {
+                      basePrice = getVipPlusBasePrice(matchedPlan, activeVipPlus);
+                  } else {
+                      basePrice = Math.round(tierPrices[activeVipPlus === 'MAX_PLUS' ? 'ULTRA' : 'BASIC'] * 1.5);
+                  }
+              }
 
               // Apply Event Discount + Renewal Bonus Logic (Consistent with Store.tsx)
               const event = localSettings.specialDiscountEvent;
@@ -2920,7 +2995,12 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
       setEditUserScore(user.totalScore || 0);
       setEditUserPass(user.password);
       setEditSubscriptionTier(user.subscriptionTier || 'FREE');
-      setEditSubscriptionLevel(user.subscriptionLevel || 'BASIC');
+      const userVipPlus = user.vipPlusTier === 'PRO_PLUS' || user.vipPlusTier === 'MAX_PLUS' ? user.vipPlusTier : 'NONE';
+      setEditVipPlusTier(userVipPlus);
+      setEditSubscriptionLevel(userVipPlus === 'MAX_PLUS' ? 'ULTRA' : userVipPlus === 'PRO_PLUS' ? 'BASIC' : (user.subscriptionLevel || 'BASIC'));
+      if (userVipPlus !== 'NONE') {
+          setSelectedVipPlusGrantTier(userVipPlus);
+      }
       
       // Default customized values based on tier
       if (user.subscriptionTier === 'WEEKLY') setEditSubscriptionDays(7);
@@ -2938,6 +3018,9 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
           const tierPrices = subPrices[user.subscriptionTier as keyof typeof subPrices];
           const level = user.subscriptionLevel || 'BASIC';
           let basePrice = tierPrices ? tierPrices[level as keyof typeof tierPrices] : 0;
+          if (userVipPlus === 'PRO_PLUS' || userVipPlus === 'MAX_PLUS') {
+              basePrice = Math.round((tierPrices ? tierPrices[userVipPlus === 'MAX_PLUS' ? 'ULTRA' : 'BASIC'] : basePrice) * 1.5);
+          }
 
           // Apply Event Discount + Renewal Bonus Logic (Same as Store.tsx)
           const event = localSettings.specialDiscountEvent;
@@ -3087,13 +3170,30 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
 
       const isoEndDate = endDate ? endDate.toISOString() : (endDate === null ? undefined : undefined);
 
+      const isVipPlusGrant = editSubscriptionTier !== 'FREE' && (editVipPlusTier === 'PRO_PLUS' || editVipPlusTier === 'MAX_PLUS');
+      const finalSubLevel: 'BASIC' | 'ULTRA' = isVipPlusGrant
+          ? (editVipPlusTier === 'MAX_PLUS' ? 'ULTRA' : 'BASIC')
+          : editSubscriptionLevel;
+
+      const durationDays = endDate
+          ? Math.max(1, Math.round((endDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)))
+          : 30;
+
+      const matchedPlan = (localSettings.subscriptionPlans || []).find(
+          (p: any) => p.id?.toUpperCase() === editSubscriptionTier || (editSubscriptionTier === 'WEEKLY' && p.duration?.toLowerCase().includes('week')) || (editSubscriptionTier === 'MONTHLY' && p.duration?.toLowerCase().includes('month') && !p.duration?.toLowerCase().includes('3')) || (editSubscriptionTier === '3_MONTHLY' && (p.duration?.toLowerCase().includes('3') || p.duration?.toLowerCase().includes('quarter'))) || (editSubscriptionTier === 'YEARLY' && p.duration?.toLowerCase().includes('year'))
+      ) || { duration: editSubscriptionTier === 'WEEKLY' ? '7 days' : editSubscriptionTier === '3_MONTHLY' ? '3 months' : editSubscriptionTier === 'YEARLY' || editSubscriptionTier === 'LIFETIME' ? '365 days' : '30 days' };
+
+      const vipPlusDailyDia = isVipPlusGrant
+          ? getVipPlusDiamondsPerDay(matchedPlan, editVipPlusTier as 'PRO_PLUS' | 'MAX_PLUS')
+          : undefined;
+
       // RECORD HISTORY
       let newHistory = editingUser.subscriptionHistory || [];
       if (editSubscriptionTier !== 'FREE') {
           const historyEntry: SubscriptionHistoryEntry = {
               id: `hist-${Date.now()}`,
               tier: editSubscriptionTier,
-              level: editSubscriptionLevel,
+              level: finalSubLevel,
               startDate: now.toISOString(),
               endDate: isoEndDate || 'LIFETIME',
               durationHours: endDate ? Math.round((endDate.getTime() - now.getTime()) / (1000 * 60 * 60)) : 999999,
@@ -3107,6 +3207,21 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
           newHistory = [historyEntry, ...newHistory];
       }
 
+      const vipDiamondSub = isVipPlusGrant && vipPlusDailyDia
+          ? {
+              planId: `vipplus_${editVipPlusTier.toLowerCase()}_${Date.now()}`,
+              planName: `${editSubscriptionTier} (${editVipPlusTier === 'MAX_PLUS' ? 'MAX+' : 'PRO+'})`,
+              dailyDiamonds: vipPlusDailyDia,
+              totalDays: durationDays,
+              startDate: now.toISOString(),
+              endDate: isoEndDate || new Date(now.getTime() + durationDays * 86400000).toISOString(),
+              totalClaimedDays: 0,
+              totalDiamondsClaimed: 0,
+              pricePaid: mode === 'PAID' ? editSubscriptionPrice : 0,
+              status: 'ACTIVE' as const,
+          }
+          : editingUser.diamondSubscription;
+
       const updatedUser: User = { 
           ...editingUser, 
           credits: editUserCredits,
@@ -3114,7 +3229,10 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
           totalScore: editUserScore,
           password: editUserPass,
           subscriptionTier: editSubscriptionTier,
-          subscriptionLevel: editSubscriptionLevel,
+          subscriptionLevel: finalSubLevel,
+          vipPlusTier: isVipPlusGrant ? (editVipPlusTier as 'PRO_PLUS' | 'MAX_PLUS') : undefined,
+          dailyVipDiamonds: isVipPlusGrant ? vipPlusDailyDia : undefined,
+          diamondSubscription: vipDiamondSub,
           subscriptionEndDate: isoEndDate,
           subscriptionPrice: editSubscriptionPrice,
           grantedByAdmin: mode === 'FREE',
@@ -3139,7 +3257,8 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
       safeSaveUsersCache(updatedList);
 
       setEditingUser(null);
-      alert(`✅ ${editingUser.name} subscription updated! (${mode} Grant)`);
+      const planDesc = isVipPlusGrant ? `${editSubscriptionTier} ${editVipPlusTier === 'MAX_PLUS' ? 'MAX+ (VIP+)' : 'PRO+ (VIP+)'}` : `${editSubscriptionTier} ${finalSubLevel}`;
+      alert(`✅ ${editingUser.name} subscription updated to ${planDesc}! (${mode} Grant)`);
   };
 
   const sendDirectMessage = async () => {
@@ -4642,7 +4761,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
   // PILOT VIEW
 
   return (
-    <div className="pb-20 bg-slate-50 min-h-screen">
+    <div className="pb-20 bg-slate-50 min-h-screen w-full max-w-full overflow-x-hidden">
       
       {/* ══ CRITICAL ERROR ALERT MODAL ══ */}
       {activeTab === 'DASHBOARD' && criticalErrorSummary && !errorModalDismissed && (
@@ -4962,6 +5081,20 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                       {/* System links — always outside the feature categories below */}
                       <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-2xl p-1.5 flex-wrap justify-center">
                           <button
+                              onClick={() => setActiveTab('MATH_MANAGER')}
+                              className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-[10px] uppercase tracking-widest font-black text-white bg-gradient-to-b from-blue-600 to-indigo-700 shadow-md shadow-blue-600/25 hover:from-blue-500 hover:to-indigo-600 transition-all cursor-pointer"
+                          >
+                              <span className="text-sm leading-none">📐</span> Math Manager (Book / Notes / Solution / MCQ)
+                          </button>
+
+                          <button
+                              onClick={() => setActiveTab('PEDRO_MANAGER')}
+                              className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-[10px] uppercase tracking-widest font-black text-white bg-gradient-to-b from-purple-600 to-indigo-700 shadow-md shadow-purple-600/25 hover:from-purple-500 hover:to-indigo-600 transition-all cursor-pointer"
+                          >
+                              <Bot size={14} /> Pedro AI Voice & Feature Master
+                          </button>
+
+                          <button
                               onClick={() => onNavigate('SCHOOL_ECOSYSTEM' as any)}
                               className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-[10px] uppercase tracking-widest font-black text-white bg-gradient-to-b from-emerald-600 to-emerald-700 shadow-md shadow-emerald-600/25 hover:from-emerald-500 hover:to-emerald-600 transition-all"
                           >
@@ -4971,7 +5104,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                           {currentUser?.role === 'ADMIN' && (
                               <button
                                   onClick={() => setActiveTab('COACHING_CENTRES')}
-                                  className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-[10px] uppercase tracking-widest font-black text-white bg-gradient-to-b from-violet-600 to-violet-700 shadow-md shadow-violet-600/25 hover:from-violet-500 hover:to-violet-600 transition-all"
+                                  className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-[10px] uppercase tracking-widest font-black text-white bg-gradient-to-b from-violet-600 to-violet-700 shadow-md shadow-violet-600/25 hover:from-violet-500 hover:to-violet-600 transition-all cursor-pointer"
                               >
                                   <Building2 size={14} /> Coaching Super Admin
                               </button>
@@ -5125,6 +5258,157 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                       >
                           <SlidersHorizontal size={15} /> Open Compare Manager
                       </button>
+                  </div>
+
+                  {/* STORE TABS & SECTIONS VISIBILITY CONTROLS (NEW) */}
+                  <div className="mb-6 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                      <div className="flex items-center justify-between mb-2">
+                          <h4 className="font-bold text-slate-800 flex items-center gap-2">
+                              <EyeOff size={18} className="text-indigo-600" /> Store Tabs & Sections Visibility (Hide / Show)
+                          </h4>
+                          <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200">
+                              Student App Control
+                          </span>
+                      </div>
+                      <p className="text-xs text-slate-500 mb-4">
+                          Admin yahan se Student app ke Store mein kisi bhi tab ya section (Credits, Diamonds, Subscriptions/VIP, Passes, Exchange) ko chupa (hide) ya dikha sakte hain.
+                      </p>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {/* Hide VIP Subscriptions Store */}
+                          <div className="bg-white p-3 rounded-xl border border-slate-200 flex items-center justify-between gap-3 shadow-sm">
+                              <div>
+                                  <div className="flex items-center gap-1.5 font-bold text-xs text-slate-800">
+                                      <span>👑</span> Hide VIP Subscriptions Tab
+                                  </div>
+                                  <p className="text-[10px] text-slate-500 mt-0.5">VIP Plans & Compare tab hide ho jayega</p>
+                              </div>
+                              <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                                  <input
+                                      type="checkbox"
+                                      checked={localSettings.hideSubscriptionsStore || false}
+                                      onChange={e => setLocalSettings({...localSettings, hideSubscriptionsStore: e.target.checked})}
+                                      className="sr-only peer"
+                                  />
+                                  <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-red-500"></div>
+                              </label>
+                          </div>
+
+                          {/* Credits Store Tab (Default OFF, Admin can turn ON/OFF) */}
+                          <div className="bg-white p-3 rounded-xl border border-slate-200 flex items-center justify-between gap-3 shadow-sm">
+                              <div>
+                                  <div className="flex items-center gap-1.5 font-bold text-xs text-slate-800">
+                                      <span>🪙</span> Credits Store Tab (Packages & Buy)
+                                      <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${localSettings.showCreditsStore === true ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                                          {localSettings.showCreditsStore === true ? 'ON' : 'OFF (Default)'}
+                                      </span>
+                                  </div>
+                                  <p className="text-[10px] text-slate-500 mt-0.5">Default me OFF rehta hai. Jab ON karenge tabhi Store me Credits tab & packs dikhenge.</p>
+                              </div>
+                              <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                                  <input
+                                      type="checkbox"
+                                      checked={localSettings.showCreditsStore === true}
+                                      onChange={e => {
+                                          const isChecked = e.target.checked;
+                                          setLocalSettings({
+                                              ...localSettings,
+                                              showCreditsStore: isChecked,
+                                              hideCreditsStore: !isChecked
+                                          });
+                                      }}
+                                      className="sr-only peer"
+                                  />
+                                  <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+                              </label>
+                          </div>
+
+                          {/* Diamonds Store Tab (Default OFF, Admin can turn ON/OFF) */}
+                          <div className="bg-white p-3 rounded-xl border border-slate-200 flex items-center justify-between gap-3 shadow-sm">
+                              <div>
+                                  <div className="flex items-center gap-1.5 font-bold text-xs text-slate-800">
+                                      <span>💎</span> Diamonds Store Tab (Packages & Buy)
+                                      <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${localSettings.showDiamondsStore === true ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                                          {localSettings.showDiamondsStore === true ? 'ON' : 'OFF (Default)'}
+                                      </span>
+                                  </div>
+                                  <p className="text-[10px] text-slate-500 mt-0.5">Default me OFF rehta hai. Jab ON karenge tabhi Store me Diamonds tab & packs dikhenge.</p>
+                              </div>
+                              <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                                  <input
+                                      type="checkbox"
+                                      checked={localSettings.showDiamondsStore === true}
+                                      onChange={e => {
+                                          const isChecked = e.target.checked;
+                                          setLocalSettings({
+                                              ...localSettings,
+                                              showDiamondsStore: isChecked,
+                                              hideDiamondsStore: !isChecked
+                                          });
+                                      }}
+                                      className="sr-only peer"
+                                  />
+                                  <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+                              </label>
+                          </div>
+
+                          {/* Hide Daily Passes */}
+                          <div className="bg-white p-3 rounded-xl border border-slate-200 flex items-center justify-between gap-3 shadow-sm">
+                              <div>
+                                  <div className="flex items-center gap-1.5 font-bold text-xs text-slate-800">
+                                      <span>⚡</span> Hide Daily Passes
+                                  </div>
+                                  <p className="text-[10px] text-slate-500 mt-0.5">Daily Credit Pass & Diamond Subscription hide honge</p>
+                              </div>
+                              <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                                  <input
+                                      type="checkbox"
+                                      checked={localSettings.hidePassesStore || false}
+                                      onChange={e => setLocalSettings({...localSettings, hidePassesStore: e.target.checked})}
+                                      className="sr-only peer"
+                                  />
+                                  <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-red-500"></div>
+                              </label>
+                          </div>
+
+                          {/* Hide Exchange Tab */}
+                          <div className="bg-white p-3 rounded-xl border border-slate-200 flex items-center justify-between gap-3 shadow-sm">
+                              <div>
+                                  <div className="flex items-center gap-1.5 font-bold text-xs text-slate-800">
+                                      <span>🔄</span> Hide Exchange Tab
+                                  </div>
+                                  <p className="text-[10px] text-slate-500 mt-0.5">Coins se Diamonds exchange tab hide karein</p>
+                              </div>
+                              <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                                  <input
+                                      type="checkbox"
+                                      checked={localSettings.hideExchangeStore || false}
+                                      onChange={e => setLocalSettings({...localSettings, hideExchangeStore: e.target.checked})}
+                                      className="sr-only peer"
+                                  />
+                                  <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-red-500"></div>
+                              </label>
+                          </div>
+
+                          {/* Hide VIP Subscriptions Tab */}
+                          <div className="bg-white p-3 rounded-xl border border-slate-200 flex items-center justify-between gap-3 shadow-sm">
+                              <div>
+                                  <div className="flex items-center gap-1.5 font-bold text-xs text-slate-800">
+                                      <span>👑</span> Hide VIP Subscriptions Tab
+                                  </div>
+                                  <p className="text-[10px] text-slate-500 mt-0.5">VIP Plans / VIP+ Plans tab ko hide karein</p>
+                              </div>
+                              <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                                  <input
+                                      type="checkbox"
+                                      checked={localSettings.hideSubscriptionsStore || false}
+                                      onChange={e => setLocalSettings({...localSettings, hideSubscriptionsStore: e.target.checked})}
+                                      className="sr-only peer"
+                                  />
+                                  <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-red-500"></div>
+                              </label>
+                          </div>
+                      </div>
                   </div>
 
                   {/* STORE EVENTS & POPUPS */}
@@ -5498,6 +5782,103 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                               <div className="mt-2">
                                                   <label className="text-[9px] font-bold text-amber-700 block">🪙 Max Credit Price (CR)</label>
                                                   <input type="number" placeholder="Default duration price use hogi" value={plan.creditPriceUltra ?? ''} onChange={e => updatePlan('creditPriceUltra', e.target.value === '' ? undefined : Number(e.target.value))} className="w-full p-1.5 border border-amber-300 rounded text-xs font-bold text-amber-900 bg-amber-50/70" />
+                                              </div>
+                                          </div>
+                                      </div>
+
+                                      {/* VIP+ TIERS (PRO+ & MAX+) CONFIG (NEW) */}
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3 pt-3 border-t border-slate-200">
+                                          {/* PRO+ (VIP+) TIER */}
+                                          <div className="bg-gradient-to-br from-cyan-50/80 to-blue-50/70 p-3 rounded-xl border border-cyan-200">
+                                              <div className="flex items-center justify-between mb-2">
+                                                  <h5 className="text-xs font-black text-cyan-900 flex items-center gap-1.5">
+                                                      <span>⭐💎</span> PRO+ (VIP+) TIER
+                                                  </h5>
+                                                  <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-cyan-100 text-cyan-800 border border-cyan-300">
+                                                      1.5x Pro
+                                                  </span>
+                                              </div>
+                                              <div className="flex gap-2">
+                                                  <div className="flex-1">
+                                                      <label className="text-[9px] font-bold text-slate-600 block">Dummy Price (₹)</label>
+                                                      <input
+                                                          type="number"
+                                                          placeholder={String(Math.round((plan.basicOriginalPrice || 199) * 1.5))}
+                                                          value={plan.proPlusOriginalPrice ?? ''}
+                                                          onChange={e => updatePlan('proPlusOriginalPrice', e.target.value === '' ? undefined : Number(e.target.value))}
+                                                          className="w-full p-1.5 border rounded text-xs line-through text-slate-500 bg-white"
+                                                      />
+                                                  </div>
+                                                  <div className="flex-1">
+                                                      <label className="text-[9px] font-bold text-cyan-800 block">Selling Price (₹)</label>
+                                                      <input
+                                                          type="number"
+                                                          placeholder={String(Math.round((plan.basicPrice || 99) * 1.5))}
+                                                          value={plan.proPlusPrice ?? ''}
+                                                          onChange={e => updatePlan('proPlusPrice', e.target.value === '' ? undefined : Number(e.target.value))}
+                                                          className="w-full p-1.5 border border-cyan-300 rounded text-xs font-bold text-cyan-800 bg-white"
+                                                      />
+                                                  </div>
+                                              </div>
+                                              <div className="mt-2">
+                                                  <label className="text-[9px] font-bold text-cyan-900 block flex items-center justify-between">
+                                                      <span>💎 Daily Diamonds/Day</span>
+                                                      <span className="text-[8px] font-normal text-slate-500">(W:10, M:25, 3M:40, Y:60)</span>
+                                                  </label>
+                                                  <input
+                                                      type="number"
+                                                      placeholder={String(getVipPlusDiamondsPerDay(plan, 'PRO_PLUS'))}
+                                                      value={plan.proPlusDailyDiamonds ?? ''}
+                                                      onChange={e => updatePlan('proPlusDailyDiamonds', e.target.value === '' ? undefined : Number(e.target.value))}
+                                                      className="w-full p-1.5 border border-cyan-300 rounded text-xs font-bold text-cyan-900 bg-white"
+                                                  />
+                                              </div>
+                                          </div>
+
+                                          {/* MAX+ (VIP+) TIER */}
+                                          <div className="bg-gradient-to-br from-pink-50/80 to-purple-50/70 p-3 rounded-xl border border-pink-200">
+                                              <div className="flex items-center justify-between mb-2">
+                                                  <h5 className="text-xs font-black text-purple-900 flex items-center gap-1.5">
+                                                      <span>👑💎</span> MAX+ (VIP+) TIER
+                                                  </h5>
+                                                  <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-pink-100 text-pink-800 border border-pink-300">
+                                                      1.5x Max
+                                                  </span>
+                                              </div>
+                                              <div className="flex gap-2">
+                                                  <div className="flex-1">
+                                                      <label className="text-[9px] font-bold text-slate-600 block">Dummy Price (₹)</label>
+                                                      <input
+                                                          type="number"
+                                                          placeholder={String(Math.round((plan.ultraOriginalPrice || 299) * 1.5))}
+                                                          value={plan.maxPlusOriginalPrice ?? ''}
+                                                          onChange={e => updatePlan('maxPlusOriginalPrice', e.target.value === '' ? undefined : Number(e.target.value))}
+                                                          className="w-full p-1.5 border rounded text-xs line-through text-slate-500 bg-white"
+                                                      />
+                                                  </div>
+                                                  <div className="flex-1">
+                                                      <label className="text-[9px] font-bold text-purple-800 block">Selling Price (₹)</label>
+                                                      <input
+                                                          type="number"
+                                                          placeholder={String(Math.round((plan.ultraPrice || 149) * 1.5))}
+                                                          value={plan.maxPlusPrice ?? ''}
+                                                          onChange={e => updatePlan('maxPlusPrice', e.target.value === '' ? undefined : Number(e.target.value))}
+                                                          className="w-full p-1.5 border border-purple-300 rounded text-xs font-bold text-purple-800 bg-white"
+                                                      />
+                                                  </div>
+                                              </div>
+                                              <div className="mt-2">
+                                                  <label className="text-[9px] font-bold text-purple-900 block flex items-center justify-between">
+                                                      <span>💎 Daily Diamonds/Day</span>
+                                                      <span className="text-[8px] font-normal text-slate-500">(W:35, M:50, 3M:70, Y:100)</span>
+                                                  </label>
+                                                  <input
+                                                      type="number"
+                                                      placeholder={String(getVipPlusDiamondsPerDay(plan, 'MAX_PLUS'))}
+                                                      value={plan.maxPlusDailyDiamonds ?? ''}
+                                                      onChange={e => updatePlan('maxPlusDailyDiamonds', e.target.value === '' ? undefined : Number(e.target.value))}
+                                                      className="w-full p-1.5 border border-purple-300 rounded text-xs font-bold text-purple-900 bg-white"
+                                                  />
                                               </div>
                                           </div>
                                       </div>
@@ -6028,17 +6409,22 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                   <Trash2 size={16} />
                                               </button>
                                           </div>
-                                          <input
-                                              type="text"
-                                              value={vid.url}
-                                              onChange={(e) => {
-                                                  const updated = [...premiumVideoPlaylist];
-                                                  updated[idx].url = e.target.value;
-                                                  setPremiumVideoPlaylist(updated);
-                                              }}
-                                              placeholder="Google Drive Link / YouTube URL"
-                                              className="w-full p-2 border border-slate-200 rounded text-xs font-mono text-blue-600 bg-white ml-8"
-                                          />
+                                          <div className="ml-8 space-y-1.5">
+
+                                              <DirectUploadButton
+                                                  kind="video"
+                                                  compact
+                                                  currentUrl={vid.url}
+                                                  onUploaded={(url, file) => {
+                                                      const updated = [...premiumVideoPlaylist];
+                                                      updated[idx].url = url;
+                                                      if (!updated[idx].title) {
+                                                          updated[idx].title = file.name.replace(/\.[^/.]+$/, '');
+                                                      }
+                                                      setPremiumVideoPlaylist(updated);
+                                                  }}
+                                              />
+                                          </div>
                                       </div>
                                   ))}
                               </div>
@@ -6181,16 +6567,19 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                   className="w-full p-2 border border-slate-200 rounded text-xs font-mono text-slate-600 bg-white ml-8 h-20"
                                               />
                                           ) : (
-                                              <input
-                                                  type="text"
-                                                  value={note.url}
-                                                  onChange={(e) => {
-                                                      const updated = universalNotes.map(n => n === note ? { ...n, url: e.target.value } : n);
-                                                      setUniversalNotes(updated);
-                                                  }}
-                                                  placeholder="PDF URL"
-                                                  className="w-full p-2 border border-slate-200 rounded text-xs font-mono text-blue-600 bg-white ml-8"
-                                              />
+                                              <div className="ml-8 space-y-1.5">
+
+                                                  <DirectUploadButton
+                                                      kind="pdf"
+                                                      compact
+                                                      currentUrl={note.url}
+                                                      onUploaded={(url, file) => {
+                                                          const autoTitle = note.title || file.name.replace(/\.[^/.]+$/, '');
+                                                          const updated = universalNotes.map(n => n === note ? { ...n, url, title: autoTitle, topic: autoTitle } : n);
+                                                          setUniversalNotes(updated);
+                                                      }}
+                                                  />
+                                              </div>
                                           )}
                                       </div>
                                   ))}
@@ -6255,11 +6644,8 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                       <button
                           onClick={() => {
                               // Manual Add (Legacy / Global)
-                              const title = prompt("Note Title");
-                              if(!title) return;
-                              const url = prompt("PDF URL");
-                              if(!url) return;
-                              setUniversalNotes([...universalNotes, { title, url, access: 'FREE' }]);
+                              const title = "Note " + (universalNotes.length + 1);
+                              setUniversalNotes([...universalNotes, { title, url: '', access: 'FREE' }]);
                           }}
                           className="flex-1 py-3 bg-white border border-blue-200 text-blue-600 font-bold rounded-xl hover:bg-blue-50 transition dashed"
                       >
@@ -7286,10 +7672,18 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                   <label className="text-[10px] font-bold text-slate-600 uppercase">Click URL (External Link)</label>
                                   <input type="url" value={localSettings.bannerConfig?.top?.clickUrl || ''} onChange={e => setLocalSettings({ ...localSettings, bannerConfig: { ...(localSettings.bannerConfig || {} as any), top: { ...(localSettings.bannerConfig?.top || {} as any), clickUrl: e.target.value } } })} className="w-full p-2 rounded-lg border border-red-200 text-sm text-slate-700" placeholder="https://..." />
                               </div>
-                              <div>
-                                  <label className="text-[10px] font-bold text-red-700 uppercase flex items-center gap-1">🔴 YouTube Live URL (App Player)</label>
-                                  <input type="url" value={localSettings.bannerConfig?.top?.liveVideoUrl || ''} onChange={e => setLocalSettings({ ...localSettings, bannerConfig: { ...(localSettings.bannerConfig || {} as any), top: { ...(localSettings.bannerConfig?.top || {} as any), liveVideoUrl: e.target.value } } })} className="w-full p-2 rounded-lg border border-red-300 text-sm text-slate-700" placeholder="https://youtube.com/live/..." />
-                                  <p className="text-[9px] text-red-400 mt-0.5">Set karne par banner tap karne se app ke video player mein live class khulegi.</p>
+                              <div className="space-y-1.5">
+                                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                                      <label className="text-[10px] font-bold text-red-700 uppercase flex items-center gap-1">🔴 Live / Video URL (App Player)</label>
+                                      <DirectUploadButton
+                                          kind="video"
+                                          compact
+                                          currentUrl={localSettings.bannerConfig?.top?.liveVideoUrl}
+                                          onUploaded={(url) => setLocalSettings({ ...localSettings, bannerConfig: { ...(localSettings.bannerConfig || {} as any), top: { ...(localSettings.bannerConfig?.top || {} as any), liveVideoUrl: url } } })}
+                                      />
+                                  </div>
+
+                                  <p className="text-[9px] text-red-400 mt-0.5">Set karne par banner tap karne se app ke video player mein video/live class khulegi.</p>
                               </div>
                           </div>
                       </div>
@@ -7327,10 +7721,18 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                   <label className="text-[10px] font-bold text-slate-600 uppercase">Click URL (External Link)</label>
                                   <input type="url" value={localSettings.bannerConfig?.bottom?.clickUrl || ''} onChange={e => setLocalSettings({ ...localSettings, bannerConfig: { ...(localSettings.bannerConfig || {} as any), bottom: { ...(localSettings.bannerConfig?.bottom || {} as any), clickUrl: e.target.value } } })} className="w-full p-2 rounded-lg border border-blue-200 text-sm text-slate-700" placeholder="https://..." />
                               </div>
-                              <div>
-                                  <label className="text-[10px] font-bold text-red-700 uppercase flex items-center gap-1">🔴 YouTube Live URL (App Player)</label>
-                                  <input type="url" value={localSettings.bannerConfig?.bottom?.liveVideoUrl || ''} onChange={e => setLocalSettings({ ...localSettings, bannerConfig: { ...(localSettings.bannerConfig || {} as any), bottom: { ...(localSettings.bannerConfig?.bottom || {} as any), liveVideoUrl: e.target.value } } })} className="w-full p-2 rounded-lg border border-red-300 text-sm text-slate-700" placeholder="https://youtube.com/live/..." />
-                                  <p className="text-[9px] text-red-400 mt-0.5">Set karne par banner tap karne se app ke video player mein live class khulegi.</p>
+                              <div className="space-y-1.5">
+                                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                                      <label className="text-[10px] font-bold text-red-700 uppercase flex items-center gap-1">🔴 Live / Video URL (App Player)</label>
+                                      <DirectUploadButton
+                                          kind="video"
+                                          compact
+                                          currentUrl={localSettings.bannerConfig?.bottom?.liveVideoUrl}
+                                          onUploaded={(url) => setLocalSettings({ ...localSettings, bannerConfig: { ...(localSettings.bannerConfig || {} as any), bottom: { ...(localSettings.bannerConfig?.bottom || {} as any), liveVideoUrl: url } } })}
+                                      />
+                                  </div>
+
+                                  <p className="text-[9px] text-red-400 mt-0.5">Set karne par banner tap karne se app ke video player mein video/live class khulegi.</p>
                               </div>
                           </div>
                           <p className="text-[10px] text-blue-400 mt-2">* Auto-Hide 0 = hamesha dikhega. Click URL set karne par banner tap karke link khulega.</p>
@@ -7541,6 +7943,29 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
           />
       )}
 
+      {/* --- PEDRO AI VOICE & FEATURE GUIDE CONTROLLER --- */}
+      {activeTab === 'PEDRO_MANAGER' && (
+          <PedroAdminManager
+              settings={localSettings}
+              onSave={async (updated) => {
+                  setLocalSettings(updated);
+                  await handleSaveSettings(updated);
+              }}
+              onBack={() => setActiveTab('DASHBOARD')}
+          />
+      )}
+
+      {/* --- MATH MASTER MANAGER (BOOK / NOTES / SOLUTION / MCQ) --- */}
+      {activeTab === 'MATH_MANAGER' && (
+          <AdminMathManager
+              onBack={() => setActiveTab('DASHBOARD')}
+              currentUser={currentUser}
+              settings={localSettings}
+              onUpdateSettings={setLocalSettings}
+              onSaveSettings={handleSaveSettings}
+          />
+      )}
+
       {/* 3-TIER POPUP CONFIG TAB */}
 
 
@@ -7675,8 +8100,8 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           className={`flex flex-col items-center gap-1 py-2.5 px-3 rounded-xl border-2 text-xs font-black transition-all ${newCustomBookType === 'single' ? 'bg-amber-600 text-white border-amber-600 shadow-md' : 'bg-white text-amber-700 border-amber-200 hover:border-amber-400'}`}
                                       >
                                           <span className="text-xl">📄</span>
-                                          <span>One Page Book</span>
-                                          <span className={`text-[9px] font-medium text-center leading-tight ${newCustomBookType === 'single' ? 'opacity-80' : 'opacity-60'}`}>Sar Sangrah jaisa — har baar ek page/notes add karo</span>
+                                          <span>One Subject Book</span>
+                                          <span className={`text-[9px] font-medium text-center leading-tight ${newCustomBookType === 'single' ? 'opacity-80' : 'opacity-60'}`}>Sar Sangrah / Speedy jaisa — Routine me nahi aayega</span>
                                       </button>
                                       <button
                                           type="button"
@@ -7684,8 +8109,8 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           className={`flex flex-col items-center gap-1 py-2.5 px-3 rounded-xl border-2 text-xs font-black transition-all ${newCustomBookType === 'multi' ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-indigo-700 border-indigo-200 hover:border-indigo-400'}`}
                                       >
                                           <span className="text-xl">📚</span>
-                                          <span>Multi Page Book</span>
-                                          <span className={`text-[9px] font-medium text-center leading-tight ${newCustomBookType === 'multi' ? 'opacity-80' : 'opacity-60'}`}>Class 6-12 jaisa — chapters + multiple pages + notes + MCQ</span>
+                                          <span>Multi Subject Book</span>
+                                          <span className={`text-[9px] font-medium text-center leading-tight ${newCustomBookType === 'multi' ? 'opacity-80' : 'opacity-60'}`}>Lucent / Class 6-12 jaisa — Routine me chalega</span>
                                       </button>
                                   </div>
                               </div>
@@ -8027,6 +8452,165 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                               <p className="text-[10px] text-cyan-700 mt-2 leading-snug">
                                   💡 Tip: PNG transparent background ke saath best dikhta hai. Max 1 MB. Changes "Save Settings" press karne ke baad apply honge.
                               </p>
+                          </div>
+
+                          {/* ============================================ */}
+                          {/* SPLASH / LOADING SCREEN VIDEO (CLOUDINARY)   */}
+                          {/* ============================================ */}
+                          <div className="bg-gradient-to-br from-sky-50 to-indigo-50 border border-sky-200 rounded-xl p-3">
+                              <div className="flex items-center justify-between mb-2">
+                                  <label className="text-xs font-bold uppercase text-sky-800 flex items-center gap-1.5">
+                                      <Video size={14} className="text-sky-600" />
+                                      <span>🎬 Loading Screen Video (Cloudinary)</span>
+                                  </label>
+                                  <span className={`text-[10px] font-black px-2 py-0.5 rounded-md border ${
+                                      localSettings.loadingScreenVideoEnabled !== false && localSettings.loadingScreenVideoUrl
+                                          ? 'text-emerald-800 bg-emerald-50 border-emerald-200'
+                                          : 'text-slate-500 bg-slate-100 border-slate-200'
+                                  }`}>
+                                      {localSettings.loadingScreenVideoEnabled !== false && localSettings.loadingScreenVideoUrl ? 'Video ON' : 'Video OFF'}
+                                  </span>
+                              </div>
+                              <p className="text-[10px] font-bold text-sky-700 mb-3">
+                                  App khulne par Loading Screen me video chalayein. Aap Gallery se direct video upload (Cloudinary) kar sakte hain ya video link paste kar sakte hain.
+                              </p>
+
+                              {/* ON/OFF TOGGLE + PREVIEW */}
+                              <div className="flex items-center justify-between bg-white rounded-xl p-3 border border-sky-100 mb-3">
+                                  <div>
+                                      <p className="font-bold text-slate-800 text-xs">Enable Loading Screen Video</p>
+                                      <p className="text-[10px] text-slate-500">ON rehne par loading screen me video chalega.</p>
+                                  </div>
+                                  <input
+                                      type="checkbox"
+                                      checked={localSettings.loadingScreenVideoEnabled !== false}
+                                      onChange={() => {
+                                          const next = !(localSettings.loadingScreenVideoEnabled !== false);
+                                          setLocalSettings({ ...localSettings, loadingScreenVideoEnabled: next });
+                                          try { localStorage.setItem('nst_loading_screen_video_enabled', String(next)); } catch {}
+                                      }}
+                                      className="w-6 h-6 accent-sky-600 cursor-pointer shrink-0"
+                                  />
+                              </div>
+
+                              {/* VIDEO PREVIEW */}
+                              {localSettings.loadingScreenVideoUrl && (
+                                  <div className="mb-3 rounded-xl overflow-hidden bg-black border border-sky-200 relative aspect-video max-h-48 mx-auto">
+                                      <video
+                                          src={getOptimizedVideoUrl(localSettings.loadingScreenVideoUrl)}
+                                          controls
+                                          muted
+                                          playsInline
+                                          className="w-full h-full object-contain"
+                                      />
+                                  </div>
+                              )}
+
+                              {/* UPLOAD PROGRESS */}
+                              {isUploadingSplashVideo && (
+                                  <div className="mb-3 bg-white p-2.5 rounded-xl border border-sky-200">
+                                      <div className="flex justify-between text-[10px] font-black text-sky-700 mb-1">
+                                          <span>☁️ Uploading Video to Cloudinary...</span>
+                                          <span>{splashVideoUploadProgress}%</span>
+                                      </div>
+                                      <div className="w-full h-2 bg-sky-100 rounded-full overflow-hidden">
+                                          <div
+                                              className="h-full bg-gradient-to-r from-sky-500 to-indigo-600 transition-all duration-300"
+                                              style={{ width: `${splashVideoUploadProgress}%` }}
+                                          />
+                                      </div>
+                                  </div>
+                              )}
+
+                              {/* DIRECT VIDEO UPLOAD + REMOVE */}
+                              <div className="grid grid-cols-2 gap-2 mb-2.5">
+                                  <label className={`cursor-pointer ${isUploadingSplashVideo ? 'opacity-60 pointer-events-none' : ''}`}>
+                                      <input
+                                          type="file"
+                                          accept="video/*"
+                                          className="hidden"
+                                          disabled={isUploadingSplashVideo}
+                                          onChange={async (e) => {
+                                              const file = e.target.files?.[0];
+                                              if (!file) return;
+                                              setIsUploadingSplashVideo(true);
+                                              setSplashVideoUploadProgress(1);
+                                              try {
+                                                  const res = await uploadToCloudinary(file, 'video', (pct) => {
+                                                      setSplashVideoUploadProgress(pct);
+                                                  });
+                                                  const videoUrl = res.secure_url || res.url;
+                                                  const updated = {
+                                                      ...localSettings,
+                                                      loadingScreenVideoEnabled: true,
+                                                      loadingScreenVideoUrl: videoUrl,
+                                                  };
+                                                  setLocalSettings(updated);
+                                                  try {
+                                                      localStorage.setItem('nst_loading_screen_video_url', videoUrl);
+                                                      localStorage.setItem('nst_loading_screen_video_enabled', 'true');
+                                                  } catch {}
+                                                  await saveSystemSettings(updated);
+                                                  if (onUpdateSettings) onUpdateSettings(updated);
+                                                  logActivity('LOADING_VIDEO_UPLOADED', `Loading screen video uploaded to Cloudinary`);
+                                                  alert('✅ Loading Screen Video Cloudinary par upload aur save ho gaya!');
+                                              } catch (err: any) {
+                                                  alert('❌ Video upload fail ho gaya: ' + (err?.message || 'Unknown error'));
+                                              } finally {
+                                                  setIsUploadingSplashVideo(false);
+                                                  setSplashVideoUploadProgress(0);
+                                                  e.target.value = '';
+                                              }
+                                          }}
+                                      />
+                                      <div className="text-center text-[11px] font-black px-3 py-2.5 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 text-white hover:opacity-95 active:scale-[0.98] transition-all">
+                                          {isUploadingSplashVideo ? `⏳ Uploading ${splashVideoUploadProgress}%` : '📱 Upload Video (Gallery)'}
+                                      </div>
+                                  </label>
+                                  <button
+                                      type="button"
+                                      onClick={async () => {
+                                          const updated = {
+                                              ...localSettings,
+                                              loadingScreenVideoEnabled: false,
+                                              loadingScreenVideoUrl: '',
+                                          };
+                                          setLocalSettings(updated);
+                                          try {
+                                              localStorage.removeItem('nst_loading_screen_video_url');
+                                              localStorage.setItem('nst_loading_screen_video_enabled', 'false');
+                                          } catch {}
+                                          await saveSystemSettings(updated);
+                                          if (onUpdateSettings) onUpdateSettings(updated);
+                                      }}
+                                      className="text-[11px] font-black px-3 py-2.5 rounded-xl bg-white text-rose-600 border-2 border-rose-200 hover:bg-rose-50 active:scale-[0.98] transition-all"
+                                  >
+                                      🗑️ Remove Video
+                                  </button>
+                              </div>
+
+                              {/* DIRECT VIDEO URL INPUT */}
+                              <div className="bg-white rounded-xl p-2.5 border border-sky-100">
+                                  <label className="text-[10px] font-bold text-slate-600 block mb-1">Ya Direct Video URL (Cloudinary / MP4) Paste Karein:</label>
+                                  <input
+                                      type="url"
+                                      value={localSettings.loadingScreenVideoUrl || ''}
+                                      onChange={(e) => {
+                                          const val = e.target.value;
+                                          setLocalSettings({
+                                              ...localSettings,
+                                              loadingScreenVideoUrl: val,
+                                              loadingScreenVideoEnabled: val.trim() ? true : localSettings.loadingScreenVideoEnabled,
+                                          });
+                                          try {
+                                              localStorage.setItem('nst_loading_screen_video_url', val.trim());
+                                              if (val.trim()) localStorage.setItem('nst_loading_screen_video_enabled', 'true');
+                                          } catch {}
+                                      }}
+                                      placeholder="https://res.cloudinary.com/.../video.mp4"
+                                      className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-sky-500"
+                                  />
+                              </div>
                           </div>
 
                           {/* ── Sequential Page Reading Setting ── */}
@@ -10959,48 +11543,53 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                       <p className="text-[8px] text-slate-400 mt-0.5">Dark + Blue mode dono mein apply hoga</p>
                                                     </div>
                                                   </div>
-                                                  <div className="bg-rose-50 border border-rose-200 rounded-lg p-2">
-                                                    <label className="text-[9px] font-black text-rose-700 uppercase block mb-1">🎬 Video Link (Google Drive / YouTube)</label>
-                                                    <input
-                                                      type="url"
-                                                      value={(pg as any).videoUrl || ''}
-                                                      onChange={e => {
-                                                        const updated = [...newLucent.pages];
-                                                        updated[pgIdx] = { ...updated[pgIdx], videoUrl: e.target.value } as any;
-                                                        setNewLucent({...newLucent, pages: updated});
-                                                      }}
-                                                      className="w-full p-2 border border-rose-200 rounded text-sm outline-none focus:border-rose-500 bg-white"
-                                                      placeholder="https://drive.google.com/file/d/FILE_ID/view  ya  YouTube link"
-                                                    />
-                                                    <p className="text-[9px] text-rose-600 mt-1">💡 Google Drive link: File ko &quot;Anyone with the link&quot; share karein — student ko Gmail login nahi maangega.</p>
+                                                  <div className="bg-rose-50 border border-rose-200 rounded-lg p-2 space-y-1.5">
+                                                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                                                      <label className="text-[9px] font-black text-rose-700 uppercase block">🎬 Video (Direct App Upload ya Link)</label>
+                                                      <DirectUploadButton
+                                                        kind="video"
+                                                        compact
+                                                        currentUrl={(pg as any).videoUrl}
+                                                        onUploaded={(url) => {
+                                                          const updated = [...newLucent.pages];
+                                                          updated[pgIdx] = { ...updated[pgIdx], videoUrl: url } as any;
+                                                          setNewLucent({ ...newLucent, pages: updated });
+                                                        }}
+                                                      />
+                                                    </div>
+
                                                   </div>
-                                                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-2">
-                                                    <label className="text-[9px] font-black text-blue-700 uppercase block mb-1">📄 PDF Link (Google Drive)</label>
-                                                    <input
-                                                      type="url"
-                                                      value={(pg as any).pdfUrl || ''}
-                                                      onChange={e => {
-                                                        const updated = [...newLucent.pages];
-                                                        updated[pgIdx] = { ...updated[pgIdx], pdfUrl: e.target.value || undefined } as any;
-                                                        setNewLucent({...newLucent, pages: updated});
-                                                      }}
-                                                      className="w-full p-2 border border-blue-200 rounded text-sm outline-none focus:border-blue-500 bg-white"
-                                                      placeholder="https://drive.google.com/file/d/FILE_ID/view"
-                                                    />
+                                                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 space-y-1.5">
+                                                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                                                      <label className="text-[9px] font-black text-blue-700 uppercase block">📄 PDF (Direct App Upload ya Link)</label>
+                                                      <DirectUploadButton
+                                                        kind="pdf"
+                                                        compact
+                                                        currentUrl={(pg as any).pdfUrl}
+                                                        onUploaded={(url) => {
+                                                          const updated = [...newLucent.pages];
+                                                          updated[pgIdx] = { ...updated[pgIdx], pdfUrl: url } as any;
+                                                          setNewLucent({ ...newLucent, pages: updated });
+                                                        }}
+                                                      />
+                                                    </div>
+
                                                   </div>
-                                                  <div className="bg-purple-50 border border-purple-200 rounded-lg p-2">
-                                                    <label className="text-[9px] font-black text-purple-700 uppercase block mb-1">🎧 Audio Link</label>
-                                                    <input
-                                                      type="url"
-                                                      value={(pg as any).audioUrl || ''}
-                                                      onChange={e => {
-                                                        const updated = [...newLucent.pages];
-                                                        updated[pgIdx] = { ...updated[pgIdx], audioUrl: e.target.value || undefined } as any;
-                                                        setNewLucent({...newLucent, pages: updated});
-                                                      }}
-                                                      className="w-full p-2 border border-purple-200 rounded text-sm outline-none focus:border-purple-500 bg-white"
-                                                      placeholder="https://... audio file ya link"
-                                                    />
+                                                  <div className="bg-purple-50 border border-purple-200 rounded-lg p-2 space-y-1.5">
+                                                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                                                      <label className="text-[9px] font-black text-purple-700 uppercase block">🎧 Audio (Direct App Upload ya Link)</label>
+                                                      <DirectUploadButton
+                                                        kind="audio"
+                                                        compact
+                                                        currentUrl={(pg as any).audioUrl}
+                                                        onUploaded={(url) => {
+                                                          const updated = [...newLucent.pages];
+                                                          updated[pgIdx] = { ...updated[pgIdx], audioUrl: url } as any;
+                                                          setNewLucent({ ...newLucent, pages: updated });
+                                                        }}
+                                                      />
+                                                    </div>
+
                                                   </div>
                                                   <details className="text-[9px]">
                                                     <summary className="text-slate-400 cursor-pointer hover:text-slate-600">Legacy content field (purana data ke liye)</summary>
@@ -11234,18 +11823,39 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           <textarea value={newHomework.mcqText} onChange={e => setNewHomework({...newHomework, mcqText: e.target.value})} className="w-full mt-1 p-2 border border-slate-200 rounded text-sm outline-none h-20 focus:border-indigo-500" placeholder="Enter MCQ text..." />
                                       </details>
                                   </div>
-                                  <div>
-                                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Audio URL (Optional)</label>
-                                      <input type="text" value={newHomework.audioUrl} onChange={e => setNewHomework({...newHomework, audioUrl: e.target.value})} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500" placeholder="Enter Audio Link" />
+                                  <div className="bg-purple-50/70 border border-purple-200 rounded-lg p-2.5 space-y-1.5">
+                                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                                          <label className="text-[10px] font-bold text-purple-700 uppercase block">🎧 Audio (Direct App Upload ya Link)</label>
+                                          <DirectUploadButton
+                                              kind="audio"
+                                              compact
+                                              currentUrl={newHomework.audioUrl}
+                                              onUploaded={(url) => setNewHomework({ ...newHomework, audioUrl: url })}
+                                          />
+                                      </div>
                                   </div>
-                                  <div>
-                                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Video URL (Optional)</label>
-                                      <input type="text" value={newHomework.videoUrl} onChange={e => setNewHomework({...newHomework, videoUrl: e.target.value})} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500" placeholder="Enter Video Link" />
+                                  <div className="bg-rose-50/70 border border-rose-200 rounded-lg p-2.5 space-y-1.5">
+                                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                                          <label className="text-[10px] font-bold text-rose-700 uppercase block">🎬 Video (Direct App Upload ya Link)</label>
+                                          <DirectUploadButton
+                                              kind="video"
+                                              compact
+                                              currentUrl={newHomework.videoUrl}
+                                              onUploaded={(url) => setNewHomework({ ...newHomework, videoUrl: url })}
+                                          />
+                                      </div>
                                   </div>
-                                  <div>
-                                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">PDF URL — Google Drive Link (Optional)</label>
-                                      <input type="text" value={newHomework.pdfUrl} onChange={e => setNewHomework({...newHomework, pdfUrl: e.target.value})} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500" placeholder="https://drive.google.com/file/d/..." />
-                                      <p className="text-[10px] text-slate-400 mt-1">Google Drive ka PDF link daalein — app ke andar khulega, download blocked rahega.</p>
+                                  <div className="bg-blue-50/70 border border-blue-200 rounded-lg p-2.5 space-y-1.5">
+                                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                                          <label className="text-[10px] font-bold text-blue-700 uppercase block">📄 PDF (Direct App Upload ya Google Drive Link)</label>
+                                          <DirectUploadButton
+                                              kind="pdf"
+                                              compact
+                                              currentUrl={newHomework.pdfUrl}
+                                              onUploaded={(url) => setNewHomework({ ...newHomework, pdfUrl: url })}
+                                          />
+                                      </div>
+                                      <p className="text-[10px] text-blue-600">Direct App se PDF upload karein ya Drive link daalein — app ke andar khulega.</p>
                                   </div>
                                   <div className="pt-2">
                                       <button onClick={() => {
@@ -11572,31 +12182,52 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                       </div>
                                                   ))}
                                               </div>
-                                              <div className="grid grid-cols-2 gap-2">
-                                                <div>
-                                                    <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Audio URL</label>
-                                                    <input type="text" value={hw.audioUrl || ''} onChange={e => {
-                                                        const updated = [...(localSettings.homework || [])];
-                                                        updated[i] = { ...updated[i], audioUrl: e.target.value };
-                                                        setLocalSettings({...localSettings, homework: updated});
-                                                    }} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500 bg-slate-50" />
+                                              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                                <div className="space-y-1">
+                                                    <div className="flex items-center justify-between gap-1 flex-wrap">
+                                                        <label className="text-[10px] font-bold text-slate-500 uppercase block">🎧 Audio URL / Upload</label>
+                                                        <DirectUploadButton
+                                                            kind="audio"
+                                                            compact
+                                                            currentUrl={hw.audioUrl}
+                                                            onUploaded={(url) => {
+                                                                const updated = [...(localSettings.homework || [])];
+                                                                updated[i] = { ...updated[i], audioUrl: url };
+                                                                setLocalSettings({ ...localSettings, homework: updated });
+                                                            }}
+                                                        />
+                                                    </div>
                                                 </div>
-                                                <div>
-                                                    <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Video URL</label>
-                                                    <input type="text" value={hw.videoUrl || ''} onChange={e => {
-                                                        const updated = [...(localSettings.homework || [])];
-                                                        updated[i] = { ...updated[i], videoUrl: e.target.value };
-                                                        setLocalSettings({...localSettings, homework: updated});
-                                                    }} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500 bg-slate-50" />
+                                                <div className="space-y-1">
+                                                    <div className="flex items-center justify-between gap-1 flex-wrap">
+                                                        <label className="text-[10px] font-bold text-slate-500 uppercase block">🎬 Video URL / Upload</label>
+                                                        <DirectUploadButton
+                                                            kind="video"
+                                                            compact
+                                                            currentUrl={hw.videoUrl}
+                                                            onUploaded={(url) => {
+                                                                const updated = [...(localSettings.homework || [])];
+                                                                updated[i] = { ...updated[i], videoUrl: url };
+                                                                setLocalSettings({ ...localSettings, homework: updated });
+                                                            }}
+                                                        />
+                                                    </div>
                                                 </div>
                                               </div>
-                                              <div>
-                                                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">PDF URL (Google Drive)</label>
-                                                  <input type="text" value={hw.pdfUrl || ''} onChange={e => {
-                                                      const updated = [...(localSettings.homework || [])];
-                                                      updated[i] = { ...updated[i], pdfUrl: e.target.value || undefined };
-                                                      setLocalSettings({...localSettings, homework: updated});
-                                                  }} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500 bg-slate-50" placeholder="https://drive.google.com/file/d/..." />
+                                              <div className="space-y-1">
+                                                  <div className="flex items-center justify-between gap-1 flex-wrap">
+                                                      <label className="text-[10px] font-bold text-slate-500 uppercase block">📄 PDF URL / Upload</label>
+                                                      <DirectUploadButton
+                                                          kind="pdf"
+                                                          compact
+                                                          currentUrl={hw.pdfUrl}
+                                                          onUploaded={(url) => {
+                                                              const updated = [...(localSettings.homework || [])];
+                                                              updated[i] = { ...updated[i], pdfUrl: url };
+                                                              setLocalSettings({ ...localSettings, homework: updated });
+                                                          }}
+                                                      />
+                                                  </div>
                                               </div>
                                           </div>
                                       </div>
@@ -12464,7 +13095,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
       )}
 
       {activeTab === 'CONFIG_CHALLENGE' && (
-          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 animate-in slide-in-from-right space-y-6">
+          <div className="bg-white p-3.5 sm:p-6 rounded-2xl sm:rounded-3xl shadow-sm border border-slate-200 animate-in fade-in space-y-6 overflow-hidden w-full max-w-full">
               <div className="flex items-center gap-4 mb-6 border-b pb-4">
                   <button onClick={() => setActiveTab('DASHBOARD')} className="bg-slate-100 p-2 rounded-full hover:bg-slate-200"><ArrowLeft size={20} /></button>
                   <h3 className="text-xl font-black text-slate-800">🎨 Theme</h3>
@@ -12472,12 +13103,12 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
 
 
                   {/* APP IDENTITY */}
-                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                  <div className="bg-slate-50 p-3 sm:p-4 rounded-xl sm:rounded-2xl border border-slate-200 w-full min-w-0 overflow-hidden">
                       <div className="flex justify-between items-center mb-3">
                           <h4 className="font-bold text-slate-700">App Identity & Features</h4>
                       </div>
-                      <div className="grid grid-cols-2 gap-4">
-                          <div>
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 w-full min-w-0">
+                          <div className="col-span-1 lg:col-span-2 w-full">
                               <label className="text-xs font-bold text-slate-600 uppercase block mb-1">App Name</label>
                               <input 
                                   type="text" 
@@ -12486,7 +13117,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                   className="w-full p-2 border rounded-lg"
                               />
                           </div>
-                          <div className="md:col-span-2">
+                          <div className="col-span-1 lg:col-span-2 w-full">
                               {/* ── QUICK RESET ALL THEMES ── */}
                               <div className="mb-4 p-3 rounded-xl border border-orange-200 bg-orange-50">
                                 <div className="flex items-center justify-between gap-2 mb-1">
@@ -12566,7 +13197,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                               </div>
                               <label className="text-xs font-bold text-slate-600 uppercase block mb-2">🎨 App Theme Color — Ek Click Me Sabhi Jagah Change</label>
                               {/* Named Presets */}
-                              <div className="grid grid-cols-4 gap-2 mb-3">
+                              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2 mb-3">
                                 {[
                                   { name: 'Gold ⚡',    color: '#c8a020' },
                                   { name: 'Blue 💙',    color: '#2563eb' },
@@ -12696,28 +13327,326 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                 <p className="text-[10px] text-slate-400 mt-1.5">🏠 Ye background Home, Important Notes, Compare, aur sabhi pages par apply hoga. Default: White (#ffffff)</p>
                               </div>
 
-                              <div className="mt-4 p-3 bg-slate-50 rounded-xl border border-slate-200">
-                                <label className="text-xs font-black text-slate-700 uppercase block mb-2">🖼️ App Background Image URL — Poori App Ka Wallpaper</label>
-                                <input
-                                  type="text"
-                                  value={localSettings.appBackgroundImage || ''}
-                                  onChange={(e) => setLocalSettings({...localSettings, appBackgroundImage: e.target.value})}
-                                  className="w-full p-2 border rounded-xl text-sm mb-2"
-                                  placeholder="https://example.com/wallpaper.jpg"
-                                />
-                                <p className="text-[10px] text-slate-500">Paste an image URL here. It will be shown globally except in Notes/Lesson views.</p>
-                                {localSettings.appBackgroundImage && (
-                                  <div className="mt-2 w-full h-32 rounded-xl border border-slate-200 bg-slate-100 overflow-hidden relative">
-                                    <img src={localSettings.appBackgroundImage} alt="Wallpaper Preview" className="w-full h-full object-cover opacity-80" />
-                                    <button
-                                      onClick={() => setLocalSettings({...localSettings, appBackgroundImage: ''})}
-                                      className="absolute top-2 right-2 bg-red-500/80 hover:bg-red-600 text-white p-1.5 rounded-lg backdrop-blur-sm"
-                                    >
-                                      <Trash2 size={14} />
-                                    </button>
+                              {/* ── 5 PAGES BACKGROUND WALLPAPER MANAGER (LIVE TELEGRAM & IMAGE WALLPAPERS) ── */}
+                              {(() => {
+                                const pagesConfig = [
+                                  {
+                                    id: 'HOME' as const,
+                                    label: 'Home Page',
+                                    emoji: '🏠',
+                                    bgField: 'homeBackgroundImage' as const,
+                                    opacityField: 'homeBackgroundOpacity' as const,
+                                    desc: 'Home dashboard, continue reading aur main cards ka wallpaper',
+                                    defaultOpacity: 0.22,
+                                  },
+                                  {
+                                    id: 'MCQ' as const,
+                                    label: 'MCQhub',
+                                    emoji: '🧠',
+                                    bgField: 'mcqHubBackgroundImage' as const,
+                                    opacityField: 'mcqHubBackgroundOpacity' as const,
+                                    desc: 'MCQ Hub arena, live questions aur quiz session ka wallpaper',
+                                    defaultOpacity: 0.25,
+                                  },
+                                  {
+                                    id: 'COMMUNITY' as const,
+                                    label: 'Community',
+                                    emoji: '👥',
+                                    bgField: 'communityBackgroundImage' as const,
+                                    opacityField: 'communityBackgroundOpacity' as const,
+                                    desc: 'Community feed, student posts aur comments ka wallpaper',
+                                    defaultOpacity: 0.22,
+                                  },
+                                  {
+                                    id: 'ROUTINE' as const,
+                                    label: 'Routine',
+                                    emoji: '📅',
+                                    bgField: 'routineBackgroundImage' as const,
+                                    opacityField: 'routineBackgroundOpacity' as const,
+                                    desc: 'Daily study routine, timetable aur 7-day schedule ka wallpaper',
+                                    defaultOpacity: 0.22,
+                                  },
+                                  {
+                                    id: 'PROFILE' as const,
+                                    label: 'Profile',
+                                    emoji: '👤',
+                                    bgField: 'profileBackgroundImage' as const,
+                                    opacityField: 'profileBackgroundOpacity' as const,
+                                    desc: 'Student profile, account details aur balance screen ka wallpaper',
+                                    defaultOpacity: 0.25,
+                                  },
+                                ];
+
+                                const activePage = pagesConfig.find(p => p.id === wallpaperPageTab) || pagesConfig[0];
+                                const currentUrl = (localSettings as any)[activePage.bgField] || '';
+                                const currentOpacity = typeof (localSettings as any)[activePage.opacityField] === 'number'
+                                  ? (localSettings as any)[activePage.opacityField]
+                                  : activePage.defaultOpacity;
+
+                                const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+                                  const file = e.target.files?.[0];
+                                  if (!file) return;
+                                  setIsUploadingWallpaper(true);
+                                  try {
+                                    const uploadedUrl = await uploadImageToImgBB(file, `wallpaper_${activePage.id.toLowerCase()}_${Date.now()}`);
+                                    const updated = {
+                                      ...localSettings,
+                                      [activePage.bgField]: uploadedUrl,
+                                      [activePage.opacityField]: currentOpacity,
+                                    };
+                                    setLocalSettings(updated);
+                                    if (onUpdateSettings) onUpdateSettings(updated);
+                                    localStorage.setItem('nst_system_settings', JSON.stringify(updated));
+                                    await saveSystemSettings(updated);
+                                    adminToast.success(`🎉 ${activePage.label} Wallpaper Telegram pe upload hokar LIVE ho gaya! Sabhi students ko dikhai dega.`);
+                                  } catch (err: any) {
+                                    adminToast.error('Upload fail ho gaya: ' + (err?.message || 'Error uploading'));
+                                  } finally {
+                                    setIsUploadingWallpaper(false);
+                                    if (e.target) e.target.value = '';
+                                  }
+                                };
+
+                                const handleSavePageSettings = async (newUrl?: string, newOpacity?: number) => {
+                                  const urlToSave = typeof newUrl === 'string' ? newUrl : currentUrl;
+                                  const opToSave = typeof newOpacity === 'number' ? newOpacity : currentOpacity;
+                                  const updated = {
+                                    ...localSettings,
+                                    [activePage.bgField]: urlToSave.trim(),
+                                    [activePage.opacityField]: opToSave,
+                                  };
+                                  setLocalSettings(updated);
+                                  if (onUpdateSettings) onUpdateSettings(updated);
+                                  localStorage.setItem('nst_system_settings', JSON.stringify(updated));
+                                  await saveSystemSettings(updated);
+                                  adminToast.success(`✅ ${activePage.label} Wallpaper settings LIVE update ho gayi!`);
+                                };
+
+                                const handleRemoveWallpaper = async () => {
+                                  const updated = {
+                                    ...localSettings,
+                                    [activePage.bgField]: '',
+                                  };
+                                  setLocalSettings(updated);
+                                  if (onUpdateSettings) onUpdateSettings(updated);
+                                  localStorage.setItem('nst_system_settings', JSON.stringify(updated));
+                                  await saveSystemSettings(updated);
+                                  adminToast.success(`${activePage.label} ka wallpaper hata diya gaya.`);
+                                };
+
+                                return (
+                                  <div className="mt-4 p-4 bg-gradient-to-br from-indigo-50/80 via-purple-50/50 to-pink-50/60 rounded-2xl border-2 border-indigo-200 shadow-sm">
+                                    <div className="flex items-center justify-between gap-2 mb-2">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-xl">🖼️</span>
+                                        <div>
+                                          <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">
+                                            5 Pages Background Wallpaper Manager
+                                          </h3>
+                                          <p className="text-[11px] text-slate-500 font-medium">
+                                            MCQhub, Community, Routine, Home aur Profile — Har page ka alag live wallpaper!
+                                          </p>
+                                        </div>
+                                      </div>
+                                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-indigo-600 text-white uppercase tracking-wider animate-pulse">
+                                        Live Sync
+                                      </span>
+                                    </div>
+
+                                    {/* 5 Page Tabs - Perfectly balanced 5-column layout without empty side gaps on mobile */}
+                                    <div className="grid grid-cols-5 gap-1 sm:gap-2 p-1 sm:p-1.5 bg-white/90 rounded-xl border border-indigo-100 mb-3 shadow-2xs">
+                                      {pagesConfig.map((p) => {
+                                        const isSet = Boolean((localSettings as any)[p.bgField]);
+                                        const isSelected = wallpaperPageTab === p.id;
+                                        return (
+                                          <button
+                                            key={p.id}
+                                            type="button"
+                                            onClick={() => setWallpaperPageTab(p.id)}
+                                            className={`px-1 sm:px-2.5 py-1.5 sm:py-2 rounded-lg text-[10px] sm:text-xs font-bold transition-all flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 cursor-pointer text-center ${
+                                              isSelected
+                                                ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-sm scale-[1.02]'
+                                                : 'text-slate-600 hover:text-indigo-600 hover:bg-indigo-50/60'
+                                            }`}
+                                          >
+                                            <span className="text-xs sm:text-sm">{p.emoji}</span>
+                                            <span className="truncate max-w-[50px] sm:max-w-none">{p.label}</span>
+                                            {isSet && (
+                                              <span className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${isSelected ? 'bg-amber-300' : 'bg-emerald-500'}`} title="Wallpaper Set" />
+                                            )}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+
+                                    {/* Active Page Control Card */}
+                                    <div className="p-3.5 bg-white rounded-xl border border-indigo-200/80 space-y-3">
+                                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                        <div>
+                                          <h4 className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                                            <span>{activePage.emoji}</span>
+                                            <span>{activePage.label} Wallpaper</span>
+                                            {currentUrl ? (
+                                              <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.2 rounded-full font-bold">
+                                                ACTIVE
+                                              </span>
+                                            ) : (
+                                              <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.2 rounded-full font-medium">
+                                                DEFAULT
+                                              </span>
+                                            )}
+                                          </h4>
+                                          <p className="text-[10px] text-slate-500">{activePage.desc}</p>
+                                        </div>
+
+                                        {/* Upload to Telegram Button */}
+                                        <div className="flex items-center gap-2">
+                                          <input
+                                            type="file"
+                                            ref={wallpaperInputRef}
+                                            accept="image/*"
+                                            onChange={handleFileUpload}
+                                            className="hidden"
+                                          />
+                                          <button
+                                            type="button"
+                                            disabled={isUploadingWallpaper}
+                                            onClick={() => wallpaperInputRef.current?.click()}
+                                            className="px-3 py-1.5 bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-700 hover:to-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+                                          >
+                                            {isUploadingWallpaper ? (
+                                              <>
+                                                <Loader2 size={13} className="animate-spin" />
+                                                <span>Telegram pe Uploading...</span>
+                                              </>
+                                            ) : (
+                                              <>
+                                                <Upload size={13} />
+                                                <span>📤 Telegram Photo Upload Karein</span>
+                                              </>
+                                            )}
+                                          </button>
+                                        </div>
+                                      </div>
+
+                                      {/* Image URL Input */}
+                                      <div>
+                                        <label className="text-[10.5px] font-bold text-slate-600 block mb-1">
+                                          Image URL (Telegram Link ya Direct Web Image URL)
+                                        </label>
+                                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 min-w-0">
+                                          <input
+                                            type="text"
+                                            value={currentUrl}
+                                            onChange={(e) => setLocalSettings({ ...localSettings, [activePage.bgField]: e.target.value })}
+                                            placeholder="https://t.me/... ya https://.../wallpaper.jpg"
+                                            className="flex-1 min-w-0 p-2 border border-slate-300 rounded-xl text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                                          />
+                                          <button
+                                            type="button"
+                                            onClick={() => handleSavePageSettings()}
+                                            className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-95 shrink-0"
+                                          >
+                                            Save & Live Sync
+                                          </button>
+                                        </div>
+                                      </div>
+
+                                      {/* Opacity / Dimming Slider */}
+                                      <div>
+                                        <div className="flex items-center justify-between text-[11px] font-bold text-slate-700 mb-1">
+                                          <span>Wallpaper Visibility / Opacity:</span>
+                                          <span className="font-mono text-indigo-600 font-black">{Math.round(currentOpacity * 100)}%</span>
+                                        </div>
+                                        <input
+                                          type="range"
+                                          min="0.05"
+                                          max="1.0"
+                                          step="0.01"
+                                          value={currentOpacity}
+                                          onChange={(e) => {
+                                            const val = parseFloat(e.target.value);
+                                            setLocalSettings({ ...localSettings, [activePage.opacityField]: val });
+                                          }}
+                                          onMouseUp={() => handleSavePageSettings()}
+                                          onTouchEnd={() => handleSavePageSettings()}
+                                          className="w-full accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
+                                        />
+                                        <p className="text-[9.5px] text-slate-400 mt-0.5">
+                                          💡 20% - 30% recommended hai taaki page ka text, notes aur MCQ cards bilkul saaf dikhai dein.
+                                        </p>
+                                      </div>
+
+                                      {/* Wallpaper Live Preview */}
+                                      {currentUrl && (
+                                        <div className="relative rounded-xl overflow-hidden border-2 border-indigo-200 bg-slate-900 h-44 shadow-inner">
+                                          <div
+                                            className="absolute inset-0 bg-cover bg-center transition-all"
+                                            style={{
+                                              backgroundImage: `url(${resolveTelegramUrl(currentUrl)})`,
+                                              opacity: currentOpacity,
+                                            }}
+                                          />
+                                          {/* Mockup Card to Preview Contrast */}
+                                          <div className="absolute inset-0 flex items-center justify-center p-3 pointer-events-none">
+                                            <div className="bg-white/85 dark:bg-slate-900/85 backdrop-blur-md p-3 rounded-xl border border-white/40 shadow-lg max-w-xs text-center space-y-1">
+                                              <span className="text-[10px] font-black uppercase text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">
+                                                {activePage.label} Mockup Preview
+                                              </span>
+                                              <p className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                                                Sample Card & MCQ Text Legibility
+                                              </p>
+                                              <p className="text-[10px] text-slate-500">
+                                                Wallpaper background me dikhega aur content upar crystal-clear rahega.
+                                              </p>
+                                            </div>
+                                          </div>
+
+                                          {/* Delete / Clear Wallpaper Button */}
+                                          <button
+                                            type="button"
+                                            onClick={handleRemoveWallpaper}
+                                            className="absolute top-2 right-2 bg-rose-600/90 hover:bg-rose-700 text-white p-2 rounded-xl backdrop-blur-sm cursor-pointer shadow-md transition-all active:scale-95 flex items-center gap-1 text-xs font-bold"
+                                            title="Wallpaper Hataayein"
+                                          >
+                                            <Trash2 size={13} />
+                                            <span>Hataayein</span>
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    {/* Quick Summary of All 5 Pages */}
+                                    <div className="mt-3 pt-2.5 border-t border-indigo-200/60">
+                                      <p className="text-[10px] font-black text-slate-600 uppercase tracking-wider mb-1.5">
+                                        Overview — Sabhi 5 Pages Ka Status
+                                      </p>
+                                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                                        {pagesConfig.map((p) => {
+                                          const url = (localSettings as any)[p.bgField];
+                                          return (
+                                            <div
+                                              key={p.id}
+                                              onClick={() => setWallpaperPageTab(p.id)}
+                                              className={`p-2 rounded-xl border text-center cursor-pointer transition-all ${
+                                                url
+                                                  ? 'bg-emerald-50/80 border-emerald-300 hover:bg-emerald-100/70'
+                                                  : 'bg-white/70 border-slate-200 hover:bg-slate-50'
+                                              }`}
+                                            >
+                                              <span className="text-sm block">{p.emoji}</span>
+                                              <span className="text-[10.5px] font-bold text-slate-800 block truncate">{p.label}</span>
+                                              <span className={`text-[9px] font-black uppercase tracking-wider ${url ? 'text-emerald-700' : 'text-slate-400'}`}>
+                                                {url ? '✅ Wallpaper Live' : 'Not Set'}
+                                              </span>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
                                   </div>
-                                )}
-                              </div>
+                                );
+                              })()}
 
                               {/* ── PROFILE PAGE BACKGROUND COLOR ── */}
                               <div className="mt-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
@@ -12760,270 +13689,826 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                 <p className="text-[10px] text-slate-400 mt-1.5">👤 Sirf Profile page par apply hoga — baaki app ka background alag rahega. Default: Light Gray (#f0f4f8)</p>
                               </div>
 
-                              {/* ── GLOBAL 3D CARDS — POORA APP ── */}
-                              <div className="mt-4 p-3 bg-gradient-to-br from-purple-50 to-indigo-50 rounded-xl border-2 border-purple-300">
-                                <label className="text-xs font-black text-purple-800 uppercase block mb-1">🌐 Global 3D — Poora App</label>
-                                <p className="text-[10px] text-purple-500 mb-2">Ek button se poore app ke saare cards 3D ho jayenge — har jagah, har screen.</p>
+                              {/* ── 3D CARDS & MODERN CARD STYLING (POORA APP) ── */}
+                              <div className="mt-4 p-3.5 sm:p-4 bg-gradient-to-br from-purple-50 via-indigo-50 to-pink-50 rounded-2xl border-2 border-purple-300 shadow-sm space-y-3.5">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                  <div>
+                                    <h4 className="text-xs font-black text-purple-900 uppercase tracking-tight flex items-center gap-1.5">
+                                      <span>🎲</span> 3D Cards & Modern Card Appearance
+                                    </h4>
+                                    <p className="text-[10px] text-purple-600 font-medium">
+                                      Poore app ke sabhi modern cards (Home, Lessons, Chapters, MCQs) ko 3D depth, border aur custom colors dein.
+                                    </p>
+                                  </div>
+                                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase self-start sm:self-auto ${
+                                    (localSettings.globalCards3D || localSettings.homeAllCards3D) ? 'bg-purple-600 text-white shadow-xs' : 'bg-slate-200 text-slate-600'
+                                  }`}>
+                                    {(localSettings.globalCards3D || localSettings.homeAllCards3D) ? '🎲 3D Active' : '⬜ 2D Flat'}
+                                  </span>
+                                </div>
+
+                                {/* Master 3D Toggle */}
                                 <button
+                                  type="button"
                                   onClick={async () => {
-                                    const updated = { ...localSettings, globalCards3D: !localSettings.globalCards3D };
+                                    const nextState = !(localSettings.globalCards3D || localSettings.homeAllCards3D);
+                                    const updated = {
+                                      ...localSettings,
+                                      globalCards3D: nextState,
+                                      homeAllCards3D: nextState,
+                                      homeAcademicCard3D: nextState,
+                                      homeClass612Card3D: nextState,
+                                      homeCompetitionCard3D: nextState,
+                                      homePracticeCard3D: nextState,
+                                      homeDailyChallengeCard3D: nextState,
+                                      homeLiveRoomCard3D: nextState,
+                                      homeStudyRoomCard3D: nextState,
+                                      homeRevisionHubCard3D: nextState,
+                                      homeRevisionCard3D: nextState,
+                                      homeMistakesCard3D: nextState,
+                                      homeQuickAccessCard3D: nextState,
+                                      homeSchoolCard3D: nextState,
+                                      homeCoachingCard3D: nextState,
+                                    };
                                     setLocalSettings(updated);
                                     if (onUpdateSettings) onUpdateSettings(updated);
                                     localStorage.setItem('nst_system_settings', JSON.stringify(updated));
                                     await saveSystemSettings(updated);
+                                    adminToast.success(nextState ? '🎲 Global 3D Cards ON ho gaye! Sabhi cards raised 3D ban gaye.' : '⬜ 2D Flat Cards mode set ho gaya!');
                                   }}
-                                  className={`w-full py-3 rounded-xl text-sm font-black transition-all border-2 flex items-center justify-center gap-2 ${localSettings.globalCards3D ? 'bg-purple-600 text-white border-purple-700 shadow-lg shadow-purple-200' : 'bg-white text-purple-600 border-purple-300 hover:bg-purple-50'}`}
+                                  className={`w-full py-3 rounded-xl text-xs font-black transition-all border-2 flex items-center justify-center gap-2 cursor-pointer active:scale-95 shadow-sm ${
+                                    (localSettings.globalCards3D || localSettings.homeAllCards3D)
+                                      ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white border-purple-700 shadow-purple-200'
+                                      : 'bg-white text-purple-700 border-purple-300 hover:bg-purple-50'
+                                  }`}
                                 >
-                                  <span className="text-lg">{localSettings.globalCards3D ? '🎲' : '⬜'}</span>
-                                  {localSettings.globalCards3D ? 'GLOBAL 3D — ON (Sab Cards 3D Hain)' : 'GLOBAL 3D — OFF (Normal/Flat)'}
+                                  <span className="text-base">{(localSettings.globalCards3D || localSettings.homeAllCards3D) ? '🎲' : '⬜'}</span>
+                                  <span>{(localSettings.globalCards3D || localSettings.homeAllCards3D) ? 'GLOBAL 3D — ON (Sabhi Cards Raised 3D Hain)' : 'GLOBAL 3D — OFF (Normal / 2D Flat Mode)'}</span>
                                 </button>
-                                <p className="text-[9px] text-purple-400 mt-1.5 text-center">{localSettings.globalCards3D ? '✅ nst-card · nst-card-brand · chapter card · subject card — sab raised 3D hain' : 'Ye toggle ON karne se poore app mein saare cards 3D raise ho jayenge'}</p>
+
+                                {/* 3D Depth Level Selector */}
+                                <div className="p-3 bg-white/90 rounded-xl border border-purple-200">
+                                  <label className="text-[10.5px] font-black text-slate-700 uppercase block mb-1.5">
+                                    🎚️ 3D Card Depth (Elevation & Shadow)
+                                  </label>
+                                  <div className="grid grid-cols-3 gap-2">
+                                    {[
+                                      { id: 'subtle' as const, label: 'Subtle 3D', depth: '2.5px', desc: 'Halka 3D lift' },
+                                      { id: 'medium' as const, label: 'Standard 3D', depth: '4px', desc: 'Balanced depth' },
+                                      { id: 'deep' as const, label: 'Deep 3D', depth: '7px', desc: 'Bold heavy 3D' },
+                                    ].map((d) => {
+                                      const activeDepth = localSettings.cardDepth3D || 'medium';
+                                      const isSel = activeDepth === d.id;
+                                      return (
+                                        <button
+                                          key={d.id}
+                                          type="button"
+                                          onClick={async () => {
+                                            const updated = {
+                                              ...localSettings,
+                                              cardDepth3D: d.id,
+                                              globalCards3D: true,
+                                              homeAllCards3D: true,
+                                              homeAcademicCard3D: true,
+                                              homeClass612Card3D: true,
+                                              homePracticeCard3D: true,
+                                              homeDailyChallengeCard3D: true,
+                                              homeLiveRoomCard3D: true,
+                                              homeStudyRoomCard3D: true,
+                                              homeRevisionHubCard3D: true,
+                                              homeRevisionCard3D: true,
+                                              homeMistakesCard3D: true,
+                                            };
+                                            setLocalSettings(updated);
+                                            if (onUpdateSettings) onUpdateSettings(updated);
+                                            localStorage.setItem('nst_system_settings', JSON.stringify(updated));
+                                            await saveSystemSettings(updated);
+                                          }}
+                                          className={`p-2 rounded-xl border-2 text-center transition-all cursor-pointer ${
+                                            isSel
+                                              ? 'border-purple-600 bg-purple-50 text-purple-900 font-black shadow-xs'
+                                              : 'border-slate-200 bg-white text-slate-600 hover:border-purple-300 font-bold'
+                                          }`}
+                                        >
+                                          <p className="text-[11px] leading-tight">{d.label}</p>
+                                          <p className="text-[9px] text-slate-400 mt-0.5">{d.desc}</p>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+
+                                {/* Card Background Color Control */}
+                                <div className="p-3 bg-white/90 rounded-xl border border-purple-200 space-y-2">
+                                  <div>
+                                    <label className="text-[10.5px] font-black text-slate-700 uppercase block mb-1">
+                                      🎨 Card Background Color (Card Ka Base Color)
+                                    </label>
+                                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                                      <div className="flex items-center gap-2">
+                                        <input
+                                          type="color"
+                                          value={localSettings.appCardBackground || '#ffffff'}
+                                          onChange={(e) => setLocalSettings({ ...localSettings, appCardBackground: e.target.value })}
+                                          className="w-9 h-9 rounded-lg cursor-pointer border border-slate-200 shrink-0"
+                                        />
+                                        <input
+                                          type="text"
+                                          value={localSettings.appCardBackground || ''}
+                                          onChange={(e) => setLocalSettings({ ...localSettings, appCardBackground: e.target.value })}
+                                          placeholder="Default White (#ffffff)"
+                                          className="flex-1 sm:w-44 p-2 border border-slate-300 rounded-xl text-xs uppercase font-mono bg-white"
+                                        />
+                                      </div>
+                                      {localSettings.appCardBackground && (
+                                        <button
+                                          type="button"
+                                          onClick={() => setLocalSettings({ ...localSettings, appCardBackground: undefined })}
+                                          className="text-[10px] text-rose-500 font-bold px-2 py-1.5 rounded-lg border border-rose-200 hover:bg-rose-50 self-start sm:self-auto"
+                                        >
+                                          Reset to Default
+                                        </button>
+                                      )}
+                                    </div>
+                                    <div className="flex gap-1.5 mt-2 flex-wrap">
+                                      {['#ffffff', '#f8fafc', '#f1f5f9', '#f0fdf4', '#eff6ff', '#fef3c7', '#fdf4ff', '#0f172a'].map((c) => (
+                                        <button
+                                          key={c}
+                                          type="button"
+                                          onClick={() => setLocalSettings({ ...localSettings, appCardBackground: c })}
+                                          className="w-6 h-6 rounded-md border-2 transition-all hover:scale-110"
+                                          style={{ background: c, borderColor: localSettings.appCardBackground === c ? '#7c3aed' : '#cbd5e1' }}
+                                          title={c}
+                                        />
+                                      ))}
+                                    </div>
+                                    <p className="text-[9.5px] text-slate-400 mt-1">
+                                      ✨ Note: Jab background wallpaper active hoga, tab yeh card background auto transparent ho jayega taaki wallpaper piche se dikhe!
+                                    </p>
+                                  </div>
+                                </div>
+
+                                {/* Card Border & Accent Color */}
+                                <div className="p-3 bg-white/90 rounded-xl border border-purple-200 space-y-2">
+                                  <div>
+                                    <label className="text-[10.5px] font-black text-slate-700 uppercase block mb-1">
+                                      🖼️ Card Border / 3D Outline Color
+                                    </label>
+                                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                                      <div className="flex items-center gap-2">
+                                        <input
+                                          type="color"
+                                          value={localSettings.appCardBorderColor || '#3b82f6'}
+                                          onChange={(e) => setLocalSettings({ ...localSettings, appCardBorderColor: e.target.value })}
+                                          className="w-9 h-9 rounded-lg cursor-pointer border border-slate-200 shrink-0"
+                                        />
+                                        <input
+                                          type="text"
+                                          value={localSettings.appCardBorderColor || ''}
+                                          onChange={(e) => setLocalSettings({ ...localSettings, appCardBorderColor: e.target.value })}
+                                          placeholder="Default Border (#3b82f6)"
+                                          className="flex-1 sm:w-44 p-2 border border-slate-300 rounded-xl text-xs uppercase font-mono bg-white"
+                                        />
+                                      </div>
+                                      {localSettings.appCardBorderColor && (
+                                        <button
+                                          type="button"
+                                          onClick={() => setLocalSettings({ ...localSettings, appCardBorderColor: undefined })}
+                                          className="text-[10px] text-rose-500 font-bold px-2 py-1.5 rounded-lg border border-rose-200 hover:bg-rose-50 self-start sm:self-auto"
+                                        >
+                                          Reset to Default
+                                        </button>
+                                      )}
+                                    </div>
+                                    <div className="flex gap-1.5 mt-2 flex-wrap">
+                                      {['#3b82f6', '#8b5cf6', '#6366f1', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#0f172a', '#e2e8f0'].map((c) => (
+                                        <button
+                                          key={c}
+                                          type="button"
+                                          onClick={() => setLocalSettings({ ...localSettings, appCardBorderColor: c })}
+                                          className="w-6 h-6 rounded-md border-2 transition-all hover:scale-110"
+                                          style={{ background: c, borderColor: localSettings.appCardBorderColor === c ? '#7c3aed' : '#cbd5e1' }}
+                                          title={c}
+                                        />
+                                      ))}
+                                    </div>
+                                  </div>
+
+                                  {/* Live Modern 3D Card Mockup Preview (Exact Replica of App's Real Card) */}
+                                  <div className="pt-2 border-t border-purple-100">
+                                    <div className="flex items-center justify-between mb-2">
+                                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider">
+                                        Live Modern Card Preview (App Ke Asli Card Jaisa)
+                                      </p>
+                                      <span className="text-[9px] font-black text-purple-600 bg-purple-100 px-2 py-0.5 rounded-full">
+                                        {(localSettings.globalCards3D || localSettings.homeAllCards3D) ? '3D Active' : '2D Flat'}
+                                      </span>
+                                    </div>
+
+                                    {/* Replica of Real App Card */}
+                                    <div
+                                      className="w-full relative overflow-hidden rounded-2xl text-left transition-all p-4 border"
+                                      style={{
+                                        background: localSettings.appCardBackground || '#ffffff',
+                                        borderColor: localSettings.appCardBorderColor || '#3b82f6',
+                                        borderWidth: '2px',
+                                        boxShadow: (localSettings.globalCards3D || localSettings.homeAllCards3D)
+                                          ? `0 1px 0 rgba(255,255,255,0.85) inset, 0 ${
+                                              localSettings.cardDepth3D === 'subtle' ? '2.5px' : localSettings.cardDepth3D === 'deep' ? '7px' : '4px'
+                                            } 0 ${(localSettings.appCardBorderColor || '#3b82f6')}bb, 0 8px 20px ${(localSettings.appCardBorderColor || '#3b82f6')}28`
+                                          : '0 4px 18px rgba(0,0,0,0.06)',
+                                        transform: (localSettings.globalCards3D || localSettings.homeAllCards3D)
+                                          ? `translateY(${localSettings.cardDepth3D === 'subtle' ? '-1px' : localSettings.cardDepth3D === 'deep' ? '-3px' : '-2px'})`
+                                          : 'none',
+                                      }}
+                                    >
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div className="flex-1 min-w-0 pr-1">
+                                          <div className="flex items-center gap-1.5 mb-1.5">
+                                            <span
+                                              className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider shrink-0"
+                                              style={{
+                                                background: `${localSettings.appCardBorderColor || '#3b82f6'}18`,
+                                                color: localSettings.appCardBorderColor || '#3b82f6',
+                                                border: `1px solid ${localSettings.appCardBorderColor || '#3b82f6'}35`,
+                                              }}
+                                            >
+                                              Class 10 · Academic Mode
+                                            </span>
+                                            <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black bg-amber-400 text-amber-900 shadow-xs">
+                                              ⚡ Live Card
+                                            </span>
+                                          </div>
+                                          <h3 className="text-[18px] sm:text-[20px] font-black leading-tight mb-1.5 text-slate-900">
+                                            Chapter 1: Real Numbers & MCQs
+                                          </h3>
+                                          <div className="flex items-center flex-wrap gap-1.5">
+                                            <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-slate-100 border border-slate-200 text-slate-700">
+                                              🧠 10+ Practice Sets
+                                            </span>
+                                            <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-slate-100 border border-slate-200 text-slate-700">
+                                              🎯 Speed & Accuracy
+                                            </span>
+                                          </div>
+                                        </div>
+                                        <div className="text-[36px] sm:text-[42px] leading-none shrink-0 select-none pt-0.5">
+                                          📝
+                                        </div>
+                                      </div>
+
+                                      {/* Standard unified bottom button */}
+                                      <div className="mt-3.5 pt-2.5 border-t w-full border-slate-100">
+                                        <div
+                                          className="w-full py-2 px-3 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 text-white"
+                                          style={{
+                                            background: `linear-gradient(135deg, ${localSettings.appCardBorderColor || '#3b82f6'}, ${localSettings.themeColor || '#7c3aed'})`,
+                                            boxShadow: `0 4px 14px ${(localSettings.appCardBorderColor || '#3b82f6')}35`
+                                          }}
+                                        >
+                                          <span>Start Practice Set</span>
+                                          <span>→</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <p className="text-[10px] text-slate-500 mt-2 text-center">
+                                      Ye setting poore app ke Home, Notes, Routine aur MCQ cards par instant live sync hogi!
+                                    </p>
+                                  </div>
+                                </div>
                               </div>
 
-                              {/* ── ADVANCED: HOME PAGE SECTION CARD COLORS ── */}
-                              <div className="mt-4 p-3 bg-indigo-50 rounded-xl border border-indigo-200">
-                                <label className="text-xs font-black text-indigo-800 uppercase block mb-1">🎨 Advanced — Home Page Card Colors</label>
-                                <p className="text-[10px] text-indigo-500 mb-3">Har section ke card ka alag color set karo. Default: App Theme Color se match karta hai.</p>
+                              {/* ── MODERN HOME PAGE CARDS: 3D DEPTH & CUSTOM COLORS ── */}
+                              <div className="mt-4 p-3.5 sm:p-4 bg-gradient-to-br from-indigo-50/90 via-purple-50/60 to-pink-50/70 rounded-2xl border-2 border-indigo-200/90 shadow-xs w-full min-w-0 max-w-full overflow-hidden">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xl">🎨</span>
+                                      <h4 className="text-xs sm:text-sm font-black text-slate-800 uppercase tracking-tight">
+                                        Home Page Naye Cards — 3D & Custom Colors
+                                      </h4>
+                                    </div>
+                                    <p className="text-[10px] sm:text-[11px] text-slate-500 font-medium mt-0.5">
+                                      Home ke sabhi naye cards (Academic, Practice Set, Daily Challenge, Live Room, Revision Hub, My Mistakes) par 3D depth aur custom colors yahan se set karein.
+                                    </p>
+                                  </div>
+                                  <span className="self-start sm:self-center px-2.5 py-0.5 rounded-full text-[10px] font-black bg-purple-600 text-white uppercase tracking-wider shrink-0 shadow-2xs">
+                                    {(localSettings.homeAllCards3D || localSettings.globalCards3D) ? '🎲 3D Active' : '⬜ 2D Flat'}
+                                  </span>
+                                </div>
 
-                                {/* Master 3D Toggle */}
-                                <div className="mb-3 p-2.5 bg-white rounded-xl border-2 border-indigo-200">
-                                  <div className="flex items-center justify-between">
-                                    <div>
-                                      <p className="text-[10px] font-black text-slate-800">🎲 Master 3D — Sabhi Cards</p>
-                                      <p className="text-[8px] text-slate-400 mt-0.5">{localSettings.homeAllCards3D ? 'Class + Competition + Quick Access — teeno 3D ON hain' : 'Sab cards 2D flat hain (individual setting se override hoti hai)'}</p>
+                                {/* Master 3D Toggle for All Modern Cards */}
+                                <div className="mb-3.5 p-3 bg-white/95 rounded-xl border-2 border-indigo-200/80 shadow-2xs">
+                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                                    <div className="min-w-0">
+                                      <p className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                                        <span>🎲</span>
+                                        <span>Master 3D Toggle — Sabhi 6 Naye Cards</span>
+                                      </p>
+                                      <p className="text-[10px] text-slate-500 mt-0.5">
+                                        {localSettings.homeAllCards3D
+                                          ? 'Academic + Practice + Daily Challenge + Live Room + Revision + Mistakes — sabhi par 3D raised depth on hai'
+                                          : 'Sabhi cards 2D flat mode me hain (niche individual cards se bhi on/off kar sakte hain)'}
+                                      </p>
                                     </div>
                                     <button
-                                      onClick={() => setLocalSettings({...localSettings, homeAllCards3D: !localSettings.homeAllCards3D})}
-                                      className={`px-3 py-2 rounded-xl text-[11px] font-black transition-all border shrink-0 ${localSettings.homeAllCards3D ? 'bg-indigo-600 text-white border-indigo-700 shadow-md' : 'bg-slate-100 text-slate-500 border-slate-200'}`}
+                                      type="button"
+                                      onClick={async () => {
+                                        const nextState = !localSettings.homeAllCards3D;
+                                        const updated = {
+                                          ...localSettings,
+                                          homeAllCards3D: nextState,
+                                          globalCards3D: nextState,
+                                          homeAcademicCard3D: nextState,
+                                          homeClass612Card3D: nextState,
+                                          homePracticeCard3D: nextState,
+                                          homeDailyChallengeCard3D: nextState,
+                                          homeLiveRoomCard3D: nextState,
+                                          homeStudyRoomCard3D: nextState,
+                                          homeRevisionHubCard3D: nextState,
+                                          homeRevisionCard3D: nextState,
+                                          homeMistakesCard3D: nextState,
+                                        };
+                                        setLocalSettings(updated);
+                                        if (onUpdateSettings) onUpdateSettings(updated);
+                                        localStorage.setItem('nst_system_settings', JSON.stringify(updated));
+                                        await saveSystemSettings(updated);
+                                        adminToast.success(nextState ? '🎲 Sabhi 6 cards 3D ban gaye!' : '⬜ 2D Flat cards mode set ho gaya!');
+                                      }}
+                                      className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all border cursor-pointer active:scale-95 shrink-0 flex items-center justify-center gap-1.5 ${
+                                        localSettings.homeAllCards3D
+                                          ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white border-purple-700 shadow-sm'
+                                          : 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200'
+                                      }`}
                                     >
-                                      {localSettings.homeAllCards3D ? '🎲 ALL 3D' : '⬜ ALL 2D'}
+                                      <span>{localSettings.homeAllCards3D ? '🎲' : '⬜'}</span>
+                                      <span>{localSettings.homeAllCards3D ? 'ALL 3D ON' : 'ALL 2D FLAT'}</span>
                                     </button>
                                   </div>
                                 </div>
 
-                                {/* Class 6-12 Cards */}
-                                <div className="mb-3 p-2.5 bg-white rounded-xl border border-indigo-100">
-                                  <p className="text-[10px] font-black text-slate-700 mb-1.5">📚 Class 6-12 Cards</p>
-                                  <div className="flex gap-2">
-                                    <div className="flex-1">
-                                      <p className="text-[9px] text-slate-400 mb-1">Background</p>
-                                      <div className="flex items-center gap-1.5">
-                                        <input type="color" value={localSettings.homeClass612CardBg || '#ffffff'} onChange={e => setLocalSettings({...localSettings, homeClass612CardBg: e.target.value})} className="w-8 h-8 rounded-lg cursor-pointer border border-slate-200 shrink-0" />
-                                        <input type="text" value={localSettings.homeClass612CardBg || ''} onChange={e => setLocalSettings({...localSettings, homeClass612CardBg: e.target.value})} placeholder="Default" className="flex-1 p-1 border rounded-lg text-[9px] uppercase font-mono bg-slate-50" />
-                                        {localSettings.homeClass612CardBg && <button onClick={() => setLocalSettings({...localSettings, homeClass612CardBg: undefined})} className="text-[9px] text-red-400 font-black shrink-0">✕</button>}
+                                {/* Live Card Interactive Replica Preview */}
+                                <div className="mb-4 p-3 sm:p-3.5 bg-white/95 rounded-xl border border-indigo-200 shadow-2xs">
+                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 mb-2.5">
+                                    <p className="text-[10px] sm:text-[11px] font-black text-slate-700 uppercase tracking-wider flex items-center gap-1">
+                                      <span>👁️</span>
+                                      <span>Live Card Preview (Select karke dekhein):</span>
+                                    </p>
+                                    <span className="text-[9.5px] font-bold text-slate-400">
+                                      App ke live home screen par aisa hi render hoga
+                                    </span>
+                                  </div>
+
+                                  {/* Filter tabs for preview */}
+                                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-1 mb-3">
+                                    {[
+                                      { id: 'ACADEMIC' as const, label: 'Academic', icon: '🎯' },
+                                      { id: 'PRACTICE' as const, label: 'Practice', icon: '🧠' },
+                                      { id: 'DAILY' as const, label: 'Daily', icon: '🚀' },
+                                      { id: 'ROOM' as const, label: 'Study Room', icon: '👥' },
+                                      { id: 'REVISION' as const, label: 'Revision', icon: '💡' },
+                                      { id: 'MISTAKES' as const, label: 'Mistakes', icon: '❌' },
+                                    ].map((t) => {
+                                      const isSel = (adminHomeCardTab === t.id) || (adminHomeCardTab === 'ALL' && t.id === 'ACADEMIC');
+                                      return (
+                                        <button
+                                          key={t.id}
+                                          type="button"
+                                          onClick={() => setAdminHomeCardTab(t.id)}
+                                          className={`py-1.5 px-1 rounded-lg text-[10px] font-bold text-center transition-all truncate cursor-pointer ${
+                                            isSel
+                                              ? 'bg-purple-600 text-white shadow-2xs'
+                                              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                          }`}
+                                        >
+                                          <span>{t.icon}</span> <span className="hidden sm:inline">{t.label}</span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+
+                                  {/* Render Selected Preview Card */}
+                                  {(() => {
+                                    const previewTarget = (adminHomeCardTab === 'ALL' ? 'ACADEMIC' : adminHomeCardTab);
+                                    const cardMeta = {
+                                      ACADEMIC: {
+                                        title: 'Class 10 · Academic & Board Mode',
+                                        sub: 'Chapter 1: Real Numbers & Practice Sets',
+                                        badge: 'Academic Class',
+                                        icon: '🎯',
+                                        cta: 'Open Class Content',
+                                        bg: localSettings.homeAcademicCardBg || localSettings.homeClass612CardBg || '#ffffff',
+                                        border: localSettings.homeAcademicCardBorder || localSettings.homeClass612CardBorder || '#3b82f6',
+                                        is3D: localSettings.homeAcademicCard3D !== undefined ? localSettings.homeAcademicCard3D : localSettings.homeClass612Card3D !== undefined ? localSettings.homeClass612Card3D : localSettings.homeAllCards3D,
+                                      },
+                                      PRACTICE: {
+                                        title: 'Practice Sets & Mock Arena',
+                                        sub: 'Chapter-wise questions & live timer mcqs',
+                                        badge: '10+ Sets Active',
+                                        icon: '🧠',
+                                        cta: 'Start Practice Set',
+                                        bg: localSettings.homePracticeCardBg || '#ffffff',
+                                        border: localSettings.homePracticeCardBorder || '#8b5cf6',
+                                        is3D: localSettings.homePracticeCard3D !== undefined ? localSettings.homePracticeCard3D : localSettings.homeAllCards3D,
+                                      },
+                                      DAILY: {
+                                        title: 'Daily Challenge 100 MCQs',
+                                        sub: 'Timed daily competition with live ranking',
+                                        badge: 'Daily Reward',
+                                        icon: '🚀',
+                                        cta: 'Enter Today\'s Challenge',
+                                        bg: localSettings.homeDailyChallengeCardBg || '#ffffff',
+                                        border: localSettings.homeDailyChallengeCardBorder || '#f59e0b',
+                                        is3D: localSettings.homeDailyChallengeCard3D !== undefined ? localSettings.homeDailyChallengeCard3D : localSettings.homeAllCards3D,
+                                      },
+                                      ROOM: {
+                                        title: 'Live Study Room & Peer Focus',
+                                        sub: 'Real-time focus room with sync timer',
+                                        badge: 'Live Study',
+                                        icon: '👥',
+                                        cta: 'Join Study Room',
+                                        bg: localSettings.homeLiveRoomCardBg || localSettings.homeStudyRoomCardBg || '#ffffff',
+                                        border: localSettings.homeLiveRoomCardBorder || localSettings.homeStudyRoomCardBorder || '#06b6d4',
+                                        is3D: localSettings.homeLiveRoomCard3D !== undefined ? localSettings.homeLiveRoomCard3D : localSettings.homeStudyRoomCard3D !== undefined ? localSettings.homeStudyRoomCard3D : localSettings.homeAllCards3D,
+                                      },
+                                      REVISION: {
+                                        title: 'Revision Hub — Memory Engine',
+                                        sub: 'Spaced repetition & quick concept drill',
+                                        badge: 'Memory Drill',
+                                        icon: '💡',
+                                        cta: 'Open Revision Hub',
+                                        bg: localSettings.homeRevisionHubCardBg || localSettings.homeRevisionCardBg || '#ffffff',
+                                        border: localSettings.homeRevisionHubCardBorder || localSettings.homeRevisionCardBorder || '#10b981',
+                                        is3D: localSettings.homeRevisionHubCard3D !== undefined ? localSettings.homeRevisionHubCard3D : localSettings.homeRevisionCard3D !== undefined ? localSettings.homeRevisionCard3D : localSettings.homeAllCards3D,
+                                      },
+                                      MISTAKES: {
+                                        title: 'My Mistakes Notebook',
+                                        sub: 'Review incorrect answers & weak spots',
+                                        badge: 'Personalized',
+                                        icon: '❌',
+                                        cta: 'Practice Weak Topics',
+                                        bg: localSettings.homeMistakesCardBg || '#ffffff',
+                                        border: localSettings.homeMistakesCardBorder || '#ef4444',
+                                        is3D: localSettings.homeMistakesCard3D !== undefined ? localSettings.homeMistakesCard3D : localSettings.homeAllCards3D,
+                                      },
+                                    }[previewTarget] || {
+                                      title: 'Modern Card',
+                                      sub: 'Card Description',
+                                      badge: 'Live Card',
+                                      icon: '📝',
+                                      cta: 'Explore',
+                                      bg: '#ffffff',
+                                      border: '#3b82f6',
+                                      is3D: true,
+                                    };
+
+                                    const isCard3D = cardMeta.is3D;
+                                    const depthPx = localSettings.cardDepth3D === 'subtle' ? '2.5px' : localSettings.cardDepth3D === 'deep' ? '7px' : '4px';
+                                    const liftPx = localSettings.cardDepth3D === 'subtle' ? '-1px' : localSettings.cardDepth3D === 'deep' ? '-3px' : '-2px';
+
+                                    return (
+                                      <div
+                                        className="w-full relative overflow-hidden rounded-2xl p-4 text-left transition-all border"
+                                        style={{
+                                          background: cardMeta.bg,
+                                          borderColor: cardMeta.border,
+                                          borderWidth: '2px',
+                                          boxShadow: isCard3D
+                                            ? `0 1px 0 rgba(255,255,255,0.85) inset, 0 ${depthPx} 0 ${cardMeta.border}bb, 0 8px 20px ${cardMeta.border}28`
+                                            : '0 4px 18px rgba(0,0,0,0.06)',
+                                          transform: isCard3D ? `translateY(${liftPx})` : 'none',
+                                        }}
+                                      >
+                                        <div className="flex items-start justify-between gap-3">
+                                          <div className="flex-1 min-w-0 pr-1">
+                                            <div className="flex items-center gap-1.5 mb-1.5">
+                                              <span
+                                                className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider shrink-0"
+                                                style={{
+                                                  background: `${cardMeta.border}18`,
+                                                  color: cardMeta.border,
+                                                  border: `1px solid ${cardMeta.border}35`,
+                                                }}
+                                              >
+                                                {cardMeta.badge}
+                                              </span>
+                                              <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black bg-amber-400 text-amber-950 shadow-2xs">
+                                                {isCard3D ? '🎲 3D Raised' : '⬜ 2D Flat'}
+                                              </span>
+                                            </div>
+                                            <h3 className="text-sm sm:text-base font-black leading-tight mb-1 text-slate-900 truncate">
+                                              {cardMeta.title}
+                                            </h3>
+                                            <p className="text-[11px] text-slate-500 font-medium truncate">
+                                              {cardMeta.sub}
+                                            </p>
+                                          </div>
+                                          <div className="text-3xl shrink-0 select-none pt-0.5">
+                                            {cardMeta.icon}
+                                          </div>
+                                        </div>
+
+                                        {/* Bottom Action CTA */}
+                                        <div className="mt-3 pt-2.5 border-t w-full border-slate-100/90">
+                                          <div
+                                            className="w-full py-2 px-3 rounded-xl text-xs font-black shadow-sm flex items-center justify-center gap-1.5 text-white"
+                                            style={{
+                                              background: `linear-gradient(135deg, ${cardMeta.border}, ${localSettings.themeColor || '#7c3aed'})`,
+                                              boxShadow: `0 4px 12px ${cardMeta.border}35`
+                                            }}
+                                          >
+                                            <span>{cardMeta.cta}</span>
+                                            <span>→</span>
+                                          </div>
+                                        </div>
                                       </div>
-                                    </div>
-                                    <div className="flex-1">
-                                      <p className="text-[9px] text-slate-400 mb-1">Border / Text</p>
-                                      <div className="flex items-center gap-1.5">
-                                        <input type="color" value={localSettings.homeClass612CardBorder || '#3b82f6'} onChange={e => setLocalSettings({...localSettings, homeClass612CardBorder: e.target.value})} className="w-8 h-8 rounded-lg cursor-pointer border border-slate-200 shrink-0" />
-                                        <input type="text" value={localSettings.homeClass612CardBorder || ''} onChange={e => setLocalSettings({...localSettings, homeClass612CardBorder: e.target.value})} placeholder="Default" className="flex-1 p-1 border rounded-lg text-[9px] uppercase font-mono bg-slate-50" />
-                                        {localSettings.homeClass612CardBorder && <button onClick={() => setLocalSettings({...localSettings, homeClass612CardBorder: undefined})} className="text-[9px] text-red-400 font-black shrink-0">✕</button>}
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <div className="flex gap-1.5 mt-2 flex-wrap">
-                                    {['#ffffff','#eff6ff','#f0fdf4','#fef3c7','#fdf4ff','#fff1f2','#f0fdfa','#1e293b'].map(c => (
-                                      <button key={c} onClick={() => setLocalSettings({...localSettings, homeClass612CardBg: c})} className="w-5 h-5 rounded border-2 transition-all hover:scale-110" style={{ background: c, borderColor: (localSettings.homeClass612CardBg||'') === c ? '#6366f1' : '#e2e8f0' }} title={c} />
-                                    ))}
-                                  </div>
-                                  <div className="flex items-center justify-between mt-2.5 pt-2.5 border-t border-slate-100">
-                                    <div>
-                                      <p className="text-[9px] font-black text-slate-700">Card Style</p>
-                                      <p className="text-[8px] text-slate-400 mt-0.5">{localSettings.homeClass612Card3D ? '🎲 3D raised — depth shadow on' : '⬜ 2D flat — clean minimal'}</p>
-                                    </div>
-                                    <button
-                                      onClick={() => setLocalSettings({...localSettings, homeClass612Card3D: !localSettings.homeClass612Card3D})}
-                                      className={`px-3 py-1.5 rounded-xl text-[10px] font-black transition-all border ${localSettings.homeClass612Card3D ? 'bg-indigo-600 text-white border-indigo-700 shadow-sm' : 'bg-slate-100 text-slate-500 border-slate-200'}`}
-                                    >
-                                      {localSettings.homeClass612Card3D ? '🎲 3D ON' : '⬜ 2D'}
-                                    </button>
-                                  </div>
+                                    );
+                                  })()}
+                                  <p className="text-[9.5px] text-slate-400 mt-2 text-center">
+                                    ✨ Note: Jab background wallpaper active hoga, tab yeh card background auto transparent ho jayega taaki wallpaper piche se clean dikhe aur text/border sharp rahein!
+                                  </p>
                                 </div>
 
-                                {/* Competition Card */}
-                                <div className="mb-3 p-2.5 bg-white rounded-xl border border-indigo-100">
-                                  <p className="text-[10px] font-black text-slate-700 mb-1.5">🏛️ Competition / Govt. Exams Card</p>
-                                  <div className="flex gap-2">
-                                    <div className="flex-1">
-                                      <p className="text-[9px] text-slate-400 mb-1">Background</p>
-                                      <div className="flex items-center gap-1.5">
-                                        <input type="color" value={localSettings.homeCompetitionCardBg || '#ffffff'} onChange={e => setLocalSettings({...localSettings, homeCompetitionCardBg: e.target.value})} className="w-8 h-8 rounded-lg cursor-pointer border border-slate-200 shrink-0" />
-                                        <input type="text" value={localSettings.homeCompetitionCardBg || ''} onChange={e => setLocalSettings({...localSettings, homeCompetitionCardBg: e.target.value})} placeholder="Default" className="flex-1 p-1 border rounded-lg text-[9px] uppercase font-mono bg-slate-50" />
-                                        {localSettings.homeCompetitionCardBg && <button onClick={() => setLocalSettings({...localSettings, homeCompetitionCardBg: undefined})} className="text-[9px] text-red-400 font-black shrink-0">✕</button>}
+                                {/* ── CARDS MANAGER: 6 MODERN CARDS LIST ── */}
+                                <div className="space-y-3">
+                                  {[
+                                    {
+                                      id: 'ACADEMIC',
+                                      name: '🎯 Academic / Competitive Class Card',
+                                      desc: 'Home page ka main class selection card (Class 6-12 ya Govt. Exams)',
+                                      bgKey: 'homeAcademicCardBg' as const,
+                                      altBgKey: 'homeClass612CardBg' as const,
+                                      borderKey: 'homeAcademicCardBorder' as const,
+                                      altBorderKey: 'homeClass612CardBorder' as const,
+                                      threeDKey: 'homeAcademicCard3D' as const,
+                                      altThreeDKey: 'homeClass612Card3D' as const,
+                                      defaultBorder: '#3b82f6',
+                                    },
+                                    {
+                                      id: 'PRACTICE',
+                                      name: '🧠 Practice Set Card',
+                                      desc: 'Home page par MCQ Practice Set card',
+                                      bgKey: 'homePracticeCardBg' as const,
+                                      borderKey: 'homePracticeCardBorder' as const,
+                                      threeDKey: 'homePracticeCard3D' as const,
+                                      defaultBorder: '#8b5cf6',
+                                    },
+                                    {
+                                      id: 'DAILY',
+                                      name: '🚀 Daily Challenge Card',
+                                      desc: '100 MCQs live daily test and ranking challenge card',
+                                      bgKey: 'homeDailyChallengeCardBg' as const,
+                                      borderKey: 'homeDailyChallengeCardBorder' as const,
+                                      threeDKey: 'homeDailyChallengeCard3D' as const,
+                                      defaultBorder: '#f59e0b',
+                                    },
+                                    {
+                                      id: 'ROOM',
+                                      name: '👥 Live Study Room Card',
+                                      desc: 'Virtual study room with timer card',
+                                      bgKey: 'homeLiveRoomCardBg' as const,
+                                      altBgKey: 'homeStudyRoomCardBg' as const,
+                                      borderKey: 'homeLiveRoomCardBorder' as const,
+                                      altBorderKey: 'homeStudyRoomCardBorder' as const,
+                                      threeDKey: 'homeLiveRoomCard3D' as const,
+                                      altThreeDKey: 'homeStudyRoomCard3D' as const,
+                                      defaultBorder: '#06b6d4',
+                                    },
+                                    {
+                                      id: 'REVISION',
+                                      name: '💡 Revision Hub Card',
+                                      desc: 'Memory engine, quick revision & spaced repetition card',
+                                      bgKey: 'homeRevisionHubCardBg' as const,
+                                      altBgKey: 'homeRevisionCardBg' as const,
+                                      borderKey: 'homeRevisionHubCardBorder' as const,
+                                      altBorderKey: 'homeRevisionCardBorder' as const,
+                                      threeDKey: 'homeRevisionHubCard3D' as const,
+                                      altThreeDKey: 'homeRevisionCard3D' as const,
+                                      defaultBorder: '#10b981',
+                                    },
+                                    {
+                                      id: 'MISTAKES',
+                                      name: '❌ My Mistakes Card',
+                                      desc: 'Weak topics & notebook mistakes practice card',
+                                      bgKey: 'homeMistakesCardBg' as const,
+                                      borderKey: 'homeMistakesCardBorder' as const,
+                                      threeDKey: 'homeMistakesCard3D' as const,
+                                      defaultBorder: '#ef4444',
+                                    },
+                                  ].map((card) => {
+                                    const cardBg = (localSettings as any)[card.bgKey] || (card.altBgKey ? (localSettings as any)[card.altBgKey] : '') || '#ffffff';
+                                    const cardBorder = (localSettings as any)[card.borderKey] || (card.altBorderKey ? (localSettings as any)[card.altBorderKey] : '') || card.defaultBorder;
+                                    const cardIs3D = (localSettings as any)[card.threeDKey] !== undefined
+                                      ? (localSettings as any)[card.threeDKey]
+                                      : (card.altThreeDKey && (localSettings as any)[card.altThreeDKey] !== undefined)
+                                      ? (localSettings as any)[card.altThreeDKey]
+                                      : localSettings.homeAllCards3D;
+
+                                    const updateBg = (val?: string) => {
+                                      const patch: any = { [card.bgKey]: val };
+                                      if (card.altBgKey) patch[card.altBgKey] = val;
+                                      setLocalSettings({ ...localSettings, ...patch });
+                                    };
+
+                                    const updateBorder = (val?: string) => {
+                                      const patch: any = { [card.borderKey]: val };
+                                      if (card.altBorderKey) patch[card.altBorderKey] = val;
+                                      setLocalSettings({ ...localSettings, ...patch });
+                                    };
+
+                                    const toggle3D = () => {
+                                      const next = !cardIs3D;
+                                      const patch: any = { [card.threeDKey]: next };
+                                      if (card.altThreeDKey) patch[card.altThreeDKey] = next;
+                                      setLocalSettings({ ...localSettings, ...patch });
+                                    };
+
+                                    return (
+                                      <div key={card.id} className="p-3 bg-white/95 rounded-xl border border-indigo-100 shadow-2xs w-full min-w-0">
+                                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 mb-2">
+                                          <div className="min-w-0">
+                                            <p className="text-[11px] font-black text-slate-800 truncate">{card.name}</p>
+                                            <p className="text-[9px] text-slate-400 truncate">{card.desc}</p>
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={toggle3D}
+                                            className={`self-start sm:self-center px-2.5 py-1 rounded-lg text-[10px] font-black transition-all border shrink-0 cursor-pointer active:scale-95 ${
+                                              cardIs3D
+                                                ? 'bg-purple-600 text-white border-purple-700 shadow-2xs'
+                                                : 'bg-slate-100 text-slate-500 border-slate-200'
+                                            }`}
+                                          >
+                                            {cardIs3D ? '🎲 3D ON' : '⬜ 2D Flat'}
+                                          </button>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 min-w-0">
+                                          {/* Background Color */}
+                                          <div className="min-w-0">
+                                            <p className="text-[9px] font-bold text-slate-500 mb-1">Card Background</p>
+                                            <div className="flex items-center gap-1.5 min-w-0">
+                                              <input
+                                                type="color"
+                                                value={cardBg}
+                                                onChange={(e) => updateBg(e.target.value)}
+                                                className="w-7 h-7 rounded-lg cursor-pointer border border-slate-200 shrink-0"
+                                              />
+                                              <input
+                                                type="text"
+                                                value={(localSettings as any)[card.bgKey] || ''}
+                                                onChange={(e) => updateBg(e.target.value)}
+                                                placeholder="Default White (#ffffff)"
+                                                className="flex-1 min-w-0 p-1 border rounded-lg text-[9px] uppercase font-mono bg-slate-50"
+                                              />
+                                              {(localSettings as any)[card.bgKey] && (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => updateBg(undefined)}
+                                                  className="text-[9px] text-rose-500 font-bold shrink-0 px-1 py-0.5 rounded hover:bg-rose-50"
+                                                >
+                                                  ✕
+                                                </button>
+                                              )}
+                                            </div>
+                                            <div className="flex gap-1 mt-1.5 flex-wrap">
+                                              {['#ffffff','#eff6ff','#f0fdf4','#fef3c7','#fdf4ff','#fff1f2','#0f172a'].map((c) => (
+                                                <button
+                                                  key={c}
+                                                  type="button"
+                                                  onClick={() => updateBg(c)}
+                                                  className="w-4 h-4 rounded border transition-all hover:scale-110"
+                                                  style={{ background: c, borderColor: cardBg === c ? '#7c3aed' : '#cbd5e1' }}
+                                                  title={c}
+                                                />
+                                              ))}
+                                            </div>
+                                          </div>
+
+                                          {/* Border / Accent Color */}
+                                          <div className="min-w-0">
+                                            <p className="text-[9px] font-bold text-slate-500 mb-1">Border & 3D Outline</p>
+                                            <div className="flex items-center gap-1.5 min-w-0">
+                                              <input
+                                                type="color"
+                                                value={cardBorder}
+                                                onChange={(e) => updateBorder(e.target.value)}
+                                                className="w-7 h-7 rounded-lg cursor-pointer border border-slate-200 shrink-0"
+                                              />
+                                              <input
+                                                type="text"
+                                                value={(localSettings as any)[card.borderKey] || ''}
+                                                onChange={(e) => updateBorder(e.target.value)}
+                                                placeholder={`Default (${card.defaultBorder})`}
+                                                className="flex-1 min-w-0 p-1 border rounded-lg text-[9px] uppercase font-mono bg-slate-50"
+                                              />
+                                              {(localSettings as any)[card.borderKey] && (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => updateBorder(undefined)}
+                                                  className="text-[9px] text-rose-500 font-bold shrink-0 px-1 py-0.5 rounded hover:bg-rose-50"
+                                                >
+                                                  ✕
+                                                </button>
+                                              )}
+                                            </div>
+                                            <div className="flex gap-1 mt-1.5 flex-wrap">
+                                              {['#3b82f6','#8b5cf6','#f59e0b','#06b6d4','#10b981','#ef4444','#ec4899','#1e293b'].map((c) => (
+                                                <button
+                                                  key={c}
+                                                  type="button"
+                                                  onClick={() => updateBorder(c)}
+                                                  className="w-4 h-4 rounded border transition-all hover:scale-110"
+                                                  style={{ background: c, borderColor: cardBorder === c ? '#7c3aed' : '#cbd5e1' }}
+                                                  title={c}
+                                                />
+                                              ))}
+                                            </div>
+                                          </div>
+                                        </div>
                                       </div>
-                                    </div>
-                                    <div className="flex-1">
-                                      <p className="text-[9px] text-slate-400 mb-1">Border / Text</p>
-                                      <div className="flex items-center gap-1.5">
-                                        <input type="color" value={localSettings.homeCompetitionCardBorder || '#3b82f6'} onChange={e => setLocalSettings({...localSettings, homeCompetitionCardBorder: e.target.value})} className="w-8 h-8 rounded-lg cursor-pointer border border-slate-200 shrink-0" />
-                                        <input type="text" value={localSettings.homeCompetitionCardBorder || ''} onChange={e => setLocalSettings({...localSettings, homeCompetitionCardBorder: e.target.value})} placeholder="Default" className="flex-1 p-1 border rounded-lg text-[9px] uppercase font-mono bg-slate-50" />
-                                        {localSettings.homeCompetitionCardBorder && <button onClick={() => setLocalSettings({...localSettings, homeCompetitionCardBorder: undefined})} className="text-[9px] text-red-400 font-black shrink-0">✕</button>}
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <div className="flex gap-1.5 mt-2 flex-wrap">
-                                    {['#ffffff','#fffbeb','#fdf4ff','#fff1f2','#f0fdfa','#eff6ff','#f0fdf4','#1e293b'].map(c => (
-                                      <button key={c} onClick={() => setLocalSettings({...localSettings, homeCompetitionCardBg: c})} className="w-5 h-5 rounded border-2 transition-all hover:scale-110" style={{ background: c, borderColor: (localSettings.homeCompetitionCardBg||'') === c ? '#6366f1' : '#e2e8f0' }} title={c} />
-                                    ))}
-                                  </div>
-                                  <div className="flex items-center justify-between mt-2.5 pt-2.5 border-t border-slate-100">
-                                    <div>
-                                      <p className="text-[9px] font-black text-slate-700">Card Style</p>
-                                      <p className="text-[8px] text-slate-400 mt-0.5">{localSettings.homeCompetitionCard3D ? '🎲 3D raised — depth shadow on' : '⬜ 2D flat — clean minimal'}</p>
-                                    </div>
-                                    <button
-                                      onClick={() => setLocalSettings({...localSettings, homeCompetitionCard3D: !localSettings.homeCompetitionCard3D})}
-                                      className={`px-3 py-1.5 rounded-xl text-[10px] font-black transition-all border ${localSettings.homeCompetitionCard3D ? 'bg-indigo-600 text-white border-indigo-700 shadow-sm' : 'bg-slate-100 text-slate-500 border-slate-200'}`}
-                                    >
-                                      {localSettings.homeCompetitionCard3D ? '🎲 3D ON' : '⬜ 2D'}
-                                    </button>
-                                  </div>
+                                    );
+                                  })}
                                 </div>
 
-                                {/* Quick Access Cards */}
-                                <div className="p-2.5 bg-white rounded-xl border border-indigo-100">
-                                  <p className="text-[10px] font-black text-slate-700 mb-1.5">⚡ Quick Access Cards</p>
-                                  <div className="flex gap-2">
-                                    <div className="flex-1">
-                                      <p className="text-[9px] text-slate-400 mb-1">Background</p>
-                                      <div className="flex items-center gap-1.5">
-                                        <input type="color" value={localSettings.homeQuickAccessCardBg || '#ffffff'} onChange={e => setLocalSettings({...localSettings, homeQuickAccessCardBg: e.target.value})} className="w-8 h-8 rounded-lg cursor-pointer border border-slate-200 shrink-0" />
-                                        <input type="text" value={localSettings.homeQuickAccessCardBg || ''} onChange={e => setLocalSettings({...localSettings, homeQuickAccessCardBg: e.target.value})} placeholder="Default" className="flex-1 p-1 border rounded-lg text-[9px] uppercase font-mono bg-slate-50" />
-                                        {localSettings.homeQuickAccessCardBg && <button onClick={() => setLocalSettings({...localSettings, homeQuickAccessCardBg: undefined})} className="text-[9px] text-red-400 font-black shrink-0">✕</button>}
+                                {/* Details / Accordion for Legacy Cards */}
+                                <details className="mt-3 bg-white/70 rounded-xl border border-indigo-100 p-2 text-xs">
+                                  <summary className="font-bold text-slate-600 cursor-pointer select-none text-[10px] py-0.5">
+                                    📂 Purane / Secondary Cards Colors (School, Coaching, Lists)
+                                  </summary>
+                                  <div className="mt-2 space-y-2 pt-2 border-t border-slate-100">
+                                    {/* School Card */}
+                                    <div className="p-2 bg-slate-50 rounded-lg">
+                                      <p className="text-[10px] font-bold text-slate-700 mb-1">🏫 School Card (Home)</p>
+                                      <div className="flex flex-col sm:flex-row gap-1.5">
+                                        <input
+                                          type="color"
+                                          value={localSettings.homeSchoolCardBg || '#ffffff'}
+                                          onChange={(e) => setLocalSettings({ ...localSettings, homeSchoolCardBg: e.target.value })}
+                                          className="w-6 h-6 rounded cursor-pointer shrink-0"
+                                        />
+                                        <input
+                                          type="color"
+                                          value={localSettings.homeSchoolCardBorder || '#6366f1'}
+                                          onChange={(e) => setLocalSettings({ ...localSettings, homeSchoolCardBorder: e.target.value })}
+                                          className="w-6 h-6 rounded cursor-pointer shrink-0"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => setLocalSettings({ ...localSettings, homeSchoolCard3D: !localSettings.homeSchoolCard3D })}
+                                          className="text-[9px] px-2 py-0.5 rounded font-bold border"
+                                        >
+                                          {localSettings.homeSchoolCard3D ? '3D ON' : '2D'}
+                                        </button>
                                       </div>
                                     </div>
-                                    <div className="flex-1">
-                                      <p className="text-[9px] text-slate-400 mb-1">Border / Icon</p>
-                                      <div className="flex items-center gap-1.5">
-                                        <input type="color" value={localSettings.homeQuickAccessCardBorder || '#3b82f6'} onChange={e => setLocalSettings({...localSettings, homeQuickAccessCardBorder: e.target.value})} className="w-8 h-8 rounded-lg cursor-pointer border border-slate-200 shrink-0" />
-                                        <input type="text" value={localSettings.homeQuickAccessCardBorder || ''} onChange={e => setLocalSettings({...localSettings, homeQuickAccessCardBorder: e.target.value})} placeholder="Default" className="flex-1 p-1 border rounded-lg text-[9px] uppercase font-mono bg-slate-50" />
-                                        {localSettings.homeQuickAccessCardBorder && <button onClick={() => setLocalSettings({...localSettings, homeQuickAccessCardBorder: undefined})} className="text-[9px] text-red-400 font-black shrink-0">✕</button>}
+
+                                    {/* Coaching Card */}
+                                    <div className="p-2 bg-slate-50 rounded-lg">
+                                      <p className="text-[10px] font-bold text-slate-700 mb-1">🏫 Coaching Card (Home)</p>
+                                      <div className="flex flex-col sm:flex-row gap-1.5">
+                                        <input
+                                          type="color"
+                                          value={localSettings.homeCoachingCardBg || '#ffffff'}
+                                          onChange={(e) => setLocalSettings({ ...localSettings, homeCoachingCardBg: e.target.value })}
+                                          className="w-6 h-6 rounded cursor-pointer shrink-0"
+                                        />
+                                        <input
+                                          type="color"
+                                          value={localSettings.homeCoachingCardBorder || '#6366f1'}
+                                          onChange={(e) => setLocalSettings({ ...localSettings, homeCoachingCardBorder: e.target.value })}
+                                          className="w-6 h-6 rounded cursor-pointer shrink-0"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => setLocalSettings({ ...localSettings, homeCoachingCard3D: !localSettings.homeCoachingCard3D })}
+                                          className="text-[9px] px-2 py-0.5 rounded font-bold border"
+                                        >
+                                          {localSettings.homeCoachingCard3D ? '3D ON' : '2D'}
+                                        </button>
+                                      </div>
+                                    </div>
+
+                                    {/* Content List Card */}
+                                    <div className="p-2 bg-slate-50 rounded-lg">
+                                      <p className="text-[10px] font-bold text-slate-700 mb-1">📋 Book / Lesson / Page List Cards</p>
+                                      <div className="flex flex-col sm:flex-row gap-1.5">
+                                        <input
+                                          type="color"
+                                          value={localSettings.contentListCardBg || '#ffffff'}
+                                          onChange={(e) => setLocalSettings({ ...localSettings, contentListCardBg: e.target.value })}
+                                          className="w-6 h-6 rounded cursor-pointer shrink-0"
+                                        />
+                                        <input
+                                          type="color"
+                                          value={localSettings.contentListCardBorder || '#3b82f6'}
+                                          onChange={(e) => setLocalSettings({ ...localSettings, contentListCardBorder: e.target.value })}
+                                          className="w-6 h-6 rounded cursor-pointer shrink-0"
+                                        />
                                       </div>
                                     </div>
                                   </div>
-                                  <div className="flex gap-1.5 mt-2 flex-wrap">
-                                    {['#ffffff','#f0f9ff','#f0fdf4','#fef9c3','#fdf4ff','#fff1f2','#f0fdfa','#1e293b'].map(c => (
-                                      <button key={c} onClick={() => setLocalSettings({...localSettings, homeQuickAccessCardBg: c})} className="w-5 h-5 rounded border-2 transition-all hover:scale-110" style={{ background: c, borderColor: (localSettings.homeQuickAccessCardBg||'') === c ? '#6366f1' : '#e2e8f0' }} title={c} />
-                                    ))}
-                                  </div>
-                                  <div className="flex items-center justify-between mt-2.5 pt-2.5 border-t border-slate-100">
-                                    <div>
-                                      <p className="text-[9px] font-black text-slate-700">Card Style</p>
-                                      <p className="text-[8px] text-slate-400 mt-0.5">{localSettings.homeQuickAccessCard3D ? '🎲 3D raised — depth shadow on' : '⬜ 2D flat — clean minimal'}</p>
-                                    </div>
-                                    <button
-                                      onClick={() => setLocalSettings({...localSettings, homeQuickAccessCard3D: !localSettings.homeQuickAccessCard3D})}
-                                      className={`px-3 py-1.5 rounded-xl text-[10px] font-black transition-all border ${localSettings.homeQuickAccessCard3D ? 'bg-indigo-600 text-white border-indigo-700 shadow-sm' : 'bg-slate-100 text-slate-500 border-slate-200'}`}
-                                    >
-                                      {localSettings.homeQuickAccessCard3D ? '🎲 3D ON' : '⬜ 2D'}
-                                    </button>
-                                  </div>
-                                </div>
+                                </details>
                               </div>
-
-                                {/* School Card */}
-                                <div className="mb-3 mt-3 p-2.5 bg-white rounded-xl border border-indigo-100">
-                                  <p className="text-[10px] font-black text-slate-700 mb-1.5">🏫 School Card (Home)</p>
-                                  <div className="flex gap-2">
-                                    <div className="flex-1">
-                                      <p className="text-[9px] text-slate-400 mb-1">Background</p>
-                                      <div className="flex items-center gap-1.5">
-                                        <input type="color" value={localSettings.homeSchoolCardBg || '#ffffff'} onChange={e => setLocalSettings({...localSettings, homeSchoolCardBg: e.target.value})} className="w-8 h-8 rounded-lg cursor-pointer border border-slate-200 shrink-0" />
-                                        <input type="text" value={localSettings.homeSchoolCardBg || ''} onChange={e => setLocalSettings({...localSettings, homeSchoolCardBg: e.target.value})} placeholder="Default" className="flex-1 p-1 border rounded-lg text-[9px] uppercase font-mono bg-slate-50" />
-                                        {localSettings.homeSchoolCardBg && <button onClick={() => setLocalSettings({...localSettings, homeSchoolCardBg: undefined})} className="text-[9px] text-red-400 font-black shrink-0">✕</button>}
-                                      </div>
-                                    </div>
-                                    <div className="flex-1">
-                                      <p className="text-[9px] text-slate-400 mb-1">Border / Accent</p>
-                                      <div className="flex items-center gap-1.5">
-                                        <input type="color" value={localSettings.homeSchoolCardBorder || '#6366f1'} onChange={e => setLocalSettings({...localSettings, homeSchoolCardBorder: e.target.value})} className="w-8 h-8 rounded-lg cursor-pointer border border-slate-200 shrink-0" />
-                                        <input type="text" value={localSettings.homeSchoolCardBorder || ''} onChange={e => setLocalSettings({...localSettings, homeSchoolCardBorder: e.target.value})} placeholder="Default" className="flex-1 p-1 border rounded-lg text-[9px] uppercase font-mono bg-slate-50" />
-                                        {localSettings.homeSchoolCardBorder && <button onClick={() => setLocalSettings({...localSettings, homeSchoolCardBorder: undefined})} className="text-[9px] text-red-400 font-black shrink-0">✕</button>}
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <div className="flex gap-1.5 mt-2 flex-wrap">
-                                    {['#ffffff','#eff6ff','#f0fdf4','#fef3c7','#fdf4ff','#fff1f2','#f0fdfa','#1e293b'].map(c => (
-                                      <button key={c} onClick={() => setLocalSettings({...localSettings, homeSchoolCardBg: c})} className="w-5 h-5 rounded border-2 transition-all hover:scale-110" style={{ background: c, borderColor: (localSettings.homeSchoolCardBg||'') === c ? '#6366f1' : '#e2e8f0' }} title={c} />
-                                    ))}
-                                  </div>
-                                  <div className="flex items-center justify-between mt-2.5 pt-2.5 border-t border-slate-100">
-                                    <div>
-                                      <p className="text-[9px] font-black text-slate-700">Card Style</p>
-                                      <p className="text-[8px] text-slate-400 mt-0.5">{localSettings.homeSchoolCard3D ? '🎲 3D raised' : '⬜ 2D flat'}</p>
-                                    </div>
-                                    <button onClick={() => setLocalSettings({...localSettings, homeSchoolCard3D: !localSettings.homeSchoolCard3D})} className={`px-3 py-1.5 rounded-xl text-[10px] font-black transition-all border ${localSettings.homeSchoolCard3D ? 'bg-indigo-600 text-white border-indigo-700 shadow-sm' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
-                                      {localSettings.homeSchoolCard3D ? '🎲 3D ON' : '⬜ 2D'}
-                                    </button>
-                                  </div>
-                                </div>
-
-                                {/* Coaching Card */}
-                                <div className="mb-3 p-2.5 bg-white rounded-xl border border-indigo-100">
-                                  <p className="text-[10px] font-black text-slate-700 mb-1.5">🏫 Coaching Card (Home)</p>
-                                  <div className="flex gap-2">
-                                    <div className="flex-1">
-                                      <p className="text-[9px] text-slate-400 mb-1">Background</p>
-                                      <div className="flex items-center gap-1.5">
-                                        <input type="color" value={localSettings.homeCoachingCardBg || '#ffffff'} onChange={e => setLocalSettings({...localSettings, homeCoachingCardBg: e.target.value})} className="w-8 h-8 rounded-lg cursor-pointer border border-slate-200 shrink-0" />
-                                        <input type="text" value={localSettings.homeCoachingCardBg || ''} onChange={e => setLocalSettings({...localSettings, homeCoachingCardBg: e.target.value})} placeholder="Default" className="flex-1 p-1 border rounded-lg text-[9px] uppercase font-mono bg-slate-50" />
-                                        {localSettings.homeCoachingCardBg && <button onClick={() => setLocalSettings({...localSettings, homeCoachingCardBg: undefined})} className="text-[9px] text-red-400 font-black shrink-0">✕</button>}
-                                      </div>
-                                    </div>
-                                    <div className="flex-1">
-                                      <p className="text-[9px] text-slate-400 mb-1">Border / Accent</p>
-                                      <div className="flex items-center gap-1.5">
-                                        <input type="color" value={localSettings.homeCoachingCardBorder || '#6366f1'} onChange={e => setLocalSettings({...localSettings, homeCoachingCardBorder: e.target.value})} className="w-8 h-8 rounded-lg cursor-pointer border border-slate-200 shrink-0" />
-                                        <input type="text" value={localSettings.homeCoachingCardBorder || ''} onChange={e => setLocalSettings({...localSettings, homeCoachingCardBorder: e.target.value})} placeholder="Default" className="flex-1 p-1 border rounded-lg text-[9px] uppercase font-mono bg-slate-50" />
-                                        {localSettings.homeCoachingCardBorder && <button onClick={() => setLocalSettings({...localSettings, homeCoachingCardBorder: undefined})} className="text-[9px] text-red-400 font-black shrink-0">✕</button>}
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <div className="flex gap-1.5 mt-2 flex-wrap">
-                                    {['#ffffff','#eff6ff','#f0fdf4','#fef3c7','#fdf4ff','#fff1f2','#f0fdfa','#1e293b'].map(c => (
-                                      <button key={c} onClick={() => setLocalSettings({...localSettings, homeCoachingCardBg: c})} className="w-5 h-5 rounded border-2 transition-all hover:scale-110" style={{ background: c, borderColor: (localSettings.homeCoachingCardBg||'') === c ? '#6366f1' : '#e2e8f0' }} title={c} />
-                                    ))}
-                                  </div>
-                                  <div className="flex items-center justify-between mt-2.5 pt-2.5 border-t border-slate-100">
-                                    <div>
-                                      <p className="text-[9px] font-black text-slate-700">Card Style</p>
-                                      <p className="text-[8px] text-slate-400 mt-0.5">{localSettings.homeCoachingCard3D ? '🎲 3D raised' : '⬜ 2D flat'}</p>
-                                    </div>
-                                    <button onClick={() => setLocalSettings({...localSettings, homeCoachingCard3D: !localSettings.homeCoachingCard3D})} className={`px-3 py-1.5 rounded-xl text-[10px] font-black transition-all border ${localSettings.homeCoachingCard3D ? 'bg-indigo-600 text-white border-indigo-700 shadow-sm' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
-                                      {localSettings.homeCoachingCard3D ? '🎲 3D ON' : '⬜ 2D'}
-                                    </button>
-                                  </div>
-                                </div>
-
-                                {/* Content List Card Colors */}
-                                <div className="p-2.5 bg-white rounded-xl border border-indigo-100">
-                                  <p className="text-[10px] font-black text-slate-700 mb-0.5">📋 Book / Lesson / Page List Cards</p>
-                                  <p className="text-[8px] text-slate-400 mb-1.5">Teeno jagah ek hi color apply hoga — subject list, lesson list, page list</p>
-                                  <div className="flex gap-2">
-                                    <div className="flex-1">
-                                      <p className="text-[9px] text-slate-400 mb-1">Background</p>
-                                      <div className="flex items-center gap-1.5">
-                                        <input type="color" value={localSettings.contentListCardBg || '#ffffff'} onChange={e => setLocalSettings({...localSettings, contentListCardBg: e.target.value})} className="w-8 h-8 rounded-lg cursor-pointer border border-slate-200 shrink-0" />
-                                        <input type="text" value={localSettings.contentListCardBg || ''} onChange={e => setLocalSettings({...localSettings, contentListCardBg: e.target.value})} placeholder="Default" className="flex-1 p-1 border rounded-lg text-[9px] uppercase font-mono bg-slate-50" />
-                                        {localSettings.contentListCardBg && <button onClick={() => setLocalSettings({...localSettings, contentListCardBg: undefined})} className="text-[9px] text-red-400 font-black shrink-0">✕</button>}
-                                      </div>
-                                    </div>
-                                    <div className="flex-1">
-                                      <p className="text-[9px] text-slate-400 mb-1">Border / Accent</p>
-                                      <div className="flex items-center gap-1.5">
-                                        <input type="color" value={localSettings.contentListCardBorder || '#3b82f6'} onChange={e => setLocalSettings({...localSettings, contentListCardBorder: e.target.value})} className="w-8 h-8 rounded-lg cursor-pointer border border-slate-200 shrink-0" />
-                                        <input type="text" value={localSettings.contentListCardBorder || ''} onChange={e => setLocalSettings({...localSettings, contentListCardBorder: e.target.value})} placeholder="Default" className="flex-1 p-1 border rounded-lg text-[9px] uppercase font-mono bg-slate-50" />
-                                        {localSettings.contentListCardBorder && <button onClick={() => setLocalSettings({...localSettings, contentListCardBorder: undefined})} className="text-[9px] text-red-400 font-black shrink-0">✕</button>}
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <div className="flex gap-1.5 mt-2 flex-wrap">
-                                    {['#ffffff','#eff6ff','#f0fdf4','#fef3c7','#fdf4ff','#fff1f2','#f0fdfa','#1e293b'].map(c => (
-                                      <button key={c} onClick={() => setLocalSettings({...localSettings, contentListCardBg: c})} className="w-5 h-5 rounded border-2 transition-all hover:scale-110" style={{ background: c, borderColor: (localSettings.contentListCardBg||'') === c ? '#6366f1' : '#e2e8f0' }} title={c} />
-                                    ))}
-                                  </div>
-                                </div>
 
                               {/* ── DESIGN TOKENS LIVE PREVIEW ── */}
                               <div className="mt-3">
@@ -13094,7 +14579,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                 })()}</div>
                           </div>
                           {/* ── TIER-WISE DEFAULT COLORS ── */}
-                          <div className="md:col-span-2">
+                          <div className="col-span-1 lg:col-span-2 w-full">
                             <label className="text-xs font-black text-slate-700 uppercase block mb-2">🎨 Free / Basic / Ultra — Default Tier Colors</label>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                               {/* ULTRA */}
@@ -13115,7 +14600,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                   <input type="color" value={localSettings.ultraThemeColor || '#374151'} onChange={e => setLocalSettings({...localSettings, ultraThemeColor: e.target.value})} className="w-8 h-8 rounded-lg cursor-pointer border-none shrink-0" />
                                   <input type="text" value={localSettings.ultraThemeColor || ''} onChange={e => setLocalSettings({...localSettings, ultraThemeColor: e.target.value})} placeholder="#374151" className="flex-1 p-1.5 border rounded-lg text-[10px] uppercase font-mono" />
                                 </div>
-                                <div className="grid grid-cols-6 gap-1">
+                                <div className="grid grid-cols-3 sm:grid-cols-6 gap-1">
                                   {['#374151','#1f2937','#475569','#334155','#4b5563','#6b7280'].map(c => (
                                     <button key={c} onClick={() => setLocalSettings({...localSettings, ultraThemeColor: c})} className="h-5 rounded border-2 transition-all" style={{background: c, borderColor: localSettings.ultraThemeColor === c ? '#1e293b' : 'transparent'}} />
                                   ))}
@@ -13139,7 +14624,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                   <input type="color" value={localSettings.basicThemeColor || '#213252'} onChange={e => setLocalSettings({...localSettings, basicThemeColor: e.target.value})} className="w-8 h-8 rounded-lg cursor-pointer border-none shrink-0" />
                                   <input type="text" value={localSettings.basicThemeColor || ''} onChange={e => setLocalSettings({...localSettings, basicThemeColor: e.target.value})} placeholder="#213252" className="flex-1 p-1.5 border rounded-lg text-[10px] uppercase font-mono" />
                                 </div>
-                                <div className="grid grid-cols-6 gap-1">
+                                <div className="grid grid-cols-3 sm:grid-cols-6 gap-1">
                                   {['#213252','#1e3a8a','#1d4ed8','#2563eb','#3b82f6','#0ea5e9'].map(c => (
                                     <button key={c} onClick={() => setLocalSettings({...localSettings, basicThemeColor: c})} className="h-5 rounded border-2 transition-all" style={{background: c, borderColor: localSettings.basicThemeColor === c ? '#1e293b' : 'transparent'}} />
                                   ))}
@@ -13163,7 +14648,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                   <input type="color" value={localSettings.freeThemeColor || '#366669'} onChange={e => setLocalSettings({...localSettings, freeThemeColor: e.target.value})} className="w-8 h-8 rounded-lg cursor-pointer border-none shrink-0" />
                                   <input type="text" value={localSettings.freeThemeColor || ''} onChange={e => setLocalSettings({...localSettings, freeThemeColor: e.target.value})} placeholder="#366669" className="flex-1 p-1.5 border rounded-lg text-[10px] uppercase font-mono" />
                                 </div>
-                                <div className="grid grid-cols-6 gap-1">
+                                <div className="grid grid-cols-3 sm:grid-cols-6 gap-1">
                                   {['#366669','#4a8487','#265052','#0d9488','#0f766e','#115e59'].map(c => (
                                     <button key={c} onClick={() => setLocalSettings({...localSettings, freeThemeColor: c})} className="h-5 rounded border-2 transition-all" style={{background: c, borderColor: localSettings.freeThemeColor === c ? '#1e293b' : 'transparent'}} />
                                   ))}
@@ -13225,7 +14710,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                           </div>
 
                           {/* ── BROADCAST THEME ── */}
-                          <div className="md:col-span-2">
+                          <div className="col-span-1 lg:col-span-2 w-full">
                             <label className="text-xs font-black text-slate-700 uppercase block mb-2">📡 Broadcast Theme — Sabhi Users Pe Ek Saath Apply Karo</label>
                             {(() => {
                               const BROADCAST_THEMES = [
@@ -13275,7 +14760,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                       </button>
                                     </div>
                                   )}
-                                  <div className="grid grid-cols-6 gap-1.5">
+                                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-1.5">
                                     {BROADCAST_THEMES.map(t => {
                                       const isActive = active?.id === t.id && !isExpired;
                                       return (
@@ -13325,16 +14810,17 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                             })()}
                           </div>
 
-                          <div className="md:col-span-2">
-                              <label className="text-xs font-bold text-slate-600 uppercase block mb-1">Custom Page Video URL</label>
-                              <input
-                                  type="text"
-                                  placeholder="Paste Google Drive video URL here"
-                                  value={localSettings.customBloggerVideoUrl || ''}
-                                  onChange={(e) => setLocalSettings({...localSettings, customBloggerVideoUrl: e.target.value})}
-                                  className="w-full p-2 bg-slate-50 border rounded-lg text-sm"
-                              />
-                              <p className="text-[10px] text-slate-500 mt-1">This video will play in the Custom Page. (Google Drive link)</p>
+                          <div className="col-span-1 lg:col-span-2 w-full space-y-1.5">
+                              <div className="flex items-center justify-between gap-2 flex-wrap">
+                                  <label className="text-xs font-bold text-slate-600 uppercase block">Custom Page Video (Direct Upload ya URL)</label>
+                                  <DirectUploadButton
+                                      kind="video"
+                                      compact
+                                      currentUrl={localSettings.customBloggerVideoUrl}
+                                      onUploaded={(url) => setLocalSettings({ ...localSettings, customBloggerVideoUrl: url })}
+                                  />
+                              </div>
+                              <p className="text-[10px] text-slate-500">This video will play in the Custom Page.</p>
                           </div>
                       </div>
                   </div>
@@ -15049,6 +16535,97 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Lesson Name / Title</label>
                                           <input type="text" value={newLucent.lessonTitle} onChange={e => setNewLucent({...newLucent, lessonTitle: e.target.value})} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-indigo-500" placeholder="e.g. Chapter 1: मौलिक अधिकार" />
                                       </div>
+
+                                      {/* ── Lesson-Wide Media (Video / PDF / Audio) ── */}
+                                      <div className="bg-gradient-to-r from-rose-50 via-indigo-50 to-purple-50 border border-indigo-200 rounded-xl p-3.5 space-y-3">
+                                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                                              <p className="text-[11px] font-black uppercase text-indigo-900 flex items-center gap-1.5">
+                                                  <span>🎬 📄 🎵</span> Lesson-Wide Media (Pura Lesson Video / PDF / Audio)
+                                              </p>
+                                              <button
+                                                  type="button"
+                                                  onClick={() => {
+                                                      const dummyEntry: LucentNoteEntry = {
+                                                          id: cn612EditingId || 'temp_lucent_media',
+                                                          subject: newLucent.subject,
+                                                          lessonTitle: newLucent.lessonTitle.trim() || 'Lucent Lesson',
+                                                          classLevel: newLucent.classLevel,
+                                                          pages: newLucent.pages,
+                                                          videoUrl: newLucent.videoUrl,
+                                                          pdfUrl: newLucent.pdfUrl,
+                                                          audioUrl: newLucent.audioUrl,
+                                                      };
+                                                      setAdminLucentMediaModalEntry(dummyEntry);
+                                                      setAdminLucentMediaModalPageIndex(-1);
+                                                  }}
+                                                  className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black shadow active:scale-95 transition flex items-center gap-1"
+                                              >
+                                                  <Sparkles size={11} /> Open Media Vault Modal
+                                              </button>
+                                          </div>
+                                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                              {/* Video URL + Upload */}
+                                              <div className="space-y-1 bg-white p-2 rounded-lg border border-rose-200">
+                                                  <div className="flex items-center justify-between gap-1">
+                                                      <label className="text-[9px] font-black text-rose-700 uppercase">🎬 Video</label>
+                                                      <DirectUploadButton
+                                                          kind="video"
+                                                          compact
+                                                          currentUrl={newLucent.videoUrl}
+                                                          onUploaded={(url) => setNewLucent(prev => ({ ...prev, videoUrl: url }))}
+                                                      />
+                                                  </div>
+                                                  <input
+                                                      type="text"
+                                                      value={newLucent.videoUrl || ''}
+                                                      onChange={e => setNewLucent({ ...newLucent, videoUrl: e.target.value })}
+                                                      placeholder="YouTube / Drive / MP4 URL..."
+                                                      className="w-full p-1.5 border border-rose-200 rounded text-xs outline-none focus:border-rose-400 bg-white"
+                                                  />
+                                              </div>
+
+                                              {/* PDF URL + Upload */}
+                                              <div className="space-y-1 bg-white p-2 rounded-lg border border-blue-200">
+                                                  <div className="flex items-center justify-between gap-1">
+                                                      <label className="text-[9px] font-black text-blue-700 uppercase">📄 PDF</label>
+                                                      <DirectUploadButton
+                                                          kind="pdf"
+                                                          compact
+                                                          currentUrl={newLucent.pdfUrl}
+                                                          onUploaded={(url) => setNewLucent(prev => ({ ...prev, pdfUrl: url }))}
+                                                      />
+                                                  </div>
+                                                  <input
+                                                      type="text"
+                                                      value={newLucent.pdfUrl || ''}
+                                                      onChange={e => setNewLucent({ ...newLucent, pdfUrl: e.target.value })}
+                                                      placeholder="Google Drive PDF / direct link..."
+                                                      className="w-full p-1.5 border border-blue-200 rounded text-xs outline-none focus:border-blue-400 bg-white"
+                                                  />
+                                              </div>
+
+                                              {/* Audio URL + Upload */}
+                                              <div className="space-y-1 bg-white p-2 rounded-lg border border-purple-200">
+                                                  <div className="flex items-center justify-between gap-1">
+                                                      <label className="text-[9px] font-black text-purple-700 uppercase">🎵 Audio</label>
+                                                      <DirectUploadButton
+                                                          kind="audio"
+                                                          compact
+                                                          currentUrl={newLucent.audioUrl}
+                                                          onUploaded={(url) => setNewLucent(prev => ({ ...prev, audioUrl: url }))}
+                                                      />
+                                                  </div>
+                                                  <input
+                                                      type="text"
+                                                      value={newLucent.audioUrl || ''}
+                                                      onChange={e => setNewLucent({ ...newLucent, audioUrl: e.target.value })}
+                                                      placeholder="MP3 / Audio URL..."
+                                                      className="w-full p-1.5 border border-purple-200 rounded text-xs outline-none focus:border-purple-400 bg-white"
+                                                  />
+                                              </div>
+                                          </div>
+                                      </div>
+
                                       <div className="space-y-3">
                                           <div className="flex items-center justify-between">
                                               <label className="text-[10px] font-bold text-slate-500 uppercase">Pages ({newLucent.pages.length})</label>
@@ -15116,6 +16693,93 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                         </details>
                                                       </div>
                                                   </div>
+                                                  {/* ── Media URLs & Uploads (Video, PDF, Audio) for this Lucent page ── */}
+                                                  <div className="border border-indigo-100 rounded-lg p-2.5 bg-indigo-50/40 space-y-2">
+                                                    <p className="text-[9px] font-black uppercase text-indigo-800 flex items-center gap-1">
+                                                      <span>🎬 📄 🎵</span> Attach Media for Page {pg.pageNo || pgIdx + 1} (Video / PDF / Audio)
+                                                    </p>
+                                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                                      <div>
+                                                        <div className="flex items-center justify-between gap-1 mb-0.5">
+                                                          <label className="text-[8px] font-black text-rose-700 uppercase block">🎬 Video</label>
+                                                          <DirectUploadButton
+                                                            kind="video"
+                                                            compact
+                                                            currentUrl={(pg as any).videoUrl}
+                                                            onUploaded={(url) => {
+                                                              const u = [...newLucent.pages];
+                                                              u[pgIdx] = { ...u[pgIdx], videoUrl: url };
+                                                              setNewLucent({ ...newLucent, pages: u });
+                                                            }}
+                                                          />
+                                                        </div>
+                                                        <input
+                                                          type="text"
+                                                          value={(pg as any).videoUrl || ""}
+                                                          onChange={e => {
+                                                            const u = [...newLucent.pages];
+                                                            u[pgIdx] = { ...u[pgIdx], videoUrl: e.target.value };
+                                                            setNewLucent({ ...newLucent, pages: u });
+                                                          }}
+                                                          placeholder="YouTube / Drive / MP4..."
+                                                          className="w-full p-1.5 border border-rose-200 rounded text-xs outline-none focus:border-rose-400 bg-white"
+                                                        />
+                                                      </div>
+                                                      <div>
+                                                        <div className="flex items-center justify-between gap-1 mb-0.5">
+                                                          <label className="text-[8px] font-black text-blue-700 uppercase block">📄 PDF</label>
+                                                          <DirectUploadButton
+                                                            kind="pdf"
+                                                            compact
+                                                            currentUrl={(pg as any).pdfUrl}
+                                                            onUploaded={(url) => {
+                                                              const u = [...newLucent.pages];
+                                                              u[pgIdx] = { ...u[pgIdx], pdfUrl: url };
+                                                              setNewLucent({ ...newLucent, pages: u });
+                                                            }}
+                                                          />
+                                                        </div>
+                                                        <input
+                                                          type="text"
+                                                          value={(pg as any).pdfUrl || ""}
+                                                          onChange={e => {
+                                                            const u = [...newLucent.pages];
+                                                            u[pgIdx] = { ...u[pgIdx], pdfUrl: e.target.value };
+                                                            setNewLucent({ ...newLucent, pages: u });
+                                                          }}
+                                                          placeholder="Drive PDF / direct URL..."
+                                                          className="w-full p-1.5 border border-blue-200 rounded text-xs outline-none focus:border-blue-400 bg-white"
+                                                        />
+                                                      </div>
+                                                      <div>
+                                                        <div className="flex items-center justify-between gap-1 mb-0.5">
+                                                          <label className="text-[8px] font-black text-violet-700 uppercase block">🎵 Audio</label>
+                                                          <DirectUploadButton
+                                                            kind="audio"
+                                                            compact
+                                                            currentUrl={(pg as any).audioUrl}
+                                                            onUploaded={(url) => {
+                                                              const u = [...newLucent.pages];
+                                                              u[pgIdx] = { ...u[pgIdx], audioUrl: url };
+                                                              setNewLucent({ ...newLucent, pages: u });
+                                                            }}
+                                                          />
+                                                        </div>
+                                                        <input
+                                                          type="text"
+                                                          value={(pg as any).audioUrl || ""}
+                                                          onChange={e => {
+                                                            const u = [...newLucent.pages];
+                                                            u[pgIdx] = { ...u[pgIdx], audioUrl: e.target.value };
+                                                            setNewLucent({ ...newLucent, pages: u });
+                                                          }}
+                                                          placeholder="MP3 / Audio URL..."
+                                                          className="w-full p-1.5 border border-violet-200 rounded text-xs outline-none focus:border-violet-400 bg-white"
+                                                        />
+                                                      </div>
+                                                    </div>
+                                                  </div>
+
                                                   <div className="border-t border-slate-200 pt-2">
                                                       <CoachingMcqEditor
                                                           value={(pg.mcqs || []) as any}
@@ -15132,7 +16796,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                       </div>
                                       <button onClick={() => {
                                           if (!newLucent.lessonTitle.trim()) return alert('Lesson name nahi diya.');
-                                          const validPages = newLucent.pages.filter(p => p.pageNo.trim() && (p.chunkNotes?.trim() || p.htmlNotes?.trim() || p.content?.trim() || (p.mcqs && p.mcqs.length > 0)));
+                                          const validPages = newLucent.pages.filter(p => p.pageNo.trim() && (p.chunkNotes?.trim() || p.htmlNotes?.trim() || p.content?.trim() || (p.mcqs && p.mcqs.length > 0) || (p as any).videoUrl?.trim() || (p as any).pdfUrl?.trim() || (p as any).audioUrl?.trim()));
                                           if (validPages.length === 0) return alert('Kam se kam ek page ke notes ya MCQ add karein.');
                                           const target2 = LUCENT_CLASS_TARGETS.find(t => t.id === newLucent.classLevel)?.label || newLucent.classLevel;
                                           let bnLucentUpdated: LucentNoteEntry[];
@@ -15459,13 +17123,38 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           value={newBookNoteMcqs}
                                           onChange={setNewBookNoteMcqs}
                                       />
-                                      <div>
-                                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">🎬 Video URL (Optional)</label>
-                                          <input type="text" value={newBookNote.videoUrl} onChange={e => setNewBookNote({...newBookNote, videoUrl: e.target.value})} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-amber-500" placeholder="Video link" />
+                                      <div className="bg-rose-50/70 border border-rose-200 rounded-lg p-2.5 space-y-1.5">
+                                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                                              <label className="text-[10px] font-bold text-rose-700 uppercase block">🎬 Video (Direct App Upload ya Link)</label>
+                                              <DirectUploadButton
+                                                  kind="video"
+                                                  compact
+                                                  currentUrl={newBookNote.videoUrl}
+                                                  onUploaded={(url) => setNewBookNote({ ...newBookNote, videoUrl: url })}
+                                              />
+                                          </div>
                                       </div>
-                                      <div>
-                                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">🎙️ Audio URL (Optional)</label>
-                                          <input type="text" value={newBookNote.audioUrl} onChange={e => setNewBookNote({...newBookNote, audioUrl: e.target.value})} className="w-full p-2 border border-slate-200 rounded text-sm outline-none focus:border-amber-500" placeholder="Audio link" />
+                                      <div className="bg-purple-50/70 border border-purple-200 rounded-lg p-2.5 space-y-1.5">
+                                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                                              <label className="text-[10px] font-bold text-purple-700 uppercase block">🎙️ Audio (Direct App Upload ya Link)</label>
+                                              <DirectUploadButton
+                                                  kind="audio"
+                                                  compact
+                                                  currentUrl={newBookNote.audioUrl}
+                                                  onUploaded={(url) => setNewBookNote({ ...newBookNote, audioUrl: url })}
+                                              />
+                                          </div>
+                                      </div>
+                                      <div className="bg-blue-50/70 border border-blue-200 rounded-lg p-2.5 space-y-1.5">
+                                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                                              <label className="text-[10px] font-bold text-blue-700 uppercase block">📄 PDF (Direct App Upload ya Link)</label>
+                                              <DirectUploadButton
+                                                  kind="pdf"
+                                                  compact
+                                                  currentUrl={newBookNote.pdfUrl}
+                                                  onUploaded={(url) => setNewBookNote({ ...newBookNote, pdfUrl: url })}
+                                              />
+                                          </div>
                                       </div>
                                       <button onClick={() => {
                                           const pg = newBookNote.pageNo.trim();
@@ -15493,6 +17182,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                               parsedMcqs: structuredMcqs,
                                               audioUrl: newBookNote.audioUrl,
                                               videoUrl: newBookNote.videoUrl,
+                                              pdfUrl: newBookNote.pdfUrl || undefined,
                                               targetSubject: newBookNote.targetSubject,
                                               pageNo: pg,
                                               board: newBookNote.board || undefined,
@@ -15684,8 +17374,19 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                       <span className="shrink-0 text-[10px] text-indigo-600 font-bold">
                                                           {entry.pages.length} pg{entry.pages.reduce((s: number, p: any) => s + ((p.mcqs || []).length), 0) > 0 ? ` · ${entry.pages.reduce((s: number, p: any) => s + ((p.mcqs || []).length), 0)} MCQ` : ''}
                                                       </span>
+                                                      {((entry.videoUrl || entry.pages?.some((p: any) => p.videoUrl)) || (entry.pdfUrl || entry.pages?.some((p: any) => p.pdfUrl)) || (entry.audioUrl || entry.pages?.some((p: any) => p.audioUrl))) && (
+                                                          <span className="flex items-center gap-1 text-[10px] font-black text-purple-700 bg-purple-100 px-2 py-0.5 rounded-full shrink-0">
+                                                              {(entry.videoUrl || entry.pages?.some((p: any) => p.videoUrl)) && <span title="Video available">🎬</span>}
+                                                              {(entry.pdfUrl || entry.pages?.some((p: any) => p.pdfUrl)) && <span title="PDF available">📄</span>}
+                                                              {(entry.audioUrl || entry.pages?.some((p: any) => p.audioUrl)) && <span title="Audio available">🎵</span>}
+                                                          </span>
+                                                      )}
                                                       <button onClick={() => {
-                                                          setNewLucent({ subject: entry.subject, bookName: entry.bookName || '', classLevel: entry.classLevel, board: (entry as any).board || '', lessonTitle: entry.lessonTitle, pages: entry.pages.map((p: any) => ({ ...p })), mcqOnly: entry.mcqOnly || false });
+                                                          setAdminLucentMediaModalEntry(entry);
+                                                          setAdminLucentMediaModalPageIndex(-1);
+                                                      }} className="p-1 text-purple-600 hover:text-purple-800 hover:bg-purple-50 rounded transition-colors flex items-center gap-0.5 text-xs font-black" title="Manage Video / PDF / Audio Media"><Video size={13}/><span className="hidden sm:inline text-[10px]">Media</span></button>
+                                                      <button onClick={() => {
+                                                          setNewLucent({ subject: entry.subject, bookName: entry.bookName || '', classLevel: entry.classLevel, board: (entry as any).board || '', lessonTitle: entry.lessonTitle, videoUrl: entry.videoUrl || '', pdfUrl: entry.pdfUrl || '', audioUrl: entry.audioUrl || '', pages: entry.pages.map((p: any) => ({ ...p })), mcqOnly: entry.mcqOnly || false });
                                                           setNewBookNote((prev: any) => ({ ...prev, targetSubject: 'lucent' }));
                                                           setCn612EditingId(entry.id);
                                                           setBookNotesTab('ADD');
@@ -15967,7 +17668,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           mcqText: hw.mcqText || '',
                                           audioUrl: hw.audioUrl || '',
                                           videoUrl: hw.videoUrl || '',
-                                          pdfUrl: '',
+                                          pdfUrl: (hw as any).pdfUrl || '',
                                           targetSubject: hw.targetSubject || 'sarSangrah',
                                           pageNo: (hw as any).pageNo || '',
                                           topicName: '',
@@ -16240,21 +17941,54 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                           <textarea value={pg.htmlNotes || ''} onChange={e => { const u=[...newLucent.pages]; u[pgIdx]={...u[pgIdx], htmlNotes: e.target.value}; setNewLucent({...newLucent, pages: u}); }} className="w-full p-2 border border-teal-200 rounded text-sm outline-none min-h-[110px] resize-y focus:border-teal-500 bg-white font-mono" placeholder="<h2>Topic</h2><p>HTML formatted notes — bold, tables, colors sab supported hai.</p>" />
                                       </div>
                                       {/* Media Links */}
-                                      <div className="bg-rose-50 border border-rose-200 rounded-lg p-2 space-y-2">
-                                          <p className="text-[9px] font-black text-rose-700 uppercase">🎬 Media Links (Google Drive ya YouTube)</p>
-                                          <div>
-                                              <label className="text-[9px] font-bold text-slate-500 uppercase block mb-1">▶ Video URL</label>
-                                              <input type="url" value={(pg as any).videoUrl || ''} onChange={e => { const u=[...newLucent.pages]; u[pgIdx]={...u[pgIdx], videoUrl: e.target.value}; setNewLucent({...newLucent, pages: u}); }} className="w-full p-1.5 border border-rose-200 rounded text-xs outline-none focus:border-rose-500 bg-white" placeholder="https://drive.google.com/file/d/... ya YouTube link" />
+                                      <div className="bg-rose-50 border border-rose-200 rounded-lg p-2.5 space-y-2.5">
+                                          <p className="text-[9px] font-black text-rose-700 uppercase">🎬 Media (Direct App se Upload karein ya Link daalein)</p>
+                                          <div className="space-y-1">
+                                              <div className="flex items-center justify-between gap-2 flex-wrap">
+                                                  <label className="text-[9px] font-bold text-slate-600 uppercase block">▶ Video (App Upload ya Link)</label>
+                                                  <DirectUploadButton
+                                                      kind="video"
+                                                      compact
+                                                      currentUrl={(pg as any).videoUrl}
+                                                      onUploaded={(url) => {
+                                                          const u = [...newLucent.pages];
+                                                          u[pgIdx] = { ...u[pgIdx], videoUrl: url } as any;
+                                                          setNewLucent({ ...newLucent, pages: u });
+                                                      }}
+                                                  />
+                                              </div>
                                           </div>
-                                          <div>
-                                              <label className="text-[9px] font-bold text-slate-500 uppercase block mb-1">🎵 Audio URL</label>
-                                              <input type="url" value={(pg as any).audioUrl || ''} onChange={e => { const u=[...newLucent.pages]; u[pgIdx]={...u[pgIdx], audioUrl: e.target.value}; setNewLucent({...newLucent, pages: u}); }} className="w-full p-1.5 border border-rose-200 rounded text-xs outline-none focus:border-rose-500 bg-white" placeholder="https://drive.google.com/file/d/... (audio file)" />
+                                          <div className="space-y-1">
+                                              <div className="flex items-center justify-between gap-2 flex-wrap">
+                                                  <label className="text-[9px] font-bold text-slate-600 uppercase block">🎵 Audio (App Upload ya Link)</label>
+                                                  <DirectUploadButton
+                                                      kind="audio"
+                                                      compact
+                                                      currentUrl={(pg as any).audioUrl}
+                                                      onUploaded={(url) => {
+                                                          const u = [...newLucent.pages];
+                                                          u[pgIdx] = { ...u[pgIdx], audioUrl: url } as any;
+                                                          setNewLucent({ ...newLucent, pages: u });
+                                                      }}
+                                                  />
+                                              </div>
                                           </div>
-                                          <div>
-                                              <label className="text-[9px] font-bold text-slate-500 uppercase block mb-1">📄 PDF URL</label>
-                                              <input type="url" value={(pg as any).pdfUrl || ''} onChange={e => { const u=[...newLucent.pages]; u[pgIdx]={...u[pgIdx], pdfUrl: e.target.value}; setNewLucent({...newLucent, pages: u}); }} className="w-full p-1.5 border border-rose-200 rounded text-xs outline-none focus:border-rose-500 bg-white" placeholder="https://drive.google.com/file/d/... (PDF file)" />
+                                          <div className="space-y-1">
+                                              <div className="flex items-center justify-between gap-2 flex-wrap">
+                                                  <label className="text-[9px] font-bold text-slate-600 uppercase block">📄 PDF (App Upload ya Link)</label>
+                                                  <DirectUploadButton
+                                                      kind="pdf"
+                                                      compact
+                                                      currentUrl={(pg as any).pdfUrl}
+                                                      onUploaded={(url) => {
+                                                          const u = [...newLucent.pages];
+                                                          u[pgIdx] = { ...u[pgIdx], pdfUrl: url } as any;
+                                                          setNewLucent({ ...newLucent, pages: u });
+                                                      }}
+                                                  />
+                                              </div>
                                           </div>
-                                          <p className="text-[8px] text-rose-600">💡 Google Drive links: File ko "Anyone with the link" se share karein. App ke andar hi play hoga — user bahar nahi jayega.</p>
+                                          <p className="text-[8px] text-rose-600">💡 Direct App se Video, Audio ya PDF upload kar sakte hain — ya Google Drive / YouTube link bhi daal sakte hain.</p>
                                       </div>
                                       <div className="border-t border-slate-200 pt-2">
                                           <CoachingMcqEditor
@@ -16276,7 +18010,7 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                       <button
                           onClick={() => {
                               if (!newLucent.lessonTitle.trim()) return alert('Chapter / Lesson title daalein.');
-                              const validPages = newLucent.pages.filter(p => p.pageNo.trim() && (p.chunkNotes?.trim() || p.htmlNotes?.trim() || (p.mcqs && p.mcqs.length > 0)));
+                              const validPages = newLucent.pages.filter(p => p.pageNo.trim() && (p.chunkNotes?.trim() || p.htmlNotes?.trim() || (p.mcqs && p.mcqs.length > 0) || (p as any).videoUrl?.trim() || (p as any).pdfUrl?.trim() || (p as any).audioUrl?.trim()));
                               if (validPages.length === 0) return alert('Kam se kam ek page ke notes ya MCQ add karein.');
                               const effectiveClass = (newLucent.classLevel === 'COMPETITION' ? '6' : newLucent.classLevel) as any;
                               const classLabel = CLASS_ONLY_TARGETS.find(t => t.id === effectiveClass)?.label || `Class ${effectiveClass}`;
@@ -16297,6 +18031,9 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                       board: newLucent.board || undefined,
                                       lessonTitle: titleTrimmed,
                                       pages: validPages,
+                                      videoUrl: newLucent.videoUrl?.trim() || undefined,
+                                      pdfUrl: newLucent.pdfUrl?.trim() || undefined,
+                                      audioUrl: newLucent.audioUrl?.trim() || undefined,
                                       updatedAt: new Date().toISOString(),
                                   } as LucentNoteEntry;
                                   updated = (localSettings.lucentNotes || []).map((n: LucentNoteEntry) =>
@@ -16315,6 +18052,9 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                       board: newLucent.board || undefined,
                                       lessonTitle: titleTrimmed,
                                       pages: validPages,
+                                      videoUrl: newLucent.videoUrl?.trim() || undefined,
+                                      pdfUrl: newLucent.pdfUrl?.trim() || undefined,
+                                      audioUrl: newLucent.audioUrl?.trim() || undefined,
                                       createdAt: new Date().toISOString(),
                                   };
                                   updated = [...(localSettings.lucentNotes || []), entry];
@@ -16456,6 +18196,14 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                               <div className="flex gap-1 shrink-0">
                                                   <button
                                                       onClick={() => {
+                                                          setAdminLucentMediaModalEntry(entry);
+                                                          setAdminLucentMediaModalPageIndex(-1);
+                                                      }}
+                                                      className="p-1.5 text-purple-600 hover:text-purple-800 hover:bg-purple-50 rounded-lg"
+                                                      title="Media (Video/PDF/Audio)"
+                                                  ><Video size={14}/></button>
+                                                  <button
+                                                      onClick={() => {
                                                           // Load this entry into the form for editing
                                                           setCn612EditingId(entry.id);
                                                           setNewLucent({
@@ -16464,6 +18212,9 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                                               classLevel: (entry.classLevel && entry.classLevel !== 'COMPETITION' ? entry.classLevel : '6') as any,
                                                               board: (entry as any).board || '',
                                                               lessonTitle: entry.lessonTitle,
+                                                              videoUrl: entry.videoUrl || '',
+                                                              pdfUrl: entry.pdfUrl || '',
+                                                              audioUrl: entry.audioUrl || '',
                                                               pages: entry.pages || [],
                                                           });
                                                           // Scroll to top of form
@@ -17329,6 +19080,182 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                         ))}
                       </div>
                     )}
+                  </div>
+                );
+              })()}
+
+              {/* FCM CLOUD MESSAGING & WEB PUSH DIAGNOSTIC */}
+              {(() => {
+                const [diagToken, setDiagToken] = useState<string | null>(() => getStoredFcmToken());
+                const [diagPerm, setDiagPerm] = useState<string>(() => getNotificationPermissionStatus());
+                const [diagLoading, setDiagLoading] = useState(false);
+                const [diagCopied, setDiagCopied] = useState(false);
+                const [diagKeyCopied, setDiagKeyCopied] = useState(false);
+                const [diagTestSent, setDiagTestSent] = useState(false);
+
+                const handleGetToken = async () => {
+                  setDiagLoading(true);
+                  try {
+                    const token = await subscribeUserToPush(user?.id);
+                    setDiagPerm(getNotificationPermissionStatus());
+                    if (token) {
+                      setDiagToken(token);
+                      alert('Success! FCM Device Token generated and saved in Firebase database.');
+                    } else {
+                      alert('Could not get token. Check if browser notification permission is allowed.');
+                    }
+                  } catch (err: any) {
+                    alert('Token request error: ' + (err?.message || err));
+                  } finally {
+                    setDiagLoading(false);
+                  }
+                };
+
+                const copyText = (val: string, isKey = false) => {
+                  try {
+                    navigator.clipboard.writeText(val);
+                    if (isKey) {
+                      setDiagKeyCopied(true);
+                      setTimeout(() => setDiagKeyCopied(false), 2000);
+                    } else {
+                      setDiagCopied(true);
+                      setTimeout(() => setDiagCopied(false), 2000);
+                    }
+                  } catch (_) {}
+                };
+
+                const triggerTestPush = async () => {
+                  setDiagTestSent(true);
+                  await dispatchSmartNotification({
+                    title: '🔔 Test Notification Successful!',
+                    body: 'Aapke device par push notification bilkul sahi kaam kar raha hai!',
+                    category: 'CHAT',
+                    url: '/'
+                  });
+                  setTimeout(() => setDiagTestSent(false), 3000);
+                };
+
+                return (
+                  <div className="bg-slate-900 text-white p-6 rounded-2xl border border-slate-800 mt-6 shadow-xl space-y-5">
+                    <div className="flex items-center justify-between flex-wrap gap-3 border-b border-slate-800 pb-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                          <Bell size={20} />
+                        </div>
+                        <div>
+                          <h4 className="font-black text-white text-base flex items-center gap-2">
+                            Firebase Cloud Messaging (FCM Web Push) Diagnostic
+                          </h4>
+                          <p className="text-xs text-slate-400">VAPID Key verify karein, FCM Device Token dekhein aur test notification bhejein</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={triggerTestPush}
+                        className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl text-xs font-bold shadow-lg transition-all flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Sparkles size={14} className="text-amber-300" />
+                        <span>{diagTestSent ? '✓ Notification Triggered!' : 'Send Test Notification to This Device'}</span>
+                      </button>
+                    </div>
+
+                    {/* VAPID Public Key Card */}
+                    <div className="bg-slate-950/70 p-4 rounded-xl border border-slate-800 space-y-2">
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                          <Key size={14} className="text-amber-400" /> Active VAPID Public Key (Web Push Certificate)
+                        </span>
+                        <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded-full border border-emerald-500/30">
+                          Active in Code
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <code className="text-[11px] font-mono bg-slate-900 text-amber-200 px-3 py-2 rounded-lg border border-slate-800 flex-1 truncate select-all">
+                          {VAPID_KEY}
+                        </code>
+                        <button
+                          onClick={() => copyText(VAPID_KEY, true)}
+                          className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg flex items-center gap-1 cursor-pointer transition-colors shrink-0"
+                        >
+                          <Copy size={13} /> {diagKeyCopied ? 'Copied!' : 'Copy Key'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Permission Status & Device FCM Token */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="bg-slate-950/70 p-4 rounded-xl border border-slate-800 space-y-2">
+                        <span className="text-xs font-bold text-slate-300">Browser Notification Permission</span>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className={`text-xs font-black uppercase px-2.5 py-1 rounded-lg ${
+                            diagPerm === 'granted'
+                              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                              : diagPerm === 'denied'
+                              ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                              : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                          }`}>
+                            Status: {diagPerm}
+                          </span>
+                          <button
+                            onClick={handleGetToken}
+                            disabled={diagLoading}
+                            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors"
+                          >
+                            {diagLoading ? 'Generating...' : diagPerm === 'granted' ? 'Refresh Token' : 'Allow & Get Token'}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-950/70 p-4 rounded-xl border border-slate-800 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-300">Device FCM Registration Token</span>
+                          {diagToken && (
+                            <button
+                              onClick={() => copyText(diagToken, false)}
+                              className="text-[11px] text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1 cursor-pointer"
+                            >
+                              <Copy size={11} /> {diagCopied ? 'Copied!' : 'Copy Token for Firebase'}
+                            </button>
+                          )}
+                        </div>
+                        {diagToken ? (
+                          <p className="text-[11px] font-mono text-slate-300 truncate bg-slate-900 px-3 py-2 rounded-lg border border-slate-800 select-all">
+                            {diagToken}
+                          </p>
+                        ) : (
+                          <p className="text-xs text-amber-400/90 italic">
+                            Token not generated yet. Click "Allow &amp; Get Token" to generate.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Step-by-step Troubleshooting Explanation */}
+                    <div className="bg-amber-950/20 border border-amber-500/30 p-4 rounded-xl space-y-3">
+                      <h5 className="text-xs font-black text-amber-300 uppercase tracking-wide flex items-center gap-2">
+                        <HelpCircle size={15} />
+                        Notification kyu nahi aa raha tha? (Explanation &amp; Solution)
+                      </h5>
+                      <div className="text-xs text-slate-300 space-y-2.5 leading-relaxed">
+                        <p>
+                          <strong className="text-amber-200">1. VAPID Key vs FCM Device Token:</strong> Jo key aapne daali hai (<code className="text-[11px] text-amber-300">BIZ9FrX...</code>), wo Web Push Certificate (Public VAPID Key) hai. VAPID key ka kaam sirf user ke browser se device ka unique <strong>FCM Device Token</strong> generate karna hota hai. Sirf key add karne se notification apne aap nahi aate.
+                        </p>
+                        <p>
+                          <strong className="text-amber-200">2. Firebase Console me "Send test message" karte waqt kya daalein:</strong>
+                        </p>
+                        <ol className="list-decimal pl-5 space-y-1 text-slate-300 text-[11px]">
+                          <li>Upar diye gaye <strong className="text-white">"Copy Token for Firebase"</strong> button par click karke apna Device Token copy karein (jo <code className="text-amber-300">d7vX...:APA91b...</code> jaisa hota hai).</li>
+                          <li>Firebase Console kholein ➔ <strong className="text-white">Cloud Messaging</strong> (ya Engage &gt; Messaging).</li>
+                          <li><strong className="text-white">"New campaign"</strong> ➔ <strong className="text-white">"Firebase Notification messages"</strong> par click karein.</li>
+                          <li>Notification Title aur Message text likhein.</li>
+                          <li>Right preview panel me <strong className="text-white">"Send test message"</strong> button dabayein.</li>
+                          <li>Wahan <strong className="text-white">"Add an FCM registration token"</strong> ka input box milega — usme apna copied <strong>FCM Device Token</strong> paste karein (VAPID key mat daalna!).</li>
+                          <li><strong className="text-white">"Test"</strong> button par click karein ➔ Turant aapke browser/mobile screen par notification popup aa jayega!</li>
+                        </ol>
+                        <p className="text-[11px] text-slate-400">
+                          <strong>Note:</strong> Agar app tab open hai, to ab humne foreground handler bhi add kar diya hai taaki open app me bhi alert screen par dikhe.
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 );
               })()}
@@ -18520,10 +20447,12 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                   </select>
                               </div>
                               <div>
-                                  <label className="text-xs font-bold text-pink-700 uppercase block mb-1">Level</label>
+                                  <label className="text-xs font-bold text-pink-700 uppercase block mb-1">Level (VIP / VIP+)</label>
                                   <select value={newCodeSubLevel} onChange={e => setNewCodeSubLevel(e.target.value)} className="p-3 rounded-xl border border-pink-200 bg-white font-bold">
-                                      <option value="BASIC">Basic</option>
-                                      <option value="ULTRA">Ultra</option>
+                                      <option value="BASIC">Basic (PRO VIP)</option>
+                                      <option value="ULTRA">Ultra (MAX VIP)</option>
+                                      <option value="PRO_PLUS">⭐💎 PRO+ (VIP+ with Daily Diamonds)</option>
+                                      <option value="MAX_PLUS">👑💎 MAX+ (VIP+ with Daily Diamonds)</option>
                                   </select>
                               </div>
                           </>
@@ -18728,15 +20657,26 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                       <span className="text-[11px] text-slate-500 font-mono bg-white/70 px-1.5 py-0.5 rounded border border-slate-200">UID: {u.id}</span>
                                   </p>
                               </div>
-                              <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                                  u.subscriptionTier === 'LIFETIME' ? 'bg-yellow-200 text-yellow-800' :
-                                  u.subscriptionTier === 'YEARLY' ? 'bg-purple-200 text-purple-800' :
-                                  u.subscriptionTier === 'MONTHLY' ? 'bg-blue-200 text-blue-800' :
-                                  u.subscriptionTier === 'WEEKLY' ? 'bg-green-200 text-green-800' :
-                                  'bg-slate-200 text-slate-700'
-                              }`}>
-                                  {u.subscriptionTier === 'LIFETIME' ? '🌟 LIFETIME' : u.subscriptionTier === 'YEARLY' ? '📅 YEARLY' : u.subscriptionTier === 'MONTHLY' ? '📆 MONTHLY' : u.subscriptionTier === 'WEEKLY' ? '⏰ WEEKLY' : 'FREE'}
-                              </span>
+                              <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                                  {(u.vipPlusTier === 'PRO_PLUS' || u.vipPlusTier === 'MAX_PLUS') && u.isPremium && (
+                                      <span className={`px-2.5 py-1 rounded-full text-[11px] font-black border ${
+                                          u.vipPlusTier === 'MAX_PLUS'
+                                              ? 'bg-pink-100 text-pink-800 border-pink-300'
+                                              : 'bg-cyan-100 text-cyan-800 border-cyan-300'
+                                      }`}>
+                                          {u.vipPlusTier === 'MAX_PLUS' ? '👑💎 MAX+ VIP+' : '⭐💎 PRO+ VIP+'}
+                                      </span>
+                                  )}
+                                  <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                                      u.subscriptionTier === 'LIFETIME' ? 'bg-yellow-200 text-yellow-800' :
+                                      u.subscriptionTier === 'YEARLY' ? 'bg-purple-200 text-purple-800' :
+                                      u.subscriptionTier === 'MONTHLY' ? 'bg-blue-200 text-blue-800' :
+                                      u.subscriptionTier === 'WEEKLY' ? 'bg-green-200 text-green-800' :
+                                      'bg-slate-200 text-slate-700'
+                                  }`}>
+                                      {u.subscriptionTier === 'LIFETIME' ? '🌟 LIFETIME' : u.subscriptionTier === 'YEARLY' ? '📅 YEARLY' : u.subscriptionTier === 'MONTHLY' ? '📆 MONTHLY' : u.subscriptionTier === 'WEEKLY' ? '⏰ WEEKLY' : 'FREE'}
+                                  </span>
+                              </div>
                           </div>
 
                           <div className="grid grid-cols-4 gap-3 mb-3 text-xs">
@@ -19529,28 +21469,17 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
 
                       {/* SUBSCRIPTION TIER */}
                       <div className="border-t pt-3">
-                          <label className="text-xs font-bold text-slate-600 uppercase">👑 Grant Subscription</label>
+                          <label className="text-xs font-bold text-slate-600 uppercase">👑 Grant Subscription (VIP & VIP+)</label>
                           <div className="grid grid-cols-2 gap-2 mt-2">
-                              <button onClick={() => { setEditSubscriptionTier('FREE'); setEditSubscriptionPrice(0); }} className={`p-2 rounded font-bold text-xs ${editSubscriptionTier === 'FREE' ? 'bg-slate-200 text-slate-800' : 'bg-slate-100 text-slate-600'}`}>FREE</button>
-                              <button onClick={() => { setEditSubscriptionTier('WEEKLY'); updatePriceForSelection('WEEKLY', editSubscriptionLevel); }} className={`p-2 rounded font-bold text-xs ${editSubscriptionTier === 'WEEKLY' ? 'bg-green-200 text-green-800' : 'bg-green-50 text-green-600'}`}>⏰ WEEKLY</button>
-                              <button onClick={() => { setEditSubscriptionTier('MONTHLY'); updatePriceForSelection('MONTHLY', editSubscriptionLevel); }} className={`p-2 rounded font-bold text-xs ${editSubscriptionTier === 'MONTHLY' ? 'bg-blue-200 text-blue-800' : 'bg-blue-50 text-blue-600'}`}>📆 MONTHLY</button>
-                              <button onClick={() => { setEditSubscriptionTier('3_MONTHLY'); updatePriceForSelection('3_MONTHLY', editSubscriptionLevel); }} className={`p-2 rounded font-bold text-xs ${editSubscriptionTier === '3_MONTHLY' ? 'bg-indigo-200 text-indigo-800' : 'bg-indigo-50 text-indigo-600'}`}>📅 3 MONTHLY</button>
-                              <button onClick={() => { setEditSubscriptionTier('YEARLY'); updatePriceForSelection('YEARLY', editSubscriptionLevel); }} className={`p-2 rounded font-bold text-xs ${editSubscriptionTier === 'YEARLY' ? 'bg-purple-200 text-purple-800' : 'bg-purple-50 text-purple-600'}`}>📅 YEARLY</button>
-                              <button onClick={() => { setEditSubscriptionTier('LIFETIME'); updatePriceForSelection('LIFETIME', editSubscriptionLevel); }} className={`p-2 rounded font-bold text-xs ${editSubscriptionTier === 'LIFETIME' ? 'bg-yellow-200 text-yellow-800' : 'bg-yellow-50 text-yellow-600'}`}>🌟 LIFETIME</button>
+                              <button onClick={() => { setEditSubscriptionTier('FREE'); setEditVipPlusTier('NONE'); setEditSubscriptionPrice(0); }} className={`p-2 rounded font-bold text-xs ${editSubscriptionTier === 'FREE' ? 'bg-slate-200 text-slate-800' : 'bg-slate-100 text-slate-600'}`}>FREE</button>
+                              <button onClick={() => { setEditSubscriptionTier('WEEKLY'); updatePriceForSelection('WEEKLY', editSubscriptionLevel, editVipPlusTier); }} className={`p-2 rounded font-bold text-xs ${editSubscriptionTier === 'WEEKLY' ? 'bg-green-200 text-green-800' : 'bg-green-50 text-green-600'}`}>⏰ WEEKLY</button>
+                              <button onClick={() => { setEditSubscriptionTier('MONTHLY'); updatePriceForSelection('MONTHLY', editSubscriptionLevel, editVipPlusTier); }} className={`p-2 rounded font-bold text-xs ${editSubscriptionTier === 'MONTHLY' ? 'bg-blue-200 text-blue-800' : 'bg-blue-50 text-blue-600'}`}>📆 MONTHLY</button>
+                              <button onClick={() => { setEditSubscriptionTier('3_MONTHLY'); updatePriceForSelection('3_MONTHLY', editSubscriptionLevel, editVipPlusTier); }} className={`p-2 rounded font-bold text-xs ${editSubscriptionTier === '3_MONTHLY' ? 'bg-indigo-200 text-indigo-800' : 'bg-indigo-50 text-indigo-600'}`}>📅 3 MONTHLY</button>
+                              <button onClick={() => { setEditSubscriptionTier('YEARLY'); updatePriceForSelection('YEARLY', editSubscriptionLevel, editVipPlusTier); }} className={`p-2 rounded font-bold text-xs ${editSubscriptionTier === 'YEARLY' ? 'bg-purple-200 text-purple-800' : 'bg-purple-50 text-purple-600'}`}>📅 YEARLY</button>
+                              <button onClick={() => { setEditSubscriptionTier('LIFETIME'); updatePriceForSelection('LIFETIME', editSubscriptionLevel, editVipPlusTier); }} className={`p-2 rounded font-bold text-xs ${editSubscriptionTier === 'LIFETIME' ? 'bg-yellow-200 text-yellow-800' : 'bg-yellow-50 text-yellow-600'}`}>🌟 LIFETIME</button>
                               <button onClick={() => { setEditSubscriptionTier('CUSTOM'); setEditSubscriptionPrice(0); }} className={`p-2 rounded font-bold text-xs ${editSubscriptionTier === 'CUSTOM' ? 'bg-pink-200 text-pink-800' : 'bg-pink-50 text-pink-600'}`}>⚙️ CUSTOMIZED</button>
                           </div>
                       </div>
-
-                      {/* SUBSCRIPTION LEVEL */}
-                      {editSubscriptionTier !== 'FREE' && (
-                          <div className="mt-2">
-                              <label className="text-xs font-bold text-slate-600 uppercase">Level (For Real Users)</label>
-                              <div className="grid grid-cols-2 gap-2 mt-1">
-                                  <button onClick={() => { setEditSubscriptionLevel('BASIC'); updatePriceForSelection(editSubscriptionTier, 'BASIC'); }} className={`p-2 rounded font-bold text-xs border ${editSubscriptionLevel === 'BASIC' ? 'bg-blue-100 border-blue-300 text-blue-800' : 'bg-white border-slate-200'}`}>BASIC</button>
-                                  <button onClick={() => { setEditSubscriptionLevel('ULTRA'); updatePriceForSelection(editSubscriptionTier, 'ULTRA'); }} className={`p-2 rounded font-bold text-xs border ${editSubscriptionLevel === 'ULTRA' ? 'bg-purple-100 border-purple-300 text-purple-800' : 'bg-white border-slate-200'}`}>ULTRA</button>
-                              </div>
-                          </div>
-                      )}
 
                       {editSubscriptionTier === 'CUSTOM' && (
                           <div className="space-y-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
@@ -19593,14 +21522,86 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                           </div>
                       )}
 
-                      {/* SUBSCRIPTION LEVEL */}
+                      {/* SUBSCRIPTION LEVEL (VIP & VIP+ PLANS) */}
                       {editSubscriptionTier !== 'FREE' && (
-                          <div className="mt-2">
-                              <label className="text-xs font-bold text-slate-600 uppercase">Level (For Real Users)</label>
-                              <div className="grid grid-cols-2 gap-2 mt-1">
-                                  <button onClick={() => { setEditSubscriptionLevel('BASIC'); updatePriceForSelection(editSubscriptionTier, 'BASIC'); }} className={`p-2 rounded font-bold text-xs border ${editSubscriptionLevel === 'BASIC' ? 'bg-blue-100 border-blue-300 text-blue-800' : 'bg-white border-slate-200'}`}>BASIC</button>
-                                  <button onClick={() => { setEditSubscriptionLevel('ULTRA'); updatePriceForSelection(editSubscriptionTier, 'ULTRA'); }} className={`p-2 rounded font-bold text-xs border ${editSubscriptionLevel === 'ULTRA' ? 'bg-purple-100 border-purple-300 text-purple-800' : 'bg-white border-slate-200'}`}>ULTRA</button>
+                          <div className="mt-2 space-y-2">
+                              <label className="text-xs font-bold text-slate-600 uppercase block">Level (For Real Users — VIP & VIP+)</label>
+                              <div className="grid grid-cols-2 gap-2">
+                                  <button
+                                      type="button"
+                                      onClick={() => {
+                                          setEditVipPlusTier('NONE');
+                                          setEditSubscriptionLevel('BASIC');
+                                          updatePriceForSelection(editSubscriptionTier, 'BASIC', 'NONE');
+                                      }}
+                                      className={`p-2 rounded-lg font-bold text-xs border transition ${
+                                          editSubscriptionLevel === 'BASIC' && editVipPlusTier === 'NONE'
+                                              ? 'bg-blue-100 border-blue-400 text-blue-900 shadow-sm'
+                                              : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                                      }`}
+                                  >
+                                      ⭐ BASIC (VIP Pro)
+                                  </button>
+                                  <button
+                                      type="button"
+                                      onClick={() => {
+                                          setEditVipPlusTier('NONE');
+                                          setEditSubscriptionLevel('ULTRA');
+                                          updatePriceForSelection(editSubscriptionTier, 'ULTRA', 'NONE');
+                                      }}
+                                      className={`p-2 rounded-lg font-bold text-xs border transition ${
+                                          editSubscriptionLevel === 'ULTRA' && editVipPlusTier === 'NONE'
+                                              ? 'bg-purple-100 border-purple-400 text-purple-900 shadow-sm'
+                                              : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                                      }`}
+                                  >
+                                      👑 ULTRA (VIP Max)
+                                  </button>
+                                  <button
+                                      type="button"
+                                      onClick={() => {
+                                          setEditVipPlusTier('PRO_PLUS');
+                                          setEditSubscriptionLevel('BASIC');
+                                          updatePriceForSelection(editSubscriptionTier, 'BASIC', 'PRO_PLUS');
+                                      }}
+                                      className={`p-2 rounded-lg font-bold text-xs border transition ${
+                                          editVipPlusTier === 'PRO_PLUS'
+                                              ? 'bg-cyan-100 border-cyan-500 text-cyan-900 shadow-sm ring-1 ring-cyan-400'
+                                              : 'bg-cyan-50/50 border-cyan-200 text-cyan-800 hover:bg-cyan-50'
+                                      }`}
+                                  >
+                                      ⭐💎 PRO+ (VIP+)
+                                  </button>
+                                  <button
+                                      type="button"
+                                      onClick={() => {
+                                          setEditVipPlusTier('MAX_PLUS');
+                                          setEditSubscriptionLevel('ULTRA');
+                                          updatePriceForSelection(editSubscriptionTier, 'ULTRA', 'MAX_PLUS');
+                                      }}
+                                      className={`p-2 rounded-lg font-bold text-xs border transition ${
+                                          editVipPlusTier === 'MAX_PLUS'
+                                              ? 'bg-pink-100 border-pink-500 text-pink-900 shadow-sm ring-1 ring-pink-400'
+                                              : 'bg-pink-50/50 border-pink-200 text-pink-800 hover:bg-pink-50'
+                                      }`}
+                                  >
+                                      👑💎 MAX+ (VIP+)
+                                  </button>
                               </div>
+                              {(editVipPlusTier === 'PRO_PLUS' || editVipPlusTier === 'MAX_PLUS') && (
+                                  <div className={`p-2.5 rounded-xl border text-[11px] font-bold flex items-center justify-between ${
+                                      editVipPlusTier === 'MAX_PLUS'
+                                          ? 'bg-gradient-to-r from-pink-50 to-purple-50 border-pink-200 text-purple-900'
+                                          : 'bg-gradient-to-r from-cyan-50 to-sky-50 border-cyan-200 text-cyan-900'
+                                  }`}>
+                                      <span>
+                                          {editVipPlusTier === 'MAX_PLUS' ? '👑💎 MAX+ (VIP+) Selected' : '⭐💎 PRO+ (VIP+) Selected'} — All {editVipPlusTier === 'MAX_PLUS' ? 'Max' : 'Pro'} Features + Daily Diamonds
+                                      </span>
+                                      <span className="px-2 py-0.5 rounded-full bg-white border text-[10px] font-black shrink-0">
+                                          +{getVipPlusDiamondsPerDay({ duration: editSubscriptionTier === 'WEEKLY' ? '7 days' : editSubscriptionTier === '3_MONTHLY' ? '3 months' : editSubscriptionTier === 'YEARLY' || editSubscriptionTier === 'LIFETIME' ? '365 days' : '30 days' }, editVipPlusTier)} 💎/d
+                                      </span>
+                                  </div>
+                              )}
                           </div>
                       )}
 
@@ -19636,6 +21637,195 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                               </p>
                           </div>
                       )}
+
+                      {/* --- VIP+ PLAN SUBSCRIPTION (PRO+ / MAX+ WITH DAILY DIAMONDS) --- */}
+                      <div className="border-t pt-3">
+                          <label className="text-xs font-bold text-cyan-800 uppercase flex items-center gap-1.5">
+                              <span>👑💎</span>
+                              VIP+ Plan Subscription (PRO+ / MAX+)
+                          </label>
+                          <p className="text-[10px] text-slate-500 mb-2">
+                              VIP+ Plan se Premium Content (Pro/Max) + Daily Diamonds dono ek saath unlock hote hain.
+                          </p>
+
+                          {isVipPlusUser(editingUser) ? (
+                              <div className={`p-3 rounded-xl border space-y-2 ${
+                                  editingUser.vipPlusTier === 'MAX_PLUS'
+                                      ? 'bg-pink-50 border-pink-200'
+                                      : 'bg-cyan-50 border-cyan-200'
+                              }`}>
+                                  <div className="flex items-center justify-between">
+                                      <span className={`text-xs font-black ${
+                                          editingUser.vipPlusTier === 'MAX_PLUS' ? 'text-pink-900' : 'text-cyan-900'
+                                      }`}>
+                                          {editingUser.vipPlusTier === 'MAX_PLUS' ? '👑💎 MAX+ (VIP+ Elite)' : '⭐💎 PRO+ (VIP+)'} — {editingUser.subscriptionTier}
+                                      </span>
+                                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                                          editingUser.vipPlusTier === 'MAX_PLUS'
+                                              ? 'bg-pink-200 text-pink-900'
+                                              : 'bg-cyan-200 text-cyan-900'
+                                      }`}>
+                                          ACTIVE
+                                      </span>
+                                  </div>
+                                  <div className="text-xs text-slate-700 grid grid-cols-2 gap-1">
+                                      <div>💎 Daily Diamonds: <strong>+{editingUser.dailyVipDiamonds || (editingUser.vipPlusTier === 'MAX_PLUS' ? 50 : 25)} 💎/d</strong></div>
+                                      <div>👑 Content Tier: <strong>{editingUser.vipPlusTier === 'MAX_PLUS' ? 'ULTRA (Max)' : 'BASIC (Pro)'}</strong></div>
+                                      <div className="col-span-2">📅 Expires: <strong>{editingUser.subscriptionEndDate ? new Date(editingUser.subscriptionEndDate).toLocaleDateString() : 'Lifetime'}</strong></div>
+                                  </div>
+                                  <button
+                                      type="button"
+                                      onClick={async () => {
+                                          if (!confirm(`Kya aap ${editingUser.name} ka VIP+ Plan (${editingUser.vipPlusTier === 'MAX_PLUS' ? 'MAX+' : 'PRO+'}) cancel/revoke karna chahte hain?`)) return;
+                                          const updated: User = {
+                                              ...editingUser,
+                                              isPremium: false,
+                                              subscriptionTier: 'FREE',
+                                              vipPlusTier: undefined,
+                                              dailyVipDiamonds: undefined,
+                                              subscriptionEndDate: undefined,
+                                              diamondSubscription: editingUser.diamondSubscription
+                                                  ? { ...editingUser.diamondSubscription, status: 'EXPIRED' }
+                                                  : undefined,
+                                          };
+                                          const ok = await saveUserToLive(updated);
+                                          if (ok) {
+                                              setEditingUser(updated);
+                                              setEditSubscriptionTier('FREE');
+                                              setEditVipPlusTier('NONE');
+                                              setUsers(prev => prev.map(u => u.id === updated.id ? updated : u));
+                                              alert('VIP+ Plan revoked successfully.');
+                                          }
+                                      }}
+                                      className="w-full py-1.5 bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold rounded-lg transition"
+                                  >
+                                      ❌ Revoke / Cancel VIP+ Plan
+                                  </button>
+                              </div>
+                          ) : (
+                              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+                                  <span className="text-xs text-slate-500 italic block">No active VIP+ subscription</span>
+                                  <div className="grid grid-cols-2 gap-2">
+                                      <button
+                                          type="button"
+                                          onClick={() => setSelectedVipPlusGrantTier('PRO_PLUS')}
+                                          className={`p-2 rounded-lg font-bold text-[11px] border leading-tight transition ${
+                                              selectedVipPlusGrantTier === 'PRO_PLUS'
+                                                  ? 'bg-cyan-100 border-cyan-500 text-cyan-900 shadow-sm'
+                                                  : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                                          }`}
+                                      >
+                                          <div className="text-cyan-700 font-black">⭐💎 PRO+ (VIP+)</div>
+                                          <div className="opacity-80 font-normal text-[10px]">Pro Content + Daily 💎</div>
+                                      </button>
+                                      <button
+                                          type="button"
+                                          onClick={() => setSelectedVipPlusGrantTier('MAX_PLUS')}
+                                          className={`p-2 rounded-lg font-bold text-[11px] border leading-tight transition ${
+                                              selectedVipPlusGrantTier === 'MAX_PLUS'
+                                                  ? 'bg-pink-100 border-pink-500 text-pink-900 shadow-sm'
+                                                  : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                                          }`}
+                                      >
+                                          <div className="text-pink-700 font-black">👑💎 MAX+ (VIP+)</div>
+                                          <div className="opacity-80 font-normal text-[10px]">Max Content + Daily 💎</div>
+                                      </button>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                      <span className="text-[10px] font-bold text-slate-500 uppercase w-16">Validity:</span>
+                                      <div className="flex-1 grid grid-cols-5 gap-1">
+                                          {([
+                                              { label: '1W', tier: 'WEEKLY' as const, days: 7 },
+                                              { label: '1M', tier: 'MONTHLY' as const, days: 30 },
+                                              { label: '3M', tier: '3_MONTHLY' as const, days: 90 },
+                                              { label: '1Y', tier: 'YEARLY' as const, days: 365 },
+                                              { label: 'LIFE', tier: 'LIFETIME' as const, days: 1825 },
+                                          ]).map(opt => (
+                                              <button
+                                                  key={opt.tier}
+                                                  type="button"
+                                                  onClick={() => setSelectedVipPlusGrantDuration(opt.tier)}
+                                                  className={`py-1.5 rounded font-bold text-[11px] border ${
+                                                      selectedVipPlusGrantDuration === opt.tier
+                                                          ? 'bg-cyan-800 border-cyan-900 text-white shadow-sm'
+                                                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                                                  }`}
+                                              >
+                                                  {opt.label}
+                                              </button>
+                                          ))}
+                                      </div>
+                                  </div>
+                                  <button
+                                      type="button"
+                                      onClick={async () => {
+                                          const durDays = selectedVipPlusGrantDuration === 'WEEKLY' ? 7 : selectedVipPlusGrantDuration === 'MONTHLY' ? 30 : selectedVipPlusGrantDuration === '3_MONTHLY' ? 90 : selectedVipPlusGrantDuration === 'YEARLY' ? 365 : 1825;
+                                          const durObj = { duration: selectedVipPlusGrantDuration === 'WEEKLY' ? '7 days' : selectedVipPlusGrantDuration === '3_MONTHLY' ? '3 months' : selectedVipPlusGrantDuration === 'YEARLY' || selectedVipPlusGrantDuration === 'LIFETIME' ? '365 days' : '30 days' };
+                                          const dailyDia = getVipPlusDiamondsPerDay(durObj, selectedVipPlusGrantTier);
+                                          const tierLabel = selectedVipPlusGrantTier === 'MAX_PLUS' ? 'MAX+ (VIP+)' : 'PRO+ (VIP+)';
+                                          if (!confirm(`Kya aap ${editingUser.name} ko "${selectedVipPlusGrantDuration} ${tierLabel}" (+${dailyDia} 💎/day) grant karna chahte hain?`)) return;
+
+                                          const now = new Date();
+                                          const endDate = new Date(now.getTime() + durDays * 24 * 60 * 60 * 1000);
+                                          const isoEndDate = endDate.toISOString();
+                                          const finalLevel: 'BASIC' | 'ULTRA' = selectedVipPlusGrantTier === 'MAX_PLUS' ? 'ULTRA' : 'BASIC';
+
+                                          const historyEntry: SubscriptionHistoryEntry = {
+                                              id: `hist-${Date.now()}`,
+                                              tier: selectedVipPlusGrantDuration,
+                                              level: finalLevel,
+                                              startDate: now.toISOString(),
+                                              endDate: selectedVipPlusGrantDuration === 'LIFETIME' ? 'LIFETIME' : isoEndDate,
+                                              durationHours: durDays * 24,
+                                              price: 0,
+                                              originalPrice: 0,
+                                              isFree: true,
+                                              grantSource: 'ADMIN',
+                                              grantedBy: currentUser?.id,
+                                              grantedByName: currentUser?.name,
+                                          };
+
+                                          const updated: User = {
+                                              ...editingUser,
+                                              isPremium: true,
+                                              subscriptionTier: selectedVipPlusGrantDuration,
+                                              subscriptionLevel: finalLevel,
+                                              vipPlusTier: selectedVipPlusGrantTier,
+                                              dailyVipDiamonds: dailyDia,
+                                              subscriptionEndDate: isoEndDate,
+                                              grantedByAdmin: true,
+                                              subscriptionHistory: [historyEntry, ...(editingUser.subscriptionHistory || [])],
+                                              diamondSubscription: {
+                                                  planId: `vipplus_${selectedVipPlusGrantTier.toLowerCase()}_${Date.now()}`,
+                                                  planName: `${selectedVipPlusGrantDuration} (${selectedVipPlusGrantTier === 'MAX_PLUS' ? 'MAX+' : 'PRO+'})`,
+                                                  dailyDiamonds: dailyDia,
+                                                  totalDays: durDays,
+                                                  startDate: now.toISOString(),
+                                                  endDate: isoEndDate,
+                                                  totalClaimedDays: 0,
+                                                  totalDiamondsClaimed: 0,
+                                                  pricePaid: 0,
+                                                  status: 'ACTIVE',
+                                              },
+                                          };
+
+                                          const ok = await saveUserToLive(updated);
+                                          if (ok) {
+                                              setEditingUser(updated);
+                                              setEditSubscriptionTier(selectedVipPlusGrantDuration);
+                                              setEditSubscriptionLevel(finalLevel);
+                                              setEditVipPlusTier(selectedVipPlusGrantTier);
+                                              setUsers(prev => prev.map(u => u.id === updated.id ? updated : u));
+                                              alert(`✅ ${tierLabel} (${selectedVipPlusGrantDuration}) with +${dailyDia} 💎/day granted to ${editingUser.name}!`);
+                                          }
+                                      }}
+                                      className="w-full py-2 bg-gradient-to-r from-cyan-600 to-purple-600 hover:from-cyan-700 hover:to-purple-700 text-white text-xs font-bold rounded-lg transition shadow-sm"
+                                  >
+                                      👑💎 Grant VIP+ Plan ({selectedVipPlusGrantTier === 'MAX_PLUS' ? 'MAX+' : 'PRO+'} • {selectedVipPlusGrantDuration})
+                                  </button>
+                              </div>
+                          )}
+                      </div>
 
                       {/* --- DAILY CREDIT SUBSCRIPTION (DAILY PASS) --- */}
                       <div className="border-t pt-3">
@@ -20001,12 +22191,18 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                   className="w-full p-2 border rounded-lg text-sm"
                               >
                                   <option value="">Select Plan</option>
-                                  <option value="WEEKLY_BASIC">Weekly Basic</option>
-                                  <option value="WEEKLY_ULTRA">Weekly Ultra</option>
-                                  <option value="MONTHLY_BASIC">Monthly Basic</option>
-                                  <option value="MONTHLY_ULTRA">Monthly Ultra</option>
-                                  <option value="YEARLY_BASIC">Yearly Basic</option>
-                                  <option value="YEARLY_ULTRA">Yearly Ultra</option>
+                                  <option value="WEEKLY_BASIC">Weekly Basic (VIP Pro)</option>
+                                  <option value="WEEKLY_ULTRA">Weekly Ultra (VIP Max)</option>
+                                  <option value="WEEKLY_PRO_PLUS">⭐💎 Weekly PRO+ (VIP+)</option>
+                                  <option value="WEEKLY_MAX_PLUS">👑💎 Weekly MAX+ (VIP+)</option>
+                                  <option value="MONTHLY_BASIC">Monthly Basic (VIP Pro)</option>
+                                  <option value="MONTHLY_ULTRA">Monthly Ultra (VIP Max)</option>
+                                  <option value="MONTHLY_PRO_PLUS">⭐💎 Monthly PRO+ (VIP+)</option>
+                                  <option value="MONTHLY_MAX_PLUS">👑💎 Monthly MAX+ (VIP+)</option>
+                                  <option value="YEARLY_BASIC">Yearly Basic (VIP Pro)</option>
+                                  <option value="YEARLY_ULTRA">Yearly Ultra (VIP Max)</option>
+                                  <option value="YEARLY_PRO_PLUS">⭐💎 Yearly PRO+ (VIP+)</option>
+                                  <option value="YEARLY_MAX_PLUS">👑💎 Yearly MAX+ (VIP+)</option>
                               </select>
                               <div className="flex gap-2 items-center">
                                   <label className="text-xs text-slate-600">Duration (Days):</label>
@@ -20087,17 +22283,19 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                                       <Trash2 size={16} />
                                   </button>
                               </div>
-                              <input 
-                                  type="text" 
-                                  value={vid.url || ''} 
-                                  onChange={(e) => {
-                                      const updated = [...universalVideos];
-                                      updated[i] = {...updated[i], url: e.target.value};
-                                      setUniversalVideos(updated);
-                                  }}
-                                  placeholder="YouTube URL (e.g. https://youtu.be/...)"
-                                  className="w-full p-2 border border-slate-200 rounded text-xs font-mono text-blue-600 bg-slate-50" 
-                              />
+                              <div className="space-y-1.5">
+                                  <DirectUploadButton
+                                      kind="video"
+                                      compact
+                                      currentUrl={vid.url}
+                                      onUploaded={(url, file) => {
+                                          const updated = [...universalVideos];
+                                          const autoTitle = updated[i]?.title || file.name.replace(/\.[^/.]+$/, '');
+                                          updated[i] = { ...updated[i], url, title: autoTitle };
+                                          setUniversalVideos(updated);
+                                      }}
+                                  />
+                              </div>
                           </div>
                       ))}
                   </div>
@@ -20470,12 +22668,24 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
                               placeholder="Topic (e.g. Geometry)"
                               className="w-full p-2 border border-slate-200 rounded text-sm"
                           />
-                          <input
-                              type="text"
-                              id="prem-note-url"
-                              placeholder="PDF URL (e.g. https://...)"
-                              className="w-full p-2 border border-slate-200 rounded text-sm text-blue-600"
-                          />
+                          <div className="space-y-1.5">
+                              <input
+                                  type="hidden"
+                                  id="prem-note-url"
+                              />
+                              <DirectUploadButton
+                                  kind="pdf"
+                                  compact
+                                  onUploaded={(url, file) => {
+                                      const urlInput = document.getElementById('prem-note-url') as HTMLInputElement | null;
+                                      const titleInput = document.getElementById('prem-note-title') as HTMLInputElement | null;
+                                      if (urlInput) urlInput.value = url;
+                                      if (titleInput && !titleInput.value) {
+                                          titleInput.value = file.name.replace(/\.[^/.]+$/, '');
+                                      }
+                                  }}
+                              />
+                          </div>
                           <button
                               onClick={() => {
                                   const title = (document.getElementById('prem-note-title') as HTMLInputElement).value;
@@ -20706,6 +22916,23 @@ const AdminDashboardInner: React.FC<Props> = ({ onNavigate, settings, onUpdateSe
               onCropComplete={handleCropComplete} 
               onCancel={() => setCropImageSrc(null)} 
           />
+      )}
+
+      {/* Admin Lucent Media (PDF / Video / Audio) Modal */}
+      {adminLucentMediaModalEntry && (
+        <AdminLucentMediaModal
+          entry={adminLucentMediaModalEntry}
+          initialPageIndex={adminLucentMediaModalPageIndex}
+          onClose={() => {
+            setAdminLucentMediaModalEntry(null);
+            setAdminLucentMediaModalPageIndex(-1);
+          }}
+          onSaved={(updated) => {
+            const updatedList = (localSettings.lucentNotes || []).map((n: LucentNoteEntry) => n.id === updated.id ? updated : n);
+            setLocalSettings((prev: any) => ({ ...prev, lucentNotes: updatedList }));
+            setAlertConfig({ isOpen: true, message: `✅ "${updated.lessonTitle}" media update ho gaya!` });
+          }}
+        />
       )}
 
       <CustomAlert 

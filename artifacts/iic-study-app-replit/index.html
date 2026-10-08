@@ -14,15 +14,15 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="NSTA" />
     <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
-    <title>NSTA</title>
-    <meta name="description" content="NSTA - Comprehensive learning platform with syllabus, notes, audio studio, MCQs, and student progress tracking." />
+    <title>NSTA - National Study &amp; Tracking App</title>
+    <meta name="description" content="Comprehensive learning platform with syllabus, notes, audio studio, MCQs, and student progress tracking." />
     <meta name="robots" content="index, follow" />
-    <meta property="og:title" content="NSTA" />
-    <meta property="og:description" content="NSTA - Comprehensive learning platform with syllabus, notes, audio studio, MCQs, and student progress tracking." />
+    <meta property="og:title" content="NSTA - National Study &amp; Tracking App" />
+    <meta property="og:description" content="Comprehensive learning platform with syllabus, notes, audio studio, MCQs, and student progress tracking." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="NSTA" />
-    <meta name="twitter:description" content="NSTA - Comprehensive learning platform with syllabus, notes, audio studio, MCQs, and student progress tracking." />
+    <meta name="twitter:title" content="NSTA - National Study &amp; Tracking App" />
+    <meta name="twitter:description" content="Comprehensive learning platform with syllabus, notes, audio studio, MCQs, and student progress tracking." />
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -33,6 +33,27 @@
       // The HTML fallback below covers the gap between the native PWA splash
       // and React mounting without introducing a blank frame.
       window.__nstaBootStartedAt = Date.now();
+
+      // Suppress cross-origin opaque script errors (e.g. from CDNs, iframes, fonts, or browser extensions)
+      window.addEventListener('error', function(event) {
+        if (!event.error && (event.message === 'Script error.' || event.message === 'Script error' || !event.message)) {
+          if (event.preventDefault) event.preventDefault();
+          if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+          return true;
+        }
+      }, true);
+      window.onerror = function(msg, url, line, col, error) {
+        if (!error && (msg === 'Script error.' || msg === 'Script error')) {
+          return true;
+        }
+      };
+      window.addEventListener('unhandledrejection', function(event) {
+        var reason = event.reason;
+        var msg = (reason && (reason.message || String(reason))) || '';
+        if (msg.indexOf('Script error') !== -1 || msg.indexOf('AbortError') !== -1) {
+          if (event.preventDefault) event.preventDefault();
+        }
+      });
     </script>
     <style>
       #pre-react-splash {
@@ -184,9 +205,28 @@
       </div>
     </div>
     <script>
-      const bootSplash = document.getElementById('pre-react-splash');
-      const bootElapsed = Date.now() - window.__nstaBootStartedAt;
-      window.setTimeout(() => bootSplash?.remove(), Math.max(0, 3000 - bootElapsed));
+      window.__nstaReactMounted = false;
+      window.hidePreReactSplash = function() {
+        window.__nstaReactMounted = true;
+        const splash = document.getElementById('pre-react-splash');
+        if (splash) {
+          splash.style.transition = 'opacity 0.35s ease, transform 0.35s ease';
+          splash.style.opacity = '0';
+          splash.style.transform = 'scale(0.98)';
+          setTimeout(() => splash.remove(), 350);
+        }
+      };
+
+      // Failsafe: if React didn't mount after 6 seconds, show a recovery action inside the splash
+      setTimeout(() => {
+        const root = document.getElementById('root');
+        if (!window.__nstaReactMounted && (!root || root.children.length === 0)) {
+          const startingDiv = document.querySelector('.pre-react-splash-starting');
+          if (startingDiv) {
+            startingDiv.innerHTML = '<button onclick="window.location.reload()" style="background:#2563eb;color:#fff;border:none;padding:6px 14px;border-radius:12px;font-size:12px;font-weight:bold;cursor:pointer;margin-right:8px;box-shadow:0 4px 12px rgba(37,99,235,0.3)">Reload App</button><button onclick="try{localStorage.clear();sessionStorage.clear();}catch(e){}window.location.reload()" style="background:#e2e8f0;color:#334155;border:none;padding:6px 12px;border-radius:12px;font-size:12px;font-weight:bold;cursor:pointer">Reset</button>';
+          }
+        }
+      }, 6000);
     </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>

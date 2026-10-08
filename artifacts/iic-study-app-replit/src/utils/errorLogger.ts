@@ -126,15 +126,68 @@ const _recentErrors = new Set<string>();
  * total exceeds this. Only medium/high/critical errors are written;
  * low-severity noise is dropped entirely.
  */
-const MAX_LOG_RETENTION = 200;
-const MIN_SEVERITY_TO_LOG: ErrorSeverity = 'medium';
+const MAX_LOG_RETENTION = 300;
+const MIN_SEVERITY_TO_LOG: ErrorSeverity = 'low';
 const SEVERITY_RANK: Record<ErrorSeverity, number> = {
   low: 0, medium: 1, high: 2, critical: 3,
 };
 
 /** Session-level cap: stop writing after N errors per page load to avoid floods. */
 let _sessionErrorCount = 0;
-const MAX_SESSION_ERRORS = 15;
+const MAX_SESSION_ERRORS = 100;
+
+const LOCAL_STORAGE_KEY = 'nst_local_error_logs';
+
+/**
+ * Retrieve locally saved errors from localStorage.
+ */
+export function getLocalErrors(): Array<AppError & { id: string }> {
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Save an error locally to localStorage for instant offline/direct visibility.
+ */
+export function saveLocalError(err: AppError & { id: string }): void {
+  try {
+    const list = getLocalErrors();
+    // Prepend new error
+    const updated = [err, ...list.filter(item => item.id !== err.id)].slice(0, 200);
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
+    // Dispatch event so any open ErrorNoticeBoard / AdminDashboard updates in real time
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('nsta-new-error', { detail: err }));
+    }
+  } catch {}
+}
+
+/**
+ * Mark a local error dismissed
+ */
+export function markLocalErrorDismissed(id: string): void {
+  try {
+    const list = getLocalErrors();
+    const updated = list.map(item => item.id === id ? { ...item, dismissed: true } : item);
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
+  } catch {}
+}
+
+/**
+ * Clear local error logs
+ */
+export function clearLocalErrors(): void {
+  try {
+    localStorage.removeItem(LOCAL_STORAGE_KEY);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('nsta-new-error', { detail: null }));
+    }
+  } catch {}
+}
 
 /**
  * Prune oldest error_logs entries so the node never exceeds MAX_LOG_RETENTION.
@@ -172,7 +225,7 @@ export async function logErrorToFirebase(
   } = {}
 ): Promise<void> {
   try {
-    const message = typeof error === 'string' ? error : (error?.message || String(error));
+    const message = typeof error === 'string' ? error : (error?.message || String(error || 'Unknown Error'));
     const stack = typeof error === 'string' ? undefined : error?.stack;
 
     const lowerMsg = message.toLowerCase();
@@ -193,7 +246,7 @@ export async function logErrorToFirebase(
     const dedupeKey = message.slice(0, 120);
     if (_recentErrors.has(dedupeKey)) return;
     _recentErrors.add(dedupeKey);
-    setTimeout(() => _recentErrors.delete(dedupeKey), 30_000);
+    setTimeout(() => _recentErrors.delete(dedupeKey), 5_000);
 
     if (_sessionErrorCount >= MAX_SESSION_ERRORS) return;
     _sessionErrorCount++;
@@ -203,14 +256,17 @@ export async function logErrorToFirebase(
 
     const { device, browserName, browserVersion, osName, osVersion, deviceModel } = getDetailedDeviceInfo();
 
-    const payload: AppError = {
+    const errorId = `err_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+    const payload: AppError & { id: string } = {
+      id: errorId,
       message: message.slice(0, 500),
       stack: stack?.slice(0, 1000),
       componentStack: opts.componentStack?.slice(0, 800),
       component,
       type: opts.type ?? 'runtime',
       severity,
-      url: window.location.pathname,
+      url: typeof window !== 'undefined' ? window.location.pathname : '/',
       userId: _currentUserId ?? undefined,
       userName: _currentUserName ?? undefined,
       userRole: _currentUserRole ?? undefined,
@@ -232,13 +288,33 @@ export async function logErrorToFirebase(
       if (rec[k] === undefined) delete rec[k];
     });
 
-    await push(ref(rtdb, 'error_logs'), payload);
+    // 1. ALWAYS persist locally immediately (guarantees notice board shows it even if Firebase RTDB fails)
+    saveLocalError(payload);
+
+    // 2. Push to Firebase Realtime Database
+    try {
+      await push(ref(rtdb, 'error_logs'), payload);
+    } catch (rtdbErr) {
+      console.warn('[errorLogger] RTDB push failed, kept in local storage:', rtdbErr);
+    }
 
     if (_sessionErrorCount % 10 === 0) {
       pruneOldLogs().catch(() => {});
     }
-  } catch {
+  } catch (err) {
+    console.warn('[errorLogger] Failed to log error:', err);
   }
+}
+
+/**
+ * Diagnostic helper: Trigger a test error to verify Error Notice Board live
+ */
+export async function triggerTestError(customMsg?: string): Promise<void> {
+  const testMsg = customMsg || `[Test Error] Diagnostic Check from Admin Notice Board (${new Date().toLocaleTimeString('en-IN')})`;
+  await logErrorToFirebase(new Error(testMsg), {
+    type: 'manual',
+    severity: 'high',
+  });
 }
 
 /**

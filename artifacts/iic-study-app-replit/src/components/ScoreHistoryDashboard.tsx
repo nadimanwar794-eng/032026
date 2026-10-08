@@ -11,8 +11,8 @@ interface Props {
 }
 
 const ACTIVITY_META: Record<string, { emoji: string; label: string; sublabel: string; color: string; bg: string }> = {
-  MCQ_CORRECT:        { emoji: '✅', label: 'MCQ Correct Answer',    sublabel: 'Reward for correct answer (+2 base)',         color: '#22c55e', bg: 'rgba(34,197,94,0.12)'   },
-  MCQ_WRONG:          { emoji: '📝', label: 'MCQ Attempt',           sublabel: 'Reward for trying even if wrong (+1)',        color: '#60a5fa', bg: 'rgba(96,165,250,0.12)'  },
+  MCQ_CORRECT:        { emoji: '✅', label: 'MCQ Correct Answer',    sublabel: 'Reward for correct answer (+5 base)',         color: '#22c55e', bg: 'rgba(34,197,94,0.12)'   },
+  MCQ_WRONG:          { emoji: '❌', label: 'MCQ Wrong Answer',      sublabel: 'Penalty for wrong answer (-2)',               color: '#ef4444', bg: 'rgba(239,68,68,0.12)'   },
   MCQ_STREAK_3:       { emoji: '🔥', label: 'Streak Bonus 3×',       sublabel: '3 correct in a row bonus (+5)',              color: '#fb923c', bg: 'rgba(251,146,60,0.12)'  },
   MCQ_STREAK_5:       { emoji: '⚡', label: 'Streak Bonus 5×',       sublabel: '5 correct in a row bonus (+10)',             color: '#fbbf24', bg: 'rgba(251,191,36,0.12)'  },
   READ_TTS_HIGHLIGHT:     { emoji: '🎙️', label: 'Notes TTS Read',        sublabel: '1 topic read via TTS (+1)',                  color: '#a78bfa', bg: 'rgba(167,139,250,0.12)' },

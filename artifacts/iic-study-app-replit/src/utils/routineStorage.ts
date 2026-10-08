@@ -2,6 +2,7 @@
 // All routine state, coins, rewards persisted here.
 
 import { isSubscriptionFromCoins } from './subscriptionUtils';
+import { CLASS_10_FAKE_LESSONS } from '../constants/class10SeedLessons';
 
 export type SubjectCategory = 'SCIENCE' | 'SOCIAL_SCIENCE' | 'OTHER';
 
@@ -124,12 +125,125 @@ export interface RoutineData {
   unlockedTierSlot: boolean;            // paid with coins (tier-price)
   unlockedLevel5Slot: boolean;          // legacy flag — level bonus now computed from level directly
   unlockedLevel8Slot: boolean;          // legacy flag — level bonus now computed from level directly
+  studyMode?: 'CREDIT' | 'WITHOUT_CREDIT'; // 'CREDIT' = earn/spend credits; 'WITHOUT_CREDIT' = 0 credits, strict sequential
 }
 
 const STORAGE_KEY = 'nst_my_routine_v1';
 
 export function getTodayStr(): string {
   return new Date().toISOString().split('T')[0];
+}
+
+/** Check if a subject / book / title is single-page competition homework or Sar Sangrah / Speedy / One-subject book */
+export function isRoutineSubjectNameExcluded(name?: string | null, singleBookNames?: string[]): boolean {
+  if (!name) return false;
+  const s = String(name).toLowerCase().trim();
+  if (
+    s.includes('sar sangrah') ||
+    s.includes('saar sangrah') ||
+    s.includes('sar-sangrah') ||
+    s.includes('speedy') ||
+    s.includes('spidy') ||
+    s.includes('homework') ||
+    s.includes('coaching') ||
+    s.includes('mcq practice')
+  ) {
+    return true;
+  }
+  if (singleBookNames && singleBookNames.length > 0) {
+    for (const bName of singleBookNames) {
+      if (!bName) continue;
+      if (s === bName || s.includes(bName)) return true;
+    }
+  }
+  return false;
+}
+
+/** Strict check for whether a note is eligible for Routine (multi-page/multi-subject only, no 1-subject / 1-page books) */
+export function isMultiPageRoutineNote(n: any, singleBookNames?: string[]): boolean {
+  if (!n) return false;
+  const pCount = Array.isArray(n.pages) ? n.pages.length : (n.pageCount || 0);
+  // Must have at least 1 page to be eligible for routine
+  if (pCount <= 0) return false;
+
+  const title = (n.lessonTitle || n.title || '').toLowerCase();
+  const book = ((n as any).bookName || '').toLowerCase();
+  const sub = (n.subject || '').toLowerCase();
+  const cat = ((n as any).category || '').toLowerCase();
+  const cl = String((n as any).classLevel || '').toLowerCase();
+
+  if (
+    isRoutineSubjectNameExcluded(title, singleBookNames) ||
+    isRoutineSubjectNameExcluded(book, singleBookNames) ||
+    isRoutineSubjectNameExcluded(sub, singleBookNames) ||
+    isRoutineSubjectNameExcluded(cat, singleBookNames) ||
+    isRoutineSubjectNameExcluded(cl, singleBookNames)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/** Standard academic school subject names (Class 6-12) */
+export const ACADEMIC_SUBJECT_NAMES = new Set([
+  'physics', 'chemistry', 'biology', 'science', 'math', 'maths', 'mathematics',
+  'history', 'geography', 'polity', 'political science', 'political_science',
+  'economics', 'civics', 'sociology', 'hindi', 'english', 'sanskrit', 'urdu',
+  'maithili', 'bhojpuri', 'गणित', 'गणित (mathematics)', 'विज्ञान', 'भौतिकी',
+  'रसायन विज्ञान', 'जीव विज्ञान', 'इतिहास', 'भूगोल', 'राजनीति शास्त्र',
+  'राजनीति विज्ञान', 'अर्थशास्त्र', 'ns', 'sh', 'sn', 'sst', 'sc'
+]);
+
+/**
+ * Checks whether a note belongs strictly to School / Academic (Class 6-12, BSEB, etc.)
+ * rather than Competition (Lucent GK, Railway, SSC, etc.)
+ */
+export function isAcademicSchoolNote(n: any): boolean {
+  if (!n) return false;
+  // If explicitly tagged as COMPETITION, it is NOT an academic school note
+  if (n.classLevel === 'COMPETITION') return false;
+
+  const cl = String(n.classLevel || '').trim().toLowerCase();
+  // Any numeric class 1-12 or starting with class / std / ending with th
+  if (cl && (!isNaN(Number(cl)) || cl.startsWith('class') || cl.includes('class') || cl.startsWith('std') || /^\d+(st|nd|rd|th)$/.test(cl))) {
+    return true;
+  }
+  // Any board specified (and classLevel not explicitly COMPETITION)
+  if (n.board && n.board !== 'ALL_BOARDS') {
+    return true;
+  }
+  // If bookName or subject is an academic school subject name and not tagged as competition
+  const bk = String(n.bookName || '').trim().toLowerCase();
+  const sub = String(n.subject || '').trim().toLowerCase();
+  if (ACADEMIC_SUBJECT_NAMES.has(bk) || ACADEMIC_SUBJECT_NAMES.has(sub)) {
+    return true;
+  }
+  return false;
+}
+
+/** Sanitize routine categories removing any single-page / homework / speedy / sar sangrah subjects */
+export function sanitizeRoutineCategories(cats: RoutineCategory[], singleBookNames?: string[]): RoutineCategory[] {
+  if (!Array.isArray(cats)) return [];
+  return cats
+    .filter(cat => !isRoutineSubjectNameExcluded(cat.categoryName, singleBookNames))
+    .map(cat => {
+      const filteredSubjects = (cat.subjects || []).filter(sub => {
+        return (
+          !isRoutineSubjectNameExcluded(sub.displayName, singleBookNames) &&
+          !isRoutineSubjectNameExcluded(sub.subjectId, singleBookNames) &&
+          !isRoutineSubjectNameExcluded(sub.bookName, singleBookNames)
+        );
+      });
+      return {
+        ...cat,
+        subjects: filteredSubjects,
+        currentSubjectIndex: Math.min(
+          cat.currentSubjectIndex || 0,
+          Math.max(0, filteredSubjects.length - 1)
+        ),
+      };
+    })
+    .filter(cat => cat.subjects && cat.subjects.length > 0);
 }
 
 /** Migrate old routineSlots (one-slot-per-subject) → routineCategories (one-category-per-name) */
@@ -166,11 +280,12 @@ export function loadRoutineData(userId: string): RoutineData {
     if (raw) {
       const parsed = JSON.parse(raw);
       const slots: RoutineSlot[] = parsed.routineSlots ?? [];
-      // Migrate old slots to categories if needed
-      const cats: RoutineCategory[] =
+      // Migrate old slots to categories if needed and sanitize
+      const rawCats: RoutineCategory[] =
         parsed.routineCategories?.length
           ? parsed.routineCategories
           : migrateSlotsToCats(slots);
+      const cats: RoutineCategory[] = sanitizeRoutineCategories(rawCats);
       return {
         ...parsed,
         revisionUnlockedLessons: parsed.revisionUnlockedLessons || {},
@@ -285,11 +400,15 @@ export function generateDailyTask(data: RoutineData, lucentNotes?: any[]): Daily
   const yesterdayStr = yesterday.toISOString().split('T')[0];
   const yTask = data.dailyTasks[yesterdayStr];
 
-  // Build subject → sorted notes map from real lucentNotes
+  // Build subject → sorted notes map from real lucentNotes + Class 10 mock lessons
   const notesBySubject: Record<string, any[]> = {};
-  if (lucentNotes && lucentNotes.length > 0) {
+  const rawNotes = Array.isArray(lucentNotes) ? lucentNotes : [];
+  const existingIds = new Set(rawNotes.map((n: any) => n.id));
+  const effectiveNotes = [...rawNotes, ...CLASS_10_FAKE_LESSONS.filter(l => !existingIds.has(l.id))];
+
+  if (effectiveNotes.length > 0) {
     const targetBoard = data.selectedBoard || 'BSEB';
-    lucentNotes.forEach(n => {
+    effectiveNotes.forEach(n => {
       if (data.routineMode === 'SCHOOL') {
         if (targetBoard && targetBoard !== 'ALL_BOARDS') {
           const nb = (n as any).board;
@@ -419,8 +538,9 @@ export function isRevisionLessonUnlocked(data: RoutineData, lessonId: string): b
 }
 
 // ── Daily Subscription Coin Claim ──────────────────────────────────────────
-export const DAILY_CLAIM_PRO     = 50;  // BASIC tier (Pro plan) -> 50 Credits/day
-export const DAILY_CLAIM_MAX_PRO = 5;   // ULTRA tier (Max Pro plan) -> 5 Diamonds/day
+// Note: Standard Pro and Max daily claims removed as requested. Daily diamond drops are exclusive to VIP+ plans.
+export const DAILY_CLAIM_PRO     = 0;  // Standard Pro has no daily claim
+export const DAILY_CLAIM_MAX_PRO = 0;  // Standard Max has no daily claim
 
 export type UserSubTier = 'NONE' | 'PRO' | 'MAX_PRO';
 
@@ -458,7 +578,7 @@ export function getDailyClaimAmount(tier: UserSubTier, customAmounts?: { pro?: n
 
 /** Returns total unclaimed coins stacked across all days */
 export function getUnclaimedCoins(data: RoutineData, tier: UserSubTier): number {
-  if (tier === 'NONE') return 0;
+  if (tier === 'NONE' || data.studyMode === 'WITHOUT_CREDIT') return 0;
   const today = getTodayStr();
   return Object.values(data.dailyClaims)
     .filter(e => !e.claimed && e.date <= today)
@@ -467,7 +587,7 @@ export function getUnclaimedCoins(data: RoutineData, tier: UserSubTier): number 
 
 /** Generate today's pending claim entry if it doesn't exist (for active subscribers) */
 export function ensureTodayClaimEntry(data: RoutineData, tier: UserSubTier, customAmounts?: { pro?: number; maxPro?: number; dailyClaimPro?: number; dailyClaimMaxPro?: number } | any): RoutineData {
-  if (tier === 'NONE') return data;
+  if (tier === 'NONE' || data.studyMode === 'WITHOUT_CREDIT') return data;
   const today = getTodayStr();
   if (data.dailyClaims[today]) return data;
   const amount = getDailyClaimAmount(tier, customAmounts);
@@ -510,21 +630,79 @@ export function advanceLessonInCycle(sub: RoutineSubjectConfig): RoutineSubjectC
 
 // ── Slot capacity helpers ─────────────────────────────────────────────────────
 export function getBaseSlotCount(tier: UserSubTier): number {
-  if (tier === 'MAX_PRO') return 4;
-  if (tier === 'PRO') return 3;
-  return 2;
+  if (tier === 'MAX_PRO') return 4; // Ultra user = +2 subjects (2 + 2 = 4 base)
+  if (tier === 'PRO') return 3;     // Basic user = +1 subject (2 + 1 = 3 base)
+  return 2;                         // Free user = 2 base subjects
 }
 
 export function getTierSlotCost(_tier?: UserSubTier): number {
-  return 100;
+  return 100; // 100 credits to unlock 3rd subject for free users
 }
 
 export const TIER_SLOT_DIAMOND_COST = 10;
 
+export interface SlotStatus {
+  slotNumber: number; // 1 to 5
+  isUnlocked: boolean;
+  requirementText: string;
+  canUnlockWithCredits: boolean;
+  creditCost: number;
+}
+
+export function getSlotUnlockStatus(slotNumber: number, tier: UserSubTier, level: number, data: RoutineData): SlotStatus {
+  if (slotNumber <= 2) {
+    return {
+      slotNumber,
+      isUnlocked: true,
+      requirementText: 'Free (Sabhi ke liye)',
+      canUnlockWithCredits: false,
+      creditCost: 0,
+    };
+  }
+
+  if (slotNumber === 3) {
+    const isUnlocked = tier === 'PRO' || tier === 'MAX_PRO' || !!data.unlockedTierSlot;
+    return {
+      slotNumber: 3,
+      isUnlocked,
+      requirementText: isUnlocked
+        ? (tier !== 'NONE' ? 'VIP Bonus Unlocked' : '100 Credits Se Unlocked')
+        : '100 Credits ya Basic Plan se unlock hoga',
+      canUnlockWithCredits: !isUnlocked,
+      creditCost: 100,
+    };
+  }
+
+  if (slotNumber === 4) {
+    const isUnlocked = tier === 'MAX_PRO' || level >= 5;
+    return {
+      slotNumber: 4,
+      isUnlocked,
+      requirementText: isUnlocked
+        ? (tier === 'MAX_PRO' ? 'Ultra VIP Bonus Unlocked' : `Level 5 Achieved (Lv.${level})`)
+        : `Level 5 Requirement (Aapka Level: ${level}/5)`,
+      canUnlockWithCredits: false,
+      creditCost: 0,
+    };
+  }
+
+  // Slot 5
+  const isUnlocked = level >= 8 || (tier === 'MAX_PRO' && level >= 5);
+  return {
+    slotNumber: 5,
+    isUnlocked,
+    requirementText: isUnlocked
+      ? `Level 8 Master Achieved (Lv.${level})`
+      : `Level 8 Requirement (Aapka Level: ${level}/8)`,
+    canUnlockWithCredits: false,
+    creditCost: 0,
+  };
+}
+
 export function getActualMaxSlots(tier: UserSubTier, level: number, data: RoutineData): number {
-  let max = getBaseSlotCount(tier);
-  if (data.unlockedTierSlot) max++;
-  if (level >= 5) max++;   // auto-unlocks at Level 5 achievement
-  if (level >= 8) max++;   // auto-unlocks at Level 8 achievement
-  return max;
+  let count = 2; // Slot 1 & 2 are free
+  if (getSlotUnlockStatus(3, tier, level, data).isUnlocked) count = 3;
+  if (getSlotUnlockStatus(4, tier, level, data).isUnlocked) count = 4;
+  if (getSlotUnlockStatus(5, tier, level, data).isUnlocked) count = 5;
+  return count;
 }

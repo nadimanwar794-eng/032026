@@ -53,17 +53,20 @@ export class ErrorBoundary extends Component<Props, State> {
     this.props.onError?.(error, errorInfo);
     const msg = error?.message || error?.toString() || '';
 
-    logErrorToFirebase(error, {
-      type: 'react',
-      componentStack: errorInfo?.componentStack ?? undefined,
-    }).catch(() => {});
-
     const isChunkError =
       msg.includes('ChunkLoadError') ||
       msg.includes('Loading chunk') ||
       msg.includes('Failed to fetch dynamically') ||
       msg.includes('dynamically imported module') ||
       msg.includes('Importing a module script failed');
+
+    // Only log real app errors to Firebase, skip transient network / dev-server chunk load blips
+    if (!isChunkError) {
+      logErrorToFirebase(error, {
+        type: 'react',
+        componentStack: errorInfo?.componentStack ?? undefined,
+      }).catch(() => {});
+    }
 
     // Smart Crash Protection: auto-report crash to Firebase so admin can see it (do not report transient chunk load errors)
     if (this.props.crashTarget && !isChunkError) {
@@ -95,7 +98,11 @@ export class ErrorBoundary extends Component<Props, State> {
       errText.includes('Importing a module script failed');
 
     if (isChunkError) {
-      try { window.location.reload(); } catch {}
+      try {
+        sessionStorage.clear();
+        window.location.reload();
+      } catch {}
+      this.setState({ hasError: false, error: null, retryCount: 0 });
       return;
     }
     this.setState(s => ({ hasError: false, error: null, retryCount: s.retryCount + 1 }));
@@ -164,7 +171,9 @@ export class ErrorBoundary extends Component<Props, State> {
           title={this.props.maintenanceTitle}
           message={this.props.maintenanceMessage}
           retryMinutes={this.props.maintenanceRetryMinutes}
+          pageName={this.props.fallbackLabel}
           onRetry={this.handleRetry}
+          onGoHome={this.handleGoHome}
         />
       );
     }

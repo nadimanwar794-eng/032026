@@ -31,13 +31,35 @@ import {
   CheckCircle,
   AlertTriangle,
   ShieldAlert,
+  Lightbulb,
+  Eye,
+  Clock,
+  ShieldCheck,
+  MessageSquare,
+  Video,
+  Wrench,
+  Rocket,
 } from 'lucide-react';
 import { ref, onValue, set, remove, push, update } from 'firebase/database';
-import { rtdb } from '../firebase';
-import { uploadImageToImgBB } from '../services/imgbbService';
+import {
+  rtdb,
+  subscribeSuggestions,
+  saveSuggestion,
+  adminReplySuggestion,
+  resolvesuggestion,
+  markSuggestionOpenedByAdmin,
+  deleteSuggestion,
+  reactToSuggestion,
+} from '../firebase';
+import { uploadImageToImgBB, compressImage } from '../services/imgbbService';
+import { uploadToCloudinary, getOptimizedVideoUrl } from '../services/cloudinaryService';
+import { resolveTelegramUrl } from '../services/telegramStorageService';
 import { ImageCropper } from './ImageCropper';
+import { GuestRestrictionModal } from './GuestRestrictionModal';
+import { notifyCommunityUpdateInBackground } from './NotificationManager';
 import { User } from '../types';
 import { useAppTheme } from '../utils/themeContext';
+import { getLevelInfo } from '../utils/levelSystem';
 
 export interface PostComment {
   id: string;
@@ -60,6 +82,7 @@ export interface CommunityPost {
   userTier?: 'FREE' | 'BASIC' | 'ULTRA' | string;
   text: string;
   imageUrl?: string;
+  videoUrl?: string;
   isHd?: boolean;
   language?: string;
   isOfficial?: boolean;
@@ -68,12 +91,21 @@ export interface CommunityPost {
   likes?: Record<string, boolean>; // userId -> true
   comments?: Record<string, PostComment>;
   reports?: Record<string, { userId: string; userName?: string; reason?: string; createdAt: number }>;
-  status?: 'ACTIVE' | 'UNDER_REVIEW' | 'APPROVED' | string;
+  status?: 'ACTIVE' | 'UNDER_REVIEW' | 'APPROVED' | 'RESOLVED' | 'REPLIED' | string;
   underReviewAt?: number;
   verifiedBy?: string;
   verifiedAt?: number;
   isEdited?: boolean;
   editedAt?: number;
+  isSuggestionItem?: boolean;
+  originalSuggestionId?: string;
+  adminReply?: string;
+  adminReplyAt?: string;
+  adminTag?: string;
+  adminOpened?: boolean;
+  adminOpenedAt?: string;
+  lessonTitle?: string;
+  pageNo?: string | number;
 }
 
 interface CommunityPostFeedProps {
@@ -81,24 +113,39 @@ interface CommunityPostFeedProps {
   isAdmin?: boolean;
   onClose?: () => void;
   isEmbedded?: boolean;
+  initialFilter?: FilterType;
   externalSearchQuery?: string;
   onSearchQueryChange?: (q: string) => void;
   externalShowComposer?: boolean;
   onShowComposerChange?: (show: boolean) => void;
+  onUserUpdate?: (user: User) => void;
+  onSwitchToTools?: () => void;
+  onSwitchToInfo?: () => void;
+  communityBackgroundImage?: string;
+  communityBackgroundOpacity?: number;
 }
 
-type FilterType = 'ALL' | 'OFFICIAL' | 'BUG_REPORT' | 'DOUBT' | 'MINE' | 'UNDER_REVIEW';
+type FilterType = 'ALL' | 'OFFICIAL' | 'BUG_REPORT' | 'DOUBT' | 'MINE' | 'UNDER_REVIEW' | 'NOTES_FIX';
 
 export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
   user,
   isAdmin = false,
   isEmbedded = false,
+  initialFilter,
   onClose,
   externalSearchQuery,
   onSearchQueryChange,
   externalShowComposer,
   onShowComposerChange,
+  onUserUpdate,
+  onSwitchToTools,
+  onSwitchToInfo,
+  communityBackgroundImage,
+  communityBackgroundOpacity,
 }) => {
+  const isGuestUser = !user?.email && user?.provider !== 'email' && user?.provider !== 'google' && !!(user?.isGuest || user?.isAnonymous || user?.role === 'GUEST');
+  const [guestModalOpen, setGuestModalOpen] = useState(false);
+  const [guestModalContext, setGuestModalContext] = useState('Community Interaction');
   const { appTheme } = useAppTheme();
   const isAdminOrSubUser =
     isAdmin ||
@@ -108,15 +155,24 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
     user.role?.toLowerCase() === 'admin' ||
     user.role?.toLowerCase() === 'subadmin';
 
+  // All community features are permanently unlocked (Level Roadmap removed)
+  const isBugReportUnlocked = true;
+  const isDoubtUnlocked = true;
+  const isPostsUnlocked = true;
+
   const [posts, setPosts] = useState<CommunityPost[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [activeFilter, setActiveFilter] = useState<FilterType>('ALL');
+  const [activeFilter, setActiveFilter] = useState<FilterType>(initialFilter || 'ALL');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Post Creator State
   const [postText, setPostText] = useState('');
   const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [selectedVideoFile, setSelectedVideoFile] = useState<File | null>(null);
+  const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
+  const [isUploadingVideo, setIsUploadingVideo] = useState(false);
+  const [videoUploadProgress, setVideoUploadProgress] = useState(0);
   const [isHdQuality, setIsHdQuality] = useState(false);
   const [isOfficialPost, setIsOfficialPost] = useState(false);
   const [postCategory, setPostCategory] = useState<'GENERAL' | 'DOUBT' | 'BUG_REPORT'>('GENERAL');
@@ -125,8 +181,22 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showComposer, setShowComposer] = useState(false);
 
+  // Notes Fix / Suggestions integration state
+  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [adminReplyPostId, setAdminReplyPostId] = useState<string | null>(null);
+  const [adminReplyText, setAdminReplyText] = useState<string>('');
+  const [inlineAdminReplyInputs, setInlineAdminReplyInputs] = useState<Record<string, string>>({});
+  const [adminReplyStatus, setAdminReplyStatus] = useState<'open' | 'replied' | 'resolved'>('resolved');
+  const [adminReplyTag, setAdminReplyTag] = useState<string>('Galti Sudhar Di');
+  const [isSubmittingAdminReply, setIsSubmittingAdminReply] = useState<boolean>(false);
+
   const isComposerOpen = externalShowComposer !== undefined ? externalShowComposer : showComposer;
   const setComposerOpen = (val: boolean) => {
+    if (val && isGuestUser) {
+      setGuestModalContext('Community Post Creation');
+      setGuestModalOpen(true);
+      return;
+    }
     setShowComposer(val);
     onShowComposerChange?.(val);
   };
@@ -146,6 +216,7 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
   const editFileInputRef = useRef<HTMLInputElement>(null);
 
   // Report Modal State
@@ -200,6 +271,24 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
     return () => unsubscribe();
   }, []);
 
+  // Listen to RTDB suggestions for Notes Fix integration
+  useEffect(() => {
+    const unsub = subscribeSuggestions((items) => {
+      setSuggestions(items || []);
+    });
+    return () => unsub();
+  }, []);
+
+  // Auto-mark suggestions as opened by Admin when viewed in NOTES_FIX filter
+  useEffect(() => {
+    if (!isAdminOrSubUser || activeFilter !== 'NOTES_FIX') return;
+    suggestions.forEach((s) => {
+      if (!s.adminOpened && s.id) {
+        markSuggestionOpenedByAdmin(s.id).catch(() => {});
+      }
+    });
+  }, [isAdminOrSubUser, activeFilter, suggestions]);
+
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => {
@@ -237,6 +326,32 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
     setIsHdQuality(false);
   };
 
+  const handleVideoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const MAX_VIDEO_SIZE = 50 * 1024 * 1024; // 50MB Telegram Cloud storage limit
+    if (file.size > MAX_VIDEO_SIZE) {
+      showToast('⚠️ Video size maximum 50MB tak ho sakti hai (Cloud storage limit 50MB hai)!');
+      return;
+    }
+    setSelectedVideoFile(file);
+    const preview = URL.createObjectURL(file);
+    setVideoPreviewUrl(preview);
+    setShowComposer(true);
+  };
+
+  const handleClearVideo = () => {
+    setSelectedVideoFile(null);
+    if (videoPreviewUrl) {
+      URL.revokeObjectURL(videoPreviewUrl);
+      setVideoPreviewUrl(null);
+    }
+    if (videoInputRef.current) {
+      videoInputRef.current.value = '';
+    }
+    setVideoUploadProgress(0);
+  };
+
   const handleCropPostImageComplete = async (croppedBase64: string) => {
     try {
       const res = await fetch(croppedBase64);
@@ -260,23 +375,59 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
   // Submit Post
   const handleCreatePost = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!postText.trim() && !selectedImageFile) {
-      showToast('⚠️ Kripya kuch text likhein ya photo attach karein!');
+    if (isGuestUser) {
+      setGuestModalContext('Community Post Creation');
+      setGuestModalOpen(true);
+      return;
+    }
+    if (!postText.trim() && !selectedImageFile && !selectedVideoFile) {
+      showToast('⚠️ Kripya kuch text likhein, photo ya video attach karein!');
       return;
     }
 
     setIsSubmitting(true);
     let uploadedImageUrl = '';
+    let uploadedVideoUrl = '';
 
     try {
       if (selectedImageFile) {
         setIsUploadingImage(true);
-        uploadedImageUrl = await uploadImageToImgBB(
-          selectedImageFile,
-          `post_${user.id}_${Date.now()}`,
-          { isHd: isHdQuality }
-        );
+        try {
+          uploadedImageUrl = await uploadImageToImgBB(
+            selectedImageFile,
+            `post_${user.id}_${Date.now()}`,
+            { isHd: isHdQuality }
+          );
+        } catch (imgErr) {
+          console.warn('[CommunityPostFeed] Telegram image upload failed, falling back to local compressed:', imgErr);
+          try {
+            uploadedImageUrl = await compressImage(selectedImageFile, 960, 960, 0.75);
+          } catch {}
+        }
         setIsUploadingImage(false);
+      }
+
+      if (selectedVideoFile) {
+        setIsUploadingVideo(true);
+        setVideoUploadProgress(1);
+        try {
+          const cloudRes = await uploadToCloudinary(selectedVideoFile, 'video', (pct) => {
+            setVideoUploadProgress(pct);
+          });
+          uploadedVideoUrl = cloudRes.secure_url || cloudRes.url;
+        } catch (vidErr: any) {
+          let vMsg = vidErr?.message || 'Video upload fail ho gaya';
+          if (
+            vMsg.includes('Unexpected end of JSON') ||
+            vMsg.includes('Failed to execute') ||
+            vMsg.includes('SyntaxError')
+          ) {
+            vMsg = 'Storage server se response nahi mila. Kripya apna internet connection check karein ya chhota video upload karein.';
+          }
+          throw new Error(vMsg);
+        } finally {
+          setIsUploadingVideo(false);
+        }
       }
 
       const postsRef = ref(rtdb, 'community_posts');
@@ -305,12 +456,33 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
       if (uploadedImageUrl && uploadedImageUrl.trim()) {
         newPostData.imageUrl = uploadedImageUrl.trim();
       }
+      if (uploadedVideoUrl && uploadedVideoUrl.trim()) {
+        newPostData.videoUrl = uploadedVideoUrl.trim();
+      }
 
       await set(newPostRef, newPostData);
+
+      // Also register into suggestions for coins & admin resolution tracking
+      if (postCategory === 'NOTES_FIX') {
+        try {
+          await saveSuggestion({
+            id: newPostId,
+            text: postText.trim(),
+            imageUrl: (uploadedImageUrl && uploadedImageUrl.trim()) ? uploadedImageUrl.trim() : undefined,
+            uid: user.id || 'anonymous',
+            userName: user.name || 'Anonymous Student',
+            createdAt: new Date().toISOString(),
+            lessonTitle: 'Community Notes Fix',
+          });
+        } catch (suggErr) {
+          console.warn('Sync to suggestion error (non-fatal):', suggErr);
+        }
+      }
 
       // Reset Form
       setPostText('');
       handleClearImage();
+      handleClearVideo();
       setIsHdQuality(false);
       setIsOfficialPost(false);
       setPostCategory('GENERAL');
@@ -318,15 +490,35 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
       showToast('🎉 Aapka post safaltapoorvak publish ho gaya!');
     } catch (err: any) {
       console.error('[CommunityPostFeed] Post creation failed:', err);
-      showToast(`❌ Post upload fail ho gaya: ${err.message || 'Error'}`);
+      let errMsg = err?.message || 'Error';
+      if (
+        errMsg.includes('Unexpected end of JSON') ||
+        errMsg.includes('Failed to execute') ||
+        errMsg.includes('SyntaxError')
+      ) {
+        errMsg = 'Storage server se response nahi mila. Kripya apna internet connection check karein ya chhota file upload karein.';
+      }
+      showToast(`❌ Post upload fail ho gaya: ${errMsg}`);
     } finally {
       setIsSubmitting(false);
       setIsUploadingImage(false);
+      setIsUploadingVideo(false);
     }
   };
 
   // Toggle Like Handler
   const handleToggleLike = async (post: CommunityPost) => {
+    if (isGuestUser) {
+      setGuestModalContext('Post Like Karna');
+      setGuestModalOpen(true);
+      return;
+    }
+    if (post.id.startsWith('sugg_')) {
+      const suggId = post.id.replace('sugg_', '');
+      await reactToSuggestion(suggId, user.id, 'like');
+      return;
+    }
+
     const isLiked = !!(post.likes && post.likes[user.id]);
     const likeRef = ref(rtdb, `community_posts/${post.id}/likes/${user.id}`);
 
@@ -338,6 +530,55 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
       }
     } catch (err) {
       console.error('[CommunityPostFeed] Error updating like:', err);
+    }
+  };
+
+  // Admin Submit Inline Reply for Notes Fix
+  const handleAdminSubmitReply = async (post: CommunityPost) => {
+    const textToSubmit = ((typeof inlineAdminReplyInputs !== 'undefined' && inlineAdminReplyInputs ? inlineAdminReplyInputs[post.id] : '') || adminReplyText || '').trim();
+    if (!textToSubmit) {
+      showToast('⚠️ Kripya reply text likhein!');
+      return;
+    }
+    const suggId = post.originalSuggestionId || (post.isSuggestionItem ? post.id.replace('sugg_', '') : post.id);
+    setIsSubmittingAdminReply(true);
+    try {
+      if (post.isSuggestionItem || post.originalSuggestionId) {
+        await adminReplySuggestion(suggId, textToSubmit, adminReplyTag, adminReplyStatus);
+      } else {
+        const postRef = ref(rtdb, `community_posts/${post.id}`);
+        await update(postRef, {
+          adminReply: textToSubmit,
+          adminReplyAt: new Date().toISOString(),
+          adminTag: adminReplyTag,
+          status: adminReplyStatus === 'resolved' ? 'RESOLVED' : 'REPLIED',
+        });
+      }
+      showToast('✅ Admin reply safaltapoorvak bhej diya gaya!');
+      setAdminReplyPostId(null);
+      setAdminReplyText('');
+      setInlineAdminReplyInputs((prev) => ({ ...prev, [post.id]: '' }));
+    } catch (e: any) {
+      console.error('Error sending admin reply:', e);
+      showToast('❌ Reply bhejne me error aaya: ' + (e.message || ''));
+    } finally {
+      setIsSubmittingAdminReply(false);
+    }
+  };
+
+  // Admin Quick Resolve for Notes Fix
+  const handleAdminResolveDirect = async (post: CommunityPost) => {
+    const suggId = post.originalSuggestionId || (post.isSuggestionItem ? post.id.replace('sugg_', '') : post.id);
+    try {
+      if (post.isSuggestionItem || post.originalSuggestionId) {
+        await resolvesuggestion(suggId);
+      }
+      const postRef = ref(rtdb, `community_posts/${post.id.replace('sugg_', '')}`);
+      await update(postRef, { status: 'RESOLVED' }).catch(() => {});
+      showToast('🎯 Galti Resolve mark ho gayi!');
+    } catch (e: any) {
+      console.error('Error resolving:', e);
+      showToast('❌ Error marking resolved');
     }
   };
 
@@ -411,18 +652,36 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
 
   // Submit Comment
   const handleAddComment = async (postId: string) => {
+    if (isGuestUser) {
+      setGuestModalContext('Comment Karna');
+      setGuestModalOpen(true);
+      return;
+    }
     const text = (commentInputs[postId] || '').trim();
     const imageFile = commentImageFiles[postId];
     if (!text && !imageFile) return;
+
+    const targetPost = allCommunityPosts.find((p) => p.id === postId);
+    if (targetPost && isPostNotesFix(targetPost)) {
+      showToast('⚠️ Notes Fix reports par comments allowed nahi hain.');
+      return;
+    }
 
     setIsSubmittingComment((prev) => ({ ...prev, [postId]: true }));
     try {
       let uploadedImageUrl = '';
       if (imageFile) {
-        uploadedImageUrl = await uploadImageToImgBB(
-          imageFile,
-          `comment_${user.id}_${Date.now()}`
-        );
+        try {
+          uploadedImageUrl = await uploadImageToImgBB(
+            imageFile,
+            `comment_${user.id}_${Date.now()}`
+          );
+        } catch (cImgErr) {
+          console.warn('[CommunityPostFeed] Comment image upload fallback:', cImgErr);
+          try {
+            uploadedImageUrl = await compressImage(imageFile, 800, 800, 0.72);
+          } catch {}
+        }
       }
 
       const commentsRef = ref(rtdb, `community_posts/${postId}/comments`);
@@ -448,6 +707,16 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
 
       await set(newCommentRef, commentData);
 
+      if (targetPost?.userId && targetPost.userId !== user.id) {
+        void notifyCommunityUpdateInBackground({
+          recipientIds: [targetPost.userId],
+          senderId: user.id,
+          senderName: user.name || 'NSTA Student',
+          body: `${user.name || 'Kisi student'} ne aapke community post par comment kiya hai.`,
+          url: '/?open=community',
+        });
+      }
+
       // Clear input & image preview
       setCommentInputs((prev) => ({ ...prev, [postId]: '' }));
       handleClearCommentImage(postId);
@@ -469,7 +738,11 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
 
     if (window.confirm('Kya aap is post ko delete karna chahte hain?')) {
       try {
-        await remove(ref(rtdb, `community_posts/${postId}`));
+        if (postId.startsWith('sugg_')) {
+          await deleteSuggestion(postId.replace('sugg_', ''));
+        } else {
+          await remove(ref(rtdb, `community_posts/${postId}`));
+        }
         showToast('🗑️ Post delete ho gaya');
       } catch (err) {
         console.error('[CommunityPostFeed] Error deleting post:', err);
@@ -634,11 +907,18 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
     try {
       let finalImageUrl = editImagePreview;
       if (editImageFile) {
-        finalImageUrl = await uploadImageToImgBB(
-          editImageFile,
-          `edit_${user.id}_${Date.now()}`,
-          { isHd: isEditHd }
-        );
+        try {
+          finalImageUrl = await uploadImageToImgBB(
+            editImageFile,
+            `edit_${user.id}_${Date.now()}`,
+            { isHd: isEditHd }
+          );
+        } catch (eImgErr) {
+          console.warn('[CommunityPostFeed] Edit image upload fallback:', eImgErr);
+          try {
+            finalImageUrl = await compressImage(editImageFile, 960, 960, 0.75);
+          } catch {}
+        }
       }
       const postRef = ref(rtdb, `community_posts/${editingPost.id}`);
       const updates: Record<string, any> = {
@@ -677,8 +957,32 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
     );
   };
 
+  const isPostNotesFix = (post: CommunityPost) => {
+    if (
+      post.category === 'NOTES_FIX' ||
+      post.category === 'NOTE_CORRECTION' ||
+      post.category === 'SUGGESTION' ||
+      post.isSuggestionItem
+    ) return true;
+    const txt = (post.text || '').toLowerCase();
+    return (
+      txt.includes('note fix') ||
+      txt.includes('notes fix') ||
+      txt.includes('fix note') ||
+      txt.includes('fix notes') ||
+      txt.includes('correction') ||
+      txt.includes('galti') ||
+      txt.includes('mistake') ||
+      txt.includes('spelling') ||
+      txt.includes('page no')
+    );
+  };
+
   const isPostBugReport = (post: CommunityPost) => {
-    if (post.category === 'BUG_REPORT' || post.category === 'BUG') return true;
+    if (
+      post.category === 'BUG_REPORT' ||
+      post.category === 'BUG'
+    ) return true;
     const txt = (post.text || '').toLowerCase();
     return (
       txt.includes('bug') ||
@@ -710,10 +1014,43 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
     );
   };
 
-  const officialPostsCount = posts.filter(isPostOfficial).length;
+  // Combine regular community posts with notes fix suggestions
+  const allCommunityPosts = React.useMemo(() => {
+    const suggestionPosts: CommunityPost[] = (suggestions || []).map((s) => ({
+      id: `sugg_${s.id}`,
+      originalSuggestionId: s.id,
+      userId: s.uid || 'anonymous',
+      userName: s.userName || 'Student',
+      userPhoto: '',
+      userRole: 'STUDENT',
+      userTier: (s.isVip || s.tier === 'VIP') ? 'ULTRA' : 'FREE',
+      text: s.lessonTitle
+        ? `[📖 ${s.lessonTitle}${s.pageNo ? ` • Page ${s.pageNo}` : ''}] ${s.text}`
+        : s.text,
+      imageUrl: s.imageUrl,
+      category: 'NOTES_FIX',
+      createdAt: s.createdAt ? new Date(s.createdAt).getTime() : Date.now(),
+      likes: s.likedBy || {},
+      status: s.status === 'resolved' ? 'RESOLVED' : s.status === 'replied' ? 'REPLIED' : 'ACTIVE',
+      adminReply: s.adminReply,
+      adminReplyAt: s.adminReplyAt,
+      adminTag: s.adminTag,
+      adminOpened: s.adminOpened,
+      adminOpenedAt: s.adminOpenedAt,
+      isSuggestionItem: true,
+      lessonTitle: s.lessonTitle,
+      pageNo: s.pageNo,
+    }));
+
+    const combined = [...posts, ...suggestionPosts];
+    combined.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    return combined;
+  }, [posts, suggestions]);
+
+  const officialPostsCount = allCommunityPosts.filter(isPostOfficial).length;
 
   // Filter Posts
-  const filteredPosts = posts.filter((post) => {
+  const filteredPosts = allCommunityPosts.filter((post) => {
     const underReview = isPostUnderReview(post);
 
     // If post is in review mode:
@@ -733,12 +1070,13 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
       if (!matchText && !matchAuthor && !matchCategory) return false;
     }
 
-    if (activeFilter === 'UNDER_REVIEW') return underReview;
-    if (activeFilter === 'OFFICIAL') return isPostOfficial(post);
-    if (activeFilter === 'BUG_REPORT') return isPostBugReport(post);
-    if (activeFilter === 'DOUBT') return isPostDoubt(post);
-    if (activeFilter === 'MINE') return post.userId === user.id;
-    return true;
+    if (activeFilter === 'UNDER_REVIEW') return underReview && !isPostNotesFix(post);
+    if (activeFilter === 'OFFICIAL') return isPostOfficial(post) && !isPostNotesFix(post);
+    if (activeFilter === 'BUG_REPORT') return isPostBugReport(post) && !isPostNotesFix(post);
+    if (activeFilter === 'NOTES_FIX') return isPostNotesFix(post);
+    if (activeFilter === 'DOUBT') return isPostDoubt(post) && !isPostNotesFix(post);
+    if (activeFilter === 'MINE') return post.userId === user.id && !isPostNotesFix(post);
+    return !isPostNotesFix(post);
   });
 
   const formatPostTime = (timestamp: number) => {
@@ -760,7 +1098,25 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
   };
 
   return (
-    <div id="community-post-feed" className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 overflow-hidden relative">
+    <div
+      id="community-post-feed"
+      data-wallpaper-active={communityBackgroundImage ? "true" : undefined}
+      className={`flex flex-col h-full overflow-hidden relative ${
+        communityBackgroundImage ? 'bg-transparent text-slate-800 dark:text-slate-100' : 'bg-slate-50 dark:bg-slate-950'
+      }`}
+    >
+      {/* Background Wallpaper (Admin Configured Live Wallpaper) */}
+      {communityBackgroundImage && (
+        <div
+          className="fixed inset-0 pointer-events-none z-0 overflow-hidden"
+          style={{
+            backgroundImage: `url(${resolveTelegramUrl(communityBackgroundImage)})`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            opacity: typeof communityBackgroundOpacity === 'number' ? communityBackgroundOpacity : 0.22,
+          }}
+        />
+      )}
       {/* Toast Notification */}
       {toastMessage && (
         <div className="absolute top-3 left-1/2 -translate-x-1/2 z-50 bg-slate-900/90 text-white text-xs font-semibold px-4 py-2 rounded-2xl shadow-xl backdrop-blur-md flex items-center gap-2 animate-in fade-in slide-in-from-top-2 border border-slate-700">
@@ -811,12 +1167,35 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
             </div>
           </div>
 
+          {activeFilter !== 'NOTES_FIX' && (isPostsUnlocked || user.role === 'ADMIN') && (
+            <button
+              onClick={() => {
+                setComposerOpen(!isComposerOpen);
+              }}
+              className="h-7 px-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:opacity-95 text-white rounded-lg text-[11px] font-bold shadow-2xs transition-all flex items-center gap-1 cursor-pointer active:scale-95"
+            >
+              <Sparkles size={12} />
+              <span>{isComposerOpen ? 'Close' : 'Naya Post'}</span>
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Guest Mode Informational Banner */}
+      {isGuestUser && (
+        <div className="mx-3 my-2 p-3 rounded-2xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-between gap-3 text-xs shrink-0">
+          <div className="flex items-center gap-2.5 text-amber-300 min-w-0">
+            <Eye size={17} className="text-amber-400 shrink-0" />
+            <p className="text-[11px] leading-tight">
+              <strong>Guest Mode:</strong> Aap sabhi posts aur messages padh sakte hain. Post, like ya comment karne ke liye Google se link karein.
+            </p>
+          </div>
           <button
-            onClick={() => setComposerOpen(!isComposerOpen)}
-            className="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:opacity-95 text-white rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
+            type="button"
+            onClick={() => { setGuestModalContext('Community Access'); setGuestModalOpen(true); }}
+            className="px-2.5 py-1.5 rounded-xl bg-amber-400 text-slate-900 font-black text-[11px] shrink-0 hover:bg-amber-300 transition-all active:scale-95 cursor-pointer shadow-sm"
           >
-            <Sparkles size={13} />
-            <span>{isComposerOpen ? 'Close' : 'Naya Post'}</span>
+            Link Google
           </button>
         </div>
       )}
@@ -884,18 +1263,49 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
                     )}
                   </div>
                 )}
+
+                {/* Attached Video Preview */}
+                {videoPreviewUrl && (
+                  <div className="relative mt-2 inline-block group w-56">
+                    <video
+                      src={videoPreviewUrl}
+                      controls
+                      playsInline
+                      className="w-56 h-32 object-cover rounded-xl border border-indigo-400 bg-black shadow-sm"
+                    />
+                    {!isUploadingVideo && (
+                      <button
+                        type="button"
+                        onClick={handleClearVideo}
+                        className="absolute -top-2 -right-2 p-1 bg-rose-600 hover:bg-rose-700 text-white rounded-full shadow-md cursor-pointer transition-transform hover:scale-105"
+                        title="Video Hataayein"
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                    {isUploadingVideo && (
+                      <div className="absolute inset-0 bg-black/75 rounded-xl flex flex-col items-center justify-center text-white text-[10px] font-bold p-3">
+                        <Loader2 size={16} className="animate-spin text-sky-400 mb-1" />
+                        <span>Uploading Video... {videoUploadProgress}%</span>
+                        <div className="w-full h-1.5 bg-white/20 rounded-full mt-1.5 overflow-hidden">
+                          <div className="h-full bg-sky-400 transition-all duration-300" style={{ width: `${videoUploadProgress}%` }} />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
             {/* Post Category Selection (General, Doubt, Bugs Report) */}
             <div className="flex items-center gap-1.5 pt-0.5 overflow-x-auto no-scrollbar">
-              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 shrink-0">Category:</span>
+              <span className="text-[10.5px] font-semibold text-slate-500 dark:text-slate-400 shrink-0">Category:</span>
               <button
                 type="button"
                 onClick={() => setPostCategory('GENERAL')}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                className={`h-6 px-2.5 rounded-md text-[10.5px] font-semibold transition-all cursor-pointer ${
                   postCategory === 'GENERAL'
-                    ? 'bg-purple-600 text-white shadow-xs'
+                    ? 'bg-purple-600 text-white shadow-2xs'
                     : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
                 }`}
               >
@@ -904,9 +1314,9 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
               <button
                 type="button"
                 onClick={() => setPostCategory('DOUBT')}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                className={`h-6 px-2.5 rounded-md text-[10.5px] font-semibold transition-all cursor-pointer ${
                   postCategory === 'DOUBT'
-                    ? 'bg-blue-600 text-white shadow-xs'
+                    ? 'bg-blue-600 text-white shadow-2xs'
                     : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
                 }`}
               >
@@ -915,9 +1325,9 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
               <button
                 type="button"
                 onClick={() => setPostCategory('BUG_REPORT')}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                className={`h-6 px-2.5 rounded-md text-[10.5px] font-semibold transition-all cursor-pointer ${
                   postCategory === 'BUG_REPORT'
-                    ? 'bg-rose-600 text-white shadow-xs'
+                    ? 'bg-rose-600 text-white shadow-2xs'
                     : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
                 }`}
               >
@@ -990,6 +1400,17 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
                   <span>{selectedImageFile ? 'Change Photo' : 'Photo Add Karein'}</span>
                 </button>
 
+                <button
+                  type="button"
+                  onClick={() => {
+                    videoInputRef.current?.click();
+                  }}
+                  className="px-2.5 py-1.5 bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/60 dark:hover:bg-sky-900/70 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors"
+                >
+                  <Video size={14} className="text-sky-600 dark:text-sky-400" />
+                  <span>{selectedVideoFile ? 'Change Video' : 'Video Add Karein'}</span>
+                </button>
+
                 {/* HD Quality Toggle Button */}
                 {selectedImageFile && (
                   <button
@@ -1034,6 +1455,21 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
                     pointerEvents: 'auto',
                   }}
                 />
+                <input
+                  type="file"
+                  ref={videoInputRef}
+                  accept="video/*"
+                  onChange={handleVideoSelect}
+                  style={{
+                    position: 'fixed',
+                    top: '-1000px',
+                    left: '-1000px',
+                    width: '1px',
+                    height: '1px',
+                    opacity: 0.01,
+                    pointerEvents: 'auto',
+                  }}
+                />
               </div>
 
               <div className="flex items-center gap-2">
@@ -1042,17 +1478,18 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
                   onClick={() => {
                     setPostText('');
                     handleClearImage();
+                    handleClearVideo();
                     setComposerOpen(false);
                   }}
-                  className="px-3 py-1.5 text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 font-semibold cursor-pointer"
+                  className="h-7 px-2.5 text-[11px] text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 font-medium cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={isSubmitting || (!postText.trim() && !selectedImageFile)}
-                  className={`px-4 py-1.5 rounded-xl text-xs font-bold text-white shadow-sm flex items-center gap-1.5 transition-all cursor-pointer ${
-                    isSubmitting || (!postText.trim() && !selectedImageFile)
+                  disabled={isSubmitting || (!postText.trim() && !selectedImageFile && !selectedVideoFile)}
+                  className={`h-7 px-3 rounded-lg text-[11px] font-bold text-white shadow-2xs flex items-center gap-1 transition-all cursor-pointer ${
+                    isSubmitting || (!postText.trim() && !selectedImageFile && !selectedVideoFile)
                       ? 'bg-purple-400/50 cursor-not-allowed opacity-60'
                       : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:opacity-95 active:scale-95'
                   }`}
@@ -1075,102 +1512,178 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
         </div>
       )}
 
-      {/* 5 Filter Chips Bar — Thin (patle), identical uniform size across all 5 */}
-      <div className="w-full px-2 py-1.5 bg-white dark:bg-slate-900/95 border-b border-slate-200 dark:border-slate-800 shrink-0 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-        {/* 1. All */}
-        <button
-          type="button"
-          onClick={() => setActiveFilter('ALL')}
-          className={`flex-1 h-7 min-w-[58px] flex items-center justify-center text-[10.5px] sm:text-[11px] font-bold rounded-lg transition-all cursor-pointer select-none text-center px-1 ${
-            activeFilter === 'ALL'
-              ? 'bg-purple-600 text-white shadow-xs font-black'
-              : 'bg-slate-100 dark:bg-slate-800/90 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700/60 hover:text-slate-900'
-          }`}
-          title="All Posts"
-        >
-          <span>All</span>
-        </button>
+      {/* Filter Chips Bar — Scrollable, slim, sleek professional button sizes (30-40% thinner) */}
+      <div className="w-full px-3 py-1.5 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 shrink-0 flex items-center gap-1.5 overflow-x-auto scroll-smooth touch-pan-x flex-nowrap scrollbar-none">
+        {/* 1. All (Unlocks at Level 3 (iv) with posts) */}
+        {(isPostsUnlocked || isAdminOrSubUser) && (
+          <button
+            type="button"
+            onClick={() => setActiveFilter('ALL')}
+            className={`h-7 px-3 shrink-0 flex items-center justify-center text-[11.5px] font-semibold rounded-lg transition-all cursor-pointer select-none whitespace-nowrap shadow-2xs active:scale-95 ${
+              activeFilter === 'ALL'
+                ? 'bg-purple-600 text-white shadow-xs font-bold ring-1 ring-purple-400/50'
+                : 'bg-slate-100 dark:bg-slate-800/90 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:text-slate-950 dark:hover:text-white'
+            }`}
+            title="All Posts"
+          >
+            <span>All</span>
+          </button>
+        )}
 
-        {/* 2. Official (Distinct color, same uniform size) */}
+        {/* 2. Official (Always available in Community) */}
         <button
           type="button"
           onClick={() => setActiveFilter('OFFICIAL')}
-          className={`flex-1 h-7 min-w-[58px] flex items-center justify-center text-[10.5px] sm:text-[11px] font-bold rounded-lg transition-all cursor-pointer select-none text-center px-1 ${
+          className={`h-7 px-3 shrink-0 flex items-center justify-center text-[11.5px] font-semibold rounded-lg transition-all cursor-pointer select-none whitespace-nowrap shadow-2xs active:scale-95 ${
             activeFilter === 'OFFICIAL'
-              ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-xs font-black ring-1 ring-amber-400'
-              : 'bg-amber-100/80 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 hover:bg-amber-100'
+              ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-xs font-bold ring-1 ring-amber-400'
+              : 'bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-700/80 hover:bg-amber-100'
           }`}
           title="Official Notices"
         >
           <span>Official</span>
         </button>
 
-        {/* 3. Bugs Report */}
-        <button
-          type="button"
-          onClick={() => setActiveFilter('BUG_REPORT')}
-          className={`flex-1 h-7 min-w-[58px] flex items-center justify-center text-[10.5px] sm:text-[11px] font-bold rounded-lg transition-all cursor-pointer select-none text-center px-1 ${
-            activeFilter === 'BUG_REPORT'
-              ? 'bg-rose-600 text-white shadow-xs font-black'
-              : 'bg-slate-100 dark:bg-slate-800/90 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700/60 hover:text-slate-900'
-          }`}
-          title="Bugs Report"
-        >
-          <span>Bugs Report</span>
-        </button>
+        {/* 3. Bugs Report (Unlocks at Level 3 (ii)) */}
+        {(isBugReportUnlocked || isAdminOrSubUser) && (
+          <button
+            type="button"
+            onClick={() => setActiveFilter('BUG_REPORT')}
+            className={`h-7 px-3 shrink-0 flex items-center justify-center gap-1 text-[11.5px] font-semibold rounded-lg transition-all cursor-pointer select-none whitespace-nowrap shadow-2xs active:scale-95 ${
+              activeFilter === 'BUG_REPORT'
+                ? 'bg-rose-600 text-white shadow-xs font-bold ring-1 ring-rose-400/50'
+                : 'bg-slate-100 dark:bg-slate-800/90 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:text-slate-950 dark:hover:text-white'
+            }`}
+            title="Bugs Report"
+          >
+            <span>Bugs Report</span>
+          </button>
+        )}
 
-        {/* 4. Doubt */}
-        <button
-          type="button"
-          onClick={() => setActiveFilter('DOUBT')}
-          className={`flex-1 h-7 min-w-[58px] flex items-center justify-center text-[10.5px] sm:text-[11px] font-bold rounded-lg transition-all cursor-pointer select-none text-center px-1 ${
-            activeFilter === 'DOUBT'
-              ? 'bg-blue-600 text-white shadow-xs font-black'
-              : 'bg-slate-100 dark:bg-slate-800/90 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700/60 hover:text-slate-900'
-          }`}
-          title="Doubt Posts"
-        >
-          <span>Doubt</span>
-        </button>
+        {/* 4. Doubt (Unlocks at Level 3 (iii)) */}
+        {(isDoubtUnlocked || isAdminOrSubUser) && (
+          <button
+            type="button"
+            onClick={() => setActiveFilter('DOUBT')}
+            className={`h-7 px-3 shrink-0 flex items-center justify-center gap-1 text-[11.5px] font-semibold rounded-lg transition-all cursor-pointer select-none whitespace-nowrap shadow-2xs active:scale-95 ${
+              activeFilter === 'DOUBT'
+                ? 'bg-blue-600 text-white shadow-xs font-bold ring-1 ring-blue-400/50'
+                : 'bg-slate-100 dark:bg-slate-800/90 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:text-slate-950 dark:hover:text-white'
+            }`}
+            title="Doubt Posts"
+          >
+            <span>Doubt</span>
+          </button>
+        )}
 
-        {/* 5. My Post */}
-        <button
-          type="button"
-          onClick={() => setActiveFilter('MINE')}
-          className={`flex-1 h-7 min-w-[58px] flex items-center justify-center text-[10.5px] sm:text-[11px] font-bold rounded-lg transition-all cursor-pointer select-none text-center px-1 ${
-            activeFilter === 'MINE'
-              ? 'bg-emerald-600 text-white shadow-xs font-black'
-              : 'bg-slate-100 dark:bg-slate-800/90 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700/60 hover:text-slate-900'
-          }`}
-          title="My Post"
-        >
-          <span>My Post</span>
-        </button>
+        {/* 5. My Post (Unlocks at Level 3 (iv)) */}
+        {(isPostsUnlocked || isAdminOrSubUser) && (
+          <button
+            type="button"
+            onClick={() => setActiveFilter('MINE')}
+            className={`h-7 px-3 shrink-0 flex items-center justify-center gap-1 text-[11.5px] font-semibold rounded-lg transition-all cursor-pointer select-none whitespace-nowrap shadow-2xs active:scale-95 ${
+              activeFilter === 'MINE'
+                ? 'bg-emerald-600 text-white shadow-xs font-bold ring-1 ring-emerald-400/50'
+                : 'bg-slate-100 dark:bg-slate-800/90 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:text-slate-950 dark:hover:text-white'
+            }`}
+            title="My Post"
+          >
+            <span>My Post</span>
+          </button>
+        )}
 
         {/* 6. Review Mode (Admin / SubAdmin Queue) */}
         {isAdminOrSubUser && (
           <button
             type="button"
             onClick={() => setActiveFilter('UNDER_REVIEW')}
-            className={`flex-1 h-7 min-w-[65px] flex items-center justify-center gap-1 text-[10px] sm:text-[10.5px] font-bold rounded-lg transition-all cursor-pointer select-none text-center px-1 ${
+            className={`h-7 px-3 shrink-0 flex items-center justify-center gap-1.2 text-[11.5px] font-semibold rounded-lg transition-all cursor-pointer select-none whitespace-nowrap shadow-2xs active:scale-95 ${
               activeFilter === 'UNDER_REVIEW'
-                ? 'bg-amber-500 text-slate-950 shadow-xs font-black ring-1 ring-amber-400'
+                ? 'bg-amber-500 text-slate-950 shadow-xs font-bold ring-1 ring-amber-400'
                 : underReviewPostsCount > 0
-                ? 'bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-400'
-                : 'bg-slate-100 dark:bg-slate-800/90 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700/60 hover:text-slate-900'
+                ? 'bg-amber-50 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700'
+                : 'bg-slate-100 dark:bg-slate-800/90 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:text-slate-950 dark:hover:text-white'
             }`}
             title="Review Queue (3+ Reports or Flagged)"
           >
-            <ShieldAlert size={12} />
+            <ShieldAlert size={13} />
             <span>Review</span>
             {underReviewPostsCount > 0 && (
-              <span className="bg-amber-600 text-white text-[9px] font-black px-1 rounded-full">
+              <span className="bg-amber-600 text-white text-[9.5px] font-black px-1.2 py-0.2 rounded-full">
                 {underReviewPostsCount}
               </span>
             )}
           </button>
         )}
+
+        {/* 7. Notes Fix */}
+        <button
+          type="button"
+          onClick={() => setActiveFilter('NOTES_FIX')}
+          className={`h-7 px-3 shrink-0 flex items-center justify-center gap-1.2 text-[11.5px] font-semibold rounded-lg transition-all cursor-pointer select-none whitespace-nowrap shadow-2xs active:scale-95 ${
+            activeFilter === 'NOTES_FIX'
+              ? 'bg-amber-500 text-slate-950 shadow-xs font-bold ring-1 ring-amber-400'
+              : 'bg-amber-50 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800/80 hover:bg-amber-100'
+          }`}
+          title="Notes Fix"
+        >
+          <Lightbulb size={13} className="shrink-0" />
+          <span>Notes Fix</span>
+        </button>
       </div>
+
+      {/* Bugs Report Banner */}
+      {activeFilter === 'BUG_REPORT' && (
+        <div className="mx-2.5 mt-2 p-2.5 rounded-xl bg-gradient-to-r from-rose-500/10 via-orange-500/10 to-amber-500/10 border border-rose-300/40 dark:border-rose-900/40 flex items-center justify-between gap-2 shadow-2xs shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-7 h-7 rounded-lg bg-rose-500/20 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+              <AlertTriangle size={15} />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11.5px] font-bold text-slate-900 dark:text-slate-100 truncate flex items-center gap-1.5">
+                <span>Bugs & Glitches Report Feed</span>
+                <span className="text-[9.5px] px-1.5 py-0.2 rounded-md bg-rose-500/20 text-rose-600 dark:text-rose-400 font-bold">Community</span>
+              </p>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                App me koi dikkat, crash ya bug aaye toh report karein!
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setPostCategory('BUG_REPORT');
+              setComposerOpen(true);
+            }}
+            className="h-6.5 px-2.5 rounded-md bg-rose-600 hover:bg-rose-500 active:scale-95 text-white text-[10.5px] font-bold shrink-0 transition-all shadow-2xs flex items-center gap-1 cursor-pointer"
+          >
+            <span>+ Report Bug</span>
+          </button>
+        </div>
+      )}
+
+      {/* Notes Fix Feed Banner */}
+      {activeFilter === 'NOTES_FIX' && (
+        <div className="mx-2.5 mt-2 p-2.5 rounded-xl bg-gradient-to-r from-amber-500/10 via-yellow-500/10 to-orange-500/10 border border-amber-300/40 dark:border-amber-900/40 flex items-center justify-between gap-2 shadow-2xs shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+              <Lightbulb size={15} />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11.5px] font-bold text-slate-900 dark:text-slate-100 truncate flex items-center gap-1.5">
+                <span>Notes & MCQ Fix Feed</span>
+                <span className="text-[9.5px] px-1.5 py-0.2 rounded-md bg-amber-500/20 text-amber-700 dark:text-amber-300 font-bold">Verified Reports</span>
+              </p>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                Sirf Notes ya MCQ se report ki gayi galtiyan & admin direct replies yahan dikhte hain.
+              </p>
+            </div>
+          </div>
+          <span className="px-2 py-0.8 rounded-md bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-400/30 text-[10px] font-bold shrink-0">
+            Notes / MCQ Only
+          </span>
+        </div>
+      )}
 
       {/* Posts Stream */}
       <div className="flex-1 overflow-y-auto p-3 space-y-3 pb-4 pb-safe">
@@ -1220,6 +1733,39 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
                   📢 Naya Official Notice Bhejo
                 </button>
               )}
+            </div>
+          ) : activeFilter === 'NOTES_FIX' ? (
+            <div className="text-center py-12 px-4 bg-white dark:bg-slate-900/60 rounded-2xl border border-amber-200/80 dark:border-amber-900/50 space-y-2">
+              <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-950 text-amber-600 dark:text-amber-400 flex items-center justify-center text-lg mx-auto shadow-2xs">
+                💡
+              </div>
+              <h4 className="font-bold text-xs sm:text-sm text-slate-800 dark:text-slate-200">
+                Abhi tak koi Notes / MCQ Fix report nahi hai
+              </h4>
+              <p className="text-[11px] text-slate-500 max-w-xs mx-auto">
+                Notes padhte samay ya MCQ solve karte samay 'Report / Suggest Fix' par click karke galti bhej sakte hain.
+              </p>
+            </div>
+          ) : activeFilter === 'BUG_REPORT' ? (
+            <div className="text-center py-12 px-4 bg-white dark:bg-slate-900/60 rounded-2xl border border-rose-200 dark:border-rose-900/50 space-y-2">
+              <div className="w-10 h-10 rounded-xl bg-rose-100 dark:bg-rose-950 text-rose-600 dark:text-rose-400 flex items-center justify-center text-lg mx-auto shadow-2xs">
+                🐛
+              </div>
+              <h4 className="font-bold text-xs sm:text-sm text-slate-800 dark:text-slate-200">
+                Abhi tak koi Bug Report nahi hai
+              </h4>
+              <p className="text-[11px] text-slate-500 max-w-xs mx-auto">
+                Agar app me koi dikkat ya error aaye toh report karein.
+              </p>
+              <button
+                onClick={() => {
+                  setPostCategory('BUG_REPORT');
+                  setComposerOpen(true);
+                }}
+                className="h-7 px-3 bg-gradient-to-r from-rose-600 to-red-600 text-white text-[11px] font-bold rounded-lg shadow-2xs hover:opacity-95 transition-all cursor-pointer inline-flex items-center justify-center"
+              >
+                + Report Bug
+              </button>
             </div>
           ) : (
             <div className="text-center py-16 px-4 bg-white dark:bg-slate-900/60 rounded-3xl border border-slate-200 dark:border-slate-800 space-y-3">
@@ -1327,6 +1873,54 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
                     </span>
                   </div>
                 )}
+
+                {/* Notes Fix & Bug Report Real-time Status Banner (Opened / Replied / Resolved / Pending) */}
+                {((post as any).isSuggestionItem || post.category === 'NOTES_FIX' || post.category === 'BUG_REPORT' || post.category === 'NOTE_CORRECTION' || post.adminReply || (post as any).adminOpened) && (
+                  <div
+                    className={`px-3.5 py-2 border-b flex items-center justify-between gap-2 text-xs font-black ${
+                      post.status === 'RESOLVED' || post.status === 'resolved'
+                        ? 'bg-purple-50 dark:bg-purple-950/60 border-purple-200 dark:border-purple-800/60 text-purple-700 dark:text-purple-300'
+                        : post.adminReply || post.status === 'REPLIED' || post.status === 'replied'
+                        ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-800/60 text-emerald-700 dark:text-emerald-300'
+                        : (post as any).adminOpened
+                        ? 'bg-blue-50 dark:bg-blue-950/60 border-blue-200 dark:border-blue-800/60 text-blue-700 dark:text-blue-300'
+                        : 'bg-amber-50 dark:bg-amber-950/60 border-amber-200 dark:border-amber-800/60 text-amber-700 dark:text-amber-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      {post.status === 'RESOLVED' || post.status === 'resolved' ? (
+                        <>
+                          <ShieldCheck size={14} className="shrink-0 text-purple-600 dark:text-purple-400" />
+                          <span className="truncate font-bold">🎯 Admin ne Resolve / Sudhar Diya Hai</span>
+                        </>
+                      ) : post.adminReply || post.status === 'REPLIED' || post.status === 'replied' ? (
+                        <>
+                          <MessageSquare size={14} className="shrink-0 text-emerald-600 dark:text-emerald-400" />
+                          <span className="truncate font-bold">✅ Admin ne Dekh Kar Reply Diya Hai</span>
+                        </>
+                      ) : (post as any).adminOpened ? (
+                        <>
+                          <Eye size={14} className="shrink-0 text-blue-600 dark:text-blue-400" />
+                          <span className="truncate font-bold">👁️ Admin ne Open Kar Liya Hai (Review Chalu Hai)</span>
+                        </>
+                      ) : (
+                        <>
+                          <Clock size={14} className="shrink-0 text-amber-600 dark:text-amber-400" />
+                          <span className="truncate font-bold">⏳ Admin ne Abhi Open Nahi Kiya (Pending Review)</span>
+                        </>
+                      )}
+                    </div>
+                    <span className="text-[9.5px] px-2 py-0.5 rounded-full font-black uppercase tracking-wider shrink-0 bg-white/90 dark:bg-slate-900/90 shadow-2xs">
+                      {post.status === 'RESOLVED' || post.status === 'resolved'
+                        ? 'RESOLVED'
+                        : post.adminReply || post.status === 'REPLIED' || post.status === 'replied'
+                        ? 'REPLIED'
+                        : (post as any).adminOpened
+                        ? 'OPENED'
+                        : 'PENDING'}
+                    </span>
+                  </div>
+                )}
                 {/* Post Author Bar */}
                 <div className="p-3.5 flex items-center justify-between">
                   <div className="flex items-center gap-2.5 min-w-0">
@@ -1374,6 +1968,11 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
                         {post.category === 'BUG_REPORT' && (
                           <span className="text-[9px] bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 font-bold px-1.5 py-0.2 rounded-md border border-rose-200 dark:border-rose-900/60">
                             🐛 Bug Report
+                          </span>
+                        )}
+                        {((post as any).isSuggestionItem || post.category === 'NOTES_FIX' || post.category === 'NOTE_CORRECTION') && (
+                          <span className="text-[9px] bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 font-bold px-1.5 py-0.2 rounded-md border border-amber-300 dark:border-amber-900/60 flex items-center gap-0.5">
+                            <Lightbulb size={9} className="shrink-0" /> Notes Fix
                           </span>
                         )}
                         {post.category === 'DOUBT' && (
@@ -1457,11 +2056,11 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
                 )}
 
                 {/* Post Body: Image Attachment */}
-                {post.imageUrl && (
+                {(post.imageUrl || (post as any).mediaUrl) && (
                   <div className="px-3 pb-3">
                     <div
-                      className="relative overflow-hidden rounded-xl bg-slate-100 dark:bg-slate-800 group cursor-pointer"
-                      onClick={() => setLightboxImageUrl(post.imageUrl!)}
+                      className="relative overflow-hidden rounded-xl bg-slate-100 dark:bg-slate-800 group cursor-pointer min-h-[120px]"
+                      onClick={() => setLightboxImageUrl(resolveTelegramUrl(post.imageUrl || (post as any).mediaUrl))}
                     >
                       {post.isHd && (
                         <div className="absolute top-2 left-2 z-10 px-2 py-0.5 bg-black/75 backdrop-blur-xs text-white rounded text-[10px] font-black border border-white/20 flex items-center gap-1 shadow-xs pointer-events-none">
@@ -1469,10 +2068,18 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
                         </div>
                       )}
                       <img
-                        src={post.imageUrl}
-                        alt="Post Attachment"
-                        className="w-full max-h-96 object-cover object-center group-hover:scale-[1.01] transition-transform duration-300"
+                        src={resolveTelegramUrl(post.imageUrl || (post as any).mediaUrl)}
+                        alt={post.text ? post.text.slice(0, 30) : 'Post Image'}
+                        className="w-full max-h-96 object-cover object-center group-hover:scale-[1.01] transition-transform duration-300 bg-slate-900/10"
                         loading="lazy"
+                        onError={(e) => {
+                          const target = e.currentTarget;
+                          const raw = post.imageUrl || (post as any).mediaUrl;
+                          if (raw && !target.dataset.retried) {
+                            target.dataset.retried = '1';
+                            target.src = raw;
+                          }
+                        }}
                       />
                       <div className="absolute bottom-2 right-2 p-1.5 bg-black/60 hover:bg-black/80 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] font-bold">
                         {post.isHd && <span className="text-emerald-400 text-[9px] font-black mr-0.5">HD</span>}
@@ -1482,38 +2089,151 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
                   </div>
                 )}
 
+                {/* Post Body: Video Attachment */}
+                {(post.videoUrl || (post as any).video) && (
+                  <div className="px-3 pb-3">
+                    <div className="relative overflow-hidden rounded-xl bg-black border border-slate-800">
+                      <video
+                        src={resolveTelegramUrl(getOptimizedVideoUrl(post.videoUrl || (post as any).video))}
+                        controls
+                        playsInline
+                        preload="metadata"
+                        className="w-full max-h-96 object-contain"
+                        onError={(e) => {
+                          const target = e.currentTarget;
+                          const raw = post.videoUrl || (post as any).video;
+                          if (raw && !target.dataset.retried) {
+                            target.dataset.retried = '1';
+                            target.src = raw;
+                          }
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Lesson / Note Reference if provided */}
+                {(post.lessonTitle || post.pageNo) && (
+                  <div className="mx-3.5 mb-2.5 px-3 py-1.5 rounded-xl bg-amber-50/70 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/40 text-[11px] text-amber-900 dark:text-amber-200 flex items-center gap-2">
+                    <span className="font-bold shrink-0">📖 Note Reference:</span>
+                    <span className="truncate">{post.lessonTitle || 'Lesson'}</span>
+                    {post.pageNo && (
+                      <span className="px-1.5 py-0.2 rounded bg-amber-200/70 dark:bg-amber-800/70 font-black text-[10px] shrink-0">
+                        Page {post.pageNo}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* Inline Admin Reply Box - Shown right under the report without any separate page/popup */}
+                {post.adminReply && (
+                  <div className="mx-3.5 mb-3 p-3 rounded-xl bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50/70 dark:from-emerald-950/50 dark:via-teal-950/40 dark:to-emerald-950/50 border border-emerald-300/80 dark:border-emerald-800/80 shadow-2xs">
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px] font-black shadow-xs">
+                          ✓
+                        </span>
+                        <span className="text-[11px] font-black text-emerald-900 dark:text-emerald-200 flex items-center gap-1">
+                          <span>Admin Official Reply</span>
+                          {post.adminTag && (
+                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-200/80 dark:bg-emerald-800/80 text-emerald-950 dark:text-emerald-100 font-extrabold uppercase">
+                              {post.adminTag}
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                      <span className="text-[9.5px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/60 px-2 py-0.5 rounded-full">
+                        {post.status === 'RESOLVED' || post.status === 'resolved' ? 'Resolved 🎯' : 'Replied ✅'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-emerald-950 dark:text-emerald-100 leading-relaxed font-medium whitespace-pre-wrap pl-6 select-text">
+                      {post.adminReply}
+                    </p>
+                  </div>
+                )}
+
+                {/* Admin Quick Action Controls: Reply & Resolve inline directly on card */}
+                {isAdminOrSubUser && ((post as any).isSuggestionItem || post.category === 'NOTES_FIX' || post.category === 'BUG_REPORT') && (
+                  <div className="mx-3.5 mb-3 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-black text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                        <Shield size={12} className="text-purple-600" /> Admin Response:
+                      </span>
+                      {post.status !== 'RESOLVED' && post.status !== 'resolved' && (
+                        <button
+                          type="button"
+                          onClick={() => handleAdminResolveDirect(post)}
+                          className="h-6 px-2 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold shadow-2xs cursor-pointer active:scale-95 transition-all flex items-center gap-1"
+                        >
+                          <CheckCircle size={10} />
+                          <span>Mark Resolved (+5 Coins)</span>
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex gap-1.5">
+                      <input
+                        type="text"
+                        value={(typeof inlineAdminReplyInputs !== 'undefined' && inlineAdminReplyInputs ? inlineAdminReplyInputs[post.id] : '') || ''}
+                        onChange={(e) =>
+                          typeof setInlineAdminReplyInputs === 'function' &&
+                          setInlineAdminReplyInputs((prev) => ({
+                            ...(prev || {}),
+                            [post.id]: e.target.value,
+                          }))
+                        }
+                        placeholder={post.adminReply ? "Update admin reply..." : "Student ko reply likhein..."}
+                        className="flex-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-md px-2.5 py-1 text-[11px] text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleAdminSubmitReply(post)}
+                        className="h-6.5 px-2.5 rounded-md bg-purple-600 hover:bg-purple-700 text-white text-[10.5px] font-bold shadow-2xs cursor-pointer active:scale-95 transition-all flex items-center gap-1 shrink-0"
+                      >
+                        <Send size={10} />
+                        <span>Reply</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Post Action Metrics Bar */}
-                <div className="px-4 py-2 bg-slate-50/70 dark:bg-slate-800/40 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
-                  <div className="flex items-center gap-4">
+                <div className="px-3.5 py-1.5 bg-slate-50/70 dark:bg-slate-800/40 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
                     {/* Like Button */}
                     <button
                       onClick={() => handleToggleLike(post)}
-                      className={`flex items-center gap-1.5 text-xs font-bold transition-all cursor-pointer active:scale-125 ${
+                      className={`flex items-center gap-1 text-[11.5px] font-semibold transition-all cursor-pointer active:scale-110 ${
                         isLikedByMe
                           ? 'text-rose-600 dark:text-rose-400'
                           : 'text-slate-500 hover:text-rose-500'
                       }`}
                     >
                       <Heart
-                        size={16}
-                        className={isLikedByMe ? 'fill-rose-500 text-rose-500 animate-bounce' : ''}
+                        size={14}
+                        className={isLikedByMe ? 'fill-rose-500 text-rose-500' : ''}
                       />
                       <span>{likeCount}</span>
                     </button>
 
-                    {/* Comments Toggle Button */}
-                    <button
-                      onClick={() => toggleComments(post.id)}
-                      className={`flex items-center gap-1.5 text-xs font-bold transition-all cursor-pointer ${
-                        isCommentsOpen
-                          ? 'text-purple-600 dark:text-purple-400'
-                          : 'text-slate-500 hover:text-purple-600'
-                      }`}
-                    >
-                      <MessageCircle size={16} />
-                      <span>{commentsList.length} Comments</span>
-                      {isCommentsOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                    </button>
+                    {/* Comments Toggle Button — Only for normal posts, completely hidden for Notes Fix */}
+                    {!isPostNotesFix(post) ? (
+                      <button
+                        onClick={() => toggleComments(post.id)}
+                        className={`flex items-center gap-1 text-[11.5px] font-semibold transition-all cursor-pointer ${
+                          isCommentsOpen
+                            ? 'text-purple-600 dark:text-purple-400'
+                            : 'text-slate-500 hover:text-purple-600'
+                        }`}
+                      >
+                        <MessageCircle size={14} />
+                        <span>{commentsList.length} Comments</span>
+                        {isCommentsOpen ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                      </button>
+                    ) : (
+                      <span className="text-[10px] text-amber-700/80 dark:text-amber-400/80 font-medium flex items-center gap-1 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
+                        🔒 Official Review
+                      </span>
+                    )}
                   </div>
 
                   {/* Share button */}
@@ -1521,21 +2241,21 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
                     onClick={() => {
                       if (navigator.clipboard) {
                         navigator.clipboard.writeText(
-                          `Post by ${post.userName}: ${post.text || 'Photo Post'}`
+                          `Post by ${post.userName}: ${post.text || 'Post'}`
                         );
-                        showToast('📋 Post text copy ho gaya!');
+                        showToast('📋 Link copy ho gaya!');
                       }
                     }}
                     className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors cursor-pointer"
                     title="Share Post"
                   >
-                    <Share2 size={14} />
+                    <Share2 size={13} />
                   </button>
                 </div>
 
-                {/* Comments Section Drawer */}
-                {isCommentsOpen && (
-                  <div className="p-3 bg-slate-50 dark:bg-slate-900/90 border-t border-slate-200 dark:border-slate-800 space-y-3">
+                {/* Comments Section Drawer — Never shown for Notes Fix */}
+                {isCommentsOpen && !isPostNotesFix(post) && (
+                  <div className="p-2.5 bg-slate-50 dark:bg-slate-900/90 border-t border-slate-200 dark:border-slate-800 space-y-2.5">
                     {/* Comments List */}
                     {commentsList.length === 0 ? (
                       <p className="text-center text-[11px] text-slate-400 py-3">
@@ -1575,17 +2295,24 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
                                   </p>
                                 )}
                                 {comm.imageUrl && (
-                                  <div className="mt-2 relative rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 max-w-[240px] group">
+                                  <div className="mt-2 relative rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 max-w-[240px] group bg-slate-900/10">
                                     <img
-                                      src={comm.imageUrl}
+                                      src={resolveTelegramUrl(comm.imageUrl)}
                                       alt="Comment attachment"
                                       className="max-h-48 w-full object-cover rounded-lg cursor-pointer hover:opacity-95 transition-opacity"
-                                      onClick={() => setLightboxImageUrl(comm.imageUrl || null)}
+                                      onClick={() => setLightboxImageUrl(resolveTelegramUrl(comm.imageUrl) || null)}
                                       loading="lazy"
+                                      onError={(e) => {
+                                        const target = e.currentTarget;
+                                        if (comm.imageUrl && !target.dataset.retried) {
+                                          target.dataset.retried = '1';
+                                          target.src = comm.imageUrl;
+                                        }
+                                      }}
                                     />
                                     <button
                                       type="button"
-                                      onClick={() => setLightboxImageUrl(comm.imageUrl || null)}
+                                      onClick={() => setLightboxImageUrl(resolveTelegramUrl(comm.imageUrl) || null)}
                                       className="absolute bottom-1.5 right-1.5 p-1 bg-black/60 hover:bg-black/80 text-white rounded-md text-[10px] flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer shadow-xs"
                                       title="Bada karein"
                                     >
@@ -1658,14 +2385,14 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
                       />
                       <label
                         htmlFor={`comment-file-${post.id}`}
-                        className={`p-2 rounded-xl border transition-all flex items-center justify-center shrink-0 cursor-pointer ${
+                        className={`w-7 h-7 rounded-lg border transition-all flex items-center justify-center shrink-0 cursor-pointer ${
                           commentImageFiles[post.id]
                             ? 'bg-purple-100 dark:bg-purple-950/60 border-purple-300 dark:border-purple-700 text-purple-600 dark:text-purple-300'
                             : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500 hover:text-purple-600 dark:hover:text-purple-400 hover:border-purple-300'
                         }`}
                         title="Comment me photo add karein"
                       >
-                        <Camera size={15} />
+                        <Camera size={13} />
                       </label>
                       <input
                         type="text"
@@ -1681,10 +2408,10 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
                         }}
                         placeholder={
                           commentImageFiles[post.id]
-                            ? 'Photo ke sath caption/comment likhein...'
+                            ? 'Photo ke sath caption likhein...'
                             : 'Apna comment likhein...'
                         }
-                        className="flex-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-purple-400"
+                        className="flex-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 text-[11px] text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-purple-400"
                       />
                       <button
                         onClick={() => handleAddComment(post.id)}
@@ -1692,7 +2419,7 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
                           isSubmittingComment[post.id] ||
                           (!((commentInputs[post.id] || '').trim()) && !commentImageFiles[post.id])
                         }
-                        className={`px-3 py-1.5 rounded-xl text-xs font-bold text-white shadow-xs transition-all flex items-center justify-center ${
+                        className={`h-7 px-2.5 rounded-lg text-[11px] font-bold text-white shadow-2xs transition-all flex items-center justify-center ${
                           ((commentInputs[post.id] || '').trim()) || commentImageFiles[post.id]
                             ? 'bg-purple-600 hover:bg-purple-700 cursor-pointer active:scale-95'
                             : 'bg-slate-300 dark:bg-slate-800 text-slate-500 cursor-not-allowed'
@@ -1700,9 +2427,9 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
                         title="Comment bhejein"
                       >
                         {isSubmittingComment[post.id] ? (
-                          <Loader2 size={13} className="animate-spin" />
+                          <Loader2 size={11} className="animate-spin" />
                         ) : (
-                          <Send size={13} />
+                          <Send size={11} />
                         )}
                       </button>
                     </div>
@@ -1771,8 +2498,8 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
             onClick={(e) => e.stopPropagation()}
           >
             <img
-              src={lightboxImageUrl}
-              alt="Enlarged Post Attachment"
+              src={resolveTelegramUrl(lightboxImageUrl)}
+              alt="Photo Fullscreen View"
               className="max-w-full max-h-[85vh] object-contain rounded-2xl shadow-2xl"
             />
           </div>
@@ -2040,6 +2767,18 @@ export const CommunityPostFeed: React.FC<CommunityPostFeedProps> = ({
           </div>
         </div>
       )}
+
+      {/* Guest Restriction & Google Binding Modal */}
+      <GuestRestrictionModal
+        isOpen={guestModalOpen}
+        onClose={() => setGuestModalOpen(false)}
+        currentUser={user}
+        onUserUpdated={(updated) => {
+          if (onUserUpdate) onUserUpdate(updated);
+        }}
+        featureName={guestModalContext}
+        customMessage="Guest Account me Community par post likhna, like ya comment karna allowed nahi hai. Apne account ko Google se bind karein taaki aapka profile hamesha verified rahe!"
+      />
     </div>
   );
 };

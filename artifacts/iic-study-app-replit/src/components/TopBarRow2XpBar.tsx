@@ -171,7 +171,7 @@ export const TopBarRow2XpBar: React.FC<TopBarRow2XpBarProps> = ({
         id="topbar-row2-xp-track-container"
         onClick={onOpenScorePanel}
         className="relative flex-1 min-w-[50px] cursor-pointer py-1 group"
-        title={`Level ${currentLevelInfo.level} (${currentLevelInfo.label}): ${Math.round(clampedPct)}%`}
+        title={`Level ${currentLevelInfo.level} (${Math.round(clampedPct)}%) — Tap karke details dekhein`}
       >
         {/* Track bar - sleek and thin as requested */}
         <div className={`relative w-full rounded-full overflow-hidden bg-white/20 border border-white/25 transition-all duration-500 ${
@@ -223,43 +223,32 @@ export const TopBarRow2XpBar: React.FC<TopBarRow2XpBarProps> = ({
         </div>
       </div>
 
-      {/* LEVEL DISPLAY BUTTON (e.g. Lv 1) OR LEVEL UP ANIMATION BADGE */}
+      {/* LEVEL DISPLAY: Bas text "Lev - 1", "Lev - 2" rahega, background me kuchh nahi */}
       {levelUpAnim ? (
-        /* Animated level-up celebration badge */
         <button
           id="topbar-row2-total-xp-btn"
           onClick={onOpenScorePanel}
-          className="inline-flex items-center gap-1 px-1 py-0.5 select-none active:scale-95 cursor-pointer"
+          className="bg-transparent border-0 p-0 shadow-none inline-flex items-center gap-1 active:scale-95 transition-transform shrink-0 cursor-pointer select-none"
           style={{
             animation: 'row2GainPop 0.35s ease-out forwards',
           }}
           title={`Level Up! Level ${levelUpAnim} — Tap karke details dekhein`}
         >
-          <Zap size={10} className="text-yellow-300 fill-yellow-300 animate-pulse" />
-          <span className="font-black text-[11px] text-amber-300 whitespace-nowrap">Lv {levelUpAnim}</span>
-           {isExpanded && (
-             <span className="text-[10px] font-bold text-amber-200/90 whitespace-nowrap tabular-nums">
-               {formatXpDisplay(currentTotalScore)}{nextLevelInfo ? `/${formatXpDisplay(nextLevelInfo.minScore)}` : ''}
-             </span>
-           )}
+          <Zap size={11} className="text-yellow-300 fill-yellow-300 animate-pulse shrink-0" />
+          <span className="font-extrabold text-[11px] sm:text-xs text-amber-300 tabular-nums whitespace-nowrap tracking-wide">
+            Lev - {levelUpAnim}
+          </span>
         </button>
       ) : (
-         /* Show the level while the top-bar buttons are present; reveal XP
-            after the Store/Credits/Diamonds control moves to Row 1. */
         <button
           id="topbar-row2-total-xp-btn"
           onClick={onOpenScorePanel}
-          className="inline-flex items-center gap-1 px-1 py-0.5 active:scale-95 transition-all shrink-0 cursor-pointer group select-none"
-          title={`Level ${currentLevelInfo.level} (${currentLevelInfo.label}) — ${currentTotalScore} XP — Tap karke details dekhein`}
+          className="bg-transparent border-0 p-0 shadow-none inline-flex items-center active:scale-95 transition-transform shrink-0 cursor-pointer select-none group"
+          title={`Level ${currentLevelInfo.level} (${formatXpDisplay(currentTotalScore)} XP) — Tap karke details dekhein`}
         >
-          <span className="font-black text-[11px] tabular-nums text-sky-200 group-hover:text-sky-100 whitespace-nowrap tracking-wide">
-            Lv {currentLevelInfo.level}
+          <span className="font-extrabold text-[11px] sm:text-xs tabular-nums text-white group-hover:text-amber-200 transition-colors whitespace-nowrap tracking-wide">
+            Lev - {currentLevelInfo.level}
           </span>
-           {isExpanded && (
-             <span className="text-[10px] font-bold text-sky-300/80 group-hover:text-sky-100 whitespace-nowrap tabular-nums">
-               {formatXpDisplay(currentTotalScore)}{nextLevelInfo ? `/${formatXpDisplay(nextLevelInfo.minScore)}` : ''}
-             </span>
-           )}
         </button>
       )}
     </div>

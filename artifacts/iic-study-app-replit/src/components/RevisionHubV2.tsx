@@ -770,8 +770,9 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
         userAnswers: practiceQs.map((_, i) => practiceAnswers[i] ?? null),
       };
 
-      // Award points (+2 for correct, +1 for wrong)
-      const ptsEarned = totalGot * 2 + Math.max(0, totalTotal - totalGot);
+      // Award points (+5 for correct, -2 for wrong)
+      const wrongCount = Math.max(0, totalTotal - totalGot);
+      const ptsEarned = (totalGot * 5) - (wrongCount * 2);
       const existingHistory = Array.isArray(user?.mcqHistory)
         ? user.mcqHistory
         : typeof user?.mcqHistory === 'object' && user?.mcqHistory
@@ -782,7 +783,7 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
         id: effectiveUserId || user?.id || 'anonymous',
         topicStrength: updatedTopicStrength,
         mcqHistory: [newEntry, ...existingHistory.filter((h: any) => h?.id !== newEntry.id)].slice(0, 100),
-        totalScore: ((user?.totalScore || 0) + ptsEarned),
+        totalScore: Math.max(0, (user?.totalScore || 0) + ptsEarned),
       };
 
       // Instant local storage write
@@ -1112,13 +1113,14 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
               const existingIds = new Set(existingHistory.map((e: any) => e?.id).filter(Boolean));
               const newResults = results.filter((r: any) => r?.id && !existingIds.has(r.id));
               
-              // Calculate points earned (+2 correct, +1 wrong)
+              // Calculate points earned (+5 correct, -2 wrong)
               let pts = 0;
               const updatedTopicStrength = { ...(user?.topicStrength || {}) };
               newResults.forEach((r: any) => {
                 const correct = Number(r?.correctCount || r?.score || 0);
                 const total = Number(r?.totalQuestions || 0);
-                pts += correct * 2 + Math.max(0, total - correct);
+                const wrong = Math.max(0, total - correct);
+                pts += (correct * 5) - (wrong * 2);
                 if (r?.topicAnalysis) {
                   Object.entries(r.topicAnalysis).forEach(([top, stats]: [string, any]) => {
                     if (stats && stats.total > 0) {
@@ -1133,7 +1135,7 @@ export const RevisionHubV2: React.FC<Props> = (props) => {
                 id: effectiveUserId || user?.id || 'anonymous',
                 topicStrength: updatedTopicStrength,
                 mcqHistory: [...newResults, ...existingHistory].slice(0, 100),
-                totalScore: (user?.totalScore || 0) + pts,
+                totalScore: Math.max(0, (user?.totalScore || 0) + pts),
               };
 
               // Instant local storage update

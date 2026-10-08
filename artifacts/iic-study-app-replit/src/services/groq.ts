@@ -72,6 +72,24 @@ const getAdminContent = async (
         }
 
         if (parsed) {
+            // MATH PICTURE LESSON SUPPORT
+            if (parsed.mathBookPages?.length || parsed.mathPremiumNotesPages?.length || parsed.mathSolutionPages?.length) {
+                return {
+                    id: Date.now().toString(),
+                    title: parsed.chapterTitle || "Math Lesson",
+                    subtitle: "Math Digital Reader",
+                    content: "",
+                    type: (type.startsWith('MCQ') && parsed.manualMcqData?.length) ? type : 'NOTES_SIMPLE',
+                    dateCreated: new Date().toISOString(),
+                    subjectName: subject.name,
+                    isComingSoon: false,
+                    mathBookPages: parsed.mathBookPages,
+                    mathPremiumNotesPages: parsed.mathPremiumNotesPages,
+                    mathSolutionPages: parsed.mathSolutionPages,
+                    mcqData: parsed.manualMcqData || parsed.mcqData,
+                };
+            }
+
             if (type === 'PDF_FREE' || type === 'NOTES_SIMPLE') {
                 const linkKey = syllabusMode === 'SCHOOL' ? 'schoolPdfLink' : 'competitionPdfLink';
                 const htmlKey = syllabusMode === 'SCHOOL' ? 'schoolFreeNotesHtml' : 'competitionFreeNotesHtml';

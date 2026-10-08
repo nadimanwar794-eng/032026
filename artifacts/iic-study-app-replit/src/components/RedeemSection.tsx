@@ -177,18 +177,23 @@ export const RedeemSection: React.FC<Props> = ({ user, onSuccess }) => {
         };
         let successMessage = '';
 
-        if (targetCode.type === 'SUBSCRIPTION') {
-            // Handle Subscription
+        if (targetCode.type === 'SUBSCRIPTION' || targetCode.type === 'VIP_PLUS') {
+            // Handle Subscription & VIP+
             const now = new Date();
             let endDate: Date | null = null;
             const subTier = targetCode.subTier || 'WEEKLY';
-            const subLevel = targetCode.subLevel || 'BASIC';
+            const rawLevel = targetCode.vipPlusTier || targetCode.subLevel || 'BASIC';
+            const isVipPlus = rawLevel === 'PRO_PLUS' || rawLevel === 'MAX_PLUS' || targetCode.type === 'VIP_PLUS';
+            const vipTier: 'PRO_PLUS' | 'MAX_PLUS' | undefined = rawLevel === 'MAX_PLUS' ? 'MAX_PLUS' : isVipPlus ? 'PRO_PLUS' : undefined;
+            const subLevel: 'BASIC' | 'ULTRA' = (rawLevel === 'ULTRA' || rawLevel === 'MAX_PLUS') ? 'ULTRA' : 'BASIC';
 
-            if (subTier === 'WEEKLY') endDate = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-            else if (subTier === 'MONTHLY') endDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-            else if (subTier === '3_MONTHLY') endDate = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
-            else if (subTier === 'YEARLY') endDate = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000);
-            else if (subTier === 'LIFETIME') endDate = new Date(now.getTime() + 365 * 10 * 24 * 60 * 60 * 1000); // 10 Years fallback
+            let durDays = targetCode.vipPlusDurationDays || 7;
+            if (subTier === 'WEEKLY') { durDays = 7; endDate = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000); }
+            else if (subTier === 'MONTHLY') { durDays = 30; endDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); }
+            else if (subTier === '3_MONTHLY') { durDays = 90; endDate = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000); }
+            else if (subTier === 'YEARLY') { durDays = 365; endDate = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000); }
+            else if (subTier === 'LIFETIME') { durDays = 3650; endDate = new Date(now.getTime() + 365 * 10 * 24 * 60 * 60 * 1000); } // 10 Years fallback
+            else { endDate = new Date(now.getTime() + durDays * 24 * 60 * 60 * 1000); }
             
             const isoEndDate = endDate ? endDate.toISOString() : undefined;
 
@@ -199,7 +204,7 @@ export const RedeemSection: React.FC<Props> = ({ user, onSuccess }) => {
                 level: subLevel,
                 startDate: now.toISOString(),
                 endDate: isoEndDate,
-                source: 'REWARD'
+                source: isVipPlus ? 'VIP_PLUS' : 'REWARD'
             };
 
             updatedUser.activeSubscriptions = [...(updatedUser.activeSubscriptions || []), newSub as any];
@@ -210,6 +215,26 @@ export const RedeemSection: React.FC<Props> = ({ user, onSuccess }) => {
             updatedUser.subscriptionEndDate = isoEndDate;
             updatedUser.isPremium = true;
             updatedUser.grantedByAdmin = false;
+
+            if (vipTier) {
+                const dailyDiamonds = targetCode.vipPlusDailyDiamonds || (vipTier === 'MAX_PLUS'
+                    ? (durDays <= 7 ? 35 : durDays <= 30 ? 50 : durDays <= 90 ? 70 : 100)
+                    : (durDays <= 7 ? 10 : durDays <= 30 ? 25 : durDays <= 90 ? 40 : 60));
+                updatedUser.vipPlusTier = vipTier;
+                updatedUser.dailyVipDiamonds = dailyDiamonds;
+                updatedUser.diamondSubscription = {
+                    planId: `vipplus_${vipTier.toLowerCase()}_${Date.now()}`,
+                    planName: `${subTier} (${vipTier === 'MAX_PLUS' ? 'MAX+' : 'PRO+'})`,
+                    dailyDiamonds,
+                    totalDays: durDays,
+                    startDate: now.toISOString(),
+                    endDate: isoEndDate || new Date(now.getTime() + durDays * 86400000).toISOString(),
+                    totalClaimedDays: 0,
+                    totalDiamondsClaimed: 0,
+                    pricePaid: 0,
+                    status: 'ACTIVE',
+                };
+            }
 
             // Add History Entry
             const historyEntry: SubscriptionHistoryEntry = {
@@ -235,7 +260,8 @@ export const RedeemSection: React.FC<Props> = ({ user, onSuccess }) => {
                 updatedUser.credits = (updatedUser.credits || 0) + bonus.bonusCredits;
             }
             
-            successMessage = `Success! Unlocked ${subTier} ${subLevel} Plan!${bonus.bonusCredits > 0 ? ` +${bonus.bonusCredits} Permanent Credits!` : ''} (+${bonus.score} Score)`;
+            const planLabel = vipTier ? `${subTier} ${vipTier === 'MAX_PLUS' ? 'MAX+ (VIP+)' : 'PRO+ (VIP+)'}` : `${subTier} ${subLevel}`;
+            successMessage = `Success! Unlocked ${planLabel} Plan!${vipTier ? ` +${updatedUser.dailyVipDiamonds} 💎/day!` : ''}${bonus.bonusCredits > 0 ? ` +${bonus.bonusCredits} Permanent Credits!` : ''} (+${bonus.score} Score)`;
 
         } else if (targetCode.type === 'DISCOUNT') {
             // Handle Discount Coupon

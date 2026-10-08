@@ -15,6 +15,7 @@ import {
 import { saveLesson, deleteLesson } from "../../school-firebase";
 import type { LessonMCQ } from "../../school-types";
 import McqQuestionDisplay from "../McqQuestionDisplay";
+import { DirectUploadButton } from "../DirectUploadButton";
 
 type Mode = "reading" | "writing" | "pdf" | "mcq";
 type NightMode = "normal" | "night" | "sepia";
@@ -391,12 +392,17 @@ export const SmartClass: React.FC<Props> = ({
 
             {/* PDF */}
             {editSheetTab === "pdf" && (
-              <div>
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-wide block mb-1.5">PDF URL</label>
-                <input value={editDraft.pdfUrl || ""}
-                  onChange={e => setEditDraft(prev => prev ? { ...prev, pdfUrl: e.target.value } : prev)}
-                  className="w-full px-3 py-2.5 border border-slate-200 dark:border-slate-600 rounded-xl text-sm text-slate-800 dark:text-white bg-white dark:bg-slate-800 focus:ring-2 focus:ring-orange-400 focus:outline-none"
-                  placeholder="https://drive.google.com/file/d/…" />
+              <div className="space-y-2 p-2.5 bg-orange-50/50 dark:bg-orange-950/20 rounded-xl border border-orange-200 dark:border-orange-800">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <label className="text-[10px] font-black text-slate-700 dark:text-slate-300 uppercase tracking-wide block">PDF Phone se Upload karein</label>
+                  <DirectUploadButton
+                    kind="pdf"
+                    compact
+                    currentUrl={editDraft.pdfUrl}
+                    onUploaded={(url) => setEditDraft(prev => prev ? { ...prev, pdfUrl: url } : prev)}
+                    onClear={() => setEditDraft(prev => prev ? { ...prev, pdfUrl: '' } : prev)}
+                  />
+                </div>
               </div>
             )}
 

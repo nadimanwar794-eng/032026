@@ -1,6 +1,6 @@
 // @ts-nocheck
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { WeeklyTest, MCQItem } from '../types';
 import { 
   Clock, AlertTriangle, CheckCircle, Trophy, ArrowLeft, ChevronLeft, 
@@ -11,6 +11,7 @@ import { addMistakes, removeMistakeByQuestion } from '../utils/mistakeBank';
 import { renderMathInHtml } from '../utils/mathUtils';
 import { hapticLight, hapticMedium, hapticStrong } from '../utils/haptic';
 import McqQuestionDisplay from './McqQuestionDisplay';
+import { SkipEntry, getSkipDurationSeconds, formatDurationLabel } from '../utils/officialMcqBank';
 
 interface Props {
   test: WeeklyTest;
@@ -25,6 +26,39 @@ export const WeeklyTestView: React.FC<Props> = ({ test, onComplete, onExit }) =>
   const [timeLeft, setTimeLeft] = useState<number>(0);
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+  // ── Auto-skip & Ladder Re-attempt State ──
+  const [skipEntries, setSkipEntries] = useState<Record<number, SkipEntry>>({});
+  const [isReattemptPhase, setIsReattemptPhase] = useState<boolean>(false);
+  const [reattemptRound, setReattemptRound] = useState<number>(0); // 0 = 30s, 1 = 2nd chance (1m), 2 = 3rd & last chance (5m)
+  const [roundInitialCount, setRoundInitialCount] = useState<number>(0);
+  const [qSecondsLeft, setQSecondsLeft] = useState<number>(30);
+  const [qMaxSeconds, setQMaxSeconds] = useState<number>(30);
+
+  const [skipToast, setSkipToast] = useState<{
+    id: number;
+    questionNumber: number;
+    nextDurationSeconds: number;
+    message: string;
+    subMessage?: string;
+    isAuto: boolean;
+  } | null>(null);
+
+  const [secondChanceModal, setSecondChanceModal] = useState<{
+    isOpen: boolean;
+    unsolvedCount: number;
+    initialRoundCount?: number;
+    remainingIndexes: number[];
+    round: number;
+    chanceLabel: string;
+    nextDuration: number;
+  } | null>(null);
+  const [reattemptIndices, setReattemptIndices] = useState<number[]>([]);
+
+  const getChanceLabel = (round: number) => {
+    if (round <= 1) return '2nd Chance';
+    return '3rd Chance';
+  };
   
   // UI Dialog & Drawer states
   const [showPaletteDrawer, setShowPaletteDrawer] = useState<boolean>(false);
@@ -280,16 +314,293 @@ export const WeeklyTestView: React.FC<Props> = ({ test, onComplete, onExit }) =>
     });
   };
 
+  // ── Sync per-question timer duration whenever currentIndex or round changes ──
+  useEffect(() => {
+    if (safeQuestions.length === 0 || isSubmitting) return;
+    const isAnswered = answers[currentIndex] !== undefined;
+    if (isAnswered) {
+      setQSecondsLeft(0);
+      return;
+    }
+
+    const skipEntry = skipEntries[currentIndex];
+    let duration = 30;
+    if (isReattemptPhase && skipEntry) {
+      duration = getSkipDurationSeconds(skipEntry.skipCount);
+    } else if (isReattemptPhase) {
+      duration = getSkipDurationSeconds(reattemptRound);
+    } else {
+      duration = 30;
+    }
+    setQSecondsLeft(duration);
+    setQMaxSeconds(duration);
+  }, [currentIndex, isReattemptPhase, reattemptRound, safeQuestions.length, answers[currentIndex], isSubmitting]);
+
+  // ── Per-question countdown timer interval (30s initial, escalating ladder on reattempt) ──
+  useEffect(() => {
+    if (
+      isSubmitting || 
+      showSubmitModal || 
+      showExitModal || 
+      showPaletteDrawer || 
+      (secondChanceModal && secondChanceModal.isOpen) ||
+      showResumeModal
+    ) {
+      return;
+    }
+    if (answers[currentIndex] !== undefined) return; // already answered
+
+    const interval = setInterval(() => {
+      setQSecondsLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          handleAutoSkip(currentIndex, false);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [
+    currentIndex,
+    answers[currentIndex],
+    isSubmitting,
+    showSubmitModal,
+    showExitModal,
+    showPaletteDrawer,
+    secondChanceModal,
+    isReattemptPhase,
+    safeQuestions.length,
+    showResumeModal
+  ]);
+
+  // ── Auto-skip notification toast ──
+  const showSkipToast = (qNum: number, nextDuration: number, isAuto: boolean, curDuration: number, isFinalChance: boolean = false) => {
+    setSkipToast({
+      id: Date.now(),
+      questionNumber: qNum,
+      nextDurationSeconds: isFinalChance ? 0 : nextDuration,
+      message: isAuto
+        ? `⏳ ${formatDurationLabel(curDuration)} Time Up! Q#${qNum} Auto-Skip ho gaya`
+        : `⏭️ Q#${qNum} Skip kiya gaya`,
+      subMessage: isFinalChance
+        ? `⚠️ Yeh aakhri (3rd) chance tha — iske baad aur chance nahi milega!`
+        : `Agla mauka ${formatDurationLabel(nextDuration)} timer ke sath aayega!`,
+      isAuto,
+    });
+  };
+
+  useEffect(() => {
+    if (!skipToast) return;
+    const t = setTimeout(() => {
+      setSkipToast(null);
+    }, 4500);
+    return () => clearTimeout(t);
+  }, [skipToast]);
+
+  // ── Auto-skip / Manual-skip Core Handler ──
+  const handleAutoSkip = (qIdx: number, isManual: boolean = false) => {
+    const total = safeQuestions.length;
+    if (total === 0) return;
+    if (answers[qIdx] !== undefined) {
+      handleNext();
+      return;
+    }
+
+    const prevSkips = skipEntries[qIdx]?.skipCount || 0;
+    const newSkipCount = isReattemptPhase ? reattemptRound + 1 : Math.max(1, prevSkips + 1);
+    const nextDur = getSkipDurationSeconds(newSkipCount);
+    const curDur = qMaxSeconds || 30;
+    const isFinalChance = isReattemptPhase && reattemptRound >= 2;
+
+    showSkipToast(qIdx + 1, nextDur, !isManual, curDur, isFinalChance);
+
+    const updatedSkips: Record<number, SkipEntry> = {
+      ...skipEntries,
+      [qIdx]: {
+        skipCount: newSkipCount,
+        lastSkippedAt: Date.now(),
+        nextDurationSeconds: nextDur,
+      },
+    };
+    setSkipEntries(updatedSkips);
+    setSkipped(prev => new Set(prev).add(qIdx));
+
+    if (isReattemptPhase) {
+      const remainingUnanswered = safeQuestions
+        .map((_, i) => i)
+        .filter(i => answers[i] === undefined && i !== qIdx);
+
+      const nextIdx = remainingUnanswered.find(i => i > qIdx);
+      if (nextIdx !== undefined) {
+        // Advance to next unanswered question in this round without popup
+        setCurrentIndex(nextIdx);
+      } else {
+        // Reached end of this re-attempt round pass!
+        const stillUnanswered: number[] = [];
+        for (let i = 0; i < total; i++) {
+          if (answers[i] === undefined) {
+            stillUnanswered.push(i);
+          }
+        }
+        if (answers[qIdx] === undefined && !stillUnanswered.includes(qIdx)) {
+          stillUnanswered.push(qIdx);
+        }
+
+        if (stillUnanswered.length === 0 || reattemptRound >= 2) {
+          // 3rd chance (reattemptRound === 2) is the LAST chance — no 4th chance!
+          handleSubmit();
+        } else {
+          // 2nd chance round finished: offer 3rd Chance (5 min timer)
+          const nextRound = reattemptRound + 1;
+          const nextDur = getSkipDurationSeconds(nextRound);
+          const label = getChanceLabel(nextRound);
+          setSecondChanceModal({
+            isOpen: true,
+            unsolvedCount: stillUnanswered.length,
+            initialRoundCount: roundInitialCount || total,
+            remainingIndexes: stillUnanswered,
+            round: nextRound,
+            chanceLabel: label,
+            nextDuration: nextDur,
+          });
+        }
+      }
+    } else {
+      if (qIdx < total - 1) {
+        setCurrentIndex(qIdx + 1);
+      } else {
+        const remainingUnsolved: number[] = [];
+        for (let i = 0; i < total; i++) {
+          if (answers[i] === undefined && i !== qIdx) remainingUnsolved.push(i);
+        }
+        if (answers[qIdx] === undefined && !remainingUnsolved.includes(qIdx)) {
+          remainingUnsolved.push(qIdx);
+        }
+
+        if (remainingUnsolved.length > 0) {
+          setSecondChanceModal({
+            isOpen: true,
+            unsolvedCount: remainingUnsolved.length,
+            initialRoundCount: total,
+            remainingIndexes: remainingUnsolved,
+            round: 1,
+            chanceLabel: '2nd Chance',
+            nextDuration: 60,
+          });
+        } else {
+          handleSubmit();
+        }
+      }
+    }
+  };
+
   const handleNext = () => {
     hapticLight();
-    if (currentIndex < safeQuestions.length - 1) {
-      if (answers[currentIndex] === undefined) {
-        setSkipped(prev => new Set(prev).add(currentIndex));
+    const total = safeQuestions.length;
+    if (isReattemptPhase) {
+      const remaining = safeQuestions
+        .map((_, i) => i)
+        .filter(i => answers[i] === undefined && i !== currentIndex);
+      
+      const nextIdx = remaining.find(i => i > currentIndex);
+      if (nextIdx !== undefined) {
+        // Advance to next question in this round without popup
+        setCurrentIndex(nextIdx);
+      } else {
+        // Reached end of this re-attempt round pass!
+        const stillUnanswered: number[] = [];
+        for (let i = 0; i < total; i++) {
+          if (answers[i] === undefined) {
+            stillUnanswered.push(i);
+          }
+        }
+
+        if (stillUnanswered.length === 0 || reattemptRound >= 2) {
+          // 3rd chance (reattemptRound === 2) is the LAST chance — no 4th chance!
+          handleSubmit();
+        } else {
+          const nextRound = reattemptRound + 1;
+          const nextDur = getSkipDurationSeconds(nextRound);
+          const label = getChanceLabel(nextRound);
+          setSecondChanceModal({
+            isOpen: true,
+            unsolvedCount: stillUnanswered.length,
+            initialRoundCount: roundInitialCount || total,
+            remainingIndexes: stillUnanswered,
+            round: nextRound,
+            chanceLabel: label,
+            nextDuration: nextDur,
+          });
+        }
       }
-      setCurrentIndex(prev => prev + 1);
     } else {
-      setShowSubmitModal(true);
+      if (currentIndex < total - 1) {
+        setCurrentIndex(prev => prev + 1);
+      } else {
+        const remainingUnsolved: number[] = [];
+        for (let i = 0; i < total; i++) {
+          if (answers[i] === undefined) remainingUnsolved.push(i);
+        }
+
+        if (remainingUnsolved.length > 0) {
+          setSecondChanceModal({
+            isOpen: true,
+            unsolvedCount: remainingUnsolved.length,
+            initialRoundCount: total,
+            remainingIndexes: remainingUnsolved,
+            round: 1,
+            chanceLabel: '2nd Chance',
+            nextDuration: 60,
+          });
+        } else {
+          setShowSubmitModal(true);
+        }
+      }
     }
+  };
+
+  const handleAcceptSecondChance = () => {
+    if (!secondChanceModal) return;
+    hapticMedium();
+    setIsReattemptPhase(true);
+    setReattemptRound(secondChanceModal.round);
+    setRoundInitialCount(secondChanceModal.initialRoundCount || secondChanceModal.remainingIndexes.length);
+    setReattemptIndices(secondChanceModal.remainingIndexes || []);
+    const targetIdx = secondChanceModal.remainingIndexes[0] ?? 0;
+    setCurrentIndex(targetIdx);
+    const dur = secondChanceModal.nextDuration || 60;
+    setQSecondsLeft(dur);
+    setQMaxSeconds(dur);
+
+    // Apply round timer to all remaining questions
+    const updatedSkips = { ...skipEntries };
+    (secondChanceModal.remainingIndexes || []).forEach((idx) => {
+      const prevSkip = updatedSkips[idx]?.skipCount || 0;
+      const newSkipCount = Math.max(secondChanceModal.round, prevSkip + 1);
+      updatedSkips[idx] = {
+        skipCount: newSkipCount,
+        lastSkippedAt: Date.now(),
+        nextDurationSeconds: dur,
+      };
+    });
+    setSkipEntries(updatedSkips);
+
+    setSkipToast({
+      id: Date.now(),
+      questionNumber: targetIdx + 1,
+      nextDurationSeconds: dur,
+      message: `🎯 ${secondChanceModal.chanceLabel} Round Shuru!`,
+      subMessage: `${(secondChanceModal.remainingIndexes || []).length} Unsolved Questions ke liye har question par ${formatDurationLabel(dur)} mila hai!`,
+      isAuto: false,
+    });
+    setSecondChanceModal(null);
+  };
+
+  const handleDeclineSecondChance = () => {
+    setSecondChanceModal(null);
+    handleSubmit();
   };
 
   const handlePrev = () => {
@@ -314,6 +625,25 @@ export const WeeklyTestView: React.FC<Props> = ({ test, onComplete, onExit }) =>
   const markedCount = bookmarked.size;
   const skippedCount = Array.from(skipped).filter(idx => answers[idx] === undefined).length;
   const unattemptedCount = Math.max(0, safeQuestions.length - attemptedCount);
+
+  // ── 2nd Chance Unsolved Live Tracker (e.g. 1/10, 2/10) ──
+  const activeUnsolvedIndices = useMemo(() => {
+    if (!isReattemptPhase) return [];
+    if (reattemptIndices.length > 0) return reattemptIndices;
+    return safeQuestions.map((_, i) => i).filter(i => answers[i] === undefined);
+  }, [isReattemptPhase, reattemptIndices, safeQuestions, answers]);
+
+  const currentUnsolvedPos = useMemo(() => {
+    if (!isReattemptPhase) return 1;
+    const idx = activeUnsolvedIndices.indexOf(currentIndex);
+    return idx >= 0 ? idx + 1 : 1;
+  }, [isReattemptPhase, activeUnsolvedIndices, currentIndex]);
+
+  const totalUnsolvedInRound = useMemo(() => {
+    if (!isReattemptPhase) return 0;
+    return roundInitialCount || activeUnsolvedIndices.length || 1;
+  }, [isReattemptPhase, roundInitialCount, activeUnsolvedIndices]);
+
   const currentQ = safeQuestions[currentIndex];
   const isCurrentAnswered = answers[currentIndex] !== undefined;
   const isCurrentMarked = bookmarked.has(currentIndex);
@@ -352,8 +682,19 @@ export const WeeklyTestView: React.FC<Props> = ({ test, onComplete, onExit }) =>
             <h1 className="font-extrabold text-slate-800 text-sm sm:text-base leading-tight truncate">
               {test.name}
             </h1>
-            <div className="flex items-center gap-2 text-[11px] text-slate-500 font-medium">
-              <span>Q. {currentIndex + 1} of {safeQuestions.length}</span>
+            <div className="flex items-center gap-2 text-[11px] text-slate-500 font-medium flex-wrap">
+              {isReattemptPhase ? (
+                <>
+                  <span className="font-black text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                    ⚡ {getChanceLabel(reattemptRound)}: {currentUnsolvedPos}/{totalUnsolvedInRound} Unsolved
+                  </span>
+                  <span className="font-bold text-slate-600">
+                    (Q. {currentIndex + 1} of {safeQuestions.length})
+                  </span>
+                </>
+              ) : (
+                <span>Q. {currentIndex + 1} of {safeQuestions.length}</span>
+              )}
               <span className="w-1 h-1 rounded-full bg-slate-300" />
               <span className="text-emerald-600 font-bold">{attemptedCount} Answered</span>
             </div>
@@ -388,7 +729,7 @@ export const WeeklyTestView: React.FC<Props> = ({ test, onComplete, onExit }) =>
             <LayoutGrid size={15} />
             <span className="hidden md:inline">Palette</span>
             <span className="bg-white/20 text-white text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold">
-              {currentIndex + 1}/{safeQuestions.length}
+              {isReattemptPhase ? `${currentUnsolvedPos}/${totalUnsolvedInRound} Left` : `${currentIndex + 1}/${safeQuestions.length}`}
             </span>
           </button>
         </div>
@@ -473,10 +814,19 @@ export const WeeklyTestView: React.FC<Props> = ({ test, onComplete, onExit }) =>
           <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm flex flex-col overflow-hidden">
             
             {/* Question Card Top Bar */}
-            <div className="px-4 py-3 bg-slate-50/90 border-b border-slate-200/80 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
+            <div className="px-3 sm:px-4 py-3 bg-slate-50/90 border-b border-slate-200/80 flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2 flex-wrap min-w-0">
                 <span className="px-2.5 py-1 rounded-lg bg-indigo-600 text-white font-black text-xs shadow-xs">
                   Q{currentIndex + 1}
+                  {isReattemptPhase && (
+                    <span className="ml-1 text-amber-200 font-black">
+                      • Unsolved {currentUnsolvedPos}/{totalUnsolvedInRound}
+                    </span>
+                  )}
+                </span>
+                {/* Round Badge */}
+                <span className="px-2 py-0.5 rounded-md bg-purple-50 border border-purple-200 text-purple-700 font-bold text-[10px]">
+                  {isReattemptPhase ? `⚡ ${getChanceLabel(reattemptRound)}` : '🎯 Round 1'} ({formatDurationLabel(qMaxSeconds)})
                 </span>
                 <span className="text-xs font-bold text-slate-600 hidden xs:inline">
                   Single Choice (+1.00 Mark)
@@ -489,8 +839,30 @@ export const WeeklyTestView: React.FC<Props> = ({ test, onComplete, onExit }) =>
                 )}
               </div>
 
-              {/* Text Size Adjuster & Fast Mark Toggle */}
-              <div className="flex items-center gap-1.5">
+              {/* Text Size Adjuster, Countdown Timer & Fast Mark Toggle */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                {isCurrentAnswered ? (
+                  <span className="flex items-center gap-1 text-[11px] font-black px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-300">
+                    <CheckCircle2 size={12} className="text-emerald-600" />
+                    <span>Solved</span>
+                  </span>
+                ) : (
+                  <div 
+                    className={`flex items-center gap-1 font-mono font-black text-xs px-2.5 py-0.5 rounded-full border transition-all ${
+                      qSecondsLeft <= 5
+                        ? 'bg-rose-100 text-rose-700 border-rose-300 animate-pulse'
+                        : qSecondsLeft <= 15
+                        ? 'bg-amber-100 text-amber-800 border-amber-300'
+                        : 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                    }`}
+                    title="Auto-skip timer for this question"
+                  >
+                    <Clock size={12} className={qSecondsLeft <= 5 ? 'text-rose-600' : 'text-emerald-600'} />
+                    <span>{qSecondsLeft}s</span>
+                    <span className="text-[10px] opacity-60">/ {qMaxSeconds}s</span>
+                  </div>
+                )}
+
                 <div className="flex items-center bg-white border border-slate-200 rounded-lg p-0.5 text-xs font-bold text-slate-600">
                   <button
                     type="button"
@@ -531,6 +903,26 @@ export const WeeklyTestView: React.FC<Props> = ({ test, onComplete, onExit }) =>
                   <Star size={15} className={isCurrentMarked ? 'fill-amber-500 text-amber-500' : ''} />
                 </button>
               </div>
+            </div>
+
+            {/* Question countdown progress line */}
+            <div className="w-full bg-slate-100 h-1 overflow-hidden">
+              <div 
+                className={`h-full transition-all duration-300 ${
+                  isCurrentAnswered
+                    ? 'bg-emerald-500 w-full'
+                    : qSecondsLeft <= 5
+                    ? 'bg-rose-500'
+                    : qSecondsLeft <= 15
+                    ? 'bg-amber-500'
+                    : 'bg-indigo-500'
+                }`}
+                style={{ 
+                  width: isCurrentAnswered 
+                    ? '100%' 
+                    : `${Math.max(0, Math.min(100, (qSecondsLeft / qMaxSeconds) * 100))}%` 
+                }}
+              />
             </div>
 
             {/* Question Text Area */}
@@ -627,7 +1019,27 @@ export const WeeklyTestView: React.FC<Props> = ({ test, onComplete, onExit }) =>
           id="btn-trigger-submit-modal"
           onClick={() => {
             hapticMedium();
-            setShowSubmitModal(true);
+            const total = safeQuestions.length;
+            const remainingUnsolved: number[] = [];
+            for (let i = 0; i < total; i++) {
+              if (answers[i] === undefined) remainingUnsolved.push(i);
+            }
+            if (remainingUnsolved.length > 0 && (!isReattemptPhase || reattemptRound < 2)) {
+              const nextRound = isReattemptPhase ? reattemptRound + 1 : 1;
+              const nextDurSeconds = getSkipDurationSeconds(nextRound);
+              const label = getChanceLabel(nextRound);
+              setSecondChanceModal({
+                isOpen: true,
+                unsolvedCount: remainingUnsolved.length,
+                initialRoundCount: isReattemptPhase ? (roundInitialCount || remainingUnsolved.length) : total,
+                remainingIndexes: remainingUnsolved,
+                round: nextRound,
+                chanceLabel: label,
+                nextDuration: nextDurSeconds,
+              });
+            } else {
+              setShowSubmitModal(true);
+            }
           }}
           disabled={isSubmitting}
           className="flex items-center gap-1.5 px-3.5 sm:px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs sm:text-sm shadow-md shadow-emerald-600/25 transition cursor-pointer whitespace-nowrap"
@@ -943,6 +1355,130 @@ export const WeeklyTestView: React.FC<Props> = ({ test, onComplete, onExit }) =>
                 className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs active:scale-95 transition shadow-md shadow-indigo-600/20"
               >
                 ▶️ Resume
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── AUTO-SKIP NOTIFICATION TOAST ── */}
+      {skipToast && (
+        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300 pointer-events-none max-w-sm w-[92%] sm:w-auto">
+          <div className="bg-slate-900/95 backdrop-blur-md text-white px-4 py-3 rounded-2xl shadow-2xl border border-amber-500/40 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 to-orange-500 flex items-center justify-center text-white shrink-0 shadow-md shadow-orange-500/30">
+              <RotateCcw size={20} className="animate-spin-slow" />
+            </div>
+            <div className="flex-1 min-w-0 text-left">
+              <p className="text-xs font-black text-amber-300 leading-tight">
+                {skipToast.message}
+              </p>
+              {skipToast.subMessage && (
+                <p className="text-[11px] font-semibold text-slate-300 mt-0.5 leading-tight">
+                  {skipToast.subMessage}
+                </p>
+              )}
+            </div>
+            {skipToast.nextDurationSeconds > 0 && (
+              <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-400 text-slate-950 uppercase tracking-wider">
+                {formatDurationLabel(skipToast.nextDurationSeconds)}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── 2ND CHANCE CONFIRMATION MODAL (Ladder Re-attempt) ── */}
+      {secondChanceModal && secondChanceModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4 animate-in fade-in duration-200">
+          <div className="max-w-md w-full rounded-3xl p-6 bg-white border border-slate-200 text-slate-900 shadow-2xl flex flex-col gap-4 text-center transform transition-all animate-in zoom-in-95">
+            {/* Top Graphic / Badge */}
+            <div className="mx-auto w-16 h-16 rounded-3xl bg-gradient-to-tr from-amber-500 via-orange-500 to-amber-600 flex items-center justify-center text-white shadow-xl shadow-orange-500/30">
+              <Sparkles size={32} className="animate-pulse" />
+            </div>
+
+            {/* Main Header / Question */}
+            <div className="flex flex-col gap-1.5">
+              <div className="inline-flex items-center gap-1.5 mx-auto px-3 py-1 rounded-full text-xs font-black bg-amber-100 text-amber-800 border border-amber-300">
+                <RotateCcw size={12} />
+                <span>Round Complete • Re-attempt Choice</span>
+              </div>
+              <h3 className="text-xl sm:text-2xl font-black text-slate-900 leading-tight">
+                {secondChanceModal.initialRoundCount && secondChanceModal.initialRoundCount > secondChanceModal.unsolvedCount ? (
+                  <span>
+                    Aapne {secondChanceModal.initialRoundCount} me se{' '}
+                    <span className="text-emerald-600 underline font-black">
+                      {Math.max(0, secondChanceModal.initialRoundCount - secondChanceModal.unsolvedCount)}
+                    </span>{' '}
+                    solve kiye,{' '}
+                    <span className="text-amber-600 underline decoration-amber-500 underline-offset-4">
+                      {secondChanceModal.unsolvedCount}
+                    </span>{' '}
+                    abhi bhi baaki hain!
+                  </span>
+                ) : (
+                  <span>
+                    Aap <span className="text-amber-600 underline decoration-amber-500 underline-offset-4">{secondChanceModal.unsolvedCount}</span> Question nahi bana paye!
+                  </span>
+                )}
+              </h3>
+              <p className="text-sm font-bold text-slate-600">
+                Kya aapko {secondChanceModal.chanceLabel} chahiye? 🎯
+              </p>
+            </div>
+
+            {/* Status Summary Card */}
+            <div className="p-3 rounded-2xl bg-amber-50/70 border border-amber-200/80 text-xs text-amber-950 font-semibold text-center leading-relaxed">
+              📌 <strong className="font-bold">Round Summary:</strong> Aapne{' '}
+              <span className="font-black text-slate-900">{secondChanceModal.initialRoundCount || safeQuestions.length}</span> me se{' '}
+              <span className="font-black text-emerald-700">
+                {Math.max(0, (secondChanceModal.initialRoundCount || safeQuestions.length) - secondChanceModal.unsolvedCount)}
+              </span>{' '}
+              solve kiye,{' '}
+              <span className="font-black text-amber-700">{secondChanceModal.unsolvedCount}</span> abhi bhi baaki hain.
+            </div>
+
+            {/* Quick Summary Pill Strip */}
+            <div className="grid grid-cols-2 gap-2 p-3 rounded-2xl bg-slate-50 border border-slate-200 text-xs">
+              <div className="flex flex-col items-center justify-center p-2 rounded-xl bg-emerald-50 border border-emerald-200">
+                <span className="text-[10px] font-bold text-emerald-700 uppercase">Hal Kiye Gaye (Total)</span>
+                <span className="text-base font-black text-emerald-600">
+                  {attemptedCount}
+                </span>
+              </div>
+              <div className="flex flex-col items-center justify-center p-2 rounded-xl bg-amber-50 border border-amber-200">
+                <span className="text-[10px] font-bold text-amber-700 uppercase">Nahi Bane (Remaining)</span>
+                <span className="text-base font-black text-amber-600">
+                  {secondChanceModal.unsolvedCount}
+                </span>
+              </div>
+            </div>
+
+            {/* Info / Rule Banner */}
+            <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-left text-amber-900 leading-relaxed flex items-start gap-2.5">
+              <Clock className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <strong className="font-bold">{secondChanceModal.chanceLabel} Rule:</strong> Chhute huye questions ko hal karne ke liye har question par <span className="font-black underline">{formatDurationLabel(secondChanceModal.nextDuration)}</span> ka timer milega!{secondChanceModal.round >= 2 ? ' ⚠️ Yeh aakhri (3rd) chance hai — iske baad 4th chance nahi milega!' : ' Agar abhi score jama karna chahte hain toh Submit button dabayein.'}
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-col gap-2.5 mt-1">
+              <button
+                type="button"
+                onClick={handleAcceptSecondChance}
+                className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-600 text-white font-black text-sm sm:text-base shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2 cursor-pointer active:scale-98 transition-all"
+              >
+                <RotateCcw size={18} />
+                <span>Haan, {secondChanceModal.chanceLabel} Chahiye ⚡ ({formatDurationLabel(secondChanceModal.nextDuration)} Timer)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDeclineSecondChance}
+                className="w-full py-3 px-4 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer active:scale-98 transition-all"
+              >
+                <CheckCircle2 size={16} className="text-slate-500" />
+                <span>Nahi, Test Submit Karein 📤 (Final Result)</span>
               </button>
             </div>
           </div>

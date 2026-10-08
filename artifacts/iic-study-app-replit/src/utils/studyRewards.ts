@@ -65,6 +65,13 @@ export const deferCreditsFromXp = (
 ): void => {
   if (!userId || !Number.isFinite(xpEarned) || xpEarned <= 0) return;
   try {
+    const raw = localStorage.getItem('nst_current_user');
+    if (raw) {
+      const u = JSON.parse(raw);
+      // Without credit economy: user gets XP but does NOT earn credits from XP
+      if (u?.studyMode && u.studyMode !== 'CREDIT') return;
+    }
+
     const isSubscribed = isUserSubscribed(userId);
     // Basic/Ultra: no penalty (divisor = 6)
     // Free: routine ON = 6, routine OFF = half credits (divisor = 12)

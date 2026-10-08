@@ -1,6 +1,12 @@
 import { MCQItem, ClassLevel, SystemSettings } from '../types';
 import { parseMCQText, extractStatements } from './mcqParser';
 
+export interface SkipEntry {
+  skipCount: number; // 1 = first skip, 2 = second skip, etc.
+  lastSkippedAt: number;
+  nextDurationSeconds: number; // 60, 120, 180, 240, 300
+}
+
 export interface OfficialMcqProgress {
   date: string;
   classLevel: string;
@@ -10,7 +16,35 @@ export interface OfficialMcqProgress {
   correctCount: number;
   wrongCount: number;
   isCompleted: boolean;
+  skippedQuestions?: Record<number, SkipEntry>;
+  isReattemptPhase?: boolean;
+  reattemptRound?: number;
+  initialRoundCount?: number;
 }
+
+export const MAX_REATTEMPT_ROUNDS = 2; // 1 = 2nd Chance (1 min), 2 = 3rd & Final Chance (5 min)
+
+/**
+ * Returns ladder timer for questions:
+ * 0 skips (1st attempt) -> 30 sec
+ * 1st skip re-attempt (2nd Chance) -> 60 sec (1 min)
+ * 2nd skip re-attempt (3rd & Final Chance) -> 300 sec (5 min)
+ */
+export const getSkipDurationSeconds = (skipCount: number): number => {
+  if (skipCount <= 0) return 30;
+  if (skipCount === 1) return 60;
+  return 300;
+};
+
+/**
+ * Formats seconds into human-readable label: e.g. "30s", "60 sec", "2 min", "5 min"
+ */
+export const formatDurationLabel = (seconds: number): string => {
+  if (seconds < 60) return `${seconds} sec`;
+  const mins = Math.floor(seconds / 60);
+  const rem = seconds % 60;
+  return rem > 0 ? `${mins} min ${rem}s` : `${mins} min`;
+};
 
 // ─── Deterministic PRNG (Mulberry32) ──────────────────────────────────────────
 export function createMulberry32(seedStr: string): () => number {

@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { DailyChallengeRankCard } from './DailyChallengeRankCard';
 import { getYesterdayDateKey, isChallengePrizeClaimed } from '../utils/challengePrizeSystem';
-import { loadRoutineData, getUserSubTier, getDailyClaimAmount } from '../utils/routineStorage';
+import { loadRoutineData, getUserSubTier, getDailyClaimAmount, isMultiPageRoutineNote, sanitizeRoutineCategories } from '../utils/routineStorage';
 import { getLevelInfo } from '../utils/levelSystem';
 import { getDueItems, getAllBuckets, bucketKey, markNotesReviewed, type WeakBucket } from '../utils/revisionTrackerV2';
 import { TodayAllNotesModal } from './TodayAllNotesModal';
@@ -28,6 +28,7 @@ import type { User, SystemSettings, Challenge20 } from '../types';
 import type { MistakeEntry } from '../utils/mistakeBank';
 import { getChallengeDateKey, isDailyChallenge20 } from '../utils/challengeGenerator';
 import { useAppTheme } from '../utils/themeContext';
+import { SevenDayRoutineModal } from './SevenDayRoutineModal';
 
 // ── 3-Tier Hierarchy Data Models for Revision ──────────────────────────────────
 export interface ChapterGroup {
@@ -163,6 +164,222 @@ interface Props {
 
 // ── Small reusable pieces ─────────────────────────────────────────────────────
 
+export interface SubjectCardTheme {
+  cardBg: string;
+  borderColor: string;
+  iconBg: string;
+  iconBorder: string;
+  titleColor: string;
+  metaColor: string;
+  readBtnBg: string;
+  readBtnText: string;
+  readBtnBorder: string;
+  readIconColor: string;
+  readBadgeBg: string;
+  mcqBtnGrad: string;
+  mcqBadgeBg: string;
+}
+
+export function getRevisionSubjectTheme(subjectName: string, subjectId: string): SubjectCardTheme {
+  const s = (subjectName + ' ' + subjectId).toLowerCase();
+  if (s.includes('medieval') || s.includes('ancient') || s.includes('itihaas') || s.includes('history') || s.includes('modern')) {
+    // Sepia / Royal Amber History
+    return {
+      cardBg: 'linear-gradient(135deg, #fffdf8 0%, #fef3c7 100%)',
+      borderColor: '#fcd34d',
+      iconBg: '#fef3c7',
+      iconBorder: '#f59e0b',
+      titleColor: '#78350f',
+      metaColor: '#92400e',
+      readBtnBg: '#fef3c7',
+      readBtnText: '#92400e',
+      readBtnBorder: '#fde68a',
+      readIconColor: '#b45309',
+      readBadgeBg: '#b45309',
+      mcqBtnGrad: 'linear-gradient(135deg, #d97706 0%, #b45309 100%)',
+      mcqBadgeBg: 'rgba(255,255,255,0.25)',
+    };
+  }
+  if (s.includes('math') || s.includes('ganit') || s.includes('ankganit') || s.includes('arith')) {
+    // Royal Indigo / Sapphire Math
+    return {
+      cardBg: 'linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%)',
+      borderColor: '#c4b5fd',
+      iconBg: '#ede9fe',
+      iconBorder: '#8b5cf6',
+      titleColor: '#4c1d95',
+      metaColor: '#6d28d9',
+      readBtnBg: '#ede9fe',
+      readBtnText: '#6d28d9',
+      readBtnBorder: '#ddd6fe',
+      readIconColor: '#7c3aed',
+      readBadgeBg: '#7c3aed',
+      mcqBtnGrad: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
+      mcqBadgeBg: 'rgba(255,255,255,0.25)',
+    };
+  }
+  if (s.includes('sarsangrah') || s.includes('sangrah') || s.includes('gayan') || s.includes('miscell')) {
+    // Royal Fuchsia / Purple Encyclopedia
+    return {
+      cardBg: 'linear-gradient(135deg, #fdfaff 0%, #fae8ff 100%)',
+      borderColor: '#f0abfc',
+      iconBg: '#fae8ff',
+      iconBorder: '#d946ef',
+      titleColor: '#701a75',
+      metaColor: '#86198f',
+      readBtnBg: '#fae8ff',
+      readBtnText: '#86198f',
+      readBtnBorder: '#f5d0fe',
+      readIconColor: '#a21caf',
+      readBadgeBg: '#a21caf',
+      mcqBtnGrad: 'linear-gradient(135deg, #c026d3 0%, #9333ea 100%)',
+      mcqBadgeBg: 'rgba(255,255,255,0.25)',
+    };
+  }
+  if (s.includes('geo') || s.includes('bhugol') || s.includes('map') || s.includes('earth')) {
+    // Ocean Teal / Cyan Geography
+    return {
+      cardBg: 'linear-gradient(135deg, #f0fdfa 0%, #e0f2fe 100%)',
+      borderColor: '#7dd3fc',
+      iconBg: '#cffafe',
+      iconBorder: '#0284c7',
+      titleColor: '#0c4a6e',
+      metaColor: '#0369a1',
+      readBtnBg: '#e0f2fe',
+      readBtnText: '#0369a1',
+      readBtnBorder: '#bae6fd',
+      readIconColor: '#0284c7',
+      readBadgeBg: '#0284c7',
+      mcqBtnGrad: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+      mcqBadgeBg: 'rgba(255,255,255,0.25)',
+    };
+  }
+  if (s.includes('bio') || s.includes('jeev') || s.includes('botan') || s.includes('zool')) {
+    // Fresh Emerald / Mint Biology
+    return {
+      cardBg: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)',
+      borderColor: '#86efac',
+      iconBg: '#dcfce7',
+      iconBorder: '#16a34a',
+      titleColor: '#14532d',
+      metaColor: '#15803d',
+      readBtnBg: '#dcfce7',
+      readBtnText: '#15803d',
+      readBtnBorder: '#bbf7d0',
+      readIconColor: '#16a34a',
+      readBadgeBg: '#16a34a',
+      mcqBtnGrad: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
+      mcqBadgeBg: 'rgba(255,255,255,0.25)',
+    };
+  }
+  if (s.includes('physic') || s.includes('bhautik')) {
+    // Electric Blue / Indigo Physics
+    return {
+      cardBg: 'linear-gradient(135deg, #eff6ff 0%, #e0e7ff 100%)',
+      borderColor: '#a5b4fc',
+      iconBg: '#e0e7ff',
+      iconBorder: '#6366f1',
+      titleColor: '#1e1b4b',
+      metaColor: '#3730a3',
+      readBtnBg: '#e0e7ff',
+      readBtnText: '#3730a3',
+      readBtnBorder: '#c7d2fe',
+      readIconColor: '#4f46e5',
+      readBadgeBg: '#4f46e5',
+      mcqBtnGrad: 'linear-gradient(135deg, #4f46e5 0%, #3730a3 100%)',
+      mcqBadgeBg: 'rgba(255,255,255,0.25)',
+    };
+  }
+  if (s.includes('chem') || s.includes('rasayan')) {
+    // Ruby / Rose Chemistry
+    return {
+      cardBg: 'linear-gradient(135deg, #fff1f2 0%, #ffe4e6 100%)',
+      borderColor: '#fda4af',
+      iconBg: '#ffe4e6',
+      iconBorder: '#f43f5e',
+      titleColor: '#881337',
+      metaColor: '#9f1239',
+      readBtnBg: '#ffe4e6',
+      readBtnText: '#9f1239',
+      readBtnBorder: '#fecdd3',
+      readIconColor: '#e11d48',
+      readBadgeBg: '#e11d48',
+      mcqBtnGrad: 'linear-gradient(135deg, #e11d48 0%, #be123c 100%)',
+      mcqBadgeBg: 'rgba(255,255,255,0.25)',
+    };
+  }
+  if (s.includes('pol') || s.includes('civic') || s.includes('samvidhan') || s.includes('rajniti')) {
+    // Regal Crimson Polity
+    return {
+      cardBg: 'linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)',
+      borderColor: '#fca5a5',
+      iconBg: '#fee2e2',
+      iconBorder: '#ef4444',
+      titleColor: '#7f1d1d',
+      metaColor: '#991b1b',
+      readBtnBg: '#fee2e2',
+      readBtnText: '#991b1b',
+      readBtnBorder: '#fecaca',
+      readIconColor: '#dc2626',
+      readBadgeBg: '#dc2626',
+      mcqBtnGrad: 'linear-gradient(135deg, #dc2626 0%, #991b1b 100%)',
+      mcqBadgeBg: 'rgba(255,255,255,0.25)',
+    };
+  }
+  if (s.includes('eco') || s.includes('arthashastra')) {
+    // Emerald Gold Economics
+    return {
+      cardBg: 'linear-gradient(135deg, #f0fdfa 0%, #ccfbf1 100%)',
+      borderColor: '#5eead4',
+      iconBg: '#ccfbf1',
+      iconBorder: '#14b8a6',
+      titleColor: '#134e4a',
+      metaColor: '#115e59',
+      readBtnBg: '#ccfbf1',
+      readBtnText: '#115e59',
+      readBtnBorder: '#99f6e4',
+      readIconColor: '#0d9488',
+      readBadgeBg: '#0d9488',
+      mcqBtnGrad: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)',
+      mcqBadgeBg: 'rgba(255,255,255,0.25)',
+    };
+  }
+  if (s.includes('hind')) {
+    // Terracotta Sunset Hindi
+    return {
+      cardBg: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)',
+      borderColor: '#fdba74',
+      iconBg: '#ffedd5',
+      iconBorder: '#f97316',
+      titleColor: '#7c2d12',
+      metaColor: '#9a3412',
+      readBtnBg: '#ffedd5',
+      readBtnText: '#9a3412',
+      readBtnBorder: '#fed7aa',
+      readIconColor: '#ea580c',
+      readBadgeBg: '#ea580c',
+      mcqBtnGrad: 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)',
+      mcqBadgeBg: 'rgba(255,255,255,0.25)',
+    };
+  }
+  // Default fallback for any other subject: Sleek Violet Indigo
+  return {
+    cardBg: 'linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%)',
+    borderColor: '#d8b4fe',
+    iconBg: '#f3e8ff',
+    iconBorder: '#a855f7',
+    titleColor: '#581c87',
+    metaColor: '#6b21a8',
+    readBtnBg: '#f3e8ff',
+    readBtnText: '#6b21a8',
+    readBtnBorder: '#e9d5ff',
+    readIconColor: '#9333ea',
+    readBadgeBg: '#9333ea',
+    mcqBtnGrad: 'linear-gradient(135deg, #9333ea 0%, #7e22ce 100%)',
+    mcqBadgeBg: 'rgba(255,255,255,0.25)',
+  };
+}
+
 const SectionCard: React.FC<{
   emoji: string;
   title: string;
@@ -171,25 +388,28 @@ const SectionCard: React.FC<{
   children: React.ReactNode;
   actionLabel?: string;
   onAction?: () => void;
-}> = ({ emoji, title, subtitle, accent, children, actionLabel, onAction }) => {
+  cardBg?: string;
+  cardBorder?: string;
+  headerBg?: string;
+}> = ({ emoji, title, subtitle, accent, children, actionLabel, onAction, cardBg: propBg, cardBorder: propBorder, headerBg }) => {
   const theme = useAppTheme();
-  const cardBg = (theme as any)?.soft || (theme as any)?.profileCardBg || '#f8fafc';
-  const cardBorder = (theme as any)?.borderSoft || (theme as any)?.cardBorder || `${theme.primary}25`;
+  const cardBg = propBg || (theme as any)?.soft || (theme as any)?.profileCardBg || '#f8fafc';
+  const cardBorder = propBorder || (theme as any)?.borderSoft || (theme as any)?.cardBorder || `${theme.primary}25`;
   const effectiveAccent = accent || theme.primary;
 
   return (
     <div
-      className="rounded-3xl shadow-sm overflow-hidden transition-colors"
+      className="rounded-3xl shadow-sm overflow-hidden transition-all"
       style={{
         background: cardBg,
         border: `1.5px solid ${cardBorder}`,
       }}
     >
-      <div className="px-4 pt-4 pb-3 flex items-center justify-between" style={{ borderBottom: `1px solid ${cardBorder}30` }}>
+      <div className="px-4 pt-4 pb-3 flex items-center justify-between" style={{ background: headerBg || 'transparent', borderBottom: `1px solid ${cardBorder}40` }}>
         <div className="flex items-center gap-2.5">
           <div
             className="w-9 h-9 rounded-xl flex items-center justify-center text-lg shrink-0 shadow-xs"
-            style={{ background: `${effectiveAccent}18`, color: effectiveAccent }}
+            style={{ background: `${effectiveAccent}18`, border: `1px solid ${effectiveAccent}30`, color: effectiveAccent }}
           >
             {emoji}
           </div>
@@ -201,8 +421,8 @@ const SectionCard: React.FC<{
         {actionLabel && onAction && (
           <button
             onClick={onAction}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-black text-white active:scale-95 transition-all shrink-0 shadow-xs"
-            style={{ background: theme.btnGrad || effectiveAccent }}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-black text-white active:scale-95 transition-all shrink-0 shadow-xs hover:opacity-95"
+            style={{ background: effectiveAccent }}
           >
             {actionLabel} <ChevronRight size={11} />
           </button>
@@ -258,6 +478,7 @@ export const DailyEventPage: React.FC<Props> = ({
   const [challengeTick, setChallengeTick] = useState(0);
   const [claimingChallengeId, setClaimingChallengeId] = useState<string | null>(null);
   const [showYesterdayRankModal, setShowYesterdayRankModal] = useState(false);
+  const [show7DayModal, setShow7DayModal] = useState(false);
 
   // 3-Tier Hierarchy & Subject-Wise state for Revision Hub
   const [selectedRevisionSubjectId, setSelectedRevisionSubjectId] = useState<string>('ALL');
@@ -426,27 +647,37 @@ export const DailyEventPage: React.FC<Props> = ({
 
   const routineEnabled = routineData?.enabled ?? false;
 
+  // Single-subject books from admin settings (One Page / One Subject Books)
+  const singleBookNames = useMemo(() => {
+    const list = (settings?.customBooks || []) as any[];
+    const names = list
+      .filter(b => b.type === 'single')
+      .map(b => (b.name || '').toLowerCase().trim())
+      .filter(Boolean);
+    const ids = list
+      .filter(b => b.type === 'single')
+      .map(b => (b.id || '').toLowerCase().trim())
+      .filter(Boolean);
+    return [...names, ...ids];
+  }, [settings?.customBooks]);
+
   // Build today's lesson list from routineCategories (primary system)
   const todaySlots = useMemo(() => {
-    const cats = (routineData?.routineCategories || []) as any[];
+    const rawCats = (routineData?.routineCategories || []) as any[];
+    const cats = sanitizeRoutineCategories(rawCats, singleBookNames);
     if (!cats.length) return [];
     return cats.map((cat: any) => {
       const subjects: any[] = cat.subjects || [];
       if (!subjects.length) return null;
       const si = (cat.currentSubjectIndex || 0) % subjects.length;
       const sub = subjects[si];
-      // Find notes for this subject (only multi-page books, excluding Sar Sangrah, respecting board)
+      // Find notes for this subject (only multi-page/multi-subject books, excluding Sar Sangrah, Speedy, One-subject books, Homework, respecting board)
       const targetBoard = sub.board || routineData?.selectedBoard || (user as any)?.board || 'BSEB';
       const notes = lucentNotes.filter((n: any) => {
+        if (!isMultiPageRoutineNote(n, singleBookNames)) return false;
         const nb = (n.bookName || '').trim();
         const nc = n.classLevel || '';
         const ns = (n.subject || 'other').toLowerCase().trim();
-        const pCount = Array.isArray(n.pages) ? n.pages.length : (n.pageCount || 0);
-        if (pCount <= 1) return false;
-        const titleLower = (n.lessonTitle || n.title || '').toLowerCase();
-        const bookLower = nb.toLowerCase();
-        if (titleLower.includes('sar sangrah') || titleLower.includes('saar sangrah') || titleLower.includes('sar-sangrah')) return false;
-        if (bookLower.includes('sar sangrah') || bookLower.includes('saar sangrah') || bookLower.includes('sar-sangrah')) return false;
         if (sub.bookName && nb !== sub.bookName) return false;
         if (sub.classLevel && nc !== sub.classLevel) return false;
         // Board filter: in SCHOOL mode or when classLevel is present, enforce board
@@ -528,19 +759,28 @@ export const DailyEventPage: React.FC<Props> = ({
 
   // ── Next Today Task — next lesson preview for each category ───────────────
   const nextSlots = useMemo(() => {
-    const cats = (routineData?.routineCategories || []) as any[];
+    const rawCats = (routineData?.routineCategories || []) as any[];
+    const cats = sanitizeRoutineCategories(rawCats, singleBookNames);
     if (!cats.length) return [];
     return cats.map((cat: any) => {
       const subjects: any[] = cat.subjects || [];
       if (!subjects.length) return null;
       const si = (cat.currentSubjectIndex || 0) % subjects.length;
       const sub = subjects[si];
+      const targetBoard = sub.board || routineData?.selectedBoard || (user as any)?.board || 'BSEB';
       const notes = lucentNotes.filter((n: any) => {
+        if (!isMultiPageRoutineNote(n, singleBookNames)) return false;
         const nb = (n.bookName || '').trim();
         const nc = n.classLevel || '';
         const ns = (n.subject || 'other').toLowerCase().trim();
         if (sub.bookName && nb !== sub.bookName) return false;
         if (sub.classLevel && nc !== sub.classLevel) return false;
+        if (routineData?.routineMode === 'SCHOOL' || sub.classLevel || nc) {
+          if (targetBoard && targetBoard !== 'ALL_BOARDS') {
+            const nbBoard = (n as any).board;
+            if (nbBoard && nbBoard !== targetBoard && nbBoard !== 'ALL_BOARDS') return false;
+          }
+        }
         return ns === sub.subjectId;
       });
       if (notes.length <= 1) return null;
@@ -823,169 +1063,15 @@ export const DailyEventPage: React.FC<Props> = ({
     } catch (e) { console.error('Revision pts claim failed', e); }
   }, [user.id, user.subscriptionLevel, user.subscriptionTier, user.isPremium, unclaimedRevNotes, unclaimedRevMcq, notesReviewedToday, mcqDoneToday, claimedRevNotesCount, claimedRevMcqCount, REV_NOTES_CLAIMED_KEY, REV_MCQ_CLAIMED_KEY, showClaimOverlay]);
 
-  // ── Lesson Tracker ────────────────────────────────────────────────────────
-  // Primary source: routineAutoTrack timings (what actually tracks reading time)
-  // Secondary: trackingHistory for today's lesson list (has date info)
-  const todayHistory = useMemo(() => {
-    // Collect lessonIds studied today from trackingHistory
-    const historyLessons = new Map<string, { subjectId: string; mcqsDone: number }>();
-    if (routineData?.trackingHistory) {
-      (routineData.trackingHistory as any[])
-        .filter((h) => h.date === todayStr)
-        .forEach((h) => {
-          if (!historyLessons.has(h.lessonId)) {
-            historyLessons.set(h.lessonId, { subjectId: h.subjectId, mcqsDone: h.mcqsDone || 0 });
-          } else {
-            // accumulate mcqsDone if same lesson appears multiple times
-            const prev = historyLessons.get(h.lessonId)!;
-            historyLessons.set(h.lessonId, { ...prev, mcqsDone: prev.mcqsDone + (h.mcqsDone || 0) });
-          }
-        });
-    }
-
-    // Also scan routineAutoTrack for any lessons that have time recorded but
-    // might not be in trackingHistory (e.g. lessons opened without routine)
-    try {
-      const snap = getAutoTrackSnapshot();
-      Object.keys(snap.timings).forEach((key) => {
-        const lessonId = key.split('__')[0];
-        if (lessonId && !historyLessons.has(lessonId) && (snap.timings[key] || 0) > 0) {
-          historyLessons.set(lessonId, { subjectId: '', mcqsDone: 0 });
-        }
-      });
-    } catch { /* ignore */ }
-
-    return Array.from(historyLessons.entries())
-      .map(([lessonId, meta]) => {
-        const lesson = lucentNotes.find((n: any) => n.id === lessonId);
-        const pageCount = (lesson as any)?.pages?.length || 0;
-        // Read real time from routineAutoTrack (the source of truth)
-        const stats = getLessonStats(lessonId, pageCount);
-        return {
-          lessonTitle: (lesson as any)?.lessonTitle || lessonId,
-          subject: (lesson as any)?.subject || meta.subjectId,
-          pagesRead: stats.pagesRead,
-          mcqsDone: meta.mcqsDone,
-          totalTimeSec: stats.totalTime,
-        };
-      })
-      // Only show lessons with any activity
-      .filter((h) => h.pagesRead > 0 || h.totalTimeSec > 0 || h.mcqsDone > 0)
-      .sort((a, b) => b.totalTimeSec - a.totalTimeSec);
-  }, [routineData, todayStr, lucentNotes]);
-
-  const formatTime = (secs: number) => {
-    if (!secs) return '—';
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    if (m === 0) return `${s}s`;
-    return s > 0 ? `${m}m ${s}s` : `${m}m`;
-  };
-
   return (
     <div>
 
       <div className="px-4 pt-4 space-y-4 pb-6">
 
-        {/* ── 0. DAILY CHALLENGE 2.0 & YESTERDAY RESULT ── */}
-        <SectionCard
-          emoji="🏆"
-          title="Daily Challenge 2.0"
-          subtitle="Kal ka result, leaderboard & % prizes"
-          accent="#f59e0b"
-          actionLabel="Kal Ka Result ➔"
-          onAction={() => setShowYesterdayRankModal(true)}
-        >
-          <div className="space-y-3">
-            {/* Kal Ka Leaderboard & Winner List Banner */}
-            <div className="bg-gradient-to-r from-amber-500/15 via-yellow-500/10 to-orange-500/15 border border-amber-300/70 rounded-2xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-yellow-600 text-white flex items-center justify-center font-black shadow-sm shrink-0">
-                  <Trophy size={20} className="drop-shadow" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h4 className="text-xs font-black text-slate-800 uppercase tracking-tight">
-                      Kal Ke Challenge Ka Leaderboard & Winner List
-                    </h4>
-                    {!isYesterdayClaimed && (
-                      <span className="px-2 py-0.5 bg-amber-500 text-black text-[9px] font-black rounded-full animate-pulse">
-                        Prize Available!
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    Dekhein kal kiski kya rank aayi aur apna % prize claim karein!
-                  </p>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setShowYesterdayRankModal(true)}
-                className="w-full sm:w-auto px-4 py-2 rounded-xl text-xs font-black bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-black shadow-sm flex items-center justify-center gap-1.5 active:scale-95 transition-all cursor-pointer shrink-0"
-              >
-                <span>🏆 Dekhein Kiski Kya Rank Aayi</span>
-              </button>
-            </div>
-
-            {/* Aaj Ka Daily Challenge Card */}
-            {activeDailyChallenge && (
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <span className="px-2 py-0.5 rounded-lg bg-violet-100 text-violet-700 text-[10px] font-black uppercase">
-                      Aaj Ka Challenge
-                    </span>
-                    <span className="text-xs font-black text-slate-700">
-                      {activeDailyChallenge.title}
-                    </span>
-                  </div>
-                  <span className="text-[10px] font-bold text-slate-400">
-                    {activeDailyChallenge.questions?.length || 20} Qs • {activeDailyChallenge.durationMinutes || 60}m
-                  </span>
-                </div>
-
-                {activeDailyStatus.completed ? (
-                  activeDailyStatus.claimed ? (
-                    <div className="w-full py-2 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-center gap-1.5 text-xs font-black text-emerald-700">
-                      <CheckCircle size={15} />
-                      <span>Aaj Ka Challenge Complete (+100 XP Claimed)</span>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => handleChallengeClaim(activeDailyChallenge)}
-                      disabled={Boolean(claimingChallengeId)}
-                      className="w-full py-2 rounded-xl text-xs font-black bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-sm flex items-center justify-center gap-1.5 active:scale-95 transition-all cursor-pointer"
-                    >
-                      <Gift size={15} />
-                      <span>{claimingChallengeId ? 'Claiming...' : '🎁 Claim +100 XP Reward'}</span>
-                    </button>
-                  )
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (onStartChallenge20) {
-                        onStartChallenge20(activeDailyChallenge);
-                      }
-                    }}
-                    className="w-full py-2 rounded-xl text-xs font-black bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white shadow-sm flex items-center justify-center gap-1.5 active:scale-95 transition-all cursor-pointer"
-                  >
-                    <Rocket size={15} />
-                    <span>Start Aaj Ka Challenge (Fair Leaderboard) →</span>
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        </SectionCard>
-
         {/* ── 1. ROUTINE ─────────────────────────────────────────────────── */}
         <SectionCard
           emoji="📅"
-          title="My Routine"
+          title="Daily Routine"
           subtitle={
             routineEnabled
               ? tasksTotal > 0
@@ -993,7 +1079,10 @@ export const DailyEventPage: React.FC<Props> = ({
                 : 'Koi slot set nahi'
               : 'Routine enabled nahi hai'
           }
-          accent={theme.primary || "#4f46e5"}
+          accent="#0284c7"
+          cardBg="linear-gradient(180deg, #f0f9ff 0%, #ffffff 100%)"
+          cardBorder="#bae6fd"
+          headerBg="rgba(224, 242, 254, 0.55)"
           actionLabel="Open →"
           onAction={onOpenRoutine}
         >
@@ -1007,6 +1096,22 @@ export const DailyEventPage: React.FC<Props> = ({
             </p>
           ) : (
             <div className="space-y-2">
+              {/* ── 7-Day Timetable Button ── */}
+              <div className="flex items-center justify-between pb-1">
+                <button
+                  type="button"
+                  onClick={() => setShow7DayModal(true)}
+                  className="px-2.5 py-1 rounded-xl text-[10px] font-black flex items-center gap-1.5 border shadow-xs transition active:scale-95"
+                  style={{ background: '#ffffff', borderColor: `${theme.primary}30`, color: theme.primary }}
+                >
+                  <span>📅</span>
+                  <span>7-Day Routine Timetable</span>
+                </button>
+                <span className="text-[10px] font-bold text-slate-400">
+                  Daily 1 Chapter
+                </span>
+              </div>
+
               {/* ── Next Today Task preview ── */}
               {nextSlots.length > 0 && (
                 <div
@@ -1266,7 +1371,10 @@ export const DailyEventPage: React.FC<Props> = ({
             if (totalDone > 0) parts.push(`${totalDone} done ✓`);
             return parts.join(' · ') || 'Revision Hub';
           })()}
-          accent="#8b5cf6"
+          accent="#7c3aed"
+          cardBg="linear-gradient(180deg, #faf5ff 0%, #ffffff 100%)"
+          cardBorder="#e9d5ff"
+          headerBg="rgba(243, 232, 255, 0.45)"
           actionLabel="Practice"
           onAction={onOpenRevisionHub}
         >
@@ -1294,37 +1402,53 @@ export const DailyEventPage: React.FC<Props> = ({
             )}
 
 
-            {/* ── Status & Claim Cards (Notes & MCQ) ────────────────────── */}
+            {/* ── Daily Tasks: Status & Claim Cards (Notes & MCQ) ────────────────────── */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
-              {/* Notes Card */}
+              {/* Daily Task 1: Reading Revision */}
               {(() => {
                 const total = dueNotes.length + notesReviewedToday;
                 const done = notesReviewedToday;
                 const pct = total > 0 ? Math.round((done / total) * 100) : 100;
                 const isDone = done === total && total > 0;
                 return (
-                  <div className={`rounded-2xl p-3 border ${isDone ? 'bg-emerald-50/80 border-emerald-200' : 'bg-white border-indigo-200'} shadow-sm flex flex-col justify-between`}>
+                  <div
+                    className={`rounded-2xl p-3 border shadow-xs flex flex-col justify-between transition-all ${
+                      isDone
+                        ? 'bg-emerald-50/90 border-emerald-300'
+                        : 'bg-gradient-to-br from-indigo-50/90 via-blue-50/40 to-white border-indigo-200/90'
+                    }`}
+                  >
                     <div>
                       <div className="flex items-center justify-between mb-1.5">
                         <div className="flex items-center gap-2">
-                          <div className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs ${isDone ? 'bg-emerald-100 text-emerald-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                          <div
+                            className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs shadow-2xs ${
+                              isDone ? 'bg-emerald-100 text-emerald-700' : 'bg-indigo-100 text-indigo-700 border border-indigo-200'
+                            }`}
+                          >
                             {isDone ? '✅' : '📖'}
                           </div>
                           <div>
-                            <p className="text-[12px] font-black text-slate-800">Reading Revision</p>
-                            <p className="text-[9px] text-slate-500">
+                            <p className="text-[12px] font-black text-indigo-950">Reading Revision</p>
+                            <p className="text-[9px] text-slate-500 font-medium">
                               {total === 0 ? 'Aaj koi notes due nahi' : `${dueNotes.length} baki · ${done}/${total} complete`}
                             </p>
                           </div>
                         </div>
-                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${isDone ? 'bg-emerald-100 text-emerald-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                        <span
+                          className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                            isDone ? 'bg-emerald-100 text-emerald-700' : 'bg-indigo-100 text-indigo-700'
+                          }`}
+                        >
                           {total === 0 ? 'Done' : `${pct}%`}
                         </span>
                       </div>
                       {total > 0 && (
                         <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden mt-1 mb-2">
                           <div
-                            className={`h-full rounded-full transition-all ${isDone ? 'bg-emerald-500' : 'bg-indigo-500'}`}
+                            className={`h-full rounded-full transition-all ${
+                              isDone ? 'bg-emerald-500' : 'bg-gradient-to-r from-blue-500 to-indigo-600'
+                            }`}
                             style={{ width: `${pct}%` }}
                           />
                         </div>
@@ -1334,7 +1458,7 @@ export const DailyEventPage: React.FC<Props> = ({
                       {unclaimedRevNotes > 0 ? (
                         <button
                           onClick={() => handleClaimRevisionPts('notes')}
-                          className="w-full py-2 rounded-xl font-black text-[11px] flex items-center justify-center gap-1.5 transition-all active:scale-95 bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-sm"
+                          className="w-full py-2 rounded-xl font-black text-[11px] flex items-center justify-center gap-1.5 transition-all active:scale-95 bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-xs hover:opacity-95"
                         >
                           🎁 Claim +{unclaimedRevNotes * REV_PTS}⭐ pts ({unclaimedRevNotes} Lesson{unclaimedRevNotes > 1 ? 's' : ''})
                         </button>
@@ -1343,7 +1467,7 @@ export const DailyEventPage: React.FC<Props> = ({
                           <span className="text-[10px] font-black text-emerald-700">✅ +{claimedRevNotesCount * REV_PTS}⭐ pts Claimed ({claimedRevNotesCount} Lesson{claimedRevNotesCount > 1 ? 's' : ''})</span>
                         </div>
                       ) : (
-                        <div className="w-full py-1.5 rounded-xl font-black text-[10px] flex items-center justify-center gap-1 bg-slate-100 text-slate-500 border border-slate-200">
+                        <div className="w-full py-1.5 rounded-xl font-black text-[10px] flex items-center justify-center gap-1 bg-indigo-50/60 text-indigo-700/80 border border-indigo-100">
                           🔒 Har lesson pe +{REV_PTS}⭐ pts unlock
                         </div>
                       )}
@@ -1352,35 +1476,51 @@ export const DailyEventPage: React.FC<Props> = ({
                 );
               })()}
 
-              {/* MCQ Practice Card */}
+              {/* Daily Task 2: MCQ Practice */}
               {(() => {
                 const total = dueMcq.length + mcqDoneToday;
                 const done = mcqDoneToday;
                 const pct = total > 0 ? Math.round((done / total) * 100) : 100;
                 const isDone = done === total && total > 0;
                 return (
-                  <div className={`rounded-2xl p-3 border ${isDone ? 'bg-emerald-50/80 border-emerald-200' : 'bg-white border-violet-200'} shadow-sm flex flex-col justify-between`}>
+                  <div
+                    className={`rounded-2xl p-3 border shadow-xs flex flex-col justify-between transition-all ${
+                      isDone
+                        ? 'bg-emerald-50/90 border-emerald-300'
+                        : 'bg-gradient-to-br from-fuchsia-50/90 via-purple-50/40 to-white border-fuchsia-200/90'
+                    }`}
+                  >
                     <div>
                       <div className="flex items-center justify-between mb-1.5">
                         <div className="flex items-center gap-2">
-                          <div className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs ${isDone ? 'bg-emerald-100 text-emerald-700' : 'bg-violet-100 text-violet-700'}`}>
+                          <div
+                            className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs shadow-2xs ${
+                              isDone ? 'bg-emerald-100 text-emerald-700' : 'bg-fuchsia-100 text-fuchsia-700 border border-fuchsia-200'
+                            }`}
+                          >
                             {isDone ? '✅' : '🧠'}
                           </div>
                           <div>
-                            <p className="text-[12px] font-black text-slate-800">MCQ Practice</p>
-                            <p className="text-[9px] text-slate-500">
+                            <p className="text-[12px] font-black text-purple-950">MCQ Practice</p>
+                            <p className="text-[9px] text-slate-500 font-medium">
                               {total === 0 ? 'Aaj koi MCQ due nahi' : `${dueMcq.length} baki · ${done}/${total} complete`}
                             </p>
                           </div>
                         </div>
-                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${isDone ? 'bg-emerald-100 text-emerald-700' : 'bg-violet-100 text-violet-700'}`}>
+                        <span
+                          className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                            isDone ? 'bg-emerald-100 text-emerald-700' : 'bg-fuchsia-100 text-fuchsia-700'
+                          }`}
+                        >
                           {total === 0 ? 'Done' : `${pct}%`}
                         </span>
                       </div>
                       {total > 0 && (
                         <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden mt-1 mb-2">
                           <div
-                            className={`h-full rounded-full transition-all ${isDone ? 'bg-emerald-500' : 'bg-violet-500'}`}
+                            className={`h-full rounded-full transition-all ${
+                              isDone ? 'bg-emerald-500' : 'bg-gradient-to-r from-fuchsia-500 to-purple-600'
+                            }`}
                             style={{ width: `${pct}%` }}
                           />
                         </div>
@@ -1390,7 +1530,7 @@ export const DailyEventPage: React.FC<Props> = ({
                       {unclaimedRevMcq > 0 ? (
                         <button
                           onClick={() => handleClaimRevisionPts('mcq')}
-                          className="w-full py-2 rounded-xl font-black text-[11px] flex items-center justify-center gap-1.5 transition-all active:scale-95 bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-sm"
+                          className="w-full py-2 rounded-xl font-black text-[11px] flex items-center justify-center gap-1.5 transition-all active:scale-95 bg-gradient-to-r from-fuchsia-600 to-purple-600 text-white shadow-xs hover:opacity-95"
                         >
                           🎁 Claim +{unclaimedRevMcq * REV_PTS}⭐ pts ({unclaimedRevMcq} Lesson{unclaimedRevMcq > 1 ? 's' : ''})
                         </button>
@@ -1399,7 +1539,7 @@ export const DailyEventPage: React.FC<Props> = ({
                           <span className="text-[10px] font-black text-emerald-700">✅ +{claimedRevMcqCount * REV_PTS}⭐ pts Claimed ({claimedRevMcqCount} Lesson{claimedRevMcqCount > 1 ? 's' : ''})</span>
                         </div>
                       ) : (
-                        <div className="w-full py-1.5 rounded-xl font-black text-[10px] flex items-center justify-center gap-1 bg-slate-100 text-slate-500 border border-slate-200">
+                        <div className="w-full py-1.5 rounded-xl font-black text-[10px] flex items-center justify-center gap-1 bg-purple-50/60 text-purple-700/80 border border-purple-100">
                           🔒 Har lesson pe +{REV_PTS}⭐ pts unlock
                         </div>
                       )}
@@ -1432,59 +1572,9 @@ export const DailyEventPage: React.FC<Props> = ({
                   </button>
                 </div>
 
-                {/* Search & Mode Bar */}
-                <div className="bg-white rounded-2xl border border-slate-200 p-2.5 shadow-sm space-y-2">
-                  <div className="flex items-center gap-2">
-                    <div className="relative flex-1">
-                      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                      <input
-                        type="text"
-                        value={revisionSearchQuery}
-                        onChange={(e) => setRevisionSearchQuery(e.target.value)}
-                        placeholder="Search in 200+ lessons & topics..."
-                        className="w-full pl-8 pr-7 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-violet-400"
-                      />
-                      {revisionSearchQuery && (
-                        <button
-                          onClick={() => setRevisionSearchQuery('')}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                        >
-                          <X size={12} />
-                        </button>
-                      )}
-                    </div>
-
-                    {/* View mode switcher */}
-                    <div className="flex bg-slate-100 p-0.5 rounded-xl shrink-0 text-[10px] font-black">
-                      <button
-                        onClick={() => setRevisionViewMode('SUBJECT')}
-                        className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${revisionViewMode === 'SUBJECT' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}
-                      >
-                        <BookOpen size={11} /> Subject
-                      </button>
-                      <button
-                        onClick={() => setRevisionViewMode('HIERARCHY')}
-                        className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${revisionViewMode === 'HIERARCHY' ? 'bg-white text-violet-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}
-                      >
-                        <Layers size={11} /> 3-Tier
-                      </button>
-                      <button
-                        onClick={() => setRevisionViewMode('FOCUS')}
-                        className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${revisionViewMode === 'FOCUS' ? 'bg-white text-rose-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}
-                      >
-                        <Zap size={11} /> Focus
-                      </button>
-                      <button
-                        onClick={() => setRevisionViewMode('LIST')}
-                        className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${revisionViewMode === 'LIST' ? 'bg-white text-slate-800 shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}
-                      >
-                        <ListFilter size={11} /> List
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Subject Filter Carousel */}
-                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar pt-1 border-t border-slate-100">
+                {/* Subject Filter Carousel */}
+                <div className="bg-white rounded-2xl border border-slate-200 p-2 shadow-sm">
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar">
                     <button
                       onClick={() => setSelectedRevisionSubjectId('ALL')}
                       className={`px-2.5 py-1 rounded-lg text-[10px] font-black whitespace-nowrap transition-all shrink-0 ${selectedRevisionSubjectId === 'ALL' ? 'bg-violet-600 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
@@ -1518,126 +1608,113 @@ export const DailyEventPage: React.FC<Props> = ({
                   </div>
                 )}
 
-                {/* MODE 0: SUBJECT-WISE SMART CARDS (Primary Consolidated View) */}
-                {revisionViewMode === 'SUBJECT' && filteredSubjectGroups.map((sg) => {
-                  const isDetailsOpen = !!expandedRevisionSubs[sg.subjectId];
-                  return (
-                    <div key={sg.subjectId} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden p-3.5 space-y-3">
-                      {/* Top Row: Icon + Subject Title + Badges */}
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <div className="w-10 h-10 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center text-xl shrink-0 shadow-2xs">
-                            {sg.icon}
-                          </div>
-                          <div className="min-w-0">
-                            <h4 className="font-black text-slate-800 text-sm truncate leading-tight">{sg.subjectName}</h4>
-                            <p className="text-[10px] text-slate-500 font-medium truncate mt-0.5">
-                              {sg.chapters.length} Lessons · {sg.totalDue} Total Due Topics
-                            </p>
-                          </div>
-                        </div>
-                        <span className="text-[11px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200 px-2.5 py-1 rounded-full shrink-0">
-                          {sg.totalDue} Due
-                        </span>
-                      </div>
+                {/* MODE 0: SUBJECT-WISE SMART CARDS (Slim Distinct Professional Themed Cards) */}
+                {revisionViewMode === 'SUBJECT' && (
+                  <div className="space-y-2">
+                    {filteredSubjectGroups.map((sg) => {
+                      const notesList = sg.dueNotes.length > 0 ? sg.dueNotes : sg.chapters.flatMap(c => c.buckets);
+                      const mcqList = sg.dueMcq.length > 0 ? sg.dueMcq : (sg.dueNotes.length > 0 ? sg.dueNotes : sg.chapters.flatMap(c => c.buckets));
+                      const subTheme = getRevisionSubjectTheme(sg.subjectName, sg.subjectId);
 
-                      {/* Smart 3-Tier Distribution: ⚡ Weak (mistakes/retry) · ⏳ Average · 📅 Routine */}
-                      <div className="grid grid-cols-3 gap-1.5">
-                        <div className="bg-rose-50 border border-rose-200 rounded-xl p-2 text-center">
-                          <div className="flex items-center justify-center gap-1 text-rose-700 font-black text-xs">
-                            <span>⚡</span> {sg.weakCount}
-                          </div>
-                          <p className="text-[8px] font-black text-rose-500 uppercase tracking-wider mt-0.5">Weak / Retry</p>
-                        </div>
-                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-2 text-center">
-                          <div className="flex items-center justify-center gap-1 text-amber-700 font-black text-xs">
-                            <span>⏳</span> {sg.avgCount}
-                          </div>
-                          <p className="text-[8px] font-black text-amber-600 uppercase tracking-wider mt-0.5">Average</p>
-                        </div>
-                        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2 text-center">
-                          <div className="flex items-center justify-center gap-1 text-emerald-700 font-black text-xs">
-                            <span>📅</span> {sg.routineCount}
-                          </div>
-                          <p className="text-[8px] font-black text-emerald-600 uppercase tracking-wider mt-0.5">Routine</p>
-                        </div>
-                      </div>
-
-                      {/* 1-Tap Consolidated Revision Action Buttons */}
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          onClick={() => handleOpenNotes(sg.dueNotes)}
-                          disabled={sg.notesCount === 0}
-                          className="py-2.5 px-3 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-700 font-black text-xs flex items-center justify-center gap-1.5 active:scale-95 transition disabled:opacity-40 disabled:cursor-not-allowed hover:bg-indigo-100 shadow-2xs"
+                      return (
+                        <div
+                          key={sg.subjectId}
+                          className="rounded-2xl px-3 py-2.5 flex items-center justify-between gap-2.5 transition-all shadow-xs hover:shadow-sm"
+                          style={{
+                            background: subTheme.cardBg,
+                            border: `1.5px solid ${subTheme.borderColor}`,
+                          }}
                         >
-                          <BookOpen size={13} />
-                          <span>📖 Notes ({sg.notesCount})</span>
-                        </button>
-                        <button
-                          onClick={() => handleStartPractice(sg.dueMcq)}
-                          disabled={sg.mcqCount === 0}
-                          className="py-2.5 px-3 rounded-xl bg-violet-600 text-white font-black text-xs flex items-center justify-center gap-1.5 active:scale-95 transition disabled:opacity-40 disabled:cursor-not-allowed hover:bg-violet-700 shadow-sm"
-                        >
-                          <Target size={13} />
-                          <span>🧠 MCQ ({sg.mcqCount})</span>
-                        </button>
-                      </div>
-
-                      {/* Optional Chapter Breakdown Toggle */}
-                      <div className="border-t border-slate-100 pt-2">
-                        <button
-                          onClick={() => setExpandedRevisionSubs(prev => ({ ...prev, [sg.subjectId]: !isDetailsOpen }))}
-                          className="w-full flex items-center justify-between text-[11px] font-bold text-slate-500 hover:text-slate-700 py-1"
-                        >
-                          <span className="flex items-center gap-1">
-                            <span>🔍 Chapter Breakdown Dekhein ({sg.chapters.length} Lessons)</span>
-                          </span>
-                          {isDetailsOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                        </button>
-
-                        {isDetailsOpen && (
-                          <div className="mt-2 space-y-2 pt-1 border-t border-slate-100">
-                            {sg.chapters.map(cg => (
-                              <div key={cg.chapterId} className="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
-                                <div className="flex items-center justify-between mb-1.5">
-                                  <p className="text-xs font-black text-slate-800 truncate flex-1">{cg.chapterTitle}</p>
-                                  <span className="text-[10px] font-bold text-slate-500 shrink-0 ml-2">
-                                    {cg.buckets.length} due topics
-                                  </span>
-                                </div>
-                                <div className="flex items-center justify-between gap-2 text-[10px]">
-                                  <div className="flex items-center gap-2">
-                                    {cg.dueNotes.length > 0 && (
-                                      <button
-                                        onClick={() => handleOpenNotes(cg.dueNotes)}
-                                        className="text-indigo-600 font-bold hover:underline flex items-center gap-0.5"
-                                      >
-                                        <BookOpen size={10} /> {cg.dueNotes.length} Notes
-                                      </button>
-                                    )}
-                                    {cg.dueMcq.length > 0 && (
-                                      <button
-                                        onClick={() => handleStartPractice(cg.dueMcq)}
-                                        className="text-violet-600 font-bold hover:underline flex items-center gap-0.5"
-                                      >
-                                        <Target size={10} /> {cg.dueMcq.length} MCQ
-                                      </button>
-                                    )}
-                                  </div>
-                                  {cg.totalTopicsCount > 0 && (
-                                    <span className="text-emerald-600 font-bold">
-                                      {cg.completedTopicsCount}/{cg.totalTopicsCount} Mastered
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            ))}
+                          {/* Left: Icon & Subject Name */}
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <div
+                              className="w-9 h-9 rounded-xl flex items-center justify-center text-lg shrink-0 shadow-2xs"
+                              style={{
+                                background: subTheme.iconBg,
+                                border: `1px solid ${subTheme.iconBorder}`,
+                              }}
+                            >
+                              {sg.icon}
+                            </div>
+                            <div className="min-w-0">
+                              <h4
+                                className="font-black text-xs sm:text-[13px] truncate capitalize leading-tight"
+                                style={{ color: subTheme.titleColor }}
+                              >
+                                {sg.subjectName.replace(/_/g, ' ')}
+                              </h4>
+                              <p
+                                className="text-[9.5px] font-semibold truncate mt-0.5"
+                                style={{ color: subTheme.metaColor }}
+                              >
+                                {sg.chapters.length} Lesson{sg.chapters.length > 1 ? 's' : ''} · {sg.totalDue} due topics
+                              </p>
+                            </div>
                           </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+
+                          {/* Right: Read Button & MCQ Button */}
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (notesList.length > 0) {
+                                  handleOpenNotes(notesList);
+                                } else {
+                                  toast.info(`${sg.subjectName} ke liye koi notes pending nahi hain!`);
+                                }
+                              }}
+                              className="px-2.5 sm:px-3 py-1.5 rounded-xl font-black text-xs flex items-center gap-1.5 transition active:scale-95 shadow-2xs"
+                              style={{
+                                background: subTheme.readBtnBg,
+                                color: subTheme.readBtnText,
+                                border: `1px solid ${subTheme.readBtnBorder}`,
+                              }}
+                              title={`Sirf ${sg.subjectName} ke notes padhein`}
+                            >
+                              <BookOpen size={13} style={{ color: subTheme.readIconColor }} />
+                              <span>Read</span>
+                              {sg.notesCount > 0 && (
+                                <span
+                                  className="text-white text-[9.5px] font-black px-1.5 py-0.2 rounded-full leading-none"
+                                  style={{ background: subTheme.readBadgeBg }}
+                                >
+                                  {sg.notesCount}
+                                </span>
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (mcqList.length > 0) {
+                                  handleStartPractice(mcqList);
+                                } else {
+                                  toast.info(`${sg.subjectName} ke liye koi MCQ pending nahi hain!`);
+                                }
+                              }}
+                              className="px-2.5 sm:px-3 py-1.5 rounded-xl text-white font-black text-xs flex items-center gap-1.5 transition active:scale-95 shadow-2xs hover:opacity-95"
+                              style={{
+                                background: subTheme.mcqBtnGrad,
+                              }}
+                              title={`Sirf ${sg.subjectName} ke MCQ practice karein`}
+                            >
+                              <Target size={13} className="text-white/80" />
+                              <span>MCQ</span>
+                              {(sg.mcqCount > 0 || (sg.mcqCount === 0 && mcqList.length > 0)) && (
+                                <span
+                                  className="text-white text-[9.5px] font-black px-1.5 py-0.2 rounded-full leading-none"
+                                  style={{ background: subTheme.mcqBadgeBg }}
+                                >
+                                  {sg.mcqCount > 0 ? sg.mcqCount : mcqList.length}
+                                </span>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
 
                 {/* MODE 1: 3-TIER HIERARCHY (Subject ➔ Lesson ➔ 30 Topics) */}
                 {revisionViewMode === 'HIERARCHY' && filteredSubjectGroups.map((sg) => {
@@ -1945,7 +2022,10 @@ export const DailyEventPage: React.FC<Props> = ({
               ? 'Abhi koi mistakes saved nahi'
               : `${totalEver} banaya · ${remainingMistakes} bacha · Aaj ${todayPracticed} practice kiya`
           }
-          accent="#ef4444"
+          accent="#e11d48"
+          cardBg="linear-gradient(180deg, #fff1f2 0%, #ffffff 100%)"
+          cardBorder="#fecdd3"
+          headerBg="rgba(255, 228, 230, 0.5)"
           actionLabel={remainingMistakes > 0 ? `${Math.min(100, remainingMistakes)}Q Practice` : undefined}
           onAction={remainingMistakes > 0 ? () => onPracticeMistakes(todayMistakes) : undefined}
         >
@@ -2072,113 +2152,6 @@ export const DailyEventPage: React.FC<Props> = ({
             </div>
           )}
         </SectionCard>
-
-        {/* ── 4. LESSON TRACKER ───────────────────────────────────────────── */}
-        {(() => {
-          const ONE_HOUR = 3600;
-          const needsMore = todayHistory.filter((h) => h.totalTimeSec < ONE_HOUR);
-          const sufficient = todayHistory.filter((h) => h.totalTimeSec >= ONE_HOUR);
-          const formatRemaining = (secs: number) => {
-            const rem = ONE_HOUR - secs;
-            const m = Math.ceil(rem / 60);
-            return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m aur` : `${m}m aur`;
-          };
-          return (
-            <SectionCard
-              emoji="📚"
-              title="Lesson Tracker"
-              subtitle={
-                todayHistory.length === 0
-                  ? 'Aaj ki padhai yahan track hogi'
-                  : needsMore.length > 0
-                  ? `${needsMore.length} lesson 1 hour se kam · ${sufficient.length} complete`
-                  : `${todayHistory.length} lesson — sab 1 hour+ ✅`
-              }
-              accent="#0ea5e9"
-            >
-              {todayHistory.length === 0 ? (
-                <p className="text-sm text-slate-400 text-center py-2">
-                  Padhai shuru karo — yahan time aur progress track hoga
-                </p>
-              ) : (
-                <div className="space-y-3">
-
-                  {/* ── Aur padhna hai (< 1 hr) ── */}
-                  {needsMore.length > 0 && (
-                    <div className="bg-orange-50 border border-orange-200 rounded-xl px-3 py-2.5">
-                      <div className="flex items-center justify-between mb-2">
-                        <p className="text-[10px] font-black text-orange-700 uppercase tracking-widest">
-                          ⏳ Aur Padhna Hai (1 hour target)
-                        </p>
-                        <span className="text-[9px] font-black text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full">
-                          1hr = +{LESSON_1HR_PTS} ⭐pts
-                        </span>
-                      </div>
-                      <div className="space-y-2">
-                        {needsMore.map((h, i) => {
-                          const pct = Math.min(100, Math.round((h.totalTimeSec / ONE_HOUR) * 100));
-                          return (
-                            <div key={i}>
-                              <div className="flex items-center justify-between mb-1">
-                                <div className="flex-1 min-w-0 mr-2">
-                                  <p className="text-[11px] font-black text-orange-900 truncate">{h.lessonTitle}</p>
-                                  <p className="text-[9px] text-orange-500 truncate">{h.subject}</p>
-                                </div>
-                                <div className="text-right shrink-0">
-                                  <p className="text-[10px] font-black text-orange-700">{formatTime(h.totalTimeSec)}</p>
-                                  <p className="text-[8px] text-orange-400">{formatRemaining(h.totalTimeSec)}</p>
-                                </div>
-                              </div>
-                              {/* Progress bar toward 1 hour */}
-                              <div className="h-1.5 bg-orange-200 rounded-full overflow-hidden">
-                                <div
-                                  className="h-full bg-orange-500 rounded-full transition-all"
-                                  style={{ width: `${pct}%` }}
-                                />
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* ── 1 hour+ complete ── */}
-                  {sufficient.length > 0 && (
-                    <div className="space-y-1.5">
-                      {sufficient.map((h, i) => (
-                        <div key={i} className="bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 space-y-1.5">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex-1 min-w-0">
-                              <p className="text-[11px] font-black text-emerald-800 truncate">✅ {h.lessonTitle}</p>
-                              <p className="text-[9px] text-emerald-500 truncate">{h.subject} · {h.pagesRead} pages</p>
-                            </div>
-                            <p className="text-[10px] font-black text-emerald-700 shrink-0">{formatTime(h.totalTimeSec)}</p>
-                          </div>
-                          {/* 1hr reward claim button */}
-                          {claimed1hrLessons.has(h.lessonTitle) ? (
-                            <div className="flex items-center justify-center gap-1 py-1 rounded-lg bg-emerald-100 border border-emerald-300">
-                              <span className="text-[10px] font-black text-emerald-700">✅ +{LESSON_1HR_PTS} pts Claimed!</span>
-                            </div>
-                          ) : (
-                            <button
-                              onClick={() => handleClaim1hrLesson(h.lessonTitle)}
-                              className="w-full py-1.5 rounded-lg font-black text-[11px] flex items-center justify-center gap-1.5 transition-all active:scale-95 bg-gradient-to-r from-emerald-500 to-teal-500 text-white"
-                            >
-                              🎁 Claim +{LESSON_1HR_PTS} ⭐pts
-                              <span className="text-[9px] bg-white/30 px-1.5 py-0.5 rounded-full">1 Hour Bonus</span>
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                </div>
-              )}
-            </SectionCard>
-          );
-        })()}
 
       </div>
 
@@ -2345,6 +2318,16 @@ export const DailyEventPage: React.FC<Props> = ({
               onStartChallenge20(activeDailyChallenge);
             }
           }}
+        />
+      )}
+
+      {show7DayModal && (
+        <SevenDayRoutineModal
+          isOpen={show7DayModal}
+          onClose={() => setShow7DayModal(false)}
+          categories={routineData?.routineCategories || []}
+          allNotes={lucentNotes}
+          studyMode={routineData?.studyMode || 'WITHOUT_CREDIT'}
         />
       )}
 

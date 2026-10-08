@@ -543,6 +543,12 @@ export function getWeakBuckets(opts?: { minAttempts?: number; maxAccuracy?: numb
 /** A bucket counts as "trackable" if it has wrong questions OR is in the
  *  long-spacing maintenance window (notes/MCQ rerun queued). */
 function isTrackable(b: TopicBucket) {
+  // Math rule: Math revision hub me kabhi nahi jayega
+  const s = `${b.subjectName || ''} ${b.subjectId || ''} ${b.chapterTitle || ''}`.toLowerCase();
+  if (s.includes('math') || s.includes('ganit') || s.includes('गणित')) {
+    return false;
+  }
+
   // Always track: topics with wrong answers, long-spacing maintenance, OR
   // freshly scheduled routine lessons (NOTES OR MCQ stage, never cycled yet).
   return (
@@ -895,8 +901,14 @@ export function scheduleRoutineLessonForRevision(opts: {
   lessonTitle?: string;
 }): void {
   try {
-    const map = safeRead();
     const { lessonId, subjectId, subjectName, lessonTitle } = opts;
+    // Math rule: Math revision hub me na jayega
+    const checkStr = `${subjectName || ''} ${subjectId || ''} ${lessonTitle || ''}`.toLowerCase();
+    if (checkStr.includes('math') || checkStr.includes('ganit') || checkStr.includes('गणित')) {
+      return;
+    }
+
+    const map = safeRead();
     const k = bucketKey(subjectId, lessonId, lessonId, lessonTitle || lessonId);
     // Don't overwrite an existing bucket that has real MCQ history
     if (map[k] && (map[k].total > 0 || map[k].cycleCount)) return;

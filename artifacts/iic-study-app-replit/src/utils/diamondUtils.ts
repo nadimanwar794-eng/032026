@@ -106,10 +106,10 @@ export const DIAMOND_SUBSCRIPTION_PLANS: DiamondSubscriptionPlan[] = [
 ];
 
 /**
- * Exchange Rate: 1 Diamond = 20 Credits
+ * Exchange Rate: 1 Diamond = 4 Credits
  */
-export const DIAMOND_TO_CREDIT_RATE = 20;
-export const CREDITS_PER_DIAMOND = 20;
+export const DIAMOND_TO_CREDIT_RATE = 4;
+export const CREDITS_PER_DIAMOND = 4;
 
 /**
  * Safely get user's diamonds count
@@ -121,7 +121,8 @@ export function getUserDiamonds(user?: User | null): number {
 
 /**
  * Convert Diamonds to Credits:
- * Checks if user has enough diamonds, deducts diamonds and adds credits (numDiamonds * 20)
+ * Checks if user has enough diamonds, deducts diamonds and adds credits (numDiamonds * 4)
+ * Exchange Rate: 1 Diamond = 4 Credits
  */
 export function exchangeDiamondsForCredits(
   user: User,

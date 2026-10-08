@@ -12,9 +12,12 @@ import {
   FileCheck, 
   TrendingUp, 
   CalendarCheck, 
-  RotateCcw 
+  RotateCcw,
+  Volume2,
+  VolumeX
 } from 'lucide-react';
 import { APP_VERSION } from '../constants';
+import { getOptimizedVideoUrl } from '../services/cloudinaryService';
 
 interface AppLoadingScreenProps {
   onComplete: () => void;
@@ -28,6 +31,7 @@ interface AppLoadingScreenProps {
   loadingScreenSlotAssignments?: Record<string, number>;
   loadingScreenSlotUnlocks?: Record<string, boolean>;
   loadingScreenUnlocks?: Record<string, number>;
+  loadingScreenVideoUrl?: string;
 }
 
 interface BlockItem {
@@ -51,7 +55,22 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({
   loadingScreenSlotAssignments,
   loadingScreenSlotUnlocks,
   loadingScreenUnlocks,
+  loadingScreenVideoUrl,
 }) => {
+  const [isVideoMuted, setIsVideoMuted] = useState(true);
+  const [videoFailed, setVideoFailed] = useState(false);
+  const resolvedVideoUrl = (() => {
+    if (loadingScreenVideoUrl && loadingScreenVideoUrl.trim()) return loadingScreenVideoUrl.trim();
+    try {
+      const enabled = localStorage.getItem('nst_loading_screen_video_enabled');
+      if (enabled === 'false') return '';
+      return localStorage.getItem('nst_loading_screen_video_url') || '';
+    } catch {
+      return '';
+    }
+  })();
+  const hasActiveVideo = Boolean(resolvedVideoUrl && !videoFailed);
+
   // ── Selected style ──
   const [styleVariant] = useState<number>(() => {
     try {
@@ -118,7 +137,7 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({
   const [actionPrompt, setActionPrompt] = useState<string>('a[0] > a[1] ?');
 
   const developerName = 'Nadim Anwar';
-  const isSortMode = styleVariant === 3;
+  const isSortMode = !hasActiveVideo && styleVariant === 3;
   const SLOT_WIDTH = 40;
   const RIG_PAD = 14;
 
@@ -483,8 +502,30 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({
         </div>
       </div>
 
-      {/* ── MIDDLE DYNAMIC CONTENT (1 TO 4) ── */}
-      {styleVariant === 1 && (
+      {/* ── MIDDLE DYNAMIC CONTENT (VIDEO OR 1 TO 4) ── */}
+      {hasActiveVideo ? (
+        <div className="relative z-10 w-full max-w-[350px] my-auto flex flex-col items-center justify-center">
+          <div className="relative w-full aspect-video rounded-2xl overflow-hidden border-2 border-sky-400/40 shadow-[0_0_32px_rgba(56,189,248,0.35)] bg-black">
+            <video
+              src={getOptimizedVideoUrl(resolvedVideoUrl)}
+              autoPlay
+              muted={isVideoMuted}
+              loop
+              playsInline
+              onError={() => setVideoFailed(true)}
+              className="w-full h-full object-cover"
+            />
+            <button
+              type="button"
+              onClick={() => setIsVideoMuted(prev => !prev)}
+              className="absolute bottom-2.5 right-2.5 z-20 p-2 rounded-full bg-black/65 hover:bg-black/80 text-white border border-white/20 backdrop-blur-md transition-all active:scale-95"
+              title={isVideoMuted ? 'Unmute Video' : 'Mute Video'}
+            >
+              {isVideoMuted ? <VolumeX size={15} /> : <Volume2 size={15} />}
+            </button>
+          </div>
+        </div>
+      ) : styleVariant === 1 && (
         /* 1. Feature Grid Flip Cards (5s Duration) */
         <div className="relative z-10 w-full max-w-[340px] h-[210px] perspective-1000 flex items-center justify-center">
           <div className={`absolute inset-0 grid grid-cols-2 gap-3 transition-all duration-500 ${progress < 50 ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}>
@@ -527,7 +568,7 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({
         </div>
       )}
 
-      {styleVariant === 2 && (
+      {!hasActiveVideo && styleVariant === 2 && (
         /* 2. Frameless Continuous Spinning Orbit Ring (8s Duration) */
         <div className="relative z-10 w-[345px] h-[345px] flex items-center justify-center my-auto">
           <div className="absolute w-[250px] h-[250px] rounded-full border border-sky-500/25 shadow-[0_0_24px_rgba(56,189,248,0.18)] pointer-events-none" />
@@ -617,7 +658,7 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({
         </div>
       )}
 
-      {styleVariant === 3 && (
+      {!hasActiveVideo && styleVariant === 3 && (
         /* 3. Frameless Bubble Sort with Crane (Direct on Main Screen) */
          <div className="sort-scene-3d relative z-10 w-full max-w-[345px] h-[210px] flex flex-col justify-between my-auto">
           {/* Top Crane Track & Trolley */}
@@ -703,7 +744,7 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({
         </div>
       )}
 
-      {styleVariant === 4 && (
+      {!hasActiveVideo && styleVariant === 4 && (
         /* 4. Frameless Sequential Discovery Ring (8s Duration) */
         <div className="relative z-10 w-[345px] h-[345px] flex items-center justify-center my-auto">
           <div className="absolute w-[250px] h-[250px] rounded-full border border-sky-500/25 shadow-[0_0_24px_rgba(56,189,248,0.18)] pointer-events-none" />

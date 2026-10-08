@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { User, SystemSettings, MCQItem } from '../types';
+import { resolveTelegramUrl } from '../services/telegramStorageService';
 import {
   Trophy,
   CheckCircle2,
@@ -29,7 +30,12 @@ import {
   RotateCcw,
   ChevronDown,
   ArrowUp,
-  ListFilter
+  ListFilter,
+  Timer,
+  SkipForward,
+  FastForward,
+  Clock,
+  AlertTriangle
 } from 'lucide-react';
 import {
   getOfficial100Mcqs,
@@ -38,6 +44,9 @@ import {
   clearOfficialDailyProgress,
   getTodayDateKey,
   OfficialMcqProgress,
+  SkipEntry,
+  getSkipDurationSeconds,
+  formatDurationLabel,
 } from '../utils/officialMcqBank';
 import { renderMathInHtml } from '../utils/mathUtils';
 import {
@@ -252,6 +261,309 @@ export const McqHub: React.FC<McqHubProps> = ({
   // Class Selection Drawer
   const [showClassDrawer, setShowClassDrawer] = useState<boolean>(false);
 
+  // ── Unified Skip Notification Toast State ────────────────────────────────
+  const [skipToast, setSkipToast] = useState<{
+    id: number;
+    questionNumber: number;
+    nextDurationSeconds: number;
+    message: string;
+    subMessage?: string;
+    isAuto: boolean;
+  } | null>(null);
+
+  const showSkipToast = (qNum: number, nextDuration: number, isAuto: boolean, curDuration: number = 30, isFinalChance: boolean = false) => {
+    if (soundOn) playSoundWrong();
+    setSkipToast({
+      id: Date.now(),
+      questionNumber: qNum,
+      nextDurationSeconds: isFinalChance ? 0 : nextDuration,
+      message: isAuto
+        ? `⏳ ${formatDurationLabel(curDuration)} Time Up! Q#${qNum} Auto-Skip ho gaya`
+        : `⏭️ Q#${qNum} Skip kiya gaya`,
+      subMessage: isFinalChance
+        ? `⚠️ Yeh aakhri (3rd) chance tha — iske baad aur chance nahi milega!`
+        : `Agla mauka ${formatDurationLabel(nextDuration)} timer ke sath aayega!`,
+      isAuto,
+    });
+  };
+
+  useEffect(() => {
+    if (!skipToast) return;
+    const t = setTimeout(() => {
+      setSkipToast(null);
+    }, 4500);
+    return () => clearTimeout(t);
+  }, [skipToast]);
+
+  // ── Official 30s Timer & Re-attempt Ladder Mechanics ──────────────────────
+  const [officialSecondsLeft, setOfficialSecondsLeft] = useState<number>(30);
+  const [officialMaxSeconds, setOfficialMaxSeconds] = useState<number>(30);
+  const [isReattemptPhase, setIsReattemptPhase] = useState<boolean>(() => Boolean(progress.isReattemptPhase));
+  const [reattemptRound, setReattemptRound] = useState<number>(() => progress.reattemptRound || 0);
+  const [roundInitialCount, setRoundInitialCount] = useState<number>(() => progress.initialRoundCount || 0);
+
+  // Sync state if progress changes externally
+  useEffect(() => {
+    if (progress.isReattemptPhase !== undefined) {
+      setIsReattemptPhase(Boolean(progress.isReattemptPhase));
+    }
+    if (progress.reattemptRound !== undefined) {
+      setReattemptRound(progress.reattemptRound);
+    }
+    if (progress.initialRoundCount !== undefined) {
+      setRoundInitialCount(progress.initialRoundCount);
+    }
+  }, [progress.isReattemptPhase, progress.reattemptRound, progress.initialRoundCount]);
+
+  // Helper to get Hindi / English chance title (2nd Chance, 3rd Chance max)
+  const getChanceLabel = (round: number) => {
+    if (round <= 1) return '2nd Chance';
+    return '3rd Chance';
+  };
+
+  // ── 2nd Chance Confirmation Modal State (User Request) ────────────────────
+  const [secondChanceModal, setSecondChanceModal] = useState<{
+    isOpen: boolean;
+    unsolvedCount: number;
+    initialRoundCount?: number;
+    mode: 'OFFICIAL' | 'BATTLES';
+    remainingIndexes: (number | string)[];
+    round?: number;
+    chanceLabel?: string;
+    nextDuration?: number;
+  } | null>(null);
+
+  // Reset / Configure Timer whenever current question changes
+  useEffect(() => {
+    if (totalOfficialCount === 0 || !currentQ) return;
+    const isAnswered = progress.answers[currentQIndex] !== undefined;
+    if (isAnswered) {
+      setOfficialSecondsLeft(0);
+      return;
+    }
+    // Determine timer duration:
+    // If in re-attempt phase, use the ladder duration for this question:
+    // 1st skip reattempt: 60s, 2nd: 120s (2m), 3rd: 180s (3m), etc.
+    const skipEntry = progress.skippedQuestions?.[currentQIndex];
+    let duration = 30;
+    if (isReattemptPhase && skipEntry) {
+      duration = getSkipDurationSeconds(skipEntry.skipCount);
+    } else if (isReattemptPhase) {
+      duration = getSkipDurationSeconds(reattemptRound || 1);
+    } else {
+      // Normal flow or manually jumped to from grid: 30s as per mandate
+      duration = 30;
+    }
+    setOfficialSecondsLeft(duration);
+    setOfficialMaxSeconds(duration);
+  }, [currentQIndex, isReattemptPhase, reattemptRound, totalOfficialCount, officialClass]);
+
+  // Official question countdown timer interval
+  useEffect(() => {
+    if (
+      activeSubMode !== 'OFFICIAL' ||
+      totalOfficialCount === 0 ||
+      showReviewAll ||
+      isCompleted ||
+      (secondChanceModal && secondChanceModal.isOpen)
+    )
+      return;
+    if (progress.answers[currentQIndex] !== undefined) return; // already answered
+
+    const interval = setInterval(() => {
+      setOfficialSecondsLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          // Auto-skip triggered on timeout!
+          handleOfficialAutoSkip(currentQIndex);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [
+    activeSubMode,
+    currentQIndex,
+    progress.answers,
+    totalOfficialCount,
+    showReviewAll,
+    isCompleted,
+    isReattemptPhase,
+    progress.skippedQuestions,
+    secondChanceModal,
+  ]);
+
+  // Handle auto-skip when question timer expires (or manual skip)
+  const handleOfficialAutoSkip = (qIdx: number, isManual: boolean = false) => {
+    if (totalOfficialCount === 0) return;
+    if (progress.answers[qIdx] !== undefined) {
+      // already answered, just go next
+      handleNextOfficialQ();
+      return;
+    }
+
+    const prevSkips = progress.skippedQuestions?.[qIdx]?.skipCount || 0;
+    const newSkipCount = isReattemptPhase ? reattemptRound + 1 : Math.max(1, prevSkips + 1);
+    const nextDur = getSkipDurationSeconds(newSkipCount);
+    const curDur = officialMaxSeconds || 30;
+    const isFinalChance = isReattemptPhase && reattemptRound >= 2;
+
+    showSkipToast(qIdx + 1, nextDur, !isManual, curDur, isFinalChance);
+
+    const updatedSkips: Record<number, SkipEntry> = {
+      ...(progress.skippedQuestions || {}),
+      [qIdx]: {
+        skipCount: newSkipCount,
+        lastSkippedAt: Date.now(),
+        nextDurationSeconds: nextDur,
+      },
+    };
+
+    // Advance to next question
+    if (isReattemptPhase) {
+      // Find all remaining unanswered questions across the test excluding current
+      const remainingUnsolved: number[] = [];
+      for (let i = 0; i < totalOfficialCount; i++) {
+        if (progress.answers[i] === undefined && i !== qIdx) {
+          remainingUnsolved.push(i);
+        }
+      }
+
+      const nextSkipped = remainingUnsolved.find((i) => i > qIdx);
+      if (nextSkipped !== undefined) {
+        // Move forward to the next unanswered question in this round (no modal popup between questions)
+        const nextSkipsObj: OfficialMcqProgress = {
+          ...progress,
+          currentIndex: nextSkipped,
+          skippedQuestions: updatedSkips,
+          isReattemptPhase: true,
+          reattemptRound,
+          initialRoundCount: roundInitialCount,
+        };
+        setProgress(nextSkipsObj);
+        saveOfficialDailyProgress(user.id, nextSkipsObj);
+      } else {
+        // Reached end of this re-attempt round pass!
+        // Collect all still-unanswered questions across entire test
+        const stillUnanswered: number[] = [];
+        for (let i = 0; i < totalOfficialCount; i++) {
+          if (progress.answers[i] === undefined) {
+            stillUnanswered.push(i);
+          }
+        }
+        if (progress.answers[qIdx] === undefined && !stillUnanswered.includes(qIdx)) {
+          stillUnanswered.push(qIdx);
+        }
+
+        const nextSkipsObj: OfficialMcqProgress = {
+          ...progress,
+          skippedQuestions: updatedSkips,
+        };
+        setProgress(nextSkipsObj);
+        saveOfficialDailyProgress(user.id, nextSkipsObj);
+
+        if (stillUnanswered.length === 0 || reattemptRound >= 2) {
+          // 3rd chance (reattemptRound === 2) is the LAST chance — no 4th chance!
+          const finalObj: OfficialMcqProgress = {
+            ...nextSkipsObj,
+            isCompleted: true,
+            isReattemptPhase: false,
+          };
+          setProgress(finalObj);
+          saveOfficialDailyProgress(user.id, finalObj);
+          if (soundOn) playSoundVictory();
+        } else {
+          // Summary popup after 2nd chance round completed -> offer 3rd Chance (5 min timer)
+          const nextRound = reattemptRound + 1;
+          const nextDur = getSkipDurationSeconds(nextRound);
+          const label = getChanceLabel(nextRound);
+          setSecondChanceModal({
+            isOpen: true,
+            unsolvedCount: stillUnanswered.length,
+            initialRoundCount: roundInitialCount || totalOfficialCount,
+            mode: 'OFFICIAL',
+            remainingIndexes: stillUnanswered,
+            round: nextRound,
+            chanceLabel: label,
+            nextDuration: nextDur,
+          });
+        }
+      }
+    } else {
+      // Normal pass: 1 to 100 questions
+      if (qIdx < maxIndex) {
+        const nextIndex = qIdx + 1;
+        const nextSkipsObj: OfficialMcqProgress = {
+          ...progress,
+          currentIndex: nextIndex,
+          skippedQuestions: updatedSkips,
+        };
+        setProgress(nextSkipsObj);
+        saveOfficialDailyProgress(user.id, nextSkipsObj);
+      } else {
+        // Reached end of 100 questions!
+        // Check how many questions were not solved
+        const remainingUnsolved: number[] = [];
+        for (let i = 0; i < totalOfficialCount; i++) {
+          if (progress.answers[i] === undefined && i !== qIdx) remainingUnsolved.push(i);
+        }
+        if (progress.answers[qIdx] === undefined && !remainingUnsolved.includes(qIdx)) {
+          remainingUnsolved.push(qIdx);
+        }
+
+        const nextSkipsObj: OfficialMcqProgress = {
+          ...progress,
+          skippedQuestions: updatedSkips,
+        };
+        setProgress(nextSkipsObj);
+        saveOfficialDailyProgress(user.id, nextSkipsObj);
+
+        if (remainingUnsolved.length > 0) {
+          // Ask User: "Aap X question nahi bana paye, kya aapko 2nd chance chahiye?"
+          setSecondChanceModal({
+            isOpen: true,
+            unsolvedCount: remainingUnsolved.length,
+            initialRoundCount: totalOfficialCount,
+            mode: 'OFFICIAL',
+            remainingIndexes: remainingUnsolved,
+            round: 1,
+            chanceLabel: '2nd Chance',
+            nextDuration: getSkipDurationSeconds(1),
+          });
+        } else {
+          // All questions answered!
+          const finalObj: OfficialMcqProgress = {
+            ...nextSkipsObj,
+            isCompleted: true,
+          };
+          setProgress(finalObj);
+          saveOfficialDailyProgress(user.id, finalObj);
+          if (soundOn) playSoundVictory();
+        }
+      }
+    }
+  };
+
+  const handleOfficialManualSkip = () => {
+    if (soundOn) playSoundClick();
+    if (autoAdvanceTimerRef.current) clearTimeout(autoAdvanceTimerRef.current);
+    handleOfficialAutoSkip(currentQIndex, true);
+  };
+
+  // Metric counts for Official Mode
+  const officialSolvedCount = useMemo(() => {
+    return Object.keys(progress.answers).length;
+  }, [progress.answers]);
+
+  const officialSkippedCount = useMemo(() => {
+    const skips = progress.skippedQuestions || {};
+    return Object.keys(skips).filter((k) => progress.answers[Number(k)] === undefined).length;
+  }, [progress.skippedQuestions, progress.answers]);
+
+  const officialUnattemptedCount = Math.max(0, totalOfficialCount - officialSolvedCount - officialSkippedCount);
+
   // Handle answering an Official question
   const handleSelectOfficialOption = (optionIndex: number) => {
     if (!currentQ || totalOfficialCount === 0) return;
@@ -282,17 +594,23 @@ export const McqHub: React.FC<McqHubProps> = ({
     const newWrong = newAttempted - newCorrect;
     const isCompleted = totalOfficialCount > 0 && newAttempted >= totalOfficialCount;
 
-    const nextIndex = currentQIndex < maxIndex ? currentQIndex + 1 : currentQIndex;
+    // If this question was in skipped list, mark it answered
+    const updatedSkips = { ...(progress.skippedQuestions || {}) };
+    delete updatedSkips[currentQIndex];
 
     const updatedProgress: OfficialMcqProgress = {
       date: todayKey,
       classLevel: officialClass,
-      currentIndex: nextIndex,
+      currentIndex: currentQIndex, // Stay on current question so student can review answer & explanation
       answers: newAnswers,
       attemptedCount: newAttempted,
       correctCount: newCorrect,
       wrongCount: newWrong,
       isCompleted,
+      skippedQuestions: updatedSkips,
+      isReattemptPhase: Boolean(isReattemptPhase),
+      reattemptRound,
+      initialRoundCount: roundInitialCount,
     };
 
     setProgress(updatedProgress);
@@ -302,47 +620,288 @@ export const McqHub: React.FC<McqHubProps> = ({
       playSoundVictory();
     }
 
-    // Auto advance smoothly to next question without manual Next/Back buttons
-    if (autoAdvanceTimerRef.current) clearTimeout(autoAdvanceTimerRef.current);
-    if (currentQIndex < maxIndex) {
-      autoAdvanceTimerRef.current = setTimeout(() => {
-        setProgress((prev) => {
-          const up = { ...prev, currentIndex: Math.min(maxIndex, prev.currentIndex + 1) };
-          saveOfficialDailyProgress(user.id, up);
-          return up;
-        });
-      }, 850);
-    } else {
-      // Completed all questions in the set! Reveal score at the end.
-      autoAdvanceTimerRef.current = setTimeout(() => {
-        setProgress((prev) => {
-          const up = { ...prev, isCompleted: true };
-          saveOfficialDailyProgress(user.id, up);
-          return up;
-        });
-      }, 850);
+    // Option A: No automatic jump on answer. Student reviews result and taps "Next ➔" button when ready.
+    if (autoAdvanceTimerRef.current) {
+      clearTimeout(autoAdvanceTimerRef.current);
+      autoAdvanceTimerRef.current = null;
     }
   };
 
   const handleNextOfficialQ = () => {
-    if (currentQIndex < maxIndex && totalOfficialCount > 0) {
-      if (soundOn) playSoundClick();
-      if (autoAdvanceTimerRef.current) clearTimeout(autoAdvanceTimerRef.current);
-      const next = currentQIndex + 1;
-      const up = { ...progress, currentIndex: next };
+    if (totalOfficialCount === 0) return;
+    if (soundOn) playSoundClick();
+    if (autoAdvanceTimerRef.current) clearTimeout(autoAdvanceTimerRef.current);
+
+    if (isReattemptPhase) {
+      // Find all unanswered questions in test excluding current
+      const remainingUnsolved: number[] = [];
+      for (let i = 0; i < totalOfficialCount; i++) {
+        if (progress.answers[i] === undefined && i !== currentQIndex) {
+          remainingUnsolved.push(i);
+        }
+      }
+
+      const next = remainingUnsolved.find((i) => i > currentQIndex);
+      if (next !== undefined) {
+        // Move to the next unanswered question in this round without any popup
+        const up: OfficialMcqProgress = {
+          ...progress,
+          currentIndex: next,
+          isReattemptPhase: true,
+          reattemptRound,
+          initialRoundCount: roundInitialCount,
+        };
+        setProgress(up);
+        saveOfficialDailyProgress(user.id, up);
+      } else {
+        // Reached the end of this re-attempt round pass!
+        const stillUnanswered: number[] = [];
+        for (let i = 0; i < totalOfficialCount; i++) {
+          if (progress.answers[i] === undefined) {
+            stillUnanswered.push(i);
+          }
+        }
+
+        if (stillUnanswered.length === 0 || reattemptRound >= 2) {
+          // All questions answered or 3rd Chance finished (last chance)! Test completed!
+          const up: OfficialMcqProgress = {
+            ...progress,
+            isCompleted: true,
+            isReattemptPhase: false,
+          };
+          setProgress(up);
+          saveOfficialDailyProgress(user.id, up);
+          if (soundOn) playSoundVictory();
+        } else {
+          // 2nd chance round completed: offer 3rd Chance (5 min timer)
+          const nextRound = reattemptRound + 1;
+          const nextDur = getSkipDurationSeconds(nextRound);
+          const label = getChanceLabel(nextRound);
+          setSecondChanceModal({
+            isOpen: true,
+            unsolvedCount: stillUnanswered.length,
+            initialRoundCount: roundInitialCount || totalOfficialCount,
+            mode: 'OFFICIAL',
+            remainingIndexes: stillUnanswered,
+            round: nextRound,
+            chanceLabel: label,
+            nextDuration: nextDur,
+          });
+        }
+      }
+    } else {
+      if (currentQIndex < maxIndex) {
+        const next = currentQIndex + 1;
+        const up: OfficialMcqProgress = { ...progress, currentIndex: next };
+        setProgress(up);
+        saveOfficialDailyProgress(user.id, up);
+      } else {
+        // Reached end of regular 100 questions. Check for skipped / unsolved questions!
+        const remainingUnsolved: number[] = [];
+        for (let i = 0; i < totalOfficialCount; i++) {
+          if (progress.answers[i] === undefined) remainingUnsolved.push(i);
+        }
+
+        if (remainingUnsolved.length > 0) {
+          setSecondChanceModal({
+            isOpen: true,
+            unsolvedCount: remainingUnsolved.length,
+            initialRoundCount: totalOfficialCount,
+            mode: 'OFFICIAL',
+            remainingIndexes: remainingUnsolved,
+            round: 1,
+            chanceLabel: '2nd Chance',
+            nextDuration: getSkipDurationSeconds(1),
+          });
+        } else {
+          const up: OfficialMcqProgress = { ...progress, isCompleted: true, isReattemptPhase: false };
+          setProgress(up);
+          saveOfficialDailyProgress(user.id, up);
+          if (soundOn) playSoundVictory();
+        }
+      }
+    }
+  };
+
+  // User manually clicks "Submit Test" button
+  const handleOfficialSubmitClick = () => {
+    if (soundOn) playSoundClick();
+    if (autoAdvanceTimerRef.current) clearTimeout(autoAdvanceTimerRef.current);
+
+    const remainingUnsolved: number[] = [];
+    for (let i = 0; i < totalOfficialCount; i++) {
+      if (progress.answers[i] === undefined) remainingUnsolved.push(i);
+    }
+
+    if (remainingUnsolved.length > 0 && (!isReattemptPhase || reattemptRound < 2)) {
+      const nextRound = isReattemptPhase ? (reattemptRound + 1) : 1;
+      const nextDur = getSkipDurationSeconds(nextRound);
+      const label = getChanceLabel(nextRound);
+      setSecondChanceModal({
+        isOpen: true,
+        unsolvedCount: remainingUnsolved.length,
+        initialRoundCount: isReattemptPhase ? (roundInitialCount || totalOfficialCount) : totalOfficialCount,
+        mode: 'OFFICIAL',
+        remainingIndexes: remainingUnsolved,
+        round: nextRound,
+        chanceLabel: label,
+        nextDuration: nextDur,
+      });
+    } else {
+      // All answered or 3rd chance completed, submit directly
+      setProgress((prev) => {
+        const up: OfficialMcqProgress = { ...prev, isCompleted: true, isReattemptPhase: false };
+        saveOfficialDailyProgress(user.id, up);
+        return up;
+      });
+      if (soundOn) playSoundVictory();
+    }
+  };
+
+  // 2nd / 3rd / N-th Chance Decision Handlers
+  const handleAcceptSecondChance = () => {
+    if (!secondChanceModal) return;
+    if (soundOn) playSoundClick();
+
+    if (secondChanceModal.mode === 'OFFICIAL') {
+      const nextRound = secondChanceModal.round || (reattemptRound + 1) || 1;
+      const remainingUnsolved = (secondChanceModal.remainingIndexes as number[]) || [];
+      const targetIdx = remainingUnsolved.length > 0 ? remainingUnsolved[0] : 0;
+      const duration = secondChanceModal.nextDuration || getSkipDurationSeconds(nextRound);
+      const initCount = secondChanceModal.initialRoundCount || remainingUnsolved.length;
+
+      setIsReattemptPhase(true);
+      setReattemptRound(nextRound);
+      setRoundInitialCount(initCount);
+      setSecondChanceModal(null);
+
+      // Register ALL remaining unsolved questions in skippedQuestions with proper ladder timer!
+      const currentSkips = { ...(progress.skippedQuestions || {}) };
+      remainingUnsolved.forEach((idx) => {
+        const prevSkip = currentSkips[idx]?.skipCount || 0;
+        const newSkipCount = Math.max(nextRound, prevSkip + 1);
+        currentSkips[idx] = {
+          skipCount: newSkipCount,
+          lastSkippedAt: Date.now(),
+          nextDurationSeconds: duration,
+        };
+      });
+
+      setOfficialSecondsLeft(duration);
+      setOfficialMaxSeconds(duration);
+
+      const up: OfficialMcqProgress = {
+        ...progress,
+        currentIndex: targetIdx,
+        skippedQuestions: currentSkips,
+        isReattemptPhase: true,
+        reattemptRound: nextRound,
+        initialRoundCount: initCount,
+      };
       setProgress(up);
       saveOfficialDailyProgress(user.id, up);
+
+      const chanceName = secondChanceModal.chanceLabel || getChanceLabel(nextRound);
+      setSkipToast({
+        id: Date.now(),
+        questionNumber: targetIdx + 1,
+        nextDurationSeconds: duration,
+        message: `🎯 ${chanceName} Round Shuru!`,
+        subMessage: `${remainingUnsolved.length} Questions ke liye har question par ${formatDurationLabel(duration)} mila hai!`,
+        isAuto: false,
+      });
+    } else {
+      // Battle Mode 2nd / 3rd chance
+      const nextRound = secondChanceModal.round || (battleReattemptRound + 1) || 1;
+      const duration = secondChanceModal.nextDuration || getSkipDurationSeconds(nextRound);
+      setIsBattleReattempt(true);
+      setBattleReattemptRound(nextRound);
+      setSecondChanceModal(null);
+
+      const remainingIds = (secondChanceModal.remainingIndexes as string[]) || [];
+      if (remainingIds.length > 0) {
+        const targetId = remainingIds[0];
+        const targetIdx = visibleBattles.findIndex((b) => b.id === targetId);
+        const safeIdx = targetIdx !== -1 ? targetIdx : 0;
+        setCurrentBattleIdx(safeIdx);
+
+        const updatedSkips = { ...battleSkips };
+        remainingIds.forEach((bId) => {
+          const prevSkip = updatedSkips[bId]?.skipCount || 0;
+          updatedSkips[bId] = {
+            skipCount: Math.max(nextRound, prevSkip + 1),
+            lastSkippedAt: Date.now(),
+            nextDurationSeconds: duration,
+          };
+        });
+        setBattleSkips(updatedSkips);
+        try {
+          localStorage.setItem(`nst_battle_skips_${user.id}`, JSON.stringify(updatedSkips));
+        } catch {}
+
+        setBattleSecondsLeft(duration);
+        setBattleMaxSeconds(duration);
+
+        const chanceName = secondChanceModal.chanceLabel || getChanceLabel(nextRound);
+        setSkipToast({
+          id: Date.now(),
+          questionNumber: safeIdx + 1,
+          nextDurationSeconds: duration,
+          message: `⚔️ Battle ${chanceName} Round Shuru!`,
+          subMessage: `${remainingIds.length} Questions ke liye har question par ${formatDurationLabel(duration)} mila hai!`,
+          isAuto: false,
+        });
+      }
+    }
+  };
+
+  const handleSubmitTestDirectly = () => {
+    if (!secondChanceModal) return;
+    if (soundOn) playSoundVictory();
+
+    if (secondChanceModal.mode === 'OFFICIAL') {
+      setProgress((prev) => {
+        const up = { ...prev, isCompleted: true };
+        saveOfficialDailyProgress(user.id, up);
+        return up;
+      });
+      setSecondChanceModal(null);
+    } else {
+      setSecondChanceModal(null);
+      setBattleViewMode('FEED');
+      setTimeout(() => {
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      }, 150);
     }
   };
 
   const handlePrevOfficialQ = () => {
-    if (currentQIndex > 0 && totalOfficialCount > 0) {
-      if (soundOn) playSoundClick();
-      if (autoAdvanceTimerRef.current) clearTimeout(autoAdvanceTimerRef.current);
-      const prev = currentQIndex - 1;
-      const up = { ...progress, currentIndex: prev };
-      setProgress(up);
-      saveOfficialDailyProgress(user.id, up);
+    if (totalOfficialCount === 0) return;
+    if (soundOn) playSoundClick();
+    if (autoAdvanceTimerRef.current) clearTimeout(autoAdvanceTimerRef.current);
+
+    if (isReattemptPhase) {
+      const remainingUnsolved: number[] = [];
+      for (let i = 0; i < totalOfficialCount; i++) {
+        if (progress.answers[i] === undefined && i !== currentQIndex) {
+          remainingUnsolved.push(i);
+        }
+      }
+      if (remainingUnsolved.length > 0) {
+        const prev = [...remainingUnsolved].reverse().find((i) => i < currentQIndex) ?? remainingUnsolved[remainingUnsolved.length - 1];
+        const up = { ...progress, currentIndex: prev };
+        setProgress(up);
+        saveOfficialDailyProgress(user.id, up);
+      }
+    } else {
+      if (currentQIndex > 0) {
+        const prev = currentQIndex - 1;
+        const up = { ...progress, currentIndex: prev };
+        setProgress(up);
+        saveOfficialDailyProgress(user.id, up);
+        setOfficialSecondsLeft(30);
+        setOfficialMaxSeconds(30);
+      }
     }
   };
 
@@ -354,6 +913,9 @@ export const McqHub: React.FC<McqHubProps> = ({
       setProgress(up);
       saveOfficialDailyProgress(user.id, up);
       setShowQuestionGrid(false);
+      // Per user explicit instruction: "aur khud se bhi skip question ko dekh sake par khud se jayega to phir se 30 sec hi milega"
+      setOfficialSecondsLeft(30);
+      setOfficialMaxSeconds(30);
     }
   };
 
@@ -645,20 +1207,47 @@ export const McqHub: React.FC<McqHubProps> = ({
     }
   }, []);
 
-  // Filtered battles based on selected class filter
+  // Filtered battles based on selected class filter (with deduplication by id)
   const visibleBattles = useMemo(() => {
-    if (battleClassFilter === 'ALL') return battleList;
-    return battleList.filter((b) => {
-      const c = String(b.classLevel || '').toLowerCase();
-      const f = battleClassFilter.toLowerCase();
-      return c === f || c.includes(f) || (f === 'competition' && c.includes('comp'));
+    const rawList =
+      battleClassFilter === 'ALL'
+        ? battleList
+        : battleList.filter((b) => {
+            const c = String(b.classLevel || '').toLowerCase();
+            const f = battleClassFilter.toLowerCase();
+            return c === f || c.includes(f) || (f === 'competition' && c.includes('comp'));
+          });
+
+    const seen = new Set<string>();
+    const unique: BattleMcqItem[] = [];
+    rawList.forEach((b) => {
+      if (b && b.id && !seen.has(b.id)) {
+        seen.add(b.id);
+        unique.push(b);
+      }
     });
+    return unique;
   }, [battleList, battleClassFilter]);
 
   // Battle Question Navigation & View States
   const [battleViewMode, setBattleViewMode] = useState<'CARD' | 'FEED'>('CARD');
   const [currentBattleIdx, setCurrentBattleIdx] = useState<number>(0);
   const [showBattleGrid, setShowBattleGrid] = useState<boolean>(false);
+
+  // ── Battle Skips & Timer Ladder State ────────────────────────────────────
+  const [battleSkips, setBattleSkips] = useState<Record<string, SkipEntry>>(() => {
+    try {
+      const s = localStorage.getItem(`nst_battle_skips_${user.id}`);
+      return s ? JSON.parse(s) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const [battleSecondsLeft, setBattleSecondsLeft] = useState<number>(30);
+  const [battleMaxSeconds, setBattleMaxSeconds] = useState<number>(30);
+  const [isBattleReattempt, setIsBattleReattempt] = useState<boolean>(false);
+  const [battleReattemptRound, setBattleReattemptRound] = useState<number>(0);
 
   useEffect(() => {
     setCurrentBattleIdx(0);
@@ -669,6 +1258,142 @@ export const McqHub: React.FC<McqHubProps> = ({
     return Math.min(Math.max(0, currentBattleIdx), visibleBattles.length - 1);
   }, [currentBattleIdx, visibleBattles.length]);
 
+  const currentBattleItem = visibleBattles[safeBattleIdx];
+
+  // Configure timer when battle question changes
+  useEffect(() => {
+    if (visibleBattles.length === 0 || !currentBattleItem) return;
+    const isAnswered = userBattleAnswers[currentBattleItem.id] !== undefined;
+    if (isAnswered) {
+      setBattleSecondsLeft(0);
+      return;
+    }
+
+    const skipEntry = battleSkips[currentBattleItem.id];
+    let duration = 30;
+    if (isBattleReattempt && skipEntry) {
+      duration = getSkipDurationSeconds(skipEntry.skipCount);
+    } else if (isBattleReattempt) {
+      duration = getSkipDurationSeconds(battleReattemptRound || 1);
+    } else {
+      duration = 30;
+    }
+    setBattleSecondsLeft(duration);
+    setBattleMaxSeconds(duration);
+  }, [safeBattleIdx, isBattleReattempt, battleReattemptRound, visibleBattles.length, battleClassFilter]);
+
+  // Battle countdown interval
+  useEffect(() => {
+    if (
+      activeSubMode !== 'BATTLES' ||
+      visibleBattles.length === 0 ||
+      battleViewMode !== 'CARD' ||
+      (secondChanceModal && secondChanceModal.isOpen)
+    )
+      return;
+    if (!currentBattleItem || userBattleAnswers[currentBattleItem.id] !== undefined) return;
+
+    const interval = setInterval(() => {
+      setBattleSecondsLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          handleBattleAutoSkip(currentBattleItem.id, false);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [
+    activeSubMode,
+    safeBattleIdx,
+    visibleBattles,
+    battleViewMode,
+    userBattleAnswers,
+    battleSkips,
+    isBattleReattempt,
+    currentBattleItem,
+    secondChanceModal,
+  ]);
+
+  const handleBattleAutoSkip = (battleId: string, isManual: boolean = false) => {
+    const prevSkips = battleSkips[battleId]?.skipCount || 0;
+    const newSkipCount = isBattleReattempt ? battleReattemptRound + 1 : Math.max(1, prevSkips + 1);
+    const nextDur = getSkipDurationSeconds(newSkipCount);
+    const curDur = battleMaxSeconds || 30;
+    const isFinalChance = isBattleReattempt && battleReattemptRound >= 2;
+
+    showSkipToast(safeBattleIdx + 1, nextDur, !isManual, curDur, isFinalChance);
+
+    const updatedSkips: Record<string, SkipEntry> = {
+      ...battleSkips,
+      [battleId]: {
+        skipCount: newSkipCount,
+        lastSkippedAt: Date.now(),
+        nextDurationSeconds: nextDur,
+      },
+    };
+    setBattleSkips(updatedSkips);
+    try {
+      localStorage.setItem(`nst_battle_skips_${user.id}`, JSON.stringify(updatedSkips));
+    } catch {}
+
+    const remaining = visibleBattles.filter((b) => userBattleAnswers[b.id] === undefined && b.id !== battleId);
+    const allUnsolved = [...remaining.map((b) => b.id)];
+    if (userBattleAnswers[battleId] === undefined && !allUnsolved.includes(battleId)) {
+      allUnsolved.push(battleId);
+    }
+
+    if (isBattleReattempt) {
+      const nextBattle = remaining.find((b) => visibleBattles.indexOf(b) > safeBattleIdx);
+      if (nextBattle) {
+        setCurrentBattleIdx(visibleBattles.indexOf(nextBattle));
+      } else if (allUnsolved.length === 0 || battleReattemptRound >= 2) {
+        // 3rd chance (battleReattemptRound === 2) is the LAST chance — no 4th chance!
+        setBattleViewMode('FEED');
+      } else {
+        const nextRound = battleReattemptRound + 1;
+        setSecondChanceModal({
+          isOpen: true,
+          unsolvedCount: allUnsolved.length,
+          initialRoundCount: visibleBattles.length,
+          mode: 'BATTLES',
+          remainingIndexes: allUnsolved,
+          round: nextRound,
+          chanceLabel: getChanceLabel(nextRound),
+          nextDuration: getSkipDurationSeconds(nextRound),
+        });
+      }
+    } else {
+      // Advance to next battle question
+      if (safeBattleIdx < visibleBattles.length - 1) {
+        setCurrentBattleIdx(safeBattleIdx + 1);
+      } else {
+        if (allUnsolved.length > 0) {
+          setSecondChanceModal({
+            isOpen: true,
+            unsolvedCount: allUnsolved.length,
+            initialRoundCount: visibleBattles.length,
+            mode: 'BATTLES',
+            remainingIndexes: allUnsolved,
+            round: 1,
+            chanceLabel: '2nd Chance',
+            nextDuration: getSkipDurationSeconds(1),
+          });
+        } else {
+          setBattleViewMode('FEED');
+        }
+      }
+    }
+  };
+
+  const handleBattleManualSkip = () => {
+    if (!currentBattleItem) return;
+    if (soundOn) playSoundClick();
+    handleBattleAutoSkip(currentBattleItem.id, true);
+  };
+
   const handlePrevBattleQ = () => {
     if (safeBattleIdx > 0) {
       if (soundOn) playSoundClick();
@@ -677,9 +1402,75 @@ export const McqHub: React.FC<McqHubProps> = ({
   };
 
   const handleNextBattleQ = () => {
-    if (safeBattleIdx < visibleBattles.length - 1) {
-      if (soundOn) playSoundClick();
-      setCurrentBattleIdx(safeBattleIdx + 1);
+    if (soundOn) playSoundClick();
+    if (isBattleReattempt) {
+      const remaining = visibleBattles.filter((b) => userBattleAnswers[b.id] === undefined && b.id !== currentBattleItem?.id);
+      const nextBattle = remaining.find((b) => visibleBattles.indexOf(b) > safeBattleIdx);
+      if (nextBattle) {
+        const nextIdx = visibleBattles.indexOf(nextBattle);
+        if (nextIdx !== -1) setCurrentBattleIdx(nextIdx);
+      } else {
+        const stillUnsolved = visibleBattles.filter((b) => userBattleAnswers[b.id] === undefined);
+        if (stillUnsolved.length === 0 || battleReattemptRound >= 2) {
+          setBattleViewMode('FEED');
+        } else {
+          const nextRound = battleReattemptRound + 1;
+          setSecondChanceModal({
+            isOpen: true,
+            unsolvedCount: stillUnsolved.length,
+            initialRoundCount: visibleBattles.length,
+            mode: 'BATTLES',
+            remainingIndexes: stillUnsolved.map((b) => b.id),
+            round: nextRound,
+            chanceLabel: getChanceLabel(nextRound),
+            nextDuration: getSkipDurationSeconds(nextRound),
+          });
+        }
+      }
+    } else {
+      if (safeBattleIdx < visibleBattles.length - 1) {
+        setCurrentBattleIdx(safeBattleIdx + 1);
+      } else {
+        // Reached end of battle questions
+        const remaining = visibleBattles.filter((b) => userBattleAnswers[b.id] === undefined);
+        if (remaining.length > 0) {
+          setSecondChanceModal({
+            isOpen: true,
+            unsolvedCount: remaining.length,
+            initialRoundCount: visibleBattles.length,
+            mode: 'BATTLES',
+            remainingIndexes: remaining.map((b) => b.id),
+            round: 1,
+            chanceLabel: '2nd Chance',
+            nextDuration: getSkipDurationSeconds(1),
+          });
+        } else {
+          setBattleViewMode('FEED');
+        }
+      }
+    }
+  };
+
+  const handleBattleSubmitClick = () => {
+    if (soundOn) playSoundClick();
+    const remaining = visibleBattles.filter((b) => userBattleAnswers[b.id] === undefined);
+    if (remaining.length > 0 && (!isBattleReattempt || battleReattemptRound < 2)) {
+      const nextRound = isBattleReattempt ? battleReattemptRound + 1 : 1;
+      setSecondChanceModal({
+        isOpen: true,
+        unsolvedCount: remaining.length,
+        initialRoundCount: visibleBattles.length,
+        mode: 'BATTLES',
+        remainingIndexes: remaining.map((b) => b.id),
+        round: nextRound,
+        chanceLabel: getChanceLabel(nextRound),
+        nextDuration: getSkipDurationSeconds(nextRound),
+      });
+    } else {
+      setBattleViewMode('FEED');
+      setTimeout(() => {
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      }, 150);
     }
   };
 
@@ -687,6 +1478,9 @@ export const McqHub: React.FC<McqHubProps> = ({
     if (soundOn) playSoundClick();
     setCurrentBattleIdx(index);
     setShowBattleGrid(false);
+    // Per user instruction: "khud se jayega to phir se 30 sec hi milega"
+    setBattleSecondsLeft(30);
+    setBattleMaxSeconds(30);
     if (battleViewMode === 'FEED') {
       const targetId = visibleBattles[index]?.id;
       if (targetId) {
@@ -727,6 +1521,16 @@ export const McqHub: React.FC<McqHubProps> = ({
       localStorage.setItem(`nst_battle_answers_${user.id}`, JSON.stringify(updated));
     } catch {}
 
+    // If previously in skipped, clean up or resolve
+    if (battleSkips[battleId]) {
+      const copy = { ...battleSkips };
+      delete copy[battleId];
+      setBattleSkips(copy);
+      try {
+        localStorage.setItem(`nst_battle_skips_${user.id}`, JSON.stringify(copy));
+      } catch {}
+    }
+
     // Record vote to RTDB
     if (rtdb) {
       try {
@@ -734,7 +1538,32 @@ export const McqHub: React.FC<McqHubProps> = ({
         update(ref(rtdb, `chat/universal/${battleId}/votes`), { [user.id]: optionIndex }).catch(() => {});
       } catch {}
     }
+
+    // Option A: No automatic jump on answer. Student can review explanation & community stats, then tap "Next ➔" when ready.
   };
+
+  // Metric counts for Battles
+  const battleAttemptedCount = useMemo(() => {
+    return Object.keys(userBattleAnswers).length;
+  }, [userBattleAnswers]);
+
+  const battleCorrectCount = useMemo(() => {
+    let c = 0;
+    battleList.forEach((b) => {
+      if (userBattleAnswers[b.id] !== undefined && userBattleAnswers[b.id] === b.correctAnswer) {
+        c++;
+      }
+    });
+    return c;
+  }, [battleList, userBattleAnswers]);
+
+  const battleWrongCount = battleAttemptedCount - battleCorrectCount;
+
+  const battleSkippedCount = useMemo(() => {
+    return visibleBattles.filter((b) => battleSkips[b.id] && userBattleAnswers[b.id] === undefined).length;
+  }, [visibleBattles, battleSkips, userBattleAnswers]);
+
+  const battleUnattemptedCount = Math.max(0, visibleBattles.length - battleAttemptedCount - battleSkippedCount);
 
   // Like / Upvote a Battle MCQ
   const handleToggleBattleLike = (battleId: string) => {
@@ -860,23 +1689,6 @@ export const McqHub: React.FC<McqHubProps> = ({
     alert('🎉 Aapka MCQ Battle Arena me post ho gaya hai! Sabhi students ise dekh aur solve kar sakte hain.');
   };
 
-  // Battle user stats
-  const battleAttemptedCount = useMemo(() => {
-    return Object.keys(userBattleAnswers).length;
-  }, [userBattleAnswers]);
-
-  const battleCorrectCount = useMemo(() => {
-    let c = 0;
-    battleList.forEach((b) => {
-      if (userBattleAnswers[b.id] !== undefined && userBattleAnswers[b.id] === b.correctAnswer) {
-        c++;
-      }
-    });
-    return c;
-  }, [battleList, userBattleAnswers]);
-
-  const battleWrongCount = battleAttemptedCount - battleCorrectCount;
-
   // ═══════════════════════════════════════════════════════════════════════════
   // RENDER UI
   // ═══════════════════════════════════════════════════════════════════════════
@@ -884,11 +1696,24 @@ export const McqHub: React.FC<McqHubProps> = ({
   return (
     <div
       id="mcq-hub-root-container"
-      className={`w-full h-full flex-1 flex flex-col overflow-y-auto overscroll-contain ${
-        isDarkMode ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-800'
+      data-wallpaper-active={settings?.mcqHubBackgroundImage ? "true" : undefined}
+      className={`w-full h-full flex-1 flex flex-col overflow-y-auto overscroll-contain relative ${
+        settings?.mcqHubBackgroundImage ? 'bg-transparent text-slate-800 dark:text-slate-100' : isDarkMode ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-800'
       }`}
       style={{ WebkitOverflowScrolling: 'touch' }}
     >
+      {/* Background Wallpaper (Admin Configured Live Wallpaper) */}
+      {settings?.mcqHubBackgroundImage && (
+        <div
+          className="fixed inset-0 pointer-events-none z-0 overflow-hidden"
+          style={{
+            backgroundImage: `url(${resolveTelegramUrl(settings.mcqHubBackgroundImage)})`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            opacity: typeof settings.mcqHubBackgroundOpacity === 'number' ? settings.mcqHubBackgroundOpacity : 0.25,
+          }}
+        />
+      )}
       {/* ── Top Header: Back button (Left) + Mode Switcher (Fills top bar) + Close button (Right) ── */}
       <header
         className={`sticky top-0 z-30 px-2 sm:px-4 py-1.5 border-b backdrop-blur-md shrink-0 flex items-center justify-between gap-2 w-full ${
@@ -899,6 +1724,7 @@ export const McqHub: React.FC<McqHubProps> = ({
       >
         {/* Left: Back button */}
         <button
+          id="mcq-back-btn"
           type="button"
           onClick={() => {
             if (onBack) onBack();
@@ -916,6 +1742,7 @@ export const McqHub: React.FC<McqHubProps> = ({
         {/* Center: Top 2 Main Mode Buttons spanning full top bar */}
         <div className="flex-1 flex items-center p-0.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 min-w-0">
           <button
+            id="mcq-tab-official"
             type="button"
             onClick={() => {
               setActiveSubMode('OFFICIAL');
@@ -932,6 +1759,7 @@ export const McqHub: React.FC<McqHubProps> = ({
           </button>
 
           <button
+            id="mcq-tab-battle"
             type="button"
             onClick={() => {
               setActiveSubMode('BATTLES');
@@ -975,6 +1803,56 @@ export const McqHub: React.FC<McqHubProps> = ({
           <X size={17} />
         </button>
       </header>
+
+      {/* ── SKIP NOTIFICATION TOAST (Spaced Repetition Auto-Skip Notification) ── */}
+      {skipToast && (
+        <div className="fixed top-14 left-1/2 -translate-x-1/2 z-50 w-[94%] max-w-md animate-in slide-in-from-top-4 fade-in duration-300 pointer-events-auto">
+          <div className="p-3 sm:p-3.5 rounded-2xl bg-slate-900/95 dark:bg-slate-950/95 text-white border-2 border-amber-500/80 shadow-2xl backdrop-blur-md flex flex-col gap-1.5 relative overflow-hidden">
+            {/* Countdown animation strip */}
+            <div className="absolute top-0 left-0 right-0 h-1 bg-amber-500/30">
+              <div className="h-full bg-amber-400 animate-pulse w-full" />
+            </div>
+
+            <div className="flex items-start justify-between gap-2.5">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/40">
+                  <Timer size={18} className="animate-spin text-amber-400" style={{ animationDuration: '4s' }} />
+                </div>
+                <div className="min-w-0">
+                  <div className="font-black text-xs sm:text-sm text-amber-300 truncate">
+                    {skipToast.message}
+                  </div>
+                  <div className="text-[11px] text-slate-300 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                    {skipToast.nextDurationSeconds > 0 ? (
+                      <>
+                        <span className="font-bold text-white bg-amber-500/30 border border-amber-500/50 px-1.5 py-0.2 rounded-md">
+                          ⏱️ Next Chance: {formatDurationLabel(skipToast.nextDurationSeconds)}
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          (Round ke baad dubara aayega)
+                        </span>
+                      </>
+                    ) : (
+                      <span className="font-bold text-amber-200">
+                        {skipToast.subMessage}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSkipToast(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors shrink-0 cursor-pointer"
+                title="Dismiss"
+              >
+                <X size={15} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Sub-bar: Compact Controls & Class Selector ── */}
       <div
@@ -1020,6 +1898,7 @@ export const McqHub: React.FC<McqHubProps> = ({
               {totalOfficialCount > 0 && (
                 <>
                   <button
+                    id="mcq-btn-review-all"
                     type="button"
                     onClick={() => {
                       setShowReviewAll((prev) => !prev);
@@ -1039,6 +1918,7 @@ export const McqHub: React.FC<McqHubProps> = ({
                   </button>
 
                   <button
+                    id="mcq-btn-restart"
                     type="button"
                     onClick={handleResetOfficialSet}
                     className={`h-6.5 px-1.5 rounded-lg border flex items-center justify-center text-[11px] font-bold active:scale-95 transition-all cursor-pointer ${
@@ -1054,6 +1934,7 @@ export const McqHub: React.FC<McqHubProps> = ({
               )}
 
               <button
+                id="mcq-btn-sound"
                 type="button"
                 onClick={toggleSound}
                 className={`w-6.5 h-6.5 rounded-lg border flex items-center justify-center transition-all active:scale-95 cursor-pointer ${
@@ -1140,20 +2021,16 @@ export const McqHub: React.FC<McqHubProps> = ({
               isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-2xs'
             }`}
           >
-            {/* Question Counter Button */}
-            <button
-              type="button"
-              onClick={() => setShowQuestionGrid(true)}
-              className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700 transition-all font-black text-xs cursor-pointer active:scale-95"
-              title="Sabhi prashna dekhein"
+            {/* Question Counter Badge */}
+            <div
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700 font-black text-xs"
             >
-              <LayoutGrid size={13} className="text-blue-600 dark:text-blue-400" />
               <span>
                 Q {currentQIndex + 1} / {totalOfficialCount}
               </span>
-            </button>
+            </div>
 
-            {/* Auto-Advance indicator and End Test action */}
+            {/* Auto-Advance indicator and Submit Test action */}
             <div className="flex items-center gap-2">
               <span className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 font-bold text-xs border border-blue-200/80 dark:border-blue-800/80">
                 <Sparkles size={11} className="text-amber-500 shrink-0" />
@@ -1161,17 +2038,12 @@ export const McqHub: React.FC<McqHubProps> = ({
               </span>
               <button
                 type="button"
-                onClick={() => {
-                  setProgress((prev) => {
-                    const up = { ...prev, isCompleted: true };
-                    saveOfficialDailyProgress(user.id, up);
-                    return up;
-                  });
-                }}
-                className="text-[11px] font-bold text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 cursor-pointer"
-                title="Test samapt karein aur score dekhein"
+                onClick={handleOfficialSubmitClick}
+                className="flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 font-bold text-xs border border-emerald-300 dark:border-emerald-700 cursor-pointer active:scale-95 transition-all shadow-2xs"
+                title="Test submit karein (agar koi chhoota ho toh 2nd chance milega)"
               >
-                End & See Score
+                <CheckCircle2 size={12} className="text-emerald-600 dark:text-emerald-400" />
+                <span>Submit</span>
               </button>
             </div>
           </div>
@@ -1526,10 +2398,67 @@ export const McqHub: React.FC<McqHubProps> = ({
               {/* ── Active Question Card ── */}
               {currentQ && (
                 <div
+                  id="mcq-question-card"
                   className={`flex flex-col p-3.5 sm:p-4 rounded-2xl border transition-all shadow-2xs ${
                     isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
                   }`}
                 >
+                  {/* 30-Second Countdown Timer Bar & Skip Re-attempt Indicator */}
+                  <div className="mb-2.5 flex flex-col gap-1 pb-2 border-b border-slate-100 dark:border-slate-800">
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-1.5 font-black">
+                        <span
+                          className={`flex items-center gap-1 px-2.5 py-0.5 rounded-lg border font-black text-xs transition-all ${
+                            officialSecondsLeft <= 5 && !progress.answers[currentQIndex]
+                              ? 'bg-rose-500 text-white border-rose-600 animate-pulse'
+                              : officialSecondsLeft <= 10 && !progress.answers[currentQIndex]
+                              ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700'
+                              : 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+                          }`}
+                        >
+                          <Timer size={13} className={officialSecondsLeft <= 5 && !progress.answers[currentQIndex] ? 'animate-spin' : ''} />
+                          <span>
+                            {progress.answers[currentQIndex]
+                              ? '✅ Answered'
+                              : `${officialSecondsLeft}s / ${formatDurationLabel(officialMaxSeconds)}`}
+                          </span>
+                        </span>
+
+                        {isReattemptPhase && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-800 flex items-center gap-1">
+                            <RotateCcw size={10} /> Re-attempt Round
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                        <span className="text-emerald-600 dark:text-emerald-400">✓ {officialSolvedCount}</span>
+                        <span>•</span>
+                        <span className="text-amber-600 dark:text-amber-400">⏭️ {officialSkippedCount}</span>
+                        <span>•</span>
+                        <span>Baaki: {officialUnattemptedCount}</span>
+                      </div>
+                    </div>
+
+                    {/* Countdown Progress Shrink Bar */}
+                    {!progress.answers[currentQIndex] && (
+                      <div className="w-full bg-slate-200 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden mt-0.5">
+                        <div
+                          className={`h-full transition-all duration-1000 ease-linear rounded-full ${
+                            officialSecondsLeft <= 5
+                              ? 'bg-rose-500 animate-pulse'
+                              : officialSecondsLeft <= 10
+                              ? 'bg-amber-500'
+                              : 'bg-blue-600'
+                          }`}
+                          style={{
+                            width: `${Math.max(0, Math.min(100, (officialSecondsLeft / officialMaxSeconds) * 100))}%`,
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+
                   {/* Question metadata header */}
                   <div className="flex items-center justify-between gap-2 pb-2.5 mb-2.5 border-b border-slate-100 dark:border-slate-800">
                     <div className="flex items-center gap-2">
@@ -1697,6 +2626,53 @@ export const McqHub: React.FC<McqHubProps> = ({
                 </div>
               )}
 
+              {/* ── Official Question Card Bottom Navigation Bar (Prev, Grid, Skip, Next) ── */}
+              {currentQ && (
+                <div
+                  className={`flex items-center justify-between gap-1.5 p-2 rounded-2xl border transition-all mt-1 ${
+                    isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-2xs'
+                  }`}
+                >
+                  {/* Left: Previous Button */}
+                  <button
+                    type="button"
+                    onClick={handlePrevOfficialQ}
+                    disabled={currentQIndex === 0}
+                    className={`flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-95 ${
+                      currentQIndex === 0
+                        ? 'opacity-40 cursor-not-allowed bg-slate-100 dark:bg-slate-800 text-slate-400'
+                        : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700'
+                    }`}
+                    title="Pichhla Prashna (Previous)"
+                  >
+                    <ChevronLeft size={16} />
+                    <span className="hidden xs:inline">Back</span>
+                  </button>
+
+                  {/* Submit Button */}
+                  <button
+                    type="button"
+                    onClick={handleOfficialSubmitClick}
+                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 border border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-200 text-xs font-black transition-all cursor-pointer active:scale-95"
+                    title="Test Submit Karein (Scorecard dekhein)"
+                  >
+                    <CheckCircle2 size={15} className="text-emerald-600 dark:text-emerald-400" />
+                    <span>Submit</span>
+                  </button>
+
+                  {/* Right: Next Button */}
+                  <button
+                    type="button"
+                    onClick={handleNextOfficialQ}
+                    className="flex items-center gap-1 px-3 sm:px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black shadow-xs transition-all cursor-pointer active:scale-95 shrink-0"
+                    title={currentQIndex === maxIndex ? 'Antim Prashna / Submit check' : 'Agla Prashna (Next)'}
+                  >
+                    <span>{currentQIndex === maxIndex ? 'Finish' : 'Next'}</span>
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+              )}
+
               {/* Completion Milestone Card */}
               {isCompleted && (
                 <div className="p-5 rounded-3xl bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-xl flex flex-col items-center text-center gap-3">
@@ -1740,25 +2716,56 @@ export const McqHub: React.FC<McqHubProps> = ({
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       {activeSubMode === 'BATTLES' && (
         <div className="flex-1 flex flex-col max-w-2xl w-full mx-auto px-3 sm:px-4 py-2 pb-28 sm:pb-36 gap-2 animate-in fade-in duration-150">
-          {/* ── Battles Count Bar (Compact) ── */}
-          <div className="flex items-center justify-between px-1 py-0.5 text-xs">
-            <div className="flex items-center gap-1.5">
-              <Swords size={13} className="text-purple-600" />
-              <span className="font-black text-slate-800 dark:text-slate-200">
-                {visibleBattles.length} Battle MCQs
-              </span>
-              <span className="text-[10px] text-purple-600 dark:text-purple-400 font-bold bg-purple-50 dark:bg-purple-950/60 px-1.5 py-0.2 rounded border border-purple-200/60 dark:border-purple-800/60">
-                📜 Scrollable Feed
+          {/* ── Battles Count Bar with Grid Trigger & Mode Switcher ── */}
+          <div
+            className={`flex items-center justify-between gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all ${
+              isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-2xs'
+            }`}
+          >
+            {/* Left: Question Counter Badge */}
+            <div
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700 font-black text-xs shrink-0"
+            >
+              <span>
+                Q {safeBattleIdx + 1} / {visibleBattles.length}
               </span>
             </div>
-            {isRoutineOn && (
-              <span className="text-[10px] font-semibold text-purple-600 dark:text-purple-400">
-                Routine: {routineLinkedClass === 'Competition' ? 'Competition' : `Class ${routineLinkedClass}`}
-              </span>
-            )}
+
+            {/* Center: View Switcher (Card vs Feed) */}
+            <div className="flex items-center p-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 text-[11px] font-bold">
+              <button
+                type="button"
+                onClick={() => setBattleViewMode('CARD')}
+                className={`px-2 py-0.5 rounded-md transition-all cursor-pointer ${
+                  battleViewMode === 'CARD'
+                    ? 'bg-purple-600 text-white font-black shadow-2xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                }`}
+              >
+                🃏 30s Test
+              </button>
+              <button
+                type="button"
+                onClick={() => setBattleViewMode('FEED')}
+                className={`px-2 py-0.5 rounded-md transition-all cursor-pointer ${
+                  battleViewMode === 'FEED'
+                    ? 'bg-purple-600 text-white font-black shadow-2xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                }`}
+              >
+                📜 Feed
+              </button>
+            </div>
+
+            {/* Right: Quick live stats badge */}
+            <div className="flex items-center gap-1 text-[11px] font-bold text-slate-500 dark:text-slate-400 shrink-0">
+              <span className="text-emerald-600 dark:text-emerald-400">✓{battleAttemptedCount}</span>
+              <span>•</span>
+              <span className="text-amber-600 dark:text-amber-400">⏭️{battleSkippedCount}</span>
+            </div>
           </div>
 
-          {/* ── Main Content: Full Feed List ── */}
+          {/* ── Main Content: CARD Mode vs FEED Mode ── */}
           <div className="flex flex-col gap-3.5 flex-1 min-h-0">
             {battleLoading && battleList.length === 0 ? (
               <div className="p-12 flex flex-col items-center justify-center text-center gap-2">
@@ -1783,11 +2790,245 @@ export const McqHub: React.FC<McqHubProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowCreateModal(true)}
-                  className="px-4 py-2 rounded-xl bg-purple-600 text-white font-bold text-xs shadow-md active:scale-95"
+                  className="px-4 py-2 rounded-xl bg-purple-600 text-white font-bold text-xs shadow-md active:scale-95 cursor-pointer"
                 >
                   + Pehla MCQ Post Karein
                 </button>
               </div>
+            ) : battleViewMode === 'CARD' ? (
+              /* ═════════════════════════════════════════════════════════════ */
+              /* 1. BATTLE CARD VIEW (30s Timer, Auto-Skip, Skip Ladder)       */
+              /* ═════════════════════════════════════════════════════════════ */
+              currentBattleItem && (
+                <div className="flex flex-col gap-2">
+                  <div
+                    id="battle-active-card"
+                    className={`flex flex-col p-3.5 sm:p-4 rounded-2xl border transition-all shadow-2xs ${
+                      isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
+                    }`}
+                  >
+                    {/* 30-Second Countdown Timer Bar & Skip Re-attempt Indicator */}
+                    <div className="mb-2.5 flex flex-col gap-1 pb-2 border-b border-slate-100 dark:border-slate-800">
+                      <div className="flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-1.5 font-black">
+                          <span
+                            className={`flex items-center gap-1 px-2.5 py-0.5 rounded-lg border font-black text-xs transition-all ${
+                              battleSecondsLeft <= 5 && userBattleAnswers[currentBattleItem.id] === undefined
+                                ? 'bg-rose-500 text-white border-rose-600 animate-pulse'
+                                : battleSecondsLeft <= 10 && userBattleAnswers[currentBattleItem.id] === undefined
+                                ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700'
+                                : 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800'
+                            }`}
+                          >
+                            <Timer size={13} className={battleSecondsLeft <= 5 && userBattleAnswers[currentBattleItem.id] === undefined ? 'animate-spin' : ''} />
+                            <span>
+                              {userBattleAnswers[currentBattleItem.id] !== undefined
+                                ? '✅ Answered'
+                                : `${battleSecondsLeft}s / ${formatDurationLabel(battleMaxSeconds)}`}
+                            </span>
+                          </span>
+
+                          {isBattleReattempt && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-800 flex items-center gap-1">
+                              <RotateCcw size={10} /> Re-attempt Round
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                          <span className="text-emerald-600 dark:text-emerald-400">✓ {battleAttemptedCount}</span>
+                          <span>•</span>
+                          <span className="text-amber-600 dark:text-amber-400">⏭️ {battleSkippedCount}</span>
+                          <span>•</span>
+                          <span>Baaki: {battleUnattemptedCount}</span>
+                        </div>
+                      </div>
+
+                      {/* Countdown Progress Shrink Bar */}
+                      {userBattleAnswers[currentBattleItem.id] === undefined && (
+                        <div className="w-full bg-slate-200 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden mt-0.5">
+                          <div
+                            className={`h-full transition-all duration-1000 ease-linear rounded-full ${
+                              battleSecondsLeft <= 5
+                                ? 'bg-rose-500 animate-pulse'
+                                : battleSecondsLeft <= 10
+                                ? 'bg-amber-500'
+                                : 'bg-purple-600'
+                            }`}
+                            style={{
+                              width: `${Math.max(0, Math.min(100, (battleSecondsLeft / battleMaxSeconds) * 100))}%`,
+                            }}
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Header: Author info, time, class badge */}
+                    <div className="flex items-center justify-between gap-2 pb-2.5 mb-2.5 border-b border-slate-100 dark:border-slate-800">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-purple-500 to-pink-500 flex items-center justify-center font-bold text-white text-xs shrink-0">
+                          {currentBattleItem.userName.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="truncate">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-black text-slate-800 dark:text-slate-200 truncate">
+                              {currentBattleItem.userName}
+                            </span>
+                            {currentBattleItem.userRole && (
+                              <span className="text-[9px] font-black px-1.5 py-0.2 rounded bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 uppercase">
+                                {currentBattleItem.userRole}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {currentBattleItem.classLevel && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                            Class {currentBattleItem.classLevel}
+                          </span>
+                        )}
+                        <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300">
+                          #{safeBattleIdx + 1}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Question Text & Statements */}
+                    <div className="mb-3">
+                      <McqQuestionDisplay q={currentBattleItem} isDarkMode={isDarkMode} />
+                    </div>
+
+                    {/* 4 Options */}
+                    <div className="flex flex-col gap-2 mb-3">
+                      {currentBattleItem.options.map((optText, optIdx) => {
+                        const userAns = userBattleAnswers[currentBattleItem.id];
+                        const hasAnswered = userAns !== undefined;
+                        const isUserPicked = userAns === optIdx;
+                        const isCorrectOption = optIdx === currentBattleItem.correctAnswer;
+
+                        let optClass = isDarkMode
+                          ? 'bg-slate-800/80 hover:bg-slate-800 border-slate-700 text-slate-200'
+                          : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-800';
+
+                        let badgeClass = isDarkMode ? 'bg-slate-700 text-slate-300' : 'bg-slate-200 text-slate-700';
+
+                        if (hasAnswered) {
+                          if (isCorrectOption) {
+                            optClass =
+                              'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-400 text-emerald-900 dark:text-emerald-100 font-bold';
+                            badgeClass = 'bg-emerald-600 text-white';
+                          } else if (isUserPicked && !isCorrectOption) {
+                            optClass =
+                              'bg-rose-50 dark:bg-rose-950/60 border-rose-400 text-rose-900 dark:text-rose-100';
+                            badgeClass = 'bg-rose-600 text-white';
+                          } else {
+                            optClass = 'opacity-50 border-transparent bg-slate-100/40 text-slate-400';
+                          }
+                        }
+
+                        const labels = ['A', 'B', 'C', 'D'];
+
+                        return (
+                          <button
+                            key={optIdx}
+                            disabled={hasAnswered}
+                            onClick={() => handleAnswerBattle(currentBattleItem.id, optIdx, currentBattleItem.correctAnswer)}
+                            className={`flex items-center gap-2.5 p-2.5 sm:p-3 rounded-2xl border text-left transition-all active:scale-[0.99] cursor-pointer ${optClass}`}
+                          >
+                            <span
+                              className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-xs shrink-0 ${badgeClass}`}
+                            >
+                              {hasAnswered && isCorrectOption ? (
+                                <Check size={13} strokeWidth={3} />
+                              ) : hasAnswered && isUserPicked && !isCorrectOption ? (
+                                <X size={13} strokeWidth={3} />
+                              ) : (
+                                labels[optIdx]
+                              )}
+                            </span>
+                            <div
+                              className="flex-1 text-xs sm:text-sm font-semibold"
+                              dangerouslySetInnerHTML={{
+                                __html: renderMathInHtml(optText),
+                              }}
+                            />
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Feedback / Explanation Box */}
+                    {userBattleAnswers[currentBattleItem.id] !== undefined && (
+                      <div
+                        className={`p-3 rounded-xl border text-xs leading-relaxed mb-2 ${
+                          userBattleAnswers[currentBattleItem.id] === currentBattleItem.correctAnswer
+                            ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200'
+                            : 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-900 dark:text-rose-200'
+                        }`}
+                      >
+                        <div className="font-black mb-1 flex items-center gap-1">
+                          {userBattleAnswers[currentBattleItem.id] === currentBattleItem.correctAnswer
+                            ? '✓ Sahi Jawab!'
+                            : '✗ Galat Jawab!'} (Sahi Tha:{' '}
+                          {['A', 'B', 'C', 'D'][currentBattleItem.correctAnswer]})
+                        </div>
+                        {currentBattleItem.explanation ? (
+                          <div>
+                            <strong>Explanation: </strong> {currentBattleItem.explanation}
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ── Battle Bottom Navigation Bar (Prev, Grid, Skip, Next) ── */}
+                  <div
+                    className={`flex items-center justify-between gap-1.5 p-2 rounded-2xl border transition-all mt-1 ${
+                      isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-2xs'
+                    }`}
+                  >
+                    {/* Left: Previous Button */}
+                    <button
+                      type="button"
+                      onClick={handlePrevBattleQ}
+                      disabled={safeBattleIdx === 0}
+                      className={`flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer active:scale-95 ${
+                        safeBattleIdx === 0
+                          ? 'opacity-40 cursor-not-allowed bg-slate-100 dark:bg-slate-800 text-slate-400'
+                          : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700'
+                      }`}
+                      title="Pichhla Battle Prashna (Previous)"
+                    >
+                      <ChevronLeft size={16} />
+                      <span className="hidden xs:inline">Back</span>
+                    </button>
+
+                    {/* Submit Button */}
+                    <button
+                      type="button"
+                      onClick={handleBattleSubmitClick}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-purple-50 dark:bg-purple-950/50 hover:bg-purple-100 dark:hover:bg-purple-900/60 border border-purple-300 dark:border-purple-700 text-purple-800 dark:text-purple-200 text-xs font-black transition-all cursor-pointer active:scale-95"
+                      title="Battle Test Submit Karein (Scoreboard dekhein)"
+                    >
+                      <CheckCircle2 size={15} className="text-purple-600 dark:text-purple-400" />
+                      <span>Submit</span>
+                    </button>
+
+                    {/* Right: Next Button */}
+                    <button
+                      type="button"
+                      onClick={handleNextBattleQ}
+                      className="flex items-center gap-1 px-3 sm:px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-black shadow-xs transition-all cursor-pointer active:scale-95 shrink-0"
+                      title={safeBattleIdx === visibleBattles.length - 1 ? 'Antim Battle / Submit check' : 'Agla Battle Prashna (Next)'}
+                    >
+                      <span>{safeBattleIdx === visibleBattles.length - 1 ? 'Finish' : 'Next'}</span>
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+                </div>
+              )
             ) : (
               <>
                 {/* ── FULL FEED LIST MODE ── */}
@@ -1798,7 +3039,7 @@ export const McqHub: React.FC<McqHubProps> = ({
 
                 return (
                   <div
-                    key={battle.id}
+                    key={`battle-feed-${battle.id}-${bIndex}`}
                     id={`battle-card-${battle.id}`}
                     className={`flex flex-col p-4 sm:p-5 rounded-3xl border transition-all ${
                       isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
@@ -2007,6 +3248,87 @@ export const McqHub: React.FC<McqHubProps> = ({
       )}
 
       {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {/* 2ND CHANCE CONFIRMATION MODAL (USER REQUEST)                           */}
+      {/* "App puchhega aap x question nahi bana paye kya aapko 2nd chance       */}
+      {/*  chahiye agar han to 2nd chance dega warna submite ka button daba dega" */}
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
+      {secondChanceModal && secondChanceModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4 animate-in fade-in duration-200">
+          <div
+            className={`max-w-md w-full rounded-3xl p-6 border shadow-2xl flex flex-col gap-4 text-center transform transition-all animate-in zoom-in-95 ${
+              isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'
+            }`}
+          >
+            {/* Top Graphic / Badge */}
+            <div className="mx-auto w-16 h-16 rounded-3xl bg-gradient-to-tr from-amber-500 via-orange-500 to-amber-600 flex items-center justify-center text-white shadow-xl shadow-orange-500/30">
+              <Sparkles size={32} className="animate-pulse" />
+            </div>
+
+            {/* Main Header / Question */}
+            <div className="flex flex-col gap-1.5">
+              <div className="inline-flex items-center gap-1.5 mx-auto px-3 py-1 rounded-full text-xs font-black bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                <RotateCcw size={12} />
+                <span>Round Complete • Re-attempt Choice</span>
+              </div>
+              <h3 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white leading-tight">
+                Aap {secondChanceModal.initialRoundCount && secondChanceModal.initialRoundCount > secondChanceModal.unsolvedCount ? `${secondChanceModal.initialRoundCount} me se ` : ''}<span className="text-amber-600 dark:text-amber-400 underline decoration-amber-500 underline-offset-4">{secondChanceModal.unsolvedCount}</span> Question nahi bana paye!
+              </h3>
+              <p className="text-sm font-bold text-slate-600 dark:text-slate-300">
+                क्या आपको {secondChanceModal.chanceLabel || '2nd Chance'} चाहिए? 🎯
+              </p>
+            </div>
+
+            {/* Quick Summary Pill Strip */}
+            <div className="grid grid-cols-2 gap-2 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 text-xs">
+              <div className="flex flex-col items-center justify-center p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60">
+                <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300 uppercase">Hal Kiye Gaye</span>
+                <span className="text-base font-black text-emerald-600 dark:text-emerald-400">
+                  {secondChanceModal.mode === 'OFFICIAL' ? officialSolvedCount : battleAttemptedCount}
+                </span>
+              </div>
+              <div className="flex flex-col items-center justify-center p-2 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60">
+                <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300 uppercase">Nahi Bane (Remaining)</span>
+                <span className="text-base font-black text-amber-600 dark:text-amber-400">
+                  {secondChanceModal.unsolvedCount}
+                </span>
+              </div>
+            </div>
+
+            {/* Info / Rule Banner */}
+            <div className="p-3.5 rounded-2xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-xs text-left text-amber-900 dark:text-amber-200 leading-relaxed flex items-start gap-2.5">
+              <Clock className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <strong className="font-bold">{secondChanceModal.chanceLabel || '2nd Chance'} Rule:</strong> Chhute huye questions ko hal karne ke liye har question par <span className="font-black underline">{formatDurationLabel(secondChanceModal.nextDuration || 60)}</span> ka samay milega!{(secondChanceModal.round || 1) >= 2 ? ' ⚠️ Yeh aakhri (3rd) chance hai — iske baad 4th chance nahi milega!' : ' Agar abhi score jama karna chahte hain toh Submit button dabayein.'}
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-col gap-2.5 mt-1">
+              {/* Option 1: Haan, 2nd Chance Chahiye */}
+              <button
+                type="button"
+                onClick={handleAcceptSecondChance}
+                className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-600 text-white font-black text-sm sm:text-base shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2 cursor-pointer active:scale-98 transition-all"
+              >
+                <RotateCcw size={18} />
+                <span>Haan, {secondChanceModal.chanceLabel || '2nd Chance'} Chahiye ⚡ ({formatDurationLabel(secondChanceModal.nextDuration || 60)} Timer)</span>
+              </button>
+
+              {/* Option 2: Warna Submit Button */}
+              <button
+                type="button"
+                onClick={handleSubmitTestDirectly}
+                className="w-full py-3 px-4 rounded-2xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer active:scale-98 transition-all"
+              >
+                <CheckCircle2 size={16} className="text-slate-500" />
+                <span>Nahi, Test Submit Karein 📤 (Final Result)</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════════ */}
       {/* QUESTION GRID SHEET (FOR OFFICIAL 100 QUESTIONS) */}
       {/* ═══════════════════════════════════════════════════════════════════════ */}
       {showQuestionGrid && (
@@ -2018,30 +3340,56 @@ export const McqHub: React.FC<McqHubProps> = ({
           >
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <div>
-                <h3 className="font-black text-base">Question Navigator ({totalOfficialCount} MCQs)</h3>
-                <p className="text-xs text-slate-500">Kisi bhi prashna par direct jump karein</p>
+                <h3 className="font-black text-base flex items-center gap-1.5">
+                  <LayoutGrid size={18} className="text-blue-600" />
+                  <span>Question Navigator ({totalOfficialCount} MCQs)</span>
+                </h3>
+                <p className="text-xs text-slate-500">Kisi bhi prashna par direct jump karein (30s timer ke sath)</p>
               </div>
               <button
                 onClick={() => setShowQuestionGrid(false)}
-                className="p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500"
+                className="p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 cursor-pointer"
               >
                 <X size={18} />
               </button>
             </div>
 
+            {/* Live Count Summary Metrics Strip */}
+            <div className="grid grid-cols-4 gap-1.5 py-2.5 border-b border-slate-100 dark:border-slate-800 text-center">
+              <div className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800/80">
+                <div className="text-[10px] font-bold text-slate-500 uppercase">Total</div>
+                <div className="text-xs sm:text-sm font-black text-slate-800 dark:text-slate-200">{totalOfficialCount}</div>
+              </div>
+              <div className="p-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800">
+                <div className="text-[10px] font-bold text-emerald-600 uppercase">Bana Gaye</div>
+                <div className="text-xs sm:text-sm font-black text-emerald-600">{officialSolvedCount}</div>
+              </div>
+              <div className="p-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800">
+                <div className="text-[10px] font-bold text-amber-600 uppercase">Skip Kiye</div>
+                <div className="text-xs sm:text-sm font-black text-amber-600">{officialSkippedCount}</div>
+              </div>
+              <div className="p-1.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700">
+                <div className="text-[10px] font-bold text-slate-500 uppercase">Baaki</div>
+                <div className="text-xs sm:text-sm font-black text-slate-700 dark:text-slate-300">{officialUnattemptedCount}</div>
+              </div>
+            </div>
+
             {/* Legend */}
-            <div className="flex items-center justify-center gap-4 py-2.5 text-[11px] font-bold text-slate-500">
+            <div className="flex items-center justify-center gap-3 py-2 text-[11px] font-bold text-slate-500 flex-wrap">
               <span className="flex items-center gap-1">
-                <span className="w-3 h-3 rounded-full bg-emerald-500" /> Sahi
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Sahi
               </span>
               <span className="flex items-center gap-1">
-                <span className="w-3 h-3 rounded-full bg-rose-500" /> Galat
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-500" /> Galat
               </span>
               <span className="flex items-center gap-1">
-                <span className="w-3 h-3 rounded-full bg-blue-600" /> Current
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> Skip Ho Gaya
               </span>
               <span className="flex items-center gap-1">
-                <span className="w-3 h-3 rounded-full bg-slate-200 dark:bg-slate-700" /> Bacha Hai
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-600" /> Current
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-2.5 h-2.5 rounded-full bg-slate-200 dark:bg-slate-700" /> Baaki
               </span>
             </div>
 
@@ -2050,12 +3398,16 @@ export const McqHub: React.FC<McqHubProps> = ({
               {officialQuestions.map((_, idx) => {
                 const ans = progress.answers[idx];
                 const isCurrent = idx === currentQIndex;
+                const isSkipped = progress.skippedQuestions?.[idx] && ans === undefined;
 
-                let btnBg = 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300';
+                let btnBg = 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700';
                 if (ans) {
-                  if (ans.isCorrect) btnBg = 'bg-emerald-500 text-white font-bold';
-                  else btnBg = 'bg-rose-500 text-white font-bold';
+                  if (ans.isCorrect) btnBg = 'bg-emerald-500 text-white font-black border border-emerald-600';
+                  else btnBg = 'bg-rose-500 text-white font-black border border-rose-600';
+                } else if (isSkipped) {
+                  btnBg = 'bg-amber-500 text-white font-black border border-amber-600 shadow-2xs';
                 }
+
                 if (isCurrent) {
                   btnBg += ' ring-2 ring-blue-500 ring-offset-1 dark:ring-offset-slate-900';
                 }
@@ -2065,8 +3417,9 @@ export const McqHub: React.FC<McqHubProps> = ({
                     key={idx}
                     onClick={() => handleJumpToOfficialQ(idx)}
                     className={`h-8 rounded-lg text-xs font-bold transition-all active:scale-95 flex items-center justify-center cursor-pointer ${btnBg}`}
+                    title={isSkipped ? `Question #${idx + 1} (Skipped - Tap to solve with 30s)` : `Question #${idx + 1}`}
                   >
-                    {idx + 1}
+                    {isSkipped ? `⏭️${idx + 1}` : idx + 1}
                   </button>
                 );
               })}
@@ -2083,12 +3436,24 @@ export const McqHub: React.FC<McqHubProps> = ({
                 className="px-3 py-2 bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-200 font-bold text-xs rounded-xl flex items-center gap-1.5 hover:bg-amber-100 active:scale-95 cursor-pointer"
               >
                 <BookOpen size={13} />
-                <span>Review All ({totalOfficialCount})</span>
+                <span>Review All</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowQuestionGrid(false);
+                  handleOfficialSubmitClick();
+                }}
+                className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black text-xs rounded-xl cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-sm"
+              >
+                <CheckCircle2 size={13} />
+                <span>Submit Test ({officialSolvedCount}/{totalOfficialCount})</span>
               </button>
 
               <button
                 onClick={() => setShowQuestionGrid(false)}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl cursor-pointer"
+                className="px-3.5 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs rounded-xl cursor-pointer active:scale-95"
               >
                 Close
               </button>
@@ -2113,7 +3478,7 @@ export const McqHub: React.FC<McqHubProps> = ({
                   <Swords size={18} className="text-purple-600" />
                   <span>Battle MCQs Navigator ({visibleBattles.length})</span>
                 </h3>
-                <p className="text-xs text-slate-500">Kisi bhi Battle MCQ par click karke direct solve karein</p>
+                <p className="text-xs text-slate-500">Kisi bhi Battle MCQ par click karke direct solve karein (30s timer ke sath)</p>
               </div>
               <button
                 onClick={() => setShowBattleGrid(false)}
@@ -2123,19 +3488,42 @@ export const McqHub: React.FC<McqHubProps> = ({
               </button>
             </div>
 
+            {/* Live Count Summary Metrics Strip for Battle */}
+            <div className="grid grid-cols-4 gap-1.5 py-2.5 border-b border-slate-100 dark:border-slate-800 text-center">
+              <div className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800/80">
+                <div className="text-[10px] font-bold text-slate-500 uppercase">Total</div>
+                <div className="text-xs sm:text-sm font-black text-slate-800 dark:text-slate-200">{visibleBattles.length}</div>
+              </div>
+              <div className="p-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800">
+                <div className="text-[10px] font-bold text-emerald-600 uppercase">Bana Gaye</div>
+                <div className="text-xs sm:text-sm font-black text-emerald-600">{battleAttemptedCount}</div>
+              </div>
+              <div className="p-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800">
+                <div className="text-[10px] font-bold text-amber-600 uppercase">Skip Kiye</div>
+                <div className="text-xs sm:text-sm font-black text-amber-600">{battleSkippedCount}</div>
+              </div>
+              <div className="p-1.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700">
+                <div className="text-[10px] font-bold text-slate-500 uppercase">Baaki</div>
+                <div className="text-xs sm:text-sm font-black text-slate-700 dark:text-slate-300">{battleUnattemptedCount}</div>
+              </div>
+            </div>
+
             {/* Legend */}
-            <div className="flex items-center gap-3 py-2.5 text-[11px] font-bold border-b border-slate-100 dark:border-slate-800 flex-wrap">
+            <div className="flex items-center gap-3 py-2 text-[11px] font-bold border-b border-slate-100 dark:border-slate-800 flex-wrap justify-center">
               <span className="flex items-center gap-1 text-emerald-600">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Sahi
               </span>
               <span className="flex items-center gap-1 text-rose-600">
                 <span className="w-2.5 h-2.5 rounded-full bg-rose-500" /> Galat
               </span>
-              <span className="flex items-center gap-1 text-slate-400">
-                <span className="w-2.5 h-2.5 rounded-full bg-slate-300 dark:bg-slate-700" /> Baaki
+              <span className="flex items-center gap-1 text-amber-600">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> Skip Ho Gaya
               </span>
               <span className="flex items-center gap-1 text-purple-600">
                 <span className="w-2.5 h-2.5 rounded-full border-2 border-purple-600" /> Current
+              </span>
+              <span className="flex items-center gap-1 text-slate-400">
+                <span className="w-2.5 h-2.5 rounded-full bg-slate-300 dark:bg-slate-700" /> Baaki
               </span>
             </div>
 
@@ -2146,6 +3534,7 @@ export const McqHub: React.FC<McqHubProps> = ({
                 const isAnswered = userAns !== undefined;
                 const isCorrect = isAnswered && userAns === b.correctAnswer;
                 const isCurrent = idx === safeBattleIdx;
+                const isSkipped = battleSkips[b.id] && !isAnswered;
 
                 let btnStyles = isDarkMode
                   ? 'bg-slate-800 text-slate-300 border-slate-700 hover:border-purple-500'
@@ -2157,6 +3546,8 @@ export const McqHub: React.FC<McqHubProps> = ({
                   } else {
                     btnStyles = 'bg-rose-500 border-rose-600 text-white font-black';
                   }
+                } else if (isSkipped) {
+                  btnStyles = 'bg-amber-500 border-amber-600 text-white font-black shadow-2xs';
                 }
 
                 if (isCurrent) {
@@ -2165,23 +3556,36 @@ export const McqHub: React.FC<McqHubProps> = ({
 
                 return (
                   <button
-                    key={b.id}
+                    key={`battle-grid-btn-${b.id}-${idx}`}
                     onClick={() => handleJumpToBattleQ(idx)}
                     className={`h-11 rounded-xl text-xs font-black border flex flex-col items-center justify-center transition-all active:scale-95 cursor-pointer ${btnStyles}`}
+                    title={isSkipped ? `Battle MCQ #${idx + 1} (Skipped - Tap to solve with 30s)` : `Battle MCQ #${idx + 1}`}
                   >
                     <span>#{idx + 1}</span>
-                    <span className="text-[9px] opacity-75 font-normal">
-                      {isAnswered ? (isCorrect ? '✓' : '✗') : 'Q'}
+                    <span className="text-[9px] opacity-90 font-bold">
+                      {isAnswered ? (isCorrect ? '✓' : '✗') : isSkipped ? '⏭️' : 'Q'}
                     </span>
                   </button>
                 );
               })}
             </div>
 
-            <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex justify-end">
+            <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowBattleGrid(false);
+                  handleBattleSubmitClick();
+                }}
+                className="px-3.5 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold text-xs rounded-xl cursor-pointer active:scale-95 flex items-center gap-1.5 shadow-sm"
+              >
+                <CheckCircle2 size={13} />
+                <span>Submit Battle ({battleAttemptedCount}/{visibleBattles.length})</span>
+              </button>
+
               <button
                 onClick={() => setShowBattleGrid(false)}
-                className="px-4 py-2 bg-purple-600 text-white font-bold text-xs rounded-xl cursor-pointer shadow-sm active:scale-95"
+                className="px-4 py-2 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs rounded-xl cursor-pointer active:scale-95"
               >
                 Done
               </button>

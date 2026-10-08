@@ -26,6 +26,44 @@ export const CreditConfirmationModal: React.FC<Props> = ({
 }) => {
     const [payMethod, setPayMethod] = useState<'CREDITS' | 'DIAMONDS'>(diamondCost && userCredits < cost && userDiamonds >= diamondCost ? 'DIAMONDS' : 'CREDITS');
     const [autoEnabled, setAutoEnabled] = useState(isAutoEnabledInitial);
+
+    // Without credit economy: do not show credit popup and allow usage freely
+    // EXCEPTION: Revision Hub requires 100 coins (or 50 with routine 50% discount) unless sequential learning was completed
+    const isRevisionHubModal = /revision\s*hub|mcq\s*access/i.test(title);
+    const isWithoutCredit = (() => {
+        if (isRevisionHubModal) return false;
+        try {
+            const raw = localStorage.getItem('nst_current_user');
+            if (raw) {
+                const u = JSON.parse(raw);
+                if (u?.studyMode === 'CREDIT') return false;
+                if (u?.studyMode && u.studyMode !== 'CREDIT') return true;
+                if (u?.isPremium) return true;
+                if (u?.subscriptionLevel === 'BASIC' || u?.subscriptionLevel === 'ULTRA' || u?.subscriptionLevel === 'PRO' || u?.subscriptionLevel === 'MAX') return true;
+            }
+        } catch {}
+        return false;
+    })();
+
+    React.useEffect(() => {
+        if (isWithoutCredit) {
+            onConfirm(false);
+            return;
+        }
+        document.body.classList.add('nsta-modal-open');
+        window.dispatchEvent(new CustomEvent('nsta-modal-visibility-change', { detail: { open: true } }));
+        return () => {
+            setTimeout(() => {
+                const remaining = document.querySelectorAll('[role="dialog"], [data-modal="true"], .iic-modal-overlay');
+                if (remaining.length === 0) {
+                    document.body.classList.remove('nsta-modal-open');
+                    window.dispatchEvent(new CustomEvent('nsta-modal-visibility-change', { detail: { open: false } }));
+                }
+            }, 10);
+        };
+    }, [isWithoutCredit, onConfirm]);
+
+    if (isWithoutCredit) return null;
     const canPayCredits = userCredits >= cost;
     const canPayDiamonds = (diamondCost ?? 0) > 0 ? userDiamonds >= (diamondCost ?? 0) : false;
     const isDiamondMode = payMethod === 'DIAMONDS' && !!diamondCost;
@@ -33,7 +71,7 @@ export const CreditConfirmationModal: React.FC<Props> = ({
 
     return (
         <div
-            className="fixed inset-0 z-[100000] flex items-center justify-center overflow-y-auto bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200"
+            className="fixed inset-0 z-[100000] flex items-center justify-center overflow-y-auto bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200 iic-modal-overlay"
             style={{
                 paddingTop: 'max(1rem, env(safe-area-inset-top))',
                 paddingRight: 'max(1rem, env(safe-area-inset-right))',
@@ -42,6 +80,7 @@ export const CreditConfirmationModal: React.FC<Props> = ({
             }}
             role="dialog"
             aria-modal="true"
+            data-modal="true"
             aria-label={title}
         >
             <div

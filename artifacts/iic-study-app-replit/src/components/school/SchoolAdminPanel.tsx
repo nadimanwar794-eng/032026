@@ -20,6 +20,7 @@ import { FeeManager } from "./FeeManager";
 import { ReportCard } from "./ReportCard";
 import { MarksManager } from "./MarksManager";
 import { ExamResultsPanel } from "./ExamResultsPanel";
+import { DirectUploadButton } from "../DirectUploadButton";
 import type { MonthlyFee } from "../../school-types";
 import {
   Users, BookOpen, Calendar, IndianRupee, Plus, Trash2, Settings,
@@ -917,13 +918,18 @@ export const SchoolAdminPanel: React.FC<Props> = ({ schoolId, adminUid, onBack }
                       onChange={e => setEditStudentForm(p => ({ ...p, monthlyFee: Number(e.target.value) }))}
                       className="flex-1 px-3 py-2 border dark:border-slate-600 rounded-lg bg-transparent text-slate-800 dark:text-white text-sm" />
                   </div>
-                  <div>
-                    <label className="text-xs text-slate-500 mb-1 block">Student Photo (Google Drive Link)</label>
-                    <input type="url" value={editStudentForm.photoUrl || ""}
-                      onChange={e => setEditStudentForm(p => ({ ...p, photoUrl: e.target.value }))}
-                      placeholder="https://drive.google.com/file/d/.../view"
-                      className="w-full px-3 py-2 border dark:border-slate-600 rounded-lg bg-transparent text-slate-800 dark:text-white text-sm" />
-                    <p className="text-[11px] text-slate-400 mt-0.5">Google Drive share link paste karo. Photo marksheet par dikhegi.</p>
+                  <div className="space-y-1.5 p-2.5 bg-orange-50/50 dark:bg-orange-950/20 rounded-xl border border-orange-200 dark:border-orange-800">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Student Photo (Phone se Direct Upload):</label>
+                      <DirectUploadButton
+                        kind="image"
+                        compact
+                        currentUrl={editStudentForm.photoUrl}
+                        onUploaded={(url) => setEditStudentForm(p => ({ ...p, photoUrl: url }))}
+                        onClear={() => setEditStudentForm(p => ({ ...p, photoUrl: '' }))}
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-400">Photo marksheet aur profile par dikhegi.</p>
                   </div>
                   <label className="flex items-center gap-2 cursor-pointer select-none">
                     <input type="checkbox" checked={editStudentForm.chargePhotoFee || false}

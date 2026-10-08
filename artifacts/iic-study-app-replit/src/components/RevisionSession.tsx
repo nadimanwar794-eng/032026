@@ -546,7 +546,7 @@ export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, su
                                         </button>
                                     </div>
                                 ) : mcqData.length > 0 ? (
-                                    <div className="flex-1 flex flex-col gap-4">
+                                    <div className="flex-1 flex flex-col gap-4 pb-28">
                                         {/* PROGRESS BAR */}
                                         <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
                                             <div
@@ -579,8 +579,8 @@ export const RevisionSession: React.FC<Props> = ({ user, settings, chapterId, su
                                              onSelect={handleOptionSelect}
                                          />
 
-                                        {/* NEXT / SKIP / SUBMIT BUTTONS */}
-                                        <div className="space-y-3 pb-8 animate-in slide-in-from-bottom-4">
+                                        {/* FIXED BOTTOM ACTION BAR: Next, Back, Submit pinned with fixed padding */}
+                                        <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 px-4 py-2.5 shadow-xl max-w-2xl mx-auto space-y-2">
                                             <div className="grid grid-cols-3 gap-2">
                                                 <button
                                                     onClick={() => {

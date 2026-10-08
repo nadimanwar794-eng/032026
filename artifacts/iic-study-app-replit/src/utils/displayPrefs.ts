@@ -119,9 +119,22 @@ export const applyDesktopModeFromStorage = (): void => {
 let _rotatingForOrientation = false;
 export const isRotatingForOrientation = (): boolean => _rotatingForOrientation;
 
-const isFullscreen = (): boolean => !!document.fullscreenElement;
+export const isFullscreen = (): boolean => {
+  if (typeof document === 'undefined') return false;
+  return !!document.fullscreenElement;
+};
 
-const requestFullscreenSafe = async (): Promise<boolean> => {
+export const exitFullscreenSafe = async (): Promise<boolean> => {
+  try {
+    if (typeof document !== 'undefined' && document.fullscreenElement && document.exitFullscreen) {
+      await document.exitFullscreen().catch(() => {});
+      return true;
+    }
+  } catch {}
+  return false;
+};
+
+export const requestFullscreenSafe = async (): Promise<boolean> => {
   try {
     const el: any = document.documentElement;
     if (el.requestFullscreen) await el.requestFullscreen();
@@ -148,8 +161,9 @@ export const getScreenOrientation = (): 'portrait' | 'landscape' => {
 
 /**
  * Rotate Button Handler:
- * Rotates the device screen between portrait and landscape using screen.orientation.lock().
- * Works seamlessly in both Mobile Mode AND Desktop Mode.
+ * Rotates the device screen between portrait and landscape cleanly.
+ * Does NOT force native HTML5 fullscreen to eliminate the browser's
+ * "to exit full screen, drag from the top and touch the back button" system banner.
  * Dispatches 'nst-screen-rotate' event and returns the new orientation ('portrait' | 'landscape').
  */
 export const rotateScreen = async (): Promise<'portrait' | 'landscape' | null> => {
@@ -158,12 +172,18 @@ export const rotateScreen = async (): Promise<'portrait' | 'landscape' | null> =
     const goingTo: 'portrait' | 'landscape' = current === 'landscape' ? 'portrait' : 'landscape';
     const so: any = (screen as any).orientation;
 
+    _rotatingForOrientation = true;
+    // Keep rotation flag active for 1200ms so orientation reflows don't trigger fullscreen/blanking
+    setTimeout(() => {
+      _rotatingForOrientation = false;
+    }, 1200);
+
     if (so && typeof so.lock === 'function') {
       const candidates = goingTo === 'landscape'
         ? ['landscape-primary', 'landscape']
         : ['portrait-primary', 'portrait'];
 
-      // Attempt 1: lock without fullscreen (works in installed PWA & supported mobile browsers)
+      // 1. Try direct orientation lock (works seamlessly in installed PWA without banners)
       for (const target of candidates) {
         try {
           await so.lock(target);
@@ -172,37 +192,29 @@ export const rotateScreen = async (): Promise<'portrait' | 'landscape' | null> =
         } catch {}
       }
 
-      // Attempt 2: request fullscreen briefly, lock orientation
-      _rotatingForOrientation = true;
+      // 2. If browser requires fullscreen permission for orientation lock (e.g. mobile Chrome tab)
       try {
-        const alreadyFullscreen = isFullscreen();
-        if (!alreadyFullscreen) {
+        if (goingTo === 'landscape') {
           await requestFullscreenSafe();
+        } else {
+          await exitFullscreenSafe();
+          await so.unlock?.().catch(() => {});
         }
-
-        let locked = false;
         for (const target of candidates) {
           try {
             await so.lock(target);
-            locked = true;
-            break;
+            try { window.dispatchEvent(new CustomEvent('nst-screen-rotate', { detail: { orientation: goingTo } })); } catch {}
+            return goingTo;
           } catch {}
         }
-        _rotatingForOrientation = false;
-        if (locked) {
-          try { window.dispatchEvent(new CustomEvent('nst-screen-rotate', { detail: { orientation: goingTo } })); } catch {}
-          return goingTo;
-        }
-      } catch {
-        _rotatingForOrientation = false;
-      }
+      } catch {}
     }
 
-    // Fallback: If physical orientation locking is not supported (desktop/iOS), toggle visual layout
+    // Visual layout toggle fallback (works on mobile web, iOS, and desktop without triggering browser fullscreen popups)
     try { window.dispatchEvent(new CustomEvent('nst-screen-rotate', { detail: { orientation: goingTo } })); } catch {}
     return goingTo;
   } catch {
-    _rotatingForOrientation = false;
+    setTimeout(() => { _rotatingForOrientation = false; }, 300);
     return null;
   }
 };

@@ -10,6 +10,8 @@ export const BUILD_NUMBER = "20260716.01";
 export const SUPPORT_PHONE = "8227070298"; // Admin support number — update here instead of in code
 export const ADMIN_EMAIL = "nadiman0636indo@gmail.com";
 export const SUPPORT_EMAIL = "nadiman0636indo@gmail.com";
+export const DEVELOPER_INSTAGRAM = "thenadimanwarx";
+export const SUPPORT_INSTAGRAM_URL = "https://instagram.com/thenadimanwarx";
 
 export const DEFAULT_CONTENT_INFO_CONFIG = {
     freeNotes: {
@@ -235,7 +237,6 @@ export const getSubjectsList = (classLevel: string, stream: string | null, board
           pool.speedyScience,
           pool.speedySocialScience,
           pool.sarSangrah,
-          pool.mcq,
       ].filter(Boolean);
 
       // Admin-defined Custom Books (Sar Sangrah / Speedy ki tarah). Stored under
@@ -602,8 +603,8 @@ export const DEFAULT_PLAN_COMPARISON = [
     {
         name: "1. CORE LEARNING FEATURES",
         features: [
-            { id: 'NOTES_LIB', name: "PDF Notes Library", free: "🔒 First 2 Chapters", basic: "✅ Unlimited", ultra: "✅ Unlimited" },
-            { id: 'VIDEO_ACCESS', name: "Video Lectures", free: "🔒 First 2 Videos", basic: "✅ Unlimited", ultra: "✅ Unlimited" },
+            { id: 'NOTES_LIB', name: "PDF Notes Library", free: "✅ Har Chapter ka Lesson 1 Free (Notes + PDF)", basic: "✅ Unlimited", ultra: "✅ Unlimited" },
+            { id: 'VIDEO_ACCESS', name: "Video Lectures", free: "✅ Har Chapter ka Lesson 1 Free (HD Video Included)", basic: "✅ Unlimited", ultra: "✅ Unlimited" },
             { id: 'TOPIC_CONTENT', name: "Topic-wise Notes", free: "❌ Locked", basic: "✅ Full Access", ultra: "✅ Full Access" },
             { id: 'AUDIO_LIBRARY', name: "Audio / Podcast", free: "❌ Locked", basic: "❌ Locked", ultra: "✅ Premium Only" },
             { id: 'QUICK_REVISION', name: "Quick Revision", free: "✅ Basic", basic: "✅ Full", ultra: "✅ Full" },

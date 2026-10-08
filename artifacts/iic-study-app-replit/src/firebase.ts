@@ -1,18 +1,20 @@
 import { getApp, getApps, initializeApp } from "firebase/app";
 import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, setLogLevel, doc, setDoc, getDoc, getDocFromServer, collection, updateDoc, deleteDoc, onSnapshot, getDocs, query, where, limitToLast, orderBy, increment, arrayUnion, limit, startAfter, QueryDocumentSnapshot } from "firebase/firestore";
-import { getDatabase, ref, set, get, onValue, update, remove, query as rtdbQuery, limitToLast as rtdbLimitToLast, orderByChild as rtdbOrderByChild, equalTo as rtdbEqualTo, runTransaction } from "firebase/database";
-import { getAuth, onAuthStateChanged } from "firebase/auth";
+import { getDatabase, ref, set, get, onValue, update, remove, query as rtdbQuery, limitToLast as rtdbLimitToLast, orderByChild as rtdbOrderByChild, equalTo as rtdbEqualTo, runTransaction, serverTimestamp } from "firebase/database";
+import { getAuth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from "firebase/auth";
 import { storage } from "./utils/storage";
+import { CLASS_10_FAKE_LESSONS } from "./constants/class10SeedLessons";
 
 // --- FIREBASE CONFIGURATION ---
 const firebaseConfig = {
-  apiKey: "AIzaSyDyYNuSJr72nC52MinT0rt6jbDae8HLCts",
-  authDomain: "project-1959318394445181665.firebaseapp.com",
-  databaseURL: "https://project-1959318394445181665-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "project-1959318394445181665",
-  storageBucket: "project-1959318394445181665.firebasestorage.app",
-  messagingSenderId: "130030264192",
-  appId: "1:130030264192:web:1b8a53d694b15c8ef1eb65"
+  apiKey: "AIzaSyBEDKZVPgwOPCccjWdKSShfvSqC3REDa0c",
+  authDomain: "iic-nst.firebaseapp.com",
+  databaseURL: "https://iic-nst-default-rtdb.firebaseio.com",
+  projectId: "iic-nst",
+  storageBucket: "iic-nst.firebasestorage.app",
+  messagingSenderId: "984309241322",
+  appId: "1:984309241322:web:4dae35987732d630e64e93",
+  measurementId: "G-QX0XT7RSQX"
 };
 
 // ── Stale IndexedDB guard ──────────────────────────────────────────────────
@@ -52,7 +54,9 @@ if (typeof window !== 'undefined') {
     if (
       msg.includes('Could not reach Cloud Firestore backend') ||
       msg.includes('client will operate in offline mode') ||
-      msg.includes("backend didn't respond within")
+      msg.includes("backend didn't respond within") ||
+      msg.includes('Failed to get document because the client is offline') ||
+      msg.includes('client is offline')
     ) {
       event.preventDefault();
       console.warn('[IIC] Firestore operating in offline cache mode.');
@@ -69,6 +73,11 @@ if (typeof window !== 'undefined') {
   window.addEventListener('unhandledrejection', (event) => {
     const msg = String(event?.reason?.message || event?.reason || '');
     if (handleQuotaOrNetwork(msg, event)) {
+      return;
+    }
+    if (msg.includes('Pending promise was never set') || (msg.includes('@firebase/auth') && msg.includes('INTERNAL ASSERTION FAILED'))) {
+      event.preventDefault();
+      console.warn('[IIC] Suppressed Firebase Auth internal assertion:', msg);
       return;
     }
     if (msg.includes('FIRESTORE') && msg.includes('INTERNAL ASSERTION FAILED')) {
@@ -95,24 +104,72 @@ if (typeof window !== 'undefined') {
 const analytics: any = null;
 export { analytics };
 
-let app;
+let app: any;
 let db: any;
 
 try {
   setLogLevel('silent');
 } catch {}
 
-if (!getApps().length) {
-  app = initializeApp(firebaseConfig);
-  db = initializeFirestore(app, {
-    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
-  });
-} else {
-  app = getApp();
-  db = getFirestore(app);
+try {
+  if (!getApps().length) {
+    app = initializeApp(firebaseConfig);
+    try {
+      db = initializeFirestore(app, {
+        localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+      });
+    } catch (cacheErr) {
+      console.warn('[Firebase] initializeFirestore with persistentLocalCache failed, falling back to default Firestore:', cacheErr);
+      try {
+        db = getFirestore(app);
+      } catch (fallbackErr) {
+        console.error('[Firebase] getFirestore fallback failed:', fallbackErr);
+      }
+    }
+  } else {
+    app = getApp();
+    try {
+      db = getFirestore(app);
+    } catch (e) {
+      console.error('[Firebase] getFirestore on existing app failed:', e);
+    }
+  }
+} catch (appErr) {
+  console.error('[Firebase] initializeApp failed:', appErr);
 }
-const rtdb = getDatabase(app);
-const auth = getAuth(app);
+
+let rtdb: any;
+let auth: any;
+try {
+  rtdb = getDatabase(app);
+} catch (e) {
+  console.error('[Firebase] getDatabase failed:', e);
+}
+try {
+  auth = getAuth(app);
+} catch (e) {
+  console.error('[Firebase] getAuth failed:', e);
+}
+
+export const VAPID_KEY = 'BIZ9FrX99-hm4cM6pgBIKqZPevNkrVNM0AliLpTPbSr23eX4Vw_DGyC2GMLyJqTbogbuTseW5suFRWE6qQzbrL0';
+
+let _messagingInstance: any = null;
+export const getFirebaseMessaging = async () => {
+  if (_messagingInstance) return _messagingInstance;
+  if (typeof window !== 'undefined' && 'Notification' in window && 'serviceWorker' in navigator) {
+    try {
+      const { getMessaging, isSupported } = await import('firebase/messaging');
+      const supported = await isSupported().catch(() => false);
+      if (supported && app) {
+        _messagingInstance = getMessaging(app);
+        return _messagingInstance;
+      }
+    } catch (e) {
+      console.warn('[Firebase] messaging not supported:', e);
+    }
+  }
+  return null;
+};
 
 // --- EXPORTED HELPERS ---
 
@@ -1042,6 +1099,11 @@ const _executeSaveUserToLive = async (user: any): Promise<boolean> => {
       }
     } catch (_) {}
 
+    // Guest accounts are stored only locally in browser; do not register them in live database
+    if (user.isGuest || user.isAnonymous || String(user.id).startsWith('guest_')) {
+      return true;
+    }
+
     // EXTRACT BULKY DATA FOR SEGREGATION
     const {
       mcqHistory, usageHistory, progress, testResults, inbox,
@@ -1633,12 +1695,14 @@ export const getUserByMobileOrId = async (input: string) => {
 
         // ── 1. Firestore attempt ──
         try {
-            // Check direct document ID first for all candidate IDs
-            for (const candDocId of candidateIds) {
-                const directSnap = await getDoc(doc(db, "users", candDocId)).catch(() => null);
+            // Check direct document ID in parallel for candidate IDs
+            const directDocSnaps = await Promise.all(
+                candidateIds.map(candDocId => getDoc(doc(db, "users", candDocId)).catch(() => null))
+            );
+            for (const directSnap of directDocSnaps) {
                 if (directSnap && directSnap.exists()) {
                     const coreData = directSnap.data();
-                    const bulkySnap = await getDoc(doc(db, "user_data", candDocId)).catch(() => null);
+                    const bulkySnap = await getDoc(doc(db, "user_data", directSnap.id)).catch(() => null);
                     return bulkySnap && bulkySnap.exists() ? { ...coreData, ...bulkySnap.data() } : coreData;
                 }
             }
@@ -1680,28 +1744,28 @@ export const getUserByMobileOrId = async (input: string) => {
         // ── 2. RTDB fallback ──
         let rtdbUser: any = null;
 
-        // Check direct key under users/
-        for (const candId of candidateIds) {
-            try {
-                const snap = await get(ref(rtdb, `users/${candId}`));
-                if (snap.exists()) {
-                    rtdbUser = snap.val();
-                    if (rtdbUser) break;
-                }
-            } catch {}
+        // Check direct key under users/ in parallel
+        const rtdbSnaps = await Promise.all(
+            candidateIds.map(candId => get(ref(rtdb, `users/${candId}`)).catch(() => null))
+        );
+        for (const snap of rtdbSnaps) {
+            if (snap && typeof snap.exists === 'function' && snap.exists()) {
+                rtdbUser = snap.val();
+                if (rtdbUser) break;
+            }
         }
 
         if (!rtdbUser) {
-            for (const candId of candidateIds) {
-                rtdbUser = await getUserFromRTDB('displayId', candId);
+            for (const candId of candidateIds.slice(0, 4)) {
+                rtdbUser = await getUserFromRTDB('displayId', candId).catch(() => null);
                 if (rtdbUser) break;
             }
         }
         if (!rtdbUser) {
             rtdbUser =
-                await getUserFromRTDB('mobile', rawInput) ||
-                await getUserFromRTDB('email', lowerInput) ||
-                await getUserFromRTDB('email', rawInput);
+                await getUserFromRTDB('mobile', rawInput).catch(() => null) ||
+                await getUserFromRTDB('email', lowerInput).catch(() => null) ||
+                await getUserFromRTDB('email', rawInput).catch(() => null);
         }
 
         if (rtdbUser && (rtdbUser.id || rtdbUser.uid)) {
@@ -1725,8 +1789,12 @@ export const getSystemSettings = async () => {
     try {
         const docSnap = await getDoc(doc(db, "config", "system_settings"));
         if (docSnap.exists()) return docSnap.data();
-    } catch (e) {
-        console.error("Firestore getSystemSettings failed:", e);
+    } catch (e: any) {
+        if (e?.code === 'unavailable' || String(e?.message || '').includes('offline')) {
+            console.warn("Firestore getSystemSettings (offline):", e?.message || e);
+        } else {
+            console.warn("Firestore getSystemSettings notice:", e?.message || e);
+        }
     }
 
     return null;
@@ -2210,6 +2278,11 @@ export const subscribeToSettings = (callback: (settings: any) => void) => {
     if (lucentEntriesConfirmed) {
       merged.lucentNotes = latestOrder.map(id => latestLucentMap[id]).filter(Boolean);
     }
+
+    const currentNotes = Array.isArray(merged.lucentNotes) ? merged.lucentNotes : [];
+    const noteIds = new Set(currentNotes.map((n: any) => n.id));
+    const missingFakeNotes = CLASS_10_FAKE_LESSONS.filter(l => !noteIds.has(l.id));
+    merged.lucentNotes = [...currentNotes, ...missingFakeNotes];
 
     callback(merged);
   };
@@ -2741,6 +2814,7 @@ export const saveUserHistory = async (userId: string, historyItem: any) => {
 };
 
 export const getUserSavedNotes = async (userId: string) => {
+    if (!userId || userId === 'guest' || !auth?.currentUser) return [];
     try {
         const q = query(collection(db, "users", userId, "history"));
         const snapshot = await getDocs(q);
@@ -2748,8 +2822,12 @@ export const getUserSavedNotes = async (userId: string) => {
             return snapshot.docs.map(doc => doc.data());
         }
         return [];
-    } catch(e) {
-        console.error("Error fetching user saved notes history:", e);
+    } catch(e: any) {
+        if (e?.code === 'permission-denied' || e?.message?.includes('Missing or insufficient permissions')) {
+            console.warn("[IIC] User saved notes history skipped (insufficient permissions).");
+        } else {
+            console.warn("Notice fetching user saved notes history:", e?.message || e);
+        }
         return [];
     }
 };
@@ -2985,18 +3063,27 @@ export const saveSecureKeys = async (keys: string[]) => {
         const sanitized = sanitizeForFirestore({ keys });
         // Firestore only (Secure)
         await setDoc(doc(db, "admin_secure", "apiKeys"), sanitized);
-    } catch (e) { console.error("Error saving secure keys:", e); }
+    } catch (e) { console.warn("Notice saving secure keys:", e); }
 };
 
 export const getSecureKeys = async () => {
     try {
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+            return [];
+        }
         const docSnap = await getDoc(doc(db, "admin_secure", "apiKeys"));
-        if (docSnap.exists()) {
+        if (docSnap && docSnap.exists()) {
             return docSnap.data().keys || [];
         }
         return [];
-    } catch (e) {
-        console.error("Error fetching secure keys:", e);
+    } catch (e: any) {
+        const msg = String(e?.message || '');
+        if (e?.code === 'unavailable' || msg.includes('offline') || msg.includes('client is offline')) {
+            // Graceful fallback for offline mode without triggering console error alerts
+            console.warn("Firestore offline while fetching secure keys (fallback active)");
+        } else {
+            console.warn("Could not fetch secure keys:", e);
+        }
         return [];
     }
 };
@@ -4148,6 +4235,15 @@ export const resolvesuggestion = async (suggestionId: string): Promise<void> => 
     } catch (e) { console.error('[Suggestions] resolve error:', e); }
 };
 
+export const markSuggestionOpenedByAdmin = async (suggestionId: string): Promise<void> => {
+    try {
+        await update(ref(rtdb, `suggestions/${suggestionId}`), {
+            adminOpened: true,
+            adminOpenedAt: new Date().toISOString()
+        });
+    } catch (e) { console.error('[Suggestions] markOpened error:', e); }
+};
+
 export const deleteSuggestion = async (suggestionId: string): Promise<void> => {
     try { await set(ref(rtdb, `suggestions/${suggestionId}`), null); }
     catch (e) { console.error('[Suggestions] delete error:', e); }
@@ -4355,3 +4451,76 @@ export const subscribeUserCoins = (
         () => callback(0, [])
     );
 };
+
+// Auth Providers
+export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: 'select_account' });
+
+// Global Auth Helpers
+export const loginWithGoogle = async () => {
+  try {
+    const result = await signInWithPopup(auth, googleProvider);
+    return result.user;
+  } catch (error) {
+    console.error("NSTA Auth Login Error:", error);
+    throw error;
+  }
+};
+
+export const logoutUser = async (): Promise<void> => {
+  try {
+    await signOut(auth);
+    localStorage.removeItem('nsta_cached_user');
+  } catch (error) {
+    console.error("NSTA Logout Error:", error);
+    throw error;
+  }
+};
+
+// Safe User Sync Helper (Prevents QuotaExceededError on localStorage)
+export const syncUserProfileToCloud = async (userId: string, userData: any) => {
+  try {
+    const userRef = doc(db, 'users', userId);
+    await setDoc(userRef, userData, { merge: true });
+
+    const sessionLite = {
+      uid: userId,
+      name: userData.name || '',
+      email: userData.email || '',
+      tier: userData.tier || 'free',
+      xp: userData.xp || 0
+    };
+    localStorage.setItem('nsta_session_token', JSON.stringify(sessionLite));
+  } catch (err) {
+    console.error("Cloud Profile Sync Error:", err);
+  }
+};
+
+// Live MCQ Room Helpers (Realtime Database for Instant Sync)
+export const liveRoomManager = {
+  createRoom: async (roomId: string, roomData: any) => {
+    const roomRef = ref(rtdb, `live_mcq_rooms/${roomId}`);
+    return set(roomRef, {
+      ...roomData,
+      createdAt: serverTimestamp(),
+      status: 'waiting'
+    });
+  },
+
+  subscribeToRoom: (roomId: string, callback: (data: any) => void) => {
+    const roomRef = ref(rtdb, `live_mcq_rooms/${roomId}`);
+    return onValue(roomRef, (snapshot) => {
+      callback(snapshot.val());
+    });
+  },
+
+  submitAnswer: async (roomId: string, userId: string, questionIndex: number, answerData: any) => {
+    const answerRef = ref(rtdb, `live_mcq_rooms/${roomId}/responses/${questionIndex}/${userId}`);
+    return set(answerRef, {
+      ...answerData,
+      timestamp: serverTimestamp()
+    });
+  }
+};
+
+export default app;

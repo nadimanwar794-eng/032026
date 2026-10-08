@@ -19,6 +19,10 @@ import {
   isRoutinePageRead,
   calculatePageRequiredReadingSec,
   getPagePointsCount,
+  isPageSequenceCompleted,
+  getRoutinePageMcqScore,
+  isRoutinePageMcqDone,
+  isRoutineMcqDone,
 } from '../utils/routineAutoTrack';
 import { isSequentialReadingEnforced } from '../utils/readingRules';
 import {
@@ -83,16 +87,22 @@ export const SyllabusPageCard: React.FC<SyllabusPageCardProps> = ({
 }) => {
   const contentKey = useMemo(() => getStudyActivityKey(lessonId, pageIndex), [lessonId, pageIndex]);
 
-  // Live periodic activity polling when card is open
-  const [actStats, setActStats] = useState(() => getStudyActivity(user.id, contentKey));
+  // Live periodic activity polling and event listening
+  const [actStats, setActStats] = useState(() => getStudyActivity(user?.id, contentKey));
   useEffect(() => {
-    if (!isOpen) return;
-    setActStats(getStudyActivity(user.id, contentKey));
-    const interval = window.setInterval(() => {
-      setActStats(getStudyActivity(user.id, contentKey));
-    }, 1500);
-    return () => window.clearInterval(interval);
-  }, [isOpen, user.id, contentKey]);
+    const refresh = () => {
+      setActStats(getStudyActivity(user?.id, contentKey));
+    };
+    refresh();
+    window.addEventListener('study-activity-updated', refresh);
+    window.addEventListener('storage', refresh);
+    const interval = window.setInterval(refresh, isOpen ? 1500 : 4000);
+    return () => {
+      window.removeEventListener('study-activity-updated', refresh);
+      window.removeEventListener('storage', refresh);
+      window.clearInterval(interval);
+    };
+  }, [isOpen, user?.id, contentKey, user?.mcqHistory]);
 
   // ── 1. Reading Time Calculation (Combined: Read + Write) ──
   const storedPageSec = getPageTime(lessonId, pageIndex);
@@ -107,20 +117,20 @@ export const SyllabusPageCard: React.FC<SyllabusPageCardProps> = ({
 
   // User subscription checks
   const isPremiumUser = !!(
-    user.isPremium ||
-    user.subscriptionLevel === 'BASIC' ||
-    user.subscriptionLevel === 'ULTRA' ||
-    user.subscriptionTier === 'BASIC' ||
-    user.subscriptionTier === 'ULTRA'
+    user?.isPremium ||
+    user?.subscriptionLevel === 'BASIC' ||
+    user?.subscriptionLevel === 'ULTRA' ||
+    user?.subscriptionTier === 'BASIC' ||
+    user?.subscriptionTier === 'ULTRA'
   );
-  const isAdmin = user.role === 'ADMIN' || user.role === 'SUB_ADMIN';
+  const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUB_ADMIN';
 
   // ── Sequential Page Locking ──
   // Free users: ALWAYS ON. Basic & Ultra users: Configurable in Settings (self ON/OFF). Admin: Bypassed.
   const isPageLockedBySequence = Boolean(
     isSequentialReadingEnforced(user, settings) &&
     pageIndex > 0 &&
-    !isRoutinePageRead(lessonId, pageIndex - 1)
+    !isPageSequenceCompleted(lessonId, pageIndex - 1)
   );
 
   // ── 2. Reading Score % ──
@@ -139,21 +149,68 @@ export const SyllabusPageCard: React.FC<SyllabusPageCardProps> = ({
   const totalMcq = (page.mcqs || (page as any).parsedMcqs || []).length;
   const mcqScoreHist = useMemo(() => {
     const hist = [...((actStats?.MCQ?.scoreHistory || []) as McqScoreAttempt[])];
-    if (hist.length === 0 && Array.isArray(user?.mcqHistory)) {
-      const match = user.mcqHistory.find(
-        (h: any) => h.chapterId === lessonId || (h.id && h.id.includes(lessonId))
-      );
-      if (match) {
+
+    // Fallback 1: check with underscore key format or lessonId
+    if (hist.length === 0) {
+      const alt1 = getStudyActivity(user?.id, `${lessonId}_${pageIndex}`);
+      const alt2 = getStudyActivity(user?.id, lessonId);
+      if (alt1?.MCQ?.scoreHistory?.length) {
+        hist.push(...alt1.MCQ.scoreHistory);
+      } else if (alt2?.MCQ?.scoreHistory?.length && pageIndex === 0) {
+        hist.push(...alt2.MCQ.scoreHistory);
+      }
+    }
+
+    // Fallback 2: check routineAutoTrack per-page MCQ score
+    if (hist.length === 0) {
+      const routineScore = getRoutinePageMcqScore(lessonId, pageIndex);
+      if (routineScore && routineScore.total > 0) {
         hist.push({
-          correct: match.correctCount ?? 0,
-          total: match.totalQuestions ?? 0,
+          correct: routineScore.correct,
+          total: routineScore.total,
           seconds: 0,
-          attemptedAt: match.date || new Date().toISOString(),
+          attemptedAt: new Date(routineScore.ts || Date.now()).toISOString(),
         });
       }
     }
+
+    // Fallback 3: check user?.mcqHistory with flexible matching
+    if (hist.length === 0 && Array.isArray(user?.mcqHistory)) {
+      const pageKey1 = `${lessonId}_${pageIndex}`;
+      const pageKey2 = `${lessonId}__${pageIndex}`;
+      const matches = user.mcqHistory.filter((h: any) =>
+        (h.chapterId === lessonId && (h.pageIndex === undefined || h.pageIndex === pageIndex)) ||
+        h.topicId === pageKey1 ||
+        h.topicId === pageKey2 ||
+        h.id === pageKey1 ||
+        h.id === pageKey2 ||
+        (h.id && (h.id.includes(pageKey1) || h.id.includes(pageKey2))) ||
+        (h.chapterId === lessonId && (pageIndex === 0 || !h.pageIndex))
+      );
+      matches.forEach((m: any) => {
+        const correct = m.correctCount ?? m.correctAnswers ?? m.correct ?? Math.round(((m.score || 0) / 100) * (m.totalQuestions || m.total || totalMcq || 1));
+        const total = m.totalQuestions ?? m.total ?? totalMcq ?? 1;
+        hist.push({
+          correct: Math.min(total, Math.max(0, correct)),
+          total: Math.max(1, total),
+          seconds: m.seconds || 0,
+          attemptedAt: m.date || (m.timestamp ? new Date(m.timestamp).toISOString() : new Date().toISOString()),
+        });
+      });
+    }
+
+    // Fallback 4: check isRoutinePageMcqDone or isRoutineMcqDone
+    if (hist.length === 0 && (isRoutinePageMcqDone(lessonId, pageIndex) || (pageIndex === 0 && isRoutineMcqDone(lessonId)))) {
+      hist.push({
+        correct: totalMcq > 0 ? totalMcq : 1,
+        total: totalMcq > 0 ? totalMcq : 1,
+        seconds: 0,
+        attemptedAt: new Date().toISOString(),
+      });
+    }
+
     return hist;
-  }, [actStats?.MCQ?.scoreHistory, user?.mcqHistory, lessonId]);
+  }, [actStats?.MCQ?.scoreHistory, user?.mcqHistory, lessonId, pageIndex, totalMcq, user?.id]);
   const latestMcq = mcqScoreHist.at(-1);
   const bestMcq =
     mcqScoreHist.length > 0
@@ -175,8 +232,9 @@ export const SyllabusPageCard: React.FC<SyllabusPageCardProps> = ({
   const wrongCount = latestMcq ? Math.max(0, latestMcq.total - latestMcq.correct) : 0;
 
   // ── 4. Free vs Premium MCQ Gate ──
-  // Free users cannot open MCQ until required reading time is completed.
-  const isMcqLocked = isPageLockedBySequence || (!isAdmin && !isPremiumUser && !isReadGoalMet);
+  // Free users in Without Credit mode cannot open MCQ until required reading time is completed.
+  // In Credit Economy Mode, pages & MCQs are unlocked (spending credits as needed).
+  const isMcqLocked = isPageLockedBySequence || (!isAdmin && !isPremiumUser && user?.studyMode !== 'CREDIT' && !isReadGoalMet);
 
   // ── 5. Consolidated Page Mastery % ──
   // If MCQ exists: (Reading% + Best MCQ%) / 2

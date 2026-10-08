@@ -1,11 +1,7 @@
 {
-  "name": " Room",
-  "description": "Imported from GitHub: nadimanwar794-eng/032026",
-  "requestFramePermissions": [
-    "camera",
-    "microphone"
-  ],
-  "majorCapabilities": [
+  "name": "Remix Remix Remix Remix Remix Remix nsta",
+  "description": "Imported from GitHub",
+  "capabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]
 }

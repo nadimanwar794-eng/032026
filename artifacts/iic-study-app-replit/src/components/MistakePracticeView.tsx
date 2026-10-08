@@ -97,11 +97,11 @@ export const MistakePracticeView: React.FC<Props> = ({ mistakes, onClose, onComp
         setStreakFlash(true);
         setTimeout(() => setStreakFlash(false), 800);
       }
-      // ── MCQ Scoring: +2 correct, streak bonuses ────────────────────────────
+      // ── MCQ Scoring: +5 correct, streak bonuses ────────────────────────────
       if (user?.id) {
         const _subValid = !!(user.isPremium || (user.subscriptionTier && user.subscriptionTier !== 'FREE'));
         const _tier = user.subscriptionLevel || user.subscriptionTier || 'FREE';
-        const pts = tryEarnScore(user.id, 2, _tier, _subValid, 0, 'MISTAKE_MCQ_CORRECT');
+        const pts = tryEarnScore(user.id, 5, _tier, _subValid, 0, 'MISTAKE_MCQ_CORRECT');
         const bonus = getMcqStreakBonus(newStreak);
         if (bonus > 0) {
           tryEarnScore(user.id, bonus, _tier, _subValid, 0, `MISTAKE_MCQ_STREAK_${newStreak}`);
@@ -115,9 +115,9 @@ export const MistakePracticeView: React.FC<Props> = ({ mistakes, onClose, onComp
       hapticWrong();
       setWrongCount(c => c + 1);
       setStreak(0);
-      // ── Wrong answer: -1 penalty ────────────────────────────────────────────
-      if (user?.id) subtractDailyScore(user.id, 1);
-      showMcqScore(-1);
+      // ── Wrong answer: -2 penalty ────────────────────────────────────────────
+      if (user?.id) subtractDailyScore(user.id, 2);
+      showMcqScore(-2);
     }
   };
 

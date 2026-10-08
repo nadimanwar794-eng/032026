@@ -9,7 +9,7 @@
  * Max size: 95vw × 95vh. Admin can freely resize between 160×120 and the max.
  */
 import React, { useRef, useState, useCallback, useEffect } from 'react';
-import { X, Minus, GripVertical, Presentation } from 'lucide-react';
+import { X, Minus, GripVertical, Presentation, Maximize2, Minimize2 } from 'lucide-react';
 
 interface Props {
   onClose: () => void;
@@ -152,9 +152,36 @@ export const AdminWhiteBoard: React.FC<Props> = ({ onClose }) => {
           <Presentation size={13} color="#ffffff" />
         </div>
         <GripVertical size={13} style={{ color: 'rgba(255,255,255,0.35)', flexShrink: 0, pointerEvents: 'none' }} />
-        <span style={{ flex: 1, fontSize: 10, fontWeight: 800, color: '#fff', letterSpacing: '0.07em', textTransform: 'uppercase', pointerEvents: 'none' }}>
-          Admin Board
+        <span style={{ fontSize: 10, fontWeight: 800, color: '#fff', letterSpacing: '0.07em', textTransform: 'uppercase', pointerEvents: 'none' }}>
+          White Board
         </span>
+        {/* Ratio Quick Presets */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 3, margin: '0 auto 0 4px' }} onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            onClick={() => setSize({ w: Math.max(220, Math.floor(window.innerWidth * 0.25)), h: Math.floor(window.innerHeight * 0.5) })}
+            title="5/20 Ratio (Compact 25%)"
+            style={{ padding: '2px 5px', fontSize: 9, fontWeight: 800, borderRadius: 5, border: 'none', background: 'rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer' }}
+          >
+            5/20
+          </button>
+          <button
+            type="button"
+            onClick={() => setSize({ w: Math.max(320, Math.floor(window.innerWidth * 0.5)), h: Math.floor(window.innerHeight * 0.65) })}
+            title="10/20 Ratio (Half Screen 50%)"
+            style={{ padding: '2px 5px', fontSize: 9, fontWeight: 800, borderRadius: 5, border: 'none', background: 'rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer' }}
+          >
+            10/20
+          </button>
+          <button
+            type="button"
+            onClick={() => setSize({ w: Math.floor(window.innerWidth * 0.92), h: Math.floor(window.innerHeight * 0.88) })}
+            title="Max Ratio (Wide Board)"
+            style={{ padding: '2px 5px', fontSize: 9, fontWeight: 800, borderRadius: 5, border: 'none', background: 'rgba(255,255,255,0.15)', color: '#fff', cursor: 'pointer' }}
+          >
+            Max
+          </button>
+        </div>
         {/* Minimize */}
         <button
           onMouseDown={(e) => e.stopPropagation()}

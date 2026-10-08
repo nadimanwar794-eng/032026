@@ -8,6 +8,9 @@ import { ArrowLeft, Clock, AlertTriangle, ExternalLink, CheckCircle, XCircle, Tr
 import { CustomConfirm, CustomAlert } from './CustomDialogs';
 import { CreditConfirmationModal } from './CreditConfirmationModal';
 import { CustomPlayer } from './CustomPlayer';
+import { ModernVideoPlayer } from './ModernVideoPlayer';
+import { ModernAudioPlayer } from './ModernAudioPlayer';
+import { ModernPdfViewer } from './ModernPdfViewer';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { decodeHtml } from '../utils/htmlDecoder';
@@ -47,6 +50,7 @@ import { fireSessionComplete } from '../utils/sessionNotify';
 import { deferStudyCoins } from '../utils/studyRewards';
 import { getMcqStatements } from '../utils/mcqStructure';
 import { extractStatements } from '../utils/mcqParser';
+import { MathLessonViewer } from './MathLessonViewer';
 
 
 interface Props {
@@ -354,6 +358,8 @@ export const LessonView: React.FC<Props> = ({
 
     const userLevel = getLevelFromScore(_user.totalScore || 0);
     const ratio = userLevel >= 5 ? (1 / 6) : 0.125;
+    const isCreditEconomy = _user.studyMode === 'CREDIT';
+    if (!isCreditEconomy) return;
     const coins = Math.floor(totalPts * ratio);
     if (coins <= 0) return;
 
@@ -393,9 +399,10 @@ export const LessonView: React.FC<Props> = ({
     // Update totalScore immediately — reading/MCQ pts only
     const scoreUpdated = { ..._user, totalScore: (_user.totalScore || 0) + pts };
 
-    // ── Routine credit gating: coins only on first visit ─────────────────────
-    // If isFirstTimeRef is false (repeat visit), skip coin accumulation — pts only.
-    if (isFirstTimeRef.current) {
+    // ── Routine credit gating: coins only on first visit AND Credit Economy is ON ─────────
+    // If isFirstTimeRef is false (repeat visit) or not credit economy, skip coin accumulation — pts only.
+    const isCreditEconomy = _user.studyMode === 'CREDIT';
+    if (isFirstTimeRef.current && isCreditEconomy) {
       // Fractional coin accumulator: add this event's coin-value to running total,
       // then award only the integer part — remainder carries to the next event.
       const userLevel = getLevelFromScore(_user.totalScore || 0);
@@ -415,9 +422,11 @@ export const LessonView: React.FC<Props> = ({
     saveUserToLive(scoreUpdated);
   }, []);
 
-  // Credits earned directly (video 60s, pdf 60s, writing 60s) — deferred to session-end
+  // Credits earned directly (video 60s, pdf 60s, writing 60s) — deferred to session-end (Credit Economy only)
   const handleCreditsEarned = useCallback((credits: number, activity: string) => {
     if (credits <= 0) return;
+    const isCreditEconomy = userRef.current?.studyMode === 'CREDIT';
+    if (!isCreditEconomy) return;
 
     // Accumulate per mode for session-complete breakdown
     const act = activity?.toUpperCase() || '';
@@ -589,19 +598,19 @@ export const LessonView: React.FC<Props> = ({
       }, 400);
     };
     window.addEventListener('orientationchange', reapply);
-    window.addEventListener('resize', reapply);
     return () => {
       window.removeEventListener('orientationchange', reapply);
-      window.removeEventListener('resize', reapply);
     };
   }, []);
 
   const handleRotate = async () => {
-    const newVal = !isDesktopMode;
-    setDesktopMode(newVal);
-    setIsDesktopMode(newVal);
-    setRotateToast(newVal ? '💻 Desktop Mode: ON (Compact Layout)' : '📱 Mobile Mode: ON');
-    setTimeout(() => setRotateToast(null), 2200);
+    const r = await rotateScreen();
+    if (r !== null) {
+      setRotateToast(r === 'landscape' ? '🔄 Landscape Mode' : '📱 Portrait Mode');
+    } else {
+      setRotateToast('🔄 Screen Rotate');
+    }
+    setTimeout(() => setRotateToast(null), 2000);
   };
 
   const toggleDesktopMode = () => {
@@ -637,7 +646,10 @@ export const LessonView: React.FC<Props> = ({
       const updated = exists
         ? prev.filter(n => !(n.noteKey === noteKey && n.topicText === text))
         : [...prev, { id: Date.now().toString(), noteKey, topicText: text, savedAt: new Date().toISOString() }];
-      try { localStorage.setItem('nst_starred_notes_v1', JSON.stringify(updated)); } catch {}
+      try {
+        localStorage.setItem('nst_starred_notes_v1', JSON.stringify(updated));
+        window.dispatchEvent(new Event('nst_notes_updated'));
+      } catch {}
       return updated;
     });
     // Global social-proof sync so ANY user saving a note reflects globally in trending
@@ -881,6 +893,32 @@ export const LessonView: React.FC<Props> = ({
 
   if (!content) return null;
 
+  // ── MATH DIGITAL PICTURE VIEWER (BOOK / PREMIUM NOTES / SOLUTION / MCQ) ──
+  const isMathSubject =
+    subject?.name?.toLowerCase().includes('math') ||
+    subject?.name?.toLowerCase().includes('ganit') ||
+    subject?.name?.includes('गणित') ||
+    subject?.id?.toLowerCase().includes('math');
+
+  const hasMathImagePages =
+    (content.mathBookPages && content.mathBookPages.length > 0) ||
+    (content.mathPremiumNotesPages && content.mathPremiumNotesPages.length > 0) ||
+    (content.mathSolutionPages && content.mathSolutionPages.length > 0);
+
+  if (hasMathImagePages || (isMathSubject && (content.mathBookPages || content.mathPremiumNotesPages || content.mathSolutionPages))) {
+    return (
+      <MathLessonViewer
+        content={content}
+        chapterTitle={chapter?.title || content.title || 'Math Lesson'}
+        subjectName={subject?.name || 'Mathematics'}
+        user={user!}
+        onBack={onBack}
+        onUpdateUser={onUpdateUser}
+        onSessionCreditsEarned={onSessionCreditsEarned}
+      />
+    );
+  }
+
   // 1. AI IMAGE/HTML NOTES
   const activeContentValue = (language === 'Hindi' && content.schoolPremiumNotesHtml_HI) 
       ? content.schoolPremiumNotesHtml_HI 
@@ -917,8 +955,10 @@ export const LessonView: React.FC<Props> = ({
 
   // FLOATING IMMERSIVE BUTTON — always rendered via portal into document.body
   // so it escapes any fixed/overflow parent stacking context.
+  // Note: Disabled when viewing MCQ content as per user requirement.
+  const isMcqContent = (content.type === 'MCQ_ANALYSIS' || content.type === 'MCQ_SIMPLE' || content.type === 'MCQ_RESULT') || (Boolean(content.mcqData) && (content.mcqData?.length || 0) > 0 && content.type?.includes('MCQ'));
   const fabBottom = isImmersive ? 16 : 80;
-  const floatingBtn = createPortal(
+  const floatingBtn = isMcqContent ? null : createPortal(
     <>
       {/* Backdrop — close menu on outside tap (not in schoolMode) */}
       {fabOpen && !schoolMode && (
@@ -964,7 +1004,7 @@ export const LessonView: React.FC<Props> = ({
         appName={settings?.appShortName || settings?.appName || 'NSTA'}
         title={schoolMode ? (isImmersive ? 'Exit Focus Mode' : 'Focus Mode') : (fabOpen ? 'Close menu' : 'Options')}
         defaultPosition={{ bottom: fabBottom, right: 16 }}
-        zIndex={9200}
+        zIndex={99999}
       >
         {schoolMode ? (
           isImmersive ? (
@@ -994,6 +1034,7 @@ export const LessonView: React.FC<Props> = ({
         <CreditConfirmationModal
           title={`📖 Agla Chapter: ${nextTitle || 'Next'}`}
           cost={20}
+          user={user}
           userCredits={getTotalCredits(user)}
           onConfirm={() => {
             const updated = applyDeduction(user, 20);
@@ -1012,8 +1053,9 @@ export const LessonView: React.FC<Props> = ({
   const coinModal = pendingModeSwitch !== null && user && onUpdateUser
     ? createPortal(
         <CreditConfirmationModal
-          title={pendingModeSwitch === 'readable' ? '📖 Reading Mode (TTS)' : '✍️ Writing Mode (Notes)'}
+          title={pendingModeSwitch === 'readable' ? '📖 Reading Mode (TTS)' : '✨ Premium Notes'}
           cost={20}
+          user={user}
           userCredits={getTotalCredits(user)}
           onConfirm={() => {
             const updated = applyDeduction(user, 20);
@@ -1126,13 +1168,15 @@ export const LessonView: React.FC<Props> = ({
           };
 
           const MODE_COIN_COST = 20;
+          const isUserWithoutCredit = (user?.studyMode || 'WITHOUT_CREDIT') !== 'CREDIT';
+          const isWithoutCreditOrVip = isUserWithoutCredit && Boolean(user?.isPremium || user?.subscriptionLevel === 'BASIC' || user?.subscriptionLevel === 'ULTRA' || user?.subscriptionTier === 'BASIC' || user?.subscriptionTier === 'ULTRA' || isPremiumUser || user?.role === 'ADMIN' || user?.role === 'SUB_ADMIN');
 
           const applyModeSwitch = (targetMode: 'readable' | 'styled') => {
               const currentDesktop = isDesktopModeOn();
               setIsDesktopMode(currentDesktop);
               setDesktopMode(currentDesktop);
               if (targetMode === 'styled') {
-                  if (!isPremiumUser && !htmlUnlocked && user && onUpdateUser) {
+                  if (!isPremiumUser && !isWithoutCreditOrVip && !htmlUnlocked && user && onUpdateUser) {
                       const updatedUser = applyDeduction(user, HTML_UNLOCK_COST)!;
                       onUpdateUser(updatedUser);
                       saveUserToLive(updatedUser);
@@ -1147,8 +1191,8 @@ export const LessonView: React.FC<Props> = ({
 
           const handleModeToggle = (targetMode: 'readable' | 'styled') => {
               if (targetMode === notesViewMode) return;
-              // Show 20-coin deduction popup for every mode switch
-              if (!user || !onUpdateUser) {
+              // Show 20-coin deduction popup only if Credit Economy is ON and user is not VIP / Without Credit
+              if (!user || !onUpdateUser || user.studyMode !== 'CREDIT' || isWithoutCreditOrVip) {
                   applyModeSwitch(targetMode);
                   return;
               }
@@ -1350,7 +1394,7 @@ export const LessonView: React.FC<Props> = ({
                           <button onClick={handleBack} className="shrink-0 p-2 bg-white/10 hover:bg-white/20 rounded-xl text-white transition-colors"><ArrowLeft size={18} /></button>
                           <div className="min-w-0 flex-1">
                               <h2 className="text-[13px] font-black text-white truncate leading-tight">{content.title}</h2>
-                              <p className="text-[10px] font-bold text-amber-300 uppercase tracking-wide truncate">{notesViewMode === 'styled' ? '✍️ Writing Mode' : '📖 Reading Mode'}</p>
+                              <p className="text-[10px] font-bold text-amber-300 uppercase tracking-wide truncate">{notesViewMode === 'styled' ? '✨ Premium Notes' : '📖 Reading Mode'}</p>
                           </div>
                           {/* Live score chip — both reading & writing modes */}
                           <div className="relative shrink-0" style={{ zIndex: 50 }}>
@@ -1498,7 +1542,8 @@ export const LessonView: React.FC<Props> = ({
                 <div className={`flex-shrink-0 border-t border-slate-200/60 bg-white px-4 py-2.5${isImmersive ? ' hidden' : ''}`}>
                   <button
                     onClick={() => {
-                      if (user && onUpdateUser) { setPendingNextChapter(true); }
+                      const isCreditEconomy = user?.studyMode === 'CREDIT';
+                      if (user && onUpdateUser && isCreditEconomy) { setPendingNextChapter(true); }
                       else { onNext(); }
                     }}
                     className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-slate-900 border border-slate-700/60 active:scale-[0.98] transition-all group shadow-sm"
@@ -1556,81 +1601,59 @@ export const LessonView: React.FC<Props> = ({
 
       if (isGoogleDriveAudio) {
           return (
-              <div
-                className="fixed inset-0 z-50 bg-black flex flex-col"
-                onClick={() => setIsImmersive(v => !v)}
-              >
-                  {/* ── Floating gradient header (overlays video, no layout impact) ── */}
-                  <header
-                    className="absolute top-0 left-0 right-0 z-30 transition-all duration-300"
-                    style={{
-                      background: 'linear-gradient(to bottom, rgba(0,0,0,0.90) 0%, rgba(0,0,0,0.45) 65%, transparent 100%)',
-                      opacity: isImmersive ? 0 : 1,
-                      pointerEvents: isImmersive ? 'none' : 'auto',
-                      paddingBottom: 32,
-                    }}
-                    onClick={e => e.stopPropagation()}
-                  >
-                    <div className="flex items-center gap-2 px-3 pt-3 pb-1">
-                      <button
-                        onClick={handleBack}
-                        className="p-2 rounded-full active:scale-90 transition-transform"
-                        style={{ background: 'rgba(255,255,255,0.12)' }}
-                      >
-                        <ArrowLeft size={18} color="#fff" />
-                      </button>
-                      <div className="flex-1 min-w-0 mx-1">
-                        <h2 className="font-bold text-white text-[13px] leading-snug truncate">{content.title}</h2>
-                        <p className="text-[9px] font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.38)' }}>Tap screen to hide controls</p>
-                      </div>
-                      {/* Live session score chip */}
-                      {mediaScoreState && (
-                        <div className="relative shrink-0" style={{ zIndex: 50 }}>
-                          <span
-                            onClick={() => { setVideoScoreTooltip(true); setTimeout(() => setVideoScoreTooltip(false), 2500); }}
-                            style={{ fontSize: '10px', fontWeight: 900, color: '#4ade80', background: 'rgba(34,197,94,0.18)', border: '1px solid rgba(34,197,94,0.35)', borderRadius: 99, padding: '2px 8px', letterSpacing: '0.02em', cursor: 'pointer', display: 'block' }}>
-                            📖 {mediaScoreState.totalSessionScore}
-                          </span>
-                          {videoScoreTooltip && (
-                            <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 6, background: 'linear-gradient(135deg,#eef2ff,#f5f3ff)', borderTop: '2px solid #6366f1', border: '1.5px solid rgba(99,102,241,0.2)', borderTopWidth: 2, borderTopColor: '#6366f1', borderRadius: 12, padding: '7px 12px', whiteSpace: 'nowrap', zIndex: 100, boxShadow: '0 4px 20px rgba(99,102,241,0.15), inset 0 -1px 0 #c7d2fe', animation: 'rshud-slide 0.18s ease', display: 'flex', alignItems: 'center', gap: 8, minWidth: 260 }}>
-                              <span style={{ fontSize: 14, flexShrink: 0 }}>🎬</span>
-                              <span style={{ fontSize: 10, fontWeight: 900, color: '#6366f1', textTransform: 'uppercase', letterSpacing: '0.06em', flexShrink: 0 }}>Video Score</span>
-                              <div style={{ width: 1, height: 14, background: '#e2e8f0', flexShrink: 0 }} />
-                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
-                                <span style={{ fontSize: 7, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1 }}>Score</span>
-                                <span style={{ fontSize: 13, fontWeight: 900, color: '#6366f1', lineHeight: 1.2 }}>+{mediaScoreState.totalSessionScore}</span>
-                              </div>
-                              <div style={{ width: 1, height: 14, background: '#e2e8f0', flexShrink: 0 }} />
-                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
-                                <span style={{ fontSize: 7, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1 }}>Progress</span>
-                                <span style={{ fontSize: 13, fontWeight: 900, color: '#16a34a', lineHeight: 1.2 }}>{Math.round(mediaScoreState.progressPercent ?? 0)}%</span>
-                              </div>
-                              <div style={{ width: 1, height: 14, background: '#e2e8f0', flexShrink: 0 }} />
-                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
-                                <span style={{ fontSize: 7, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1 }}>Next</span>
-                                <span style={{ fontSize: 11, fontWeight: 900, color: mediaScoreState.isPaused ? '#ef4444' : '#f59e0b', lineHeight: 1.2 }}>
-                                  {mediaScoreState.isPaused ? 'Paused' : `+5 in ${mediaScoreState.nextRewardInSec ?? 30}s`}
-                                </span>
-                              </div>
-                              <div style={{ flex: 1 }} />
-                              <button onClick={() => setVideoScoreTooltip(false)} style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: 11, fontWeight: 900, cursor: 'pointer', flexShrink: 0, padding: 0 }}>✕</button>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      <button
-                        onClick={handleBack}
-                        className="p-2 rounded-full active:scale-90 transition-transform"
-                        style={{ background: 'rgba(255,255,255,0.12)' }}
-                      >
-                        <X size={18} color="#fff" />
-                      </button>
-                    </div>
-                  </header>
+              <div className="fixed inset-0 z-50 bg-slate-950 flex flex-col p-4 items-center justify-center">
+                  <div className="w-full max-w-xl">
+                      <ModernAudioPlayer
+                          audioUrl={contentValue}
+                          title={content.title}
+                          subtitle={chapter?.name || subject?.name}
+                          mediaId={`lesson_aud_${content?.id || content?.title}`}
+                          appLogo={settings?.appLogo}
+                          appName={settings?.appShortName || 'NSTA'}
+                          user={user}
+                          isAdmin={isAdmin}
+                          onBack={handleBack}
+                      />
+                  </div>
+                  {floatingBtn}
+              </div>
+          );
+      }
 
-                  {/* ── Video fills FULL screen (no aspect-ratio, no padding) ── */}
-                  <div className="flex-1 relative" onClick={e => e.stopPropagation()}>
-                    <CustomPlayer videoUrl={contentValue} onNext={onNext} nextTitle={nextTitle} badgePos={settings?.iicNstaBadgePos} badgeLabel={settings?.playerBadgeLabel} fsButtonLabel={settings?.playerFsButtonLabel} isAdmin={isAdmin} hideYtLogoBlocker={settings?.hideYtLogoBlocker} />
+      const resolvedVideoUrl = content.videoUrl || (isUrl ? contentValue : '');
+      const isVideo = Boolean(
+          content.videoUrl ||
+          content.type === 'VIDEO' ||
+          content.type === 'VIDEO_LECTURE' ||
+          (isUrl && (
+              contentValue.includes('youtube.com') ||
+              contentValue.includes('youtu.be') ||
+              /\.(mp4|webm|mov|m4v|mkv)(\?.*)?$/i.test(contentValue) ||
+              contentValue.includes('telegram') ||
+              contentValue.includes('/api/telegram/') ||
+              contentValue.includes('cloudinary.com')
+          ))
+      );
+
+      if (isVideo && resolvedVideoUrl) {
+          return (
+              <div className="fixed inset-0 z-50 bg-black flex flex-col">
+                  {/* ── Modern Video Player with Watermark, Quality Selector & In-App Offline Download ── */}
+                  <div className="flex-1 relative flex flex-col justify-center bg-black" onClick={e => e.stopPropagation()}>
+                    <ModernVideoPlayer
+                      videoUrl={resolvedVideoUrl}
+                      title={content.title}
+                      mediaId={`lesson_vid_${content?.id || content?.title}`}
+                      subject={chapter?.name || subject?.name}
+                      appLogo={settings?.appLogo}
+                      appName={settings?.appShortName || 'NSTA'}
+                      user={user}
+                      isAdmin={isAdmin}
+                      isFirstLesson={isFirstChapter || Boolean(content?.isSampleLesson)}
+                      onBack={handleBack}
+                      onNext={onNext}
+                      nextTitle={nextTitle}
+                    />
                   </div>
 
                   {/* ── Media score HUD ── */}
@@ -1948,7 +1971,7 @@ export const LessonView: React.FC<Props> = ({
                   const newStreak = mcqStreak + 1;
                   setMcqStreak(newStreak);
                   const _mcqLabel = [subject?.name, chapter?.title].filter(Boolean).join(' · ') || undefined;
-                  const pts = tryEarnScore(user.id, 2, _tier, _subValid, 0, 'MCQ_CORRECT', undefined, undefined, _mcqLabel);
+                  const pts = tryEarnScore(user.id, 5, _tier, _subValid, 0, 'MCQ_CORRECT', undefined, undefined, _mcqLabel);
                   const bonus = getMcqStreakBonus(newStreak);
                   const bonusPts = bonus > 0 ? tryEarnScore(user.id, bonus, _tier, _subValid, 0, `MCQ_STREAK_${newStreak}`, undefined, undefined, _mcqLabel) : 0;
                   const totalPts = pts + bonusPts;
@@ -1967,14 +1990,14 @@ export const LessonView: React.FC<Props> = ({
                   }
               } else {
                   setMcqStreak(0);
-                  subtractDailyScore(user.id, 1);
+                  subtractDailyScore(user.id, 2);
                   const _u = userRef.current;
                   if (_u && onUpdateUserRef.current) {
-                      const updated = { ..._u, totalScore: Math.max(0, (_u.totalScore || 0) - 1) };
+                      const updated = { ..._u, totalScore: Math.max(0, (_u.totalScore || 0) - 2) };
                       onUpdateUserRef.current(updated);
                       saveUserToLive(updated);
                   }
-                  showMcqScore(-1);
+                  showMcqScore(-2);
               }
           }
 
@@ -2690,8 +2713,8 @@ export const LessonView: React.FC<Props> = ({
                                )}
                            </div>
 
-                           {/* Bottom action bar */}
-                           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 32px', borderTop:'3px solid #e2e8f0', background:'#f8fafc', flexShrink:0, gap:16 }}>
+                           {/* Fixed Bottom action bar: Never jumps regardless of question size */}
+                           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'12px 24px', height:68, minHeight:68, maxHeight:68, borderTop:'3px solid #e2e8f0', background:'#f8fafc', flexShrink:0, gap:16, zIndex:30 }}>
                                <button
                                    onClick={() => {
                                        const index = Math.max(0, projectorQIndex - 1);
@@ -3651,7 +3674,6 @@ export const LessonView: React.FC<Props> = ({
                     </div>
                 </div>
 
-               {floatingBtn}
                <DownloadOptionsModal
                    isOpen={downloadModalOpen}
                    onClose={() => setDownloadModalOpen(false)}

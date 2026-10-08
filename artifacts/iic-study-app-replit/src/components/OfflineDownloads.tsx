@@ -11,9 +11,10 @@ interface Props {
   hideHeader?: boolean;
   user?: User;
   settings?: SystemSettings;
+  onUpgradePlan?: () => void;
 }
 
-export const OfflineDownloads: React.FC<Props> = ({ onBack, hideHeader = false, user, settings }) => {
+export const OfflineDownloads: React.FC<Props> = ({ onBack, hideHeader = false, user, settings, onUpgradePlan }) => {
   const [items, setItems] = useState<OfflineItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedItem, setSelectedItem] = useState<OfflineItem | null>(null);
@@ -313,35 +314,54 @@ export const OfflineDownloads: React.FC<Props> = ({ onBack, hideHeader = false, 
             </span>
           </div>
         )}
-        <div className="max-w-md mx-auto p-6 mt-8">
-          <div className="bg-white rounded-3xl p-6 text-center border border-amber-200 shadow-sm">
-            <div className="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center text-3xl bg-amber-50 border border-amber-200">
-              🔒
+        <div className="max-w-md mx-auto p-5 mt-4">
+          <div className="bg-gradient-to-b from-[#18182e] via-[#121224] to-[#0a0a14] rounded-3xl p-6 text-center border border-purple-500/30 shadow-2xl relative overflow-hidden text-white">
+            <div className="absolute top-0 right-0 w-44 h-44 bg-purple-600/10 rounded-full blur-3xl pointer-events-none" />
+            <div className="absolute bottom-0 left-0 w-44 h-44 bg-pink-600/10 rounded-full blur-3xl pointer-events-none" />
+
+            <div className="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center text-3xl bg-gradient-to-br from-amber-400/20 to-purple-600/20 border border-amber-400/40 shadow-inner">
+              👑
             </div>
-            <span className="inline-block px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-widest mb-3 bg-amber-100 text-amber-800">
-              Subscription Tier Required: Basic+
-            </span>
-            <h3 className="text-xl font-black text-slate-800 mb-2">
-              Download Available Feature Locked
+
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-black tracking-wider uppercase mb-3 bg-amber-400/15 text-amber-300 border border-amber-400/30">
+              <span>Basic & Ultra Tier Required</span>
+            </div>
+
+            <h3 className="text-xl font-black text-white mb-2 tracking-tight">
+              Offline Downloads Locked
             </h3>
-            <p className="text-sm text-slate-600 leading-relaxed mb-6">
-              Notes aur MCQs offline save karke bina internet ke access karne ka feature sirf <strong className="text-blue-600">Basic (Pro)</strong> aur <strong className="text-purple-600">Ultra (Max)</strong> members ke liye available hai.
+
+            <p className="text-xs text-slate-300 leading-relaxed mb-5">
+              Notes aur MCQs ko offline download karke bina internet ke padhne ka feature sirf <strong className="text-blue-400 font-bold">Basic</strong> aur <strong className="text-purple-400 font-bold">Ultra</strong> plan members ke liye available hai.
             </p>
-            <div className="grid grid-cols-2 gap-3 mb-6 text-left">
-              <div className="p-3 rounded-2xl bg-blue-50 border border-blue-200">
-                <p className="text-xs font-black text-blue-700 mb-1">⭐ Basic Plan</p>
-                <p className="text-[11px] text-slate-600">Offline notes & content downloads available</p>
+
+            <div className="grid grid-cols-2 gap-2.5 mb-6 text-left">
+              <div className="p-3 rounded-2xl bg-white/5 border border-blue-400/30">
+                <p className="text-xs font-black text-blue-400 mb-1 flex items-center gap-1">⭐ Basic Plan</p>
+                <p className="text-[11px] text-slate-300">Offline notes & questions downloads available</p>
               </div>
-              <div className="p-3 rounded-2xl bg-purple-50 border border-purple-200">
-                <p className="text-xs font-black text-purple-700 mb-1">👑 Ultra Plan</p>
-                <p className="text-[11px] text-slate-600">Offline downloads + Ultra Mode + priority support</p>
+              <div className="p-3 rounded-2xl bg-white/5 border border-purple-400/30">
+                <p className="text-xs font-black text-purple-400 mb-1 flex items-center gap-1">👑 Ultra Plan</p>
+                <p className="text-[11px] text-slate-300">All offline downloads + Ultra notes & priority chat</p>
               </div>
             </div>
-            <button
-              onClick={onBack}
-              className="w-full py-3.5 rounded-2xl font-black text-sm text-white transition-all active:scale-95 shadow-md bg-amber-600 hover:bg-amber-700">
-              Back to Dashboard / Upgrade Plan
-            </button>
+
+            <div className="flex flex-col gap-2.5">
+              <button
+                type="button"
+                onClick={onUpgradePlan ? onUpgradePlan : onBack}
+                className="w-full py-3.5 rounded-2xl font-black text-xs uppercase tracking-wider text-white shadow-xl cursor-pointer active:scale-95 transition-all bg-gradient-to-r from-amber-500 via-pink-600 to-purple-600 hover:opacity-95"
+              >
+                ⚡ Upgrade to Basic / Ultra
+              </button>
+              <button
+                type="button"
+                onClick={onBack}
+                className="w-full py-2.5 rounded-xl font-semibold text-xs text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 transition-colors"
+              >
+                Dashboard Par Wapas Jayein
+              </button>
+            </div>
           </div>
         </div>
       </div>

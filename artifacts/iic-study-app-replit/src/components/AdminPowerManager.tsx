@@ -51,7 +51,6 @@ export const AdminPowerManager: React.FC<Props> = ({ settings, onUpdate }) => {
         { id: 'GK', label: 'Important', Icon: Star, hint: 'Star icon — opens Important Notes' },
         { id: 'VIDEO', label: 'Video', Icon: Video, hint: 'When video is in bottom nav (not top bar)' },
         { id: 'PROFILE', label: 'Profile', Icon: Crown, hint: 'When video is moved to top bar' },
-        { id: 'APP_STORE', label: 'Apps Store', Icon: ShoppingBag, hint: 'Apps marketplace tab' },
     ];
 
     // Home grid features (Layer 1+2 features — student-facing dashboard buttons)

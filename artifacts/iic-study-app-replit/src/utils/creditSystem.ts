@@ -72,6 +72,9 @@ export const applyDeduction = <T extends CreditUser>(
 ): T | null => {
   if (!chargeStaff && (user.role === 'ADMIN' || user.role === 'SUB_ADMIN')) return user;
 
+  // Without Credit Economy: features can be accessed freely without credit deductions
+  if ((user as any)?.studyMode && (user as any)?.studyMode !== 'CREDIT') return user;
+
   // Fold legacy bonusCredits into permanent
   const permanent = (user.credits ?? 0) + (user.bonusCredits ?? 0);
   const giftedExpiry = user.giftedCreditsExpiry

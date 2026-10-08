@@ -1,219 +1,284 @@
-
-import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, X, RotateCcw, RotateCw, Zap, Maximize2, Minimize2, ExternalLink, AlertTriangle, Headphones, Lock } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import {
+  Play,
+  Pause,
+  X,
+  RotateCcw,
+  RotateCw,
+  Zap,
+  Maximize2,
+  Minimize2,
+  AlertTriangle,
+  Headphones,
+  Music,
+} from 'lucide-react';
+import { globalAudioService, GlobalAudioState } from '../services/globalAudioService';
 
 interface Props {
-  track: { url: string, title: string } | null;
-  onClose: () => void;
+  track?: { url: string; title: string; subtitle?: string } | null;
+  onClose?: () => void;
+  isBottomNavHidden?: boolean;
 }
 
-export const MiniPlayer: React.FC<Props> = ({ track, onClose }) => {
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [playbackRate, setPlaybackRate] = useState(1.0);
+export const MiniPlayer: React.FC<Props> = ({
+  track: propTrack,
+  onClose: propOnClose,
+  isBottomNavHidden = false,
+}) => {
+  const [globalState, setGlobalState] = useState<GlobalAudioState>(() => globalAudioService.getState());
   const [isExpanded, setIsExpanded] = useState(false);
-  const [loadError, setLoadError] = useState(false);
-  
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-
-  // Helper to get Google Drive ID
-  const getDriveId = (url: string) => {
-      const match = url.match(/\/d\/(.*?)\/|\/d\/(.*?)$|id=(.*?)(&|$)/);
-      return match ? (match[1] || match[2] || match[3]) : null;
-  };
-
-  const isDrive = track ? track.url.includes('drive.google.com') : false;
-  const isNotebookLM = track ? track.url.includes('notebooklm.google.com') : false;
 
   useEffect(() => {
-    setLoadError(false); // Reset error on track change
-    if (track) {
-        // If it's a Drive link or NotebookLM link, we skip the native audio element
-        if (isDrive || isNotebookLM) {
-            return;
-        }
+    const unsubscribe = globalAudioService.subscribe((state) => {
+      setGlobalState(state);
+    });
+    return unsubscribe;
+  }, []);
 
-        if (audioRef.current) {
-            audioRef.current.src = track.url;
-            audioRef.current.play().then(() => {
-                setIsPlaying(true);
-            }).catch(e => {
-                console.error("Audio play error", e);
-                setIsPlaying(false);
-                setLoadError(true);
-            });
-        }
+  // Sync propTrack to globalAudioService if passed
+  useEffect(() => {
+    if (propTrack && propTrack.url && propTrack.url !== globalState.track?.url) {
+      globalAudioService.playTrack({
+        url: propTrack.url,
+        title: propTrack.title,
+        subtitle: propTrack.subtitle,
+      });
     }
-  }, [track, isDrive]);
+  }, [propTrack]);
 
-  useEffect(() => {
-      if (audioRef.current) {
-          audioRef.current.playbackRate = playbackRate;
-      }
-  }, [playbackRate]);
+  const activeTrack = globalState.track || propTrack;
+  const isPlaying = globalState.isPlaying;
+  const progress = globalState.currentTime;
+  const duration = globalState.duration;
+  const playbackRate = globalState.playbackRate;
+  const error = globalState.error;
+
+  if (!activeTrack || !activeTrack.url) return null;
+
+  const isDrive = activeTrack.url.includes('drive.google.com');
+  const isNotebookLM = activeTrack.url.includes('notebooklm.google.com');
+
+  const getDriveId = (url: string) => {
+    const match = url.match(/\/d\/(.*?)\/|\/d\/(.*?)$|id=(.*?)(&|$)/);
+    return match ? match[1] || match[2] || match[3] : null;
+  };
 
   const togglePlay = () => {
-      if (audioRef.current) {
-          if (isPlaying) {
-              audioRef.current.pause();
-          } else {
-              audioRef.current.play();
-          }
-          setIsPlaying(!isPlaying);
-      }
-  };
-
-  const handleTimeUpdate = () => {
-      if (audioRef.current) {
-          setProgress(audioRef.current.currentTime);
-          setDuration(audioRef.current.duration || 0);
-      }
+    globalAudioService.togglePlay();
   };
 
   const skip = (seconds: number) => {
-      if (audioRef.current) {
-          audioRef.current.currentTime += seconds;
-      }
+    globalAudioService.skip(seconds);
   };
 
   const toggleSpeed = () => {
-      const rates = [0.75, 1.0, 1.25, 1.5, 2.0];
-      const nextIdx = (rates.indexOf(playbackRate) + 1) % rates.length;
-      setPlaybackRate(rates[nextIdx]);
+    const rates = [0.75, 1.0, 1.25, 1.5, 2.0];
+    const nextIdx = (rates.indexOf(playbackRate) + 1) % rates.length;
+    globalAudioService.setPlaybackRate(rates[nextIdx]);
+  };
+
+  const handleClose = () => {
+    globalAudioService.close();
+    propOnClose?.();
   };
 
   const formatTime = (time: number) => {
-      if (!time) return '0:00';
-      const m = Math.floor(time / 60);
-      const s = Math.floor(time % 60);
-      return `${m}:${s.toString().padStart(2, '0')}`;
+    if (!time || isNaN(time)) return '0:00';
+    const m = Math.floor(time / 60);
+    const s = Math.floor(time % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
-  if (!track) return null;
+  const bottomClass = isBottomNavHidden
+    ? 'bottom-3 sm:bottom-4'
+    : 'bottom-[72px] sm:bottom-[76px]';
 
   return (
-    <div className={`fixed left-2 right-2 z-40 transition-all duration-300 ease-in-out shadow-2xl bg-black border border-slate-700 rounded-2xl overflow-hidden ${(isDrive || isNotebookLM) ? 'bottom-20 h-64' : (isExpanded || loadError ? 'bottom-20 h-48' : 'bottom-20 h-16')}`}>
-      {(isDrive || isNotebookLM) ? (
-          <div className="w-full h-full flex flex-col">
-               <div className="bg-black px-4 py-2 flex justify-between items-center border-b border-white/10">
-                   <div className="flex items-center gap-2 text-white/70 overflow-hidden">
-                       <Headphones size={16} className="shrink-0" />
-                       <span className="text-xs font-bold uppercase truncate">{track.title || 'AUDIO PLAYER'}</span>
-                   </div>
-                   <button onClick={onClose} className="text-slate-600 hover:text-white shrink-0 ml-2"><X size={16} /></button>
-               </div>
-
-               <div className="flex-1 p-2 flex flex-col items-center justify-center gap-3">
-                   {(isDrive && getDriveId(track.url)) || isNotebookLM ? (
-                       <div className="relative w-full h-full rounded-lg overflow-hidden border border-slate-700 bg-black">
-                           <iframe
-                               src={isDrive ? `https://drive.google.com/file/d/${getDriveId(track.url)}/preview` : track.url}
-                               className="w-full h-full"
-                               title={track.title || 'AUDIO PLAYER'}
-                               allow="autoplay"
-                           />
-                           {isDrive && (
-                               <div
-                                   className="absolute top-0 left-0 right-0 h-16 bg-black z-[1000] cursor-default flex items-center justify-between px-4"
-                                   onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                                   onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                               >
-                                   <div className="flex items-center gap-2 overflow-hidden flex-1">
-                                       <Headphones size={18} className="text-purple-500 shrink-0" />
-                                       <span className="text-white text-sm font-bold truncate">{track.title || 'AUDIO PLAYER'}</span>
-                                   </div>
-                               </div>
-                           )}
-                       </div>
-                   ) : (
-                       <div className="text-center p-4">
-                            <p className="text-slate-600 text-xs">Invalid Link.</p>
-                       </div>
-                   )}
-               </div>
+    <div
+      className={`fixed left-2 right-2 max-w-2xl mx-auto z-[95] transition-all duration-300 ease-in-out shadow-2xl bg-slate-950/95 backdrop-blur-xl border border-indigo-500/30 rounded-2xl overflow-hidden ${bottomClass} ${
+        isDrive || isNotebookLM
+          ? 'h-64'
+          : isExpanded || error
+          ? 'h-44'
+          : 'h-16'
+      }`}
+    >
+      {/* ── GOOGLE DRIVE / NOTEBOOKLM EMBED ── */}
+      {isDrive || isNotebookLM ? (
+        <div className="w-full h-full flex flex-col">
+          <div className="bg-slate-900 px-4 py-2 flex justify-between items-center border-b border-white/10">
+            <div className="flex items-center gap-2 text-white/90 overflow-hidden">
+              <Headphones size={16} className="shrink-0 text-indigo-400" />
+              <span className="text-xs font-bold uppercase truncate">
+                {activeTrack.title || 'AUDIO PLAYER'}
+              </span>
+            </div>
+            <button
+              onClick={handleClose}
+              className="text-slate-400 hover:text-white shrink-0 ml-2 p-1 active:scale-95 transition"
+            >
+              <X size={16} />
+            </button>
           </div>
-      ) : !loadError ? (
-          <>
-            <audio 
-                ref={audioRef} 
-                onTimeUpdate={handleTimeUpdate}
-                onLoadedMetadata={() => {
-                    if (audioRef.current) {
-                        setDuration(audioRef.current.duration);
-                        // Ensure auto-play triggers correctly on load
-                        if (isPlaying) audioRef.current.play().catch(e => console.error("Auto-play blocked", e));
-                    }
-                }}
-                onEnded={() => setIsPlaying(false)}
-                onError={(e) => {
-                    console.error("Audio Load Error:", e);
-                    setLoadError(true);
-                    // Don't alert immediately, switch UI first
-                }}
-            />
-            
-            {/* PROGRESS BAR */}
-            <div className="h-1 bg-slate-800 w-full cursor-pointer group" onClick={(e) => {
+
+          <div className="flex-1 p-2 flex flex-col items-center justify-center gap-3">
+            {(isDrive && getDriveId(activeTrack.url)) || isNotebookLM ? (
+              <div className="relative w-full h-full rounded-lg overflow-hidden border border-slate-700 bg-black">
+                <iframe
+                  src={
+                    isDrive
+                      ? `https://drive.google.com/file/d/${getDriveId(activeTrack.url)}/preview`
+                      : activeTrack.url
+                  }
+                  className="w-full h-full"
+                  title={activeTrack.title || 'AUDIO PLAYER'}
+                  allow="autoplay"
+                />
+              </div>
+            ) : (
+              <div className="text-center p-4">
+                <p className="text-slate-400 text-xs">Invalid Link.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : !error ? (
+        <div className="flex flex-col h-full justify-between">
+          {/* PROGRESS BAR SCRUBBER */}
+          <div
+            className="h-1.5 bg-slate-800 w-full cursor-pointer group relative"
+            onClick={(e) => {
+              if (duration > 0) {
                 const rect = e.currentTarget.getBoundingClientRect();
                 const percent = (e.clientX - rect.left) / rect.width;
-                if (audioRef.current) audioRef.current.currentTime = percent * duration;
-            }}>
-                <div className="h-full bg-gradient-to-r from-purple-500 to-pink-500 relative transition-all duration-100" style={{ width: `${(progress / duration) * 100}%` }}>
-                    <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-md opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                </div>
+                globalAudioService.seek(percent * duration);
+              }
+            }}
+          >
+            <div
+              className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 relative transition-all duration-100"
+              style={{ width: `${duration > 0 ? (progress / duration) * 100 : 0}%` }}
+            >
+              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white rounded-full shadow-lg border border-indigo-400 opacity-90 group-hover:scale-125 transition-transform" />
             </div>
-
-            <div className="flex items-center justify-between px-4 h-full">
-                {/* INFO */}
-                <div className="flex items-center gap-3 overflow-hidden flex-1">
-                    <div className={`w-10 h-10 rounded-lg bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center shrink-0 ${isPlaying ? 'animate-pulse' : ''}`}>
-                        <div className="flex items-end gap-0.5 h-4 mb-1">
-                            {[1,2,3].map(i => (
-                                <div key={i} className={`w-1 bg-white rounded-full ${isPlaying ? 'animate-bounce' : 'h-2'}`} style={{ animationDelay: `${i*0.1}s` }}></div>
-                            ))}
-                        </div>
-                    </div>
-                    <div className="min-w-0">
-                        <h4 className="text-white text-xs font-bold truncate">{track.title}</h4>
-                        <p className="text-slate-500 text-[10px] font-mono">{formatTime(progress)} / {formatTime(duration)}</p>
-                    </div>
-                </div>
-
-                {/* CONTROLS */}
-                <div className="flex items-center gap-3">
-                    {isExpanded && (
-                        <>
-                          <button onClick={() => skip(-10)} className="text-slate-500 hover:text-white transition-colors"><RotateCcw size={18} /></button>
-                          <button onClick={toggleSpeed} className="text-slate-500 hover:text-white transition-colors flex items-center text-[10px] font-bold gap-0.5 bg-white/10 px-1.5 py-0.5 rounded"><Zap size={10} /> {playbackRate}x</button>
-                          <button onClick={() => skip(10)} className="text-slate-500 hover:text-white transition-colors"><RotateCw size={18} /></button>
-                        </>
-                    )}
-                    
-                    <button 
-                        onClick={togglePlay} 
-                        className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-slate-900 hover:scale-105 transition-transform shadow-lg shadow-white/10"
-                    >
-                        {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-0.5" />}
-                    </button>
-
-                    <button onClick={() => setIsExpanded(!isExpanded)} className="text-slate-500 hover:text-white">
-                        {isExpanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
-                    </button>
-                    
-                    <button onClick={onClose} className="text-slate-600 hover:text-red-400 transition-colors">
-                        <X size={20} />
-                    </button>
-                </div>
-            </div>
-          </>
-      ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center bg-black p-4 text-center">
-               <AlertTriangle size={24} className="text-red-500 mb-2" />
-               <p className="text-white text-xs font-bold mb-1">Failed to load audio</p>
-               <p className="text-slate-600 text-[10px]">The audio format might not be supported.</p>
-               <button onClick={onClose} className="mt-4 px-4 py-1 bg-white/10 text-white text-xs rounded hover:bg-white/20">Close</button>
           </div>
+
+          {/* MAIN PLAYER ROW */}
+          <div className="flex items-center justify-between px-3.5 h-full gap-2">
+            {/* TRACK INFO */}
+            <div className="flex items-center gap-2.5 overflow-hidden flex-1 min-w-0">
+              <div
+                className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-600 flex items-center justify-center shrink-0 shadow-md ${
+                  isPlaying ? 'ring-2 ring-indigo-400/50' : 'opacity-80'
+                }`}
+              >
+                {isPlaying ? (
+                  <div className="flex items-end gap-0.5 h-4 mb-0.5">
+                    {[1, 2, 3, 4].map((i) => (
+                      <div
+                        key={i}
+                        className="w-1 bg-white rounded-full animate-bounce"
+                        style={{
+                          height: `${8 + (i % 3) * 4}px`,
+                          animationDelay: `${i * 0.12}s`,
+                          animationDuration: '0.8s',
+                        }}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <Music size={18} className="text-white" />
+                )}
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[9px] font-black uppercase px-1 py-0.2 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    Audio
+                  </span>
+                  <h4 className="text-white text-xs font-bold truncate">
+                    {activeTrack.title}
+                  </h4>
+                </div>
+                <div className="flex items-center gap-2 text-[10px] text-slate-400 font-mono mt-0.5">
+                  <span>
+                    {formatTime(progress)} / {formatTime(duration)}
+                  </span>
+                  {activeTrack.subtitle && (
+                    <span className="truncate max-w-[120px] text-slate-500 hidden xs:inline">
+                      • {activeTrack.subtitle}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* CONTROLS */}
+            <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+              {/* Skip -10s */}
+              <button
+                onClick={() => skip(-10)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition active:scale-90"
+                title="-10 seconds"
+              >
+                <RotateCcw size={16} />
+              </button>
+
+              {/* Play / Pause */}
+              <button
+                onClick={togglePlay}
+                className="w-9 h-9 sm:w-10 sm:h-10 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-full flex items-center justify-center text-white hover:brightness-110 active:scale-95 transition-all shadow-lg shadow-indigo-600/40 shrink-0"
+                title={isPlaying ? 'Pause' : 'Play'}
+              >
+                {isPlaying ? (
+                  <Pause size={18} fill="currentColor" />
+                ) : (
+                  <Play size={18} fill="currentColor" className="ml-0.5" />
+                )}
+              </button>
+
+              {/* Skip +10s */}
+              <button
+                onClick={() => skip(10)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition active:scale-90"
+                title="+10 seconds"
+              >
+                <RotateCw size={16} />
+              </button>
+
+              {/* Speed rate */}
+              <button
+                onClick={toggleSpeed}
+                className="text-slate-300 hover:text-white transition flex items-center text-[10px] font-bold gap-0.5 bg-white/10 hover:bg-white/15 px-2 py-1 rounded-md"
+                title="Playback Speed"
+              >
+                <Zap size={11} className="text-amber-400" /> {playbackRate}x
+              </button>
+
+              {/* Close */}
+              <button
+                onClick={handleClose}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition active:scale-90"
+                title="Stop & Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="w-full h-full flex items-center justify-between px-4 bg-slate-900 text-center">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={18} className="text-amber-400 shrink-0" />
+            <span className="text-white text-xs font-bold">Audio chalane me samasya aayi</span>
+          </div>
+          <button
+            onClick={handleClose}
+            className="px-3 py-1 bg-white/10 hover:bg-white/20 text-white text-xs rounded-lg transition"
+          >
+            Close
+          </button>
+        </div>
       )}
     </div>
   );

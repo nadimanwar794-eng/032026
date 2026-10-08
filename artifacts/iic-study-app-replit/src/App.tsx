@@ -26,45 +26,59 @@ import { safeSaveUsersCache, deduplicateInbox } from './utils/safeUtils';
 import { signInAnonymously } from 'firebase/auth';
 import { fetchChapters, fetchLessonContent } from './services/groq';
 import { AppLoadingScreen } from './components/AppLoadingScreen';
-import { BoardSelection } from './components/BoardSelection';
-import { ClassSelection } from './components/ClassSelection';
 import { SubjectSelection } from './components/SubjectSelection';
 import { StreamSelection } from './components/StreamSelection';
-// Resilient dynamic module loader with auto-retry for transient network / dev-server hiccups
+// Resilient dynamic module loader with auto-retry loop for transient network / dev-server hiccups
 function lazyWithRetry<T extends React.ComponentType<any>>(
   factory: () => Promise<{ default: T }>,
   chunkName = 'module'
 ): React.LazyExoticComponent<T> {
   return lazy(async () => {
     const key = `nst_chunk_retry_${chunkName}`;
-    try {
-      const mod = await factory();
-      try { sessionStorage.removeItem(key); } catch {}
-      return mod;
-    } catch (error: any) {
-      const msg = error?.message || String(error);
-      const isImportError =
-        msg.includes('Failed to fetch dynamically') ||
-        msg.includes('error loading dynamically imported module') ||
-        msg.includes('Importing a module script failed') ||
-        msg.includes('Loading chunk') ||
-        msg.includes('ChunkLoadError');
+    const maxRetries = 3;
+    let lastError: any = null;
 
-      const alreadyRetried = sessionStorage.getItem(key);
-      if (isImportError && !alreadyRetried) {
-        try { sessionStorage.setItem(key, 'true'); } catch {}
-        window.location.reload();
-        return new Promise<{ default: T }>(() => {});
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const mod = await factory();
+        try { sessionStorage.removeItem(key); } catch {}
+        return mod;
+      } catch (error: any) {
+        lastError = error;
+        const msg = error?.message || String(error);
+        const isImportError =
+          msg.includes('Failed to fetch dynamically') ||
+          msg.includes('error loading dynamically imported module') ||
+          msg.includes('Importing a module script failed') ||
+          msg.includes('Loading chunk') ||
+          msg.includes('ChunkLoadError');
+
+        if (!isImportError) {
+          throw error;
+        }
+
+        // Wait with backoff before next attempt
+        if (attempt < maxRetries - 1) {
+          await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+        }
       }
-      throw error;
     }
+
+    const alreadyRetried = sessionStorage.getItem(key);
+    if (!alreadyRetried) {
+      try { sessionStorage.setItem(key, 'true'); } catch {}
+      try { window.location.reload(); } catch {}
+      return new Promise<{ default: T }>(() => {});
+    }
+
+    throw lastError;
   });
 }
 
 const LessonView = lazyWithRetry(() => import('./components/LessonView').then(m => ({ default: m.LessonView })), 'lesson');
 import { Auth } from './components/Auth';
 const AdminDashboard = lazyWithRetry(() => import('./components/AdminDashboard').then(m => ({ default: m.AdminDashboard })), 'admin');
-import { StudentDashboard } from './components/StudentDashboard';
+const StudentDashboard = lazyWithRetry(() => import('./components/StudentDashboard').then(m => ({ default: m.StudentDashboard || (m as any).default })), 'student');
 const SchoolEcosystem = lazyWithRetry(() => import('./components/school/SchoolEcosystem').then(m => ({ default: m.SchoolEcosystem })), 'school');
 import { getSchoolUserProfile } from './school-firebase';
 const CoachingEcosystem = lazyWithRetry(() => import('./components/coaching/CoachingEcosystem').then(m => ({ default: m.CoachingEcosystem })));
@@ -77,6 +91,8 @@ import { IICPage } from './components/IICPage';
 const WeeklyTestView = lazyWithRetry(() => import('./components/WeeklyTestView').then(m => ({ default: m.WeeklyTestView })));
 const UniversalChat = lazyWithRetry(() => import('./components/UniversalChat').then(m => ({ default: m.UniversalChat })));
 const MarksheetCard = lazyWithRetry(() => import('./components/MarksheetCard').then(m => ({ default: m.MarksheetCard })));
+const UpdatesPage = lazyWithRetry(() => import('./components/UpdatesPage').then(m => ({ default: m.UpdatesPage || (m as any).default })), 'updates');
+const RevisionHubScreen = lazyWithRetry(() => import('./components/RevisionHubScreen').then(m => ({ default: m.RevisionHubScreen || (m as any).default })), 'revision');
 import { CreditConfirmationModal } from './components/CreditConfirmationModal';
 import { CustomAlert, CustomConfirm } from './components/CustomDialogs';
 import { UpdatePopup } from './components/UpdatePopup';
@@ -84,9 +100,10 @@ import { FreeSubjectLessonPopup } from './components/FreeSubjectLessonPopup';
 import { McqLimitLockedPopup } from './components/McqLimitLockedPopup';
 
 import { StreakLoginPopup } from './components/StreakLoginPopup';
+import { checkEveningStreakReminder, checkMorningRoutineReminder, listenToForegroundMessages, subscribeToUserNotifications } from './components/NotificationManager';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { logErrorToFirebase, setErrorLoggerUser } from './utils/errorLogger';
-import { MaintenanceBanner, AdminCrashPopup } from './components/MaintenanceScreen';
+import { MaintenanceBanner, AdminCrashPopup, MaintenanceScreen } from './components/MaintenanceScreen';
 import { subscribeToMaintenance, markCrashFixed, reportCrash as reportMaintenanceCrash } from './utils/maintenanceManager';
 import { initPerfMode } from './utils/performanceMode';
 import { CreditToast } from './components/CreditToast';
@@ -97,15 +114,19 @@ import { DailyChallengePopup } from './components/DailyChallengePopup';
 import { recordCreditTx } from './utils/creditHistory';
 import { getCreditCost, getRequiredTier } from './utils/creditSystem';
 import { generateDailyChallengeQuestions, getChallengeDateKey, getChallengeWeekKey, isDailyChallenge20 } from './utils/challengeGenerator';
-import { BrainCircuit, Globe, LogOut, LayoutDashboard, BookOpen, Headphones, HelpCircle, Newspaper, KeyRound, Lock, X, ShieldCheck, FileText, UserPlus, EyeOff, WifiOff, Cloud, ArrowLeft, ExternalLink } from 'lucide-react'; // eslint-disable-line @typescript-eslint/no-unused-vars
+import { BrainCircuit, Globe, LogOut, LayoutDashboard, BookOpen, Headphones, HelpCircle, Newspaper, KeyRound, Lock, X, ShieldCheck, FileText, UserPlus, EyeOff, WifiOff, Cloud, ArrowLeft, ExternalLink, ChevronRight } from 'lucide-react'; // eslint-disable-line @typescript-eslint/no-unused-vars
 import { SUPPORT_EMAIL, APP_VERSION } from './constants';
+import { CLASS_10_FAKE_LESSONS } from './constants/class10SeedLessons';
 import { StudentTab, PendingReward, MCQResult, SubscriptionHistoryEntry } from './types';
+import { PedroEngine } from './utils/engines/pedroEngine';
+import { pedroSpeak } from './utils/pedroVoiceManager';
 
 const App: React.FC = () => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [maintenanceState, setMaintenanceState] = useState<any>(null);
   const [adminDashCrashed, setAdminDashCrashed] = useState(false);
   const [showAdminCrashPopup, setShowAdminCrashPopup] = useState(false);
+  const [showFullMaintenanceModal, setShowFullMaintenanceModal] = useState(false);
 
   const [appMcqCommunityDraft, setAppMcqCommunityDraft] = useState<{question: string; statements?: string[]; options: [string,string,string,string]; correctAnswer: number; explanation: string} | null>(null);
 
@@ -113,6 +134,20 @@ const App: React.FC = () => {
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
 
   useEffect(() => { initPerfMode(); }, []);
+
+  // Listen for foreground push notifications (FCM) so alerts are visible even when app is open
+  useEffect(() => {
+    let unsubscribe: any = null;
+    listenToForegroundMessages((payload) => {
+      console.log('[App] Foreground FCM push received:', payload);
+    }).then(unsub => {
+      unsubscribe = unsub;
+    }).catch(() => {});
+
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, []);
 
   // ── Immortal Storage: 30-din purani history cleanup (app open hone par) ──
   useEffect(() => {
@@ -157,7 +192,13 @@ const App: React.FC = () => {
   // TESTING OVERRIDE: Render component directly bypassing auth
   useEffect(() => {
       const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('mock') === 'dashboard' || urlParams.get('mock') === 'dashboard_with_inbox') {
+        if (urlParams.get('view') === 'login' || urlParams.get('view') === 'auth' || urlParams.get('auth') === '1' || urlParams.get('preview') === 'login') {
+            setState(prev => ({
+                ...prev,
+                user: null
+            }));
+            return;
+        } else if (urlParams.get('mock') === 'dashboard' || urlParams.get('mock') === 'dashboard_with_inbox') {
             setState(prev => ({
                 ...prev,
                 user: {
@@ -323,7 +364,7 @@ const App: React.FC = () => {
   const [state, setState] = useState<AppState>({
     user: null,
     originalAdmin: null,
-    view: 'BOARDS',
+    view: 'STUDENT_DASHBOARD',
     selectedBoard: null,
     selectedClass: null,
     selectedStream: null,
@@ -392,6 +433,10 @@ const App: React.FC = () => {
             { id: 'lifetime', name: 'Lifetime', duration: 'Forever', basicPrice: 4999, basicOriginalPrice: 9999, ultraPrice: 7499, ultraOriginalPrice: 14999, features: ['VIP Status'], popular: true }
         ],
         creditSubscriptionPlans: DEFAULT_CREDIT_SUB_PLANS,
+        showCreditsStore: false,
+        showDiamondsStore: false,
+        hideCreditsStore: true,
+        hideDiamondsStore: true,
         startupAd: {
             enabled: false,
             duration: 2,
@@ -409,7 +454,8 @@ const App: React.FC = () => {
         prizeRules: [
             { id: 'def-daily', category: 'DAILY_CHALLENGE', minQuestions: 0, minPercentage: 90, rewardType: 'SUBSCRIPTION', rewardSubTier: 'MONTHLY', rewardSubLevel: 'ULTRA', rewardDurationHours: 720, label: 'Score 90% in Daily Challenge', enabled: true },
             { id: 'def-weekly', category: 'WEEKLY_TEST', minQuestions: 0, minPercentage: 0, rewardType: 'SUBSCRIPTION', rewardSubTier: 'WEEKLY', rewardSubLevel: 'BASIC', rewardDurationHours: 24, label: 'Participate in Weekly Test', enabled: true }
-        ]
+        ],
+        lucentNotes: CLASS_10_FAKE_LESSONS as any
     }
   });
 
@@ -426,12 +472,53 @@ const App: React.FC = () => {
   const [inAppBrowserUrl, setInAppBrowserUrl] = useState<string | null>(null);
 
   useEffect(() => {
-      if (state.settings?.globalCards3D) {
-          document.documentElement.classList.add('global-cards-3d');
+    const root = document.documentElement;
+    if (state.settings?.globalCards3D) {
+      root.classList.add('global-cards-3d');
+      const depth = state.settings.cardDepth3D || 'medium';
+      if (depth === 'subtle') {
+        root.style.setProperty('--nst-3d-depth', '2.5px');
+        root.style.setProperty('--nst-3d-lift', '-1px');
+        root.style.setProperty('--nst-3d-hover-depth', '3.5px');
+      } else if (depth === 'deep') {
+        root.style.setProperty('--nst-3d-depth', '7px');
+        root.style.setProperty('--nst-3d-lift', '-3.5px');
+        root.style.setProperty('--nst-3d-hover-depth', '9px');
       } else {
-          document.documentElement.classList.remove('global-cards-3d');
+        root.style.setProperty('--nst-3d-depth', '4px');
+        root.style.setProperty('--nst-3d-lift', '-2px');
+        root.style.setProperty('--nst-3d-hover-depth', '5.5px');
       }
-  }, [state.settings?.globalCards3D]);
+    } else {
+      root.classList.remove('global-cards-3d');
+    }
+
+    if (state.settings?.appCardBorderColor) {
+      root.style.setProperty('--nst-card-border', state.settings.appCardBorderColor);
+    }
+  }, [state.settings?.globalCards3D, state.settings?.cardDepth3D, state.settings?.appCardBorderColor]);
+
+  // Real-time User Notification Subscriber (direct RTDB pipeline for chat, friends, study room, routine)
+  useEffect(() => {
+    if (!state.user?.id) return;
+    const unsub = subscribeToUserNotifications(state.user.id, (notif) => {
+      console.log('[App] Real-time notification received:', notif.title);
+    });
+
+    // Check morning and evening reminders
+    checkMorningRoutineReminder(state.user);
+    checkEveningStreakReminder(state.user);
+
+    const reminderInterval = setInterval(() => {
+      checkMorningRoutineReminder(state.user);
+      checkEveningStreakReminder(state.user);
+    }, 15 * 60 * 1000);
+
+    return () => {
+      unsub();
+      clearInterval(reminderInterval);
+    };
+  }, [state.user?.id]);
 
   // Card Rotating Border Animation Handler (Global Admin toggle + Student Profile preference + Theme color awareness)
   useEffect(() => {
@@ -488,6 +575,14 @@ const App: React.FC = () => {
             setStudentTab(saved);
         }
     });
+
+    const handleNavHome = () => {
+      setStudentTab('HOME');
+      setState(prev => ({ ...prev, view: 'STUDENT_DASHBOARD' as any }));
+      setShowFullMaintenanceModal(false);
+    };
+    window.addEventListener('nst-navigate-home', handleNavHome);
+    return () => window.removeEventListener('nst-navigate-home', handleNavHome);
   }, []);
 
   const [activeReward, setActiveReward] = useState<PendingReward | null>(null);
@@ -575,11 +670,14 @@ const App: React.FC = () => {
       return { ...sess, bonusPts };
     });
 
+    const isCreditEconomy = user?.studyMode === 'CREDIT';
     const totalPtsEarned   = augmentedQueue.reduce((a, s) => a + (s.sessionScore  ?? 0), 0);
     const totalBonusEarned = augmentedQueue.reduce((a, s) => a + (s.bonusPts      ?? 0), 0);
-    const totalCredEarned  = deferredStudyCoins > 0
-      ? deferredStudyCoins
-      : augmentedQueue.reduce((a, s) => a + (s.coinsEarned ?? 0) + (s.creditsEarned ?? 0), 0);
+    const totalCredEarned  = !isCreditEconomy
+      ? 0
+      : (deferredStudyCoins > 0
+          ? deferredStudyCoins
+          : augmentedQueue.reduce((a, s) => a + (s.coinsEarned ?? 0) + (s.creditsEarned ?? 0), 0));
     const xpAfter          = user.totalScore || 0;
     const xpBefore         = Math.max(0, xpAfter - totalPtsEarned - totalBonusEarned);
     const creditsBefore    = user.credits || 0;
@@ -620,15 +718,22 @@ const App: React.FC = () => {
   useEffect(() => { homeTabActiveRef.current = studentTab === 'HOME'; }, [studentTab]);
 
   useEffect(() => {
+    if (state.user) {
+      checkEveningStreakReminder(state.user);
+    }
+  }, [state.user?.id]);
+
+  useEffect(() => {
     if (!toastMessage) return;
     const t = setTimeout(() => setToastMessage(null), 2800);
     return () => clearTimeout(t);
   }, [toastMessage]);
 
   const enqueueMcqAndShow = (earned: number, earnedC: number, secs: number) => {
-    let finalCoins = earnedC;
     const _sessUser = state.user;
-    if (earned > 0 && _sessUser?.id) {
+    const isCreditEconomy = _sessUser?.studyMode === 'CREDIT';
+    let finalCoins = isCreditEconomy ? earnedC : 0;
+    if (isCreditEconomy && earned > 0 && _sessUser?.id) {
       const routineOn = loadRoutineData(_sessUser.id).enabled;
       const ratio = routineOn ? (1 / 6) : 0.125;
       const expectedCoins = Math.floor(earned * ratio);
@@ -953,17 +1058,29 @@ const App: React.FC = () => {
       let hasUpdates = false;
       let newReward: PendingReward | null = null;
 
+      const isGuestUser = Boolean(state.user.isGuest || state.user.isAnonymous || String(state.user.id || '').startsWith('guest_'));
       const lastLoginRaw = state.user.lastLoginDate ? new Date(state.user.lastLoginDate) : null;
       const lastLoginDateString = lastLoginRaw ? lastLoginRaw.toDateString() : '';
 
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
 
+      const createdRaw = state.user.createdAt ? new Date(state.user.createdAt) : null;
+      const isAccountCreatedToday = !createdRaw || createdRaw.toDateString() === today;
+      const isFirstLogin = !state.user.lastLoginDate || isAccountCreatedToday || isGuestUser;
+
+      // Guest accounts on day 1 must strictly stay at Day 1 streak
+      if (isGuestUser && isAccountCreatedToday && updatedUser.streak !== 1) {
+          updatedUser.streak = 1;
+          updatedUser.longestStreak = 1;
+          hasUpdates = true;
+      }
+
       if (lastLoginDateString !== today) {
           updatedUser.lastLoginDate = new Date().toISOString();
           hasUpdates = true;
 
-          if (lastLoginDateString === yesterday.toDateString()) {
+          if (lastLoginDateString === yesterday.toDateString() && !isFirstLogin && !isGuestUser) {
               const prev = updatedUser.streak || 0;
               updatedUser.streak = prev + 1;
               const _sbeBoost = (state.settings?.scoreBoostEvent?.enabled)
@@ -981,12 +1098,18 @@ const App: React.FC = () => {
                   localStorage.setItem('nst_streak_popup_date', today);
                   setStreakLoginPopup({ newStreak: updatedUser.streak, prevStreak: prev, isNewRecord: updatedUser.streak > prevLongest && prevLongest > 0 });
               }
+              // Advance Pedro penalty recovery if active
+              try {
+                  PedroEngine.checkAndAdvancePenaltyStreak(updatedUser.id, updatedUser.streak);
+              } catch (e) {
+                  console.error('[PedroPenalty] Error advancing penalty streak:', e);
+              }
               
           } else {
               const prev = updatedUser.streak || 0;
               updatedUser.streak = 1;
               if (!updatedUser.longestStreak) updatedUser.longestStreak = 1;
-              if (localStorage.getItem('nst_streak_popup_date') !== today) {
+              if (localStorage.getItem('nst_streak_popup_date') !== today && !isGuestUser) {
                   localStorage.setItem('nst_streak_popup_date', today);
                   setStreakLoginPopup({ newStreak: 1, prevStreak: prev > 1 ? prev : 0, isNewRecord: false });
               }
@@ -996,6 +1119,27 @@ const App: React.FC = () => {
                   let lvl = 0;
                   for (let i = 0; i < thresholds.length; i++) { if (cs >= thresholds[i]) lvl = i; else break; }
                   if (lvl > 0) updatedUser.totalScore = thresholds[lvl - 1];
+
+                  // Positive Streak Encouragement (Clean Premium Experience)
+                  try {
+                      const effUserLevel = updatedUser.level || getLevelInfo(updatedUser.totalScore || 0).level || 1;
+                      PedroEngine.triggerStreakBreakPenalty(updatedUser.id, effUserLevel);
+                      pedroSpeak(
+                          `Welcome back! Aaj naya din hai, chaliye study karke apni daily streak ko continue karein!`,
+                          { rate: 1.05, pitch: 1.15, showBubble: true }
+                      );
+                      const streakAlert: any = {
+                          id: `pedro-streak-welcome-${today}`,
+                          text: `✨ Welcome Back! Aaj ka daily goal complete karke apni streak aur rewards continue karein!`,
+                          date: new Date().toISOString(),
+                          read: false,
+                          type: 'ALERT',
+                          isClaimed: false,
+                      };
+                      updatedUser.inbox = deduplicateInbox([streakAlert, ...(updatedUser.inbox || [])]);
+                  } catch (err) {
+                      console.error('[PedroPenalty] Error welcoming user:', err);
+                  }
               }
           }
 
@@ -1263,7 +1407,7 @@ const App: React.FC = () => {
   useEffect(() => {
       let unsubscribeUser: (() => void) | undefined;
 
-      if (state.user && !state.originalAdmin) {
+      if (state.user && !state.originalAdmin && !state.user.isGuest && !state.user.isAnonymous && !String(state.user.id || '').startsWith('guest_')) {
           unsubscribeUser = subscribeToUser(state.user.id, (cloudUser) => {
               if (cloudUser) {
                   setState(prev => {
@@ -1485,6 +1629,19 @@ const App: React.FC = () => {
       }
   }, [state.user?.id, state.originalAdmin]);
 
+  // The old board/class selection screens are retired. Normalize any stale
+  // in-memory state so no user can ever land on those legacy pages.
+  useEffect(() => {
+    if (state.view === 'BOARDS' || state.view === 'CLASSES') {
+      setState(prev => ({
+        ...prev,
+        view: 'STUDENT_DASHBOARD' as any,
+        selectedBoard: prev.user?.board || null,
+        selectedClass: prev.user?.classLevel || null,
+      }));
+    }
+  }, [state.view]);
+
   useEffect(() => {
       if (!state.user?.isPremium && !state.user?.subscriptionEndDate) return;
       if (state.user?.role === 'ADMIN' || state.user?.role === 'SUB_ADMIN' || state.originalAdmin) return;
@@ -1508,10 +1665,10 @@ const App: React.FC = () => {
                    let nextView = state.view;
                    let nextClass = state.selectedClass;
 
-                   if (state.selectedClass === 'COMPETITION' && !freeModes.includes('COMPETITION')) {
-                       nextView = 'CLASSES';
-                       nextClass = null;
-                   }
+                    if (state.selectedClass === 'COMPETITION' && !freeModes.includes('COMPETITION')) {
+                        nextView = 'STUDENT_DASHBOARD';
+                        nextClass = null;
+                    }
 
                    setState(prev => ({
                        ...prev,
@@ -1558,10 +1715,14 @@ const App: React.FC = () => {
       
       const queue: ('TRACKER' | 'CHALLENGE' | 'WELCOME' | 'THREE_TIER')[] = [];
       const loggedInUserStr = localStorage.getItem('nst_current_user');
+      const isForceLogin = new URLSearchParams(window.location.search).get('view') === 'login' || 
+                           new URLSearchParams(window.location.search).get('view') === 'auth' || 
+                           new URLSearchParams(window.location.search).get('auth') === '1' ||
+                           new URLSearchParams(window.location.search).get('preview') === 'login';
 
       setPopupQueue(queue);
 
-    if (loggedInUserStr) {
+    if (loggedInUserStr && !isForceLogin) {
       try {
         let user: User = JSON.parse(loggedInUserStr);
         if (user && user.inbox) {
@@ -1579,11 +1740,16 @@ const App: React.FC = () => {
         user.uid = validId;
         user.profileCompleted = true;
 
-        if (!user.displayId || user.displayId.startsWith('IIC-') || /^\d{8,12}$/.test(user.displayId)) {
-            const digits = user.displayId ? user.displayId.replace(/\D/g, '').slice(-6).padStart(6, '0') : String(Math.floor(100000 + Math.random() * 900000));
-            user.displayId = `NSTA-${digits}`;
-            localStorage.setItem('nst_current_user', JSON.stringify(user));
-            saveUserToLive(user);
+        const isGuest = Boolean(user.isGuest || user.isAnonymous || String(user.id || '').startsWith('guest_'));
+        if (!isGuest) {
+          if (!user.displayId || user.displayId.startsWith('IIC-') || /^\d{8,12}$/.test(user.displayId)) {
+              const digits = user.displayId ? user.displayId.replace(/\D/g, '').slice(-6).padStart(6, '0') : String(Math.floor(100000 + Math.random() * 900000));
+              user.displayId = `NSTA-${digits}`;
+              localStorage.setItem('nst_current_user', JSON.stringify(user));
+              saveUserToLive(user);
+          }
+        } else {
+          user.displayId = '';
         }
 
         if (auth.currentUser === null) {
@@ -2042,6 +2208,14 @@ const App: React.FC = () => {
       return;
     }
 
+    // Reset assembly seen state on new auth login so the home page assembly and Pedro Welcome animation trigger cleanly
+    try {
+      sessionStorage.removeItem('nsta_home_assembly_seen');
+      localStorage.removeItem('nsta_first_assembly_seen');
+      sessionStorage.setItem('nst_trigger_pedro_auth_welcome', 'true');
+      sessionStorage.setItem('nst_trigger_pedro_vip_check', 'true');
+    } catch {}
+
     // Show the regular dashboard immediately. School/coaching membership is
     // uncommon and can be detected in the background without blocking login.
     setState(prev => ({
@@ -2112,7 +2286,7 @@ const App: React.FC = () => {
     logActivity("LOGOUT", "User Logged Out");
     clearUserCache();
     localStorage.removeItem('nst_last_user_id');
-    setState(prev => ({ ...prev, user: null, originalAdmin: null, view: 'BOARDS', selectedBoard: null, selectedClass: null, selectedStream: null, selectedSubject: null, lessonContent: null, language: 'English' }));
+    setState(prev => ({ ...prev, user: null, originalAdmin: null, view: 'STUDENT_DASHBOARD', selectedBoard: null, selectedClass: null, selectedStream: null, selectedSubject: null, lessonContent: null, language: 'English' }));
     setDailyStudySeconds(0);
   };
 
@@ -2258,40 +2432,6 @@ const App: React.FC = () => {
       }
   };
 
-  const handleBoardSelect = (board: Board) => {
-      updateUserProfile({ board });
-      setState(prev => ({ ...prev, selectedBoard: board, view: 'CLASSES', language: board === 'BSEB' ? 'Hindi' : 'English' }));
-  };
-
-  const handleClassSelect = (level: ClassLevel) => {
-      if (state.user?.classLevel && state.user.classLevel !== level) {
-          if (state.user.role !== 'ADMIN' && state.user.role !== 'SUB_ADMIN' && !state.originalAdmin) {
-              setAlertConfig({ isOpen: true, message: "🔒 Class is locked! You cannot change your class once selected.\n\nContact Admin for help." });
-              return;
-          }
-      }
-
-      updateUserProfile({ classLevel: level });
-
-      setState(prev => {
-          const updatedUser = prev.user ? { ...prev.user, classLevel: level } : null;
-
-          if (level === '11' || level === '12') {
-              return { ...prev, user: updatedUser, selectedClass: level, view: 'STREAMS' };
-          }
-
-          const finalUser = updatedUser ? { ...updatedUser, stream: undefined } : null;
-
-          if (level === 'COMPETITION') {
-               updateUserProfile({ stream: null });
-               return { ...prev, user: finalUser as any, selectedClass: level, selectedStream: null, view: 'SUBJECTS' };
-          } else {
-               updateUserProfile({ stream: null });
-               return { ...prev, user: finalUser as any, selectedClass: level, selectedStream: null, view: 'SUBJECTS' };
-          }
-      });
-  };
-
   const handleStreamSelect = (stream: Stream) => {
       updateUserProfile({ stream });
       setState(prev => ({ ...prev, selectedStream: stream, view: 'SUBJECTS' }));
@@ -2353,7 +2493,7 @@ const App: React.FC = () => {
             _mcqSubValid && state.user.subscriptionLevel === 'ULTRA' ? 'ULTRA' :
             _mcqSubValid && state.user.subscriptionLevel === 'BASIC' ? 'BASIC' : 'FREE';
         const _mcqLimit = getEffectiveDailyLimit('mcq', getLevelInfo(state.user.totalScore || 0).level, _mcqTier, state.settings);
-        if (_mcqLimit < UNLIMITED && _mcqUsed >= _mcqLimit) {
+        if (_mcqLimit < UNLIMITED && _mcqUsed >= _mcqLimit && state.user.studyMode === 'CREDIT') {
             const _mcqCreditCost = (state.settings as any).mcqOverLimitCreditCost || 5;
             setMcqLimitPopup({ used: _mcqUsed, limit: _mcqLimit, creditCost: _mcqCreditCost });
             setLoadingContentType(undefined);
@@ -2406,9 +2546,11 @@ const App: React.FC = () => {
             cost = 0;
         }
 
-        if (_fsGrantFree) cost = 0;
+        if (_fsGrantFree && state.user.studyMode !== 'CREDIT') cost = 0;
+        const isWithoutCreditMode1 = (state.user.studyMode || 'WITHOUT_CREDIT') === 'WITHOUT_CREDIT';
+        if (isWithoutCreditMode1) cost = 0;
 
-        if (cost > 0 && state.user.role !== 'ADMIN' && !state.originalAdmin) {
+        if (cost > 0 && state.user.studyMode === 'CREDIT') {
              if (getTotalCredits(state.user) < cost) {
                  setAlertConfig({isOpen: true, message: `Insufficient Credits! You need ${cost} Credits.`});
                  return;
@@ -2507,8 +2649,10 @@ const App: React.FC = () => {
         } else if (_isTimedValid2(tempSelectedChapter.id) || _isTimedValid2(mainKey)) {
             cost = 0;
         }
+        const isWithoutCreditMode2 = (state.user.studyMode || 'WITHOUT_CREDIT') === 'WITHOUT_CREDIT';
+        if (isWithoutCreditMode2) cost = 0;
 
-         if (state.user.role !== 'ADMIN' && !state.originalAdmin && cost > 0) {
+         if (cost > 0 && state.user.studyMode === 'CREDIT') {
              if (getTotalCredits(state.user) < cost) {
                  setAlertConfig({isOpen: true, message: `Insufficient Credits! You need ${cost} Credits.`});
                  return;
@@ -2699,7 +2843,12 @@ const App: React.FC = () => {
         }
     }
 
-    if (!hasAccess) {
+    const isUserWithoutCredit3 = (state.user.studyMode || 'WITHOUT_CREDIT') !== 'CREDIT';
+    if (isUserWithoutCredit3 && Boolean(state.user.isPremium || state.user.subscriptionLevel === 'BASIC' || state.user.subscriptionLevel === 'ULTRA' || state.user.subscriptionTier === 'BASIC' || state.user.subscriptionTier === 'ULTRA')) {
+        hasAccess = true;
+    }
+
+    if (!hasAccess && state.user.studyMode === 'CREDIT') {
         if (getTotalCredits(state.user) >= cost) {
             { const _td = new Date().toISOString().split('T')[0]; const _sk = `nst_credit_skip_${state.user!.id}_${_td}`; if (!localStorage.getItem(_sk) && !forcePay) {
                  setCreditModal({
@@ -3164,6 +3313,9 @@ const App: React.FC = () => {
       if (prev.view === 'LESSON') return { ...prev, view: 'CHAPTERS', lessonContent: null };
 
       if (prev.view === 'CHAPTERS') {
+          if (prev.user?.role === 'STUDENT' || prev.originalAdmin) {
+              return { ...prev, view: 'STUDENT_DASHBOARD', selectedChapter: null, selectedSubject: null };
+          }
           return { ...prev, view: 'SUBJECTS', selectedChapter: null };
       }
 
@@ -3171,14 +3323,7 @@ const App: React.FC = () => {
           if (prev.user?.role === 'STUDENT' || prev.originalAdmin) {
               return { ...prev, view: 'STUDENT_DASHBOARD', selectedSubject: null };
           }
-          return { ...prev, view: ['11','12'].includes(prev.selectedClass||'') ? 'STREAMS' : 'CLASSES', selectedSubject: null };
-      }
-
-      if (prev.view === 'STREAMS') return { ...prev, view: 'CLASSES', selectedStream: null };
-      if (prev.view === 'CLASSES') return { ...prev, view: 'BOARDS', selectedClass: null };
-
-      if (prev.view === 'BOARDS') {
-          return { ...prev, view: 'STUDENT_DASHBOARD' as any, selectedBoard: null };
+          return { ...prev, view: ['11','12'].includes(prev.selectedClass||'') ? 'STREAMS' : 'STUDENT_DASHBOARD', selectedSubject: null };
       }
 
       return { ...prev, view: 'STUDENT_DASHBOARD' as any };
@@ -3212,38 +3357,44 @@ const App: React.FC = () => {
 
   if (isAppLoading) {
       return (
-        <AppLoadingScreen
-          isPremium={state.user?.isPremium || false}
-          subscriptionLevel={getUserPlan()}
-          userId={state.user?.id}
-          userRole={state.user?.role}
-           loadingScreenSlotAssignments={state.user?.loadingScreenSlotAssignments}
-           loadingScreenSlotUnlocks={state.user?.loadingScreenSlotUnlocks}
-           loadingScreenUnlocks={state.user?.loadingScreenUnlocks}
-           loadingScreenLibrary={state.settings?.adminLoadingScreenLibrary}
-          isPreview={isLoadingPreview}
-          onBack={() => {
-            sessionStorage.removeItem('nst_splash_preview_style');
-            setIsLoadingPreview(false);
-            setIsAppLoading(false);
-          }}
-          onApply={() => {
-             const previewStyle = parseInt(sessionStorage.getItem('nst_splash_preview_style') || '1', 10);
-             const currentUser = state.user;
-              if (currentUser && previewStyle >= 1 && previewStyle <= 4) {
-                localStorage.setItem(`nst_splash_style_preference_${currentUser.id}`, String(previewStyle));
-                localStorage.setItem('nst_splash_style_preference', String(previewStyle));
-              }
+        <ErrorBoundary fallbackLabel="Loading" onError={() => {
+          setIsAppLoading(false);
+          setIsLoadingPreview(false);
+        }}>
+          <AppLoadingScreen
+            isPremium={state.user?.isPremium || false}
+            subscriptionLevel={getUserPlan()}
+            userId={state.user?.id}
+            userRole={state.user?.role}
+             loadingScreenSlotAssignments={state.user?.loadingScreenSlotAssignments}
+             loadingScreenSlotUnlocks={state.user?.loadingScreenSlotUnlocks}
+             loadingScreenUnlocks={state.user?.loadingScreenUnlocks}
+             loadingScreenLibrary={state.settings?.adminLoadingScreenLibrary}
+             loadingScreenVideoUrl={state.settings?.loadingScreenVideoEnabled !== false ? state.settings?.loadingScreenVideoUrl : undefined}
+            isPreview={isLoadingPreview}
+            onBack={() => {
               sessionStorage.removeItem('nst_splash_preview_style');
               setIsLoadingPreview(false);
               setIsAppLoading(false);
-          }}
-          onComplete={() => {
-            sessionStorage.removeItem('nst_splash_preview_style');
-            setIsLoadingPreview(false);
-            setIsAppLoading(false);
-          }}
-        />
+            }}
+            onApply={() => {
+               const previewStyle = parseInt(sessionStorage.getItem('nst_splash_preview_style') || '1', 10);
+               const currentUser = state.user;
+                if (currentUser && previewStyle >= 1 && previewStyle <= 4) {
+                  localStorage.setItem(`nst_splash_style_preference_${currentUser.id}`, String(previewStyle));
+                  localStorage.setItem('nst_splash_style_preference', String(previewStyle));
+                }
+                sessionStorage.removeItem('nst_splash_preview_style');
+                setIsLoadingPreview(false);
+                setIsAppLoading(false);
+            }}
+            onComplete={() => {
+              sessionStorage.removeItem('nst_splash_preview_style');
+              setIsLoadingPreview(false);
+              setIsAppLoading(false);
+            }}
+          />
+        </ErrorBoundary>
       );
   }
 
@@ -3251,7 +3402,7 @@ const App: React.FC = () => {
 
   return (
     <ErrorBoundary>
-    <div className="min-h-[100dvh] flex flex-col font-sans relative pt-[env(safe-area-inset-top,24px)] pb-[env(safe-area-inset-bottom,0px)]" style={{
+    <div className={`${!state.user ? 'h-[100dvh] max-h-[100dvh] overflow-hidden' : 'min-h-[100dvh]'} flex flex-col font-sans relative pt-[env(safe-area-inset-top,24px)] pb-[env(safe-area-inset-bottom,0px)]`} style={{
       background: `var(--app-bar-color, ${state.settings?.appBackground || '#ffffff'})`,
       backgroundImage: bgImageStyle,
       backgroundSize: bgImageStyle ? 'cover' : undefined,
@@ -3499,16 +3650,15 @@ const App: React.FC = () => {
                            </div>
                        </div>
                    )}
-                   <div className="text-right hidden md:block">
-                       <div className="text-xs font-bold text-slate-800">{state.user.name}</div>
-                   </div>
                </div>
            )}
         </div>
       </header>
       )}
 
-      <main id="main-content" className={`flex-1 w-full ${!state.user ? 'p-0 max-w-none' : (isFullScreen || state.view === ('STUDENT_DASHBOARD' as any) ? 'p-0 max-w-6xl mx-auto' : 'p-4 mb-8 max-w-6xl mx-auto')}`}>
+      {/* Removed Pedro Login Page floating test button */}
+
+      <main id="main-content" className={`flex-1 w-full ${!state.user ? 'p-0 max-w-none h-full overflow-hidden flex flex-col' : (isFullScreen || state.view === ('STUDENT_DASHBOARD' as any) ? 'p-0 max-w-6xl mx-auto' : 'p-4 mb-8 max-w-6xl mx-auto')}`}>
         {!state.user ? (
             <ErrorBoundary fallbackLabel="Login" compact>
               <Auth onLogin={handleLogin} logActivity={logActivity} appSettings={state.settings} />
@@ -3516,7 +3666,7 @@ const App: React.FC = () => {
         ) : (
             <ErrorBoundary resetKey={state.view}>
             <>
-                {state.view === 'ADMIN_DASHBOARD' && (state.user.role === 'ADMIN' || state.user.role === 'SUB_ADMIN') && !adminDashCrashed && (
+                {(state.view === 'ADMIN_DASHBOARD' || (state.view as any) === 'ADMIN') && (state.user.role === 'ADMIN' || state.user.role === 'SUB_ADMIN') && !adminDashCrashed && (
                   <ErrorBoundary
                     fallbackLabel="Admin Dashboard"
                     resetKey={state.view}
@@ -3583,14 +3733,29 @@ const App: React.FC = () => {
                       </Suspense>
                     </ErrorBoundary>
                 ) : (
-                    state.view === 'STUDENT_DASHBOARD' as any && (
+                    (!['ADMIN_DASHBOARD', 'ADMIN', 'SCHOOL_ECOSYSTEM', 'COACHING_ECOSYSTEM', 'STREAMS', 'SUBJECTS', 'CHAPTERS', 'LESSON', 'UPDATES', 'REVISION_HUB'].includes(state.view as string)) && (
                         <>
                         {maintenanceState?.config?.active && state.user?.role !== 'ADMIN' && state.user?.role !== 'SUB_ADMIN' && (
                           <MaintenanceBanner
                             title={maintenanceState.config.title || 'System Maintenance'}
                             message={maintenanceState.config.message || 'We are updating our system.'}
-                            onClick={() => {}}
+                            onClick={() => setShowFullMaintenanceModal(true)}
                           />
+                        )}
+                        {showFullMaintenanceModal && (
+                          <div className="fixed inset-0 z-[99999]">
+                            <MaintenanceScreen
+                              title={maintenanceState?.config?.title}
+                              message={maintenanceState?.config?.message}
+                              pageName={studentTab}
+                              retryMinutes={maintenanceState?.config?.retryMinutes}
+                              onGoHome={() => {
+                                setShowFullMaintenanceModal(false);
+                                setStudentTab('HOME');
+                              }}
+                              onRetry={() => window.location.reload()}
+                            />
+                          </div>
                         )}
                         <ErrorBoundary
                           fallbackLabel="Student Dashboard"
@@ -3606,6 +3771,7 @@ const App: React.FC = () => {
                                 dailyStudySeconds={dailyStudySeconds} 
                                 onSubjectSelect={handleSubjectSelect} 
                                 onRedeemSuccess={u => setState(prev => ({...prev, user: u}))} 
+                                onUpdateUser={u => setState(prev => ({...prev, user: u}))} 
                                 settings={state.settings} 
                                 onStartWeeklyTest={handleStartWeeklyTest} 
                                 activeTab={studentTab} 
@@ -3668,16 +3834,6 @@ const App: React.FC = () => {
                     />
                 )}
                 
-                {(!activeWeeklyTest && state.view === 'BOARDS') && (
-                  <ErrorBoundary fallbackLabel="Board Selection" compact>
-                    <BoardSelection onSelect={handleBoardSelect} onBack={goBack} />
-                  </ErrorBoundary>
-                )}
-                {state.view === 'CLASSES' && (
-                  <ErrorBoundary fallbackLabel="Class Selection" compact>
-                    <ClassSelection selectedBoard={state.selectedBoard} allowedClasses={state.user?.role === 'ADMIN' ? undefined : state.settings.allowedClasses} settings={state.settings} user={state.user} onSelect={handleClassSelect} onBack={goBack} onBoardSwitch={(board) => setState(prev => ({ ...prev, selectedBoard: board, language: board === 'BSEB' ? 'Hindi' : 'English' }))} />
-                  </ErrorBoundary>
-                )}
                 {state.view === 'STREAMS' && (
                   <ErrorBoundary fallbackLabel="Stream Selection" compact>
                     <StreamSelection onSelect={handleStreamSelect} onBack={goBack} />
@@ -3732,7 +3888,7 @@ const App: React.FC = () => {
                               onImmersiveChange={setIsLessonImmersive}
                               nextTitle={_nextChapter?.title}
                               isFirstChapter={_isFirstChapter}
-                              onAdminBoard={(state.user?.role === 'ADMIN' || state.user?.role === 'SUB_ADMIN') ? () => setState(prev => ({...prev, view: 'ADMIN'})) : undefined}
+                              onAdminBoard={(state.user?.role === 'ADMIN' || state.user?.role === 'SUB_ADMIN') ? () => setState(prev => ({...prev, view: 'ADMIN_DASHBOARD'})) : undefined}
                               onSendToMcqCommunity={(draft) => setAppMcqCommunityDraft(draft)}
                               onSessionCreditsEarned={handleSessionCreditsEarned}
                onAdminEdit={(state.user?.role === 'ADMIN' || state.user?.role === 'SUB_ADMIN') ? () => {
@@ -3744,13 +3900,120 @@ const App: React.FC = () => {
                                     localStorage.setItem('nst_admin_edit_pending', JSON.stringify({ chapterId: ch.id, chapterTitle: ch.title, subjectName: sub.name, classLevel: cls, board: state.selectedBoard }));
                                   }
                                 } catch {}
-                                setState(prev => ({...prev, view: 'ADMIN'}));
+                                setState(prev => ({...prev, view: 'ADMIN_DASHBOARD'}));
                               } : undefined}
                           />
                         );
                       })()}
                       </Suspense>
                     </ErrorBoundary>
+                )}
+
+                {state.view === 'CHAPTERS' && state.selectedSubject && (
+                  <ErrorBoundary fallbackLabel="Chapters" compact>
+                    <div className="w-full max-w-4xl mx-auto px-4 py-4 space-y-4">
+                      {/* Header */}
+                      <div className="flex items-center justify-between bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={goBack}
+                            className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-all active:scale-95 cursor-pointer"
+                            title="Back"
+                          >
+                            <ArrowLeft size={18} />
+                          </button>
+                          <div>
+                            <h2 className="text-lg font-black text-slate-900 dark:text-white leading-tight">
+                              {state.selectedSubject?.name || 'Chapters'}
+                            </h2>
+                            <p className="text-xs font-semibold text-slate-500">
+                              Class {state.selectedClass} • {state.selectedBoard || 'CBSE'}
+                            </p>
+                          </div>
+                        </div>
+                        <span className="text-xs font-black px-3 py-1 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 rounded-full border border-blue-200 dark:border-blue-800">
+                          {state.chapters.length} Chapters
+                        </span>
+                      </div>
+
+                      {/* Chapter list */}
+                      {state.loading ? (
+                        <div className="space-y-3">
+                          {[1, 2, 3, 4, 5].map((n) => (
+                            <div key={n} className="h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 animate-pulse" />
+                          ))}
+                        </div>
+                      ) : state.chapters.length === 0 ? (
+                        <div className="text-center py-12 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 space-y-3">
+                          <div className="text-4xl">📚</div>
+                          <h3 className="text-base font-bold text-slate-800 dark:text-white">No chapters found yet</h3>
+                          <p className="text-xs text-slate-500">Is subject ke chapters syllabus me load ho rahe hain.</p>
+                          <button
+                            onClick={goBack}
+                            className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold shadow-md hover:bg-blue-700 cursor-pointer"
+                          >
+                            Back to Subjects
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {state.chapters.map((ch, idx) => (
+                            <div
+                              key={ch.id || idx}
+                              onClick={() => onChapterClick(ch, 'NOTES_HTML_FREE')}
+                              className="group flex items-center justify-between p-4 bg-white dark:bg-slate-900 hover:bg-blue-50/50 dark:hover:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-800 hover:border-blue-300 dark:hover:border-blue-600 transition-all shadow-sm hover:shadow-md cursor-pointer active:scale-[0.99]"
+                            >
+                              <div className="flex items-center gap-3">
+                                <span className="w-8 h-8 rounded-xl bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 text-xs font-black flex items-center justify-center shrink-0 border border-blue-100 dark:border-blue-800">
+                                  {ch.serialNumber || (idx + 1 < 10 ? `0${idx + 1}` : `${idx + 1}`)}
+                                </span>
+                                <div className="text-left">
+                                  <h4 className="text-sm font-bold text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-1">
+                                    {ch.title}
+                                  </h4>
+                                  {ch.description && (
+                                    <p className="text-[11px] text-slate-500 line-clamp-1">{ch.description}</p>
+                                  )}
+                                </div>
+                              </div>
+                              <ChevronRight size={16} className="text-slate-400 group-hover:text-blue-600 transition-transform group-hover:translate-x-0.5 shrink-0" />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </ErrorBoundary>
+                )}
+
+                {(state.view as any) === 'UPDATES' && state.user && (
+                  <ErrorBoundary fallbackLabel="Updates" compact>
+                    <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" /></div>}>
+                      <UpdatesPage
+                        user={state.user}
+                        settings={state.settings}
+                        isDarkMode={darkMode}
+                        onBack={goBack}
+                        onOpenMessenger={() => {}}
+                        onOpenStudyRoom={() => {}}
+                        onOpenRevisionHub={() => setState(prev => ({ ...prev, view: 'REVISION_HUB' as any }))}
+                        appName={state.settings?.appName}
+                      />
+                    </Suspense>
+                  </ErrorBoundary>
+                )}
+
+                {(state.view as any) === 'REVISION_HUB' && state.user && (
+                  <ErrorBoundary fallbackLabel="Revision Hub" compact>
+                    <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" /></div>}>
+                      <RevisionHubScreen
+                        user={state.user}
+                        settings={state.settings}
+                        onBack={goBack}
+                        onTabChange={setStudentTab}
+                        appName={state.settings?.appName}
+                      />
+                    </Suspense>
+                  </ErrorBoundary>
                 )}
             </>
             </ErrorBoundary>
@@ -3773,7 +4036,7 @@ const App: React.FC = () => {
       )}
 </main>
       
-      {!isFullScreen && state.view !== 'STUDENT_DASHBOARD' && state.settings.showFooter !== false && !isLessonImmersive && (
+      {!isFullScreen && state.view !== 'STUDENT_DASHBOARD' && state.settings.showFooter !== false && !isLessonImmersive && state.user && (
       <footer className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 py-1 text-center z-[40]">
           <p
             className="text-[10px] font-black uppercase tracking-widest"
@@ -3786,7 +4049,7 @@ const App: React.FC = () => {
 
       {state.settings.bannerConfig?.bottom?.enabled && showBottomBanner && (
           <div
-            className={`banner-premium-shimmer fixed bottom-6 left-0 right-0 text-[11px] font-black tracking-widest uppercase py-1.5 overflow-hidden relative whitespace-nowrap z-[39] transition-all duration-500 ease-in-out ${state.settings.bannerConfig.bottom.clickUrl ? 'cursor-pointer active:opacity-70' : ''}`}
+            className={`banner-premium-shimmer fixed ${!state.user ? 'bottom-0' : 'bottom-6'} left-0 right-0 text-[11px] font-black tracking-widest uppercase py-1.5 overflow-hidden relative whitespace-nowrap z-[39] transition-all duration-500 ease-in-out ${state.settings.bannerConfig.bottom.clickUrl ? 'cursor-pointer active:opacity-70' : ''}`}
             style={{
                 background: state.settings.bannerConfig.bottom.bgColor
                     ? `linear-gradient(90deg, ${state.settings.bannerConfig.bottom.bgColor}ee, ${state.settings.bannerConfig.bottom.bgColor}cc, ${state.settings.bannerConfig.bottom.bgColor}ee)`

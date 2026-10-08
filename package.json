@@ -2,29 +2,25 @@
   "name": "workspace",
   "version": "0.0.0",
   "license": "MIT",
+  "private": true,
   "workspaces": [
-    "artifacts/*",
+    "artifacts/iic-study-app-replit",
+    "artifacts/api-server",
+    "artifacts/mockup-sandbox",
     "lib/*",
     "scripts"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace=artifacts/iic-study-app-replit",
-    "build": "NODE_OPTIONS='--max-old-space-size=2048' npm run build --workspaces --if-present",
-    "typecheck:libs": "tsc --build --force",
-    "typecheck": "npm run typecheck:libs && npm run typecheck --workspaces --if-present",
-    "lint": "echo 'No lint errors'"
-  },
-  "private": true,
-  "dependencies": {
-    "@replit/connectors-sdk": "^0.4.3"
+    "dev": "npm run dev --workspace=@workspace/iic-study-app-replit",
+    "build": "npm run build --workspace=@workspace/iic-study-app-replit",
+    "typecheck:libs": "tsc --build",
+    "typecheck": "npm run typecheck:libs && npm run typecheck --workspace=@workspace/iic-study-app-replit",
+    "lint": "tsc --build"
   },
   "devDependencies": {
+    "katex": "^0.16.22",
     "prettier": "^3.9.6",
-    "typescript": "~5.9.3"
-  },
-  "overrides": {
-    "@esbuild-kit/esm-loader": "npm:tsx@^4.21.0",
-    "esbuild": "0.28.2",
-    "js-yaml": "4.3.2"
+    "typescript": "~5.9.3",
+    "vite": "^7.3.2"
   }
 }

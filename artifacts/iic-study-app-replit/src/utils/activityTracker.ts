@@ -95,7 +95,12 @@ export const getStudyActivity = (userId: string, contentId: string): Partial<Rec
   if (!userId || !contentId) return {};
   try {
     const parsed = JSON.parse(localStorage.getItem(KEY(userId)) || '{}') as StudyActivityMap;
-    const raw = parsed?.[contentId];
+    let raw = parsed?.[contentId];
+    if (!raw && contentId.includes('__')) {
+      raw = parsed?.[contentId.replace('__', '_')];
+    } else if (!raw && contentId.includes('_')) {
+      raw = parsed?.[contentId.replace('_', '__')];
+    }
     if (!raw || typeof raw !== 'object') return {};
     return Object.fromEntries(
       Object.entries(raw).map(([mode, record]) => [mode, normaliseRecord(record)])
@@ -123,6 +128,11 @@ const update = (
   mutate(current);
   all[contentId] = { ...(all[contentId] || {}), [mode]: current };
   try { localStorage.setItem(KEY(userId), JSON.stringify(all)); } catch {}
+  try {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('study-activity-updated', { detail: { userId, contentId, mode } }));
+    }
+  } catch {}
   return current;
 };
 
@@ -194,21 +204,59 @@ export const recordProjectorAnswer = (
 });
 
 export const recordMcqScore = (
-  userId: string,
-  contentId: string,
-  correct: number,
-  total: number,
-  seconds: number,
+  userIdOrKey: string,
+  contentIdOrHist: any,
+  correct?: number,
+  total?: number,
+  seconds?: number,
   meta?: { topic?: string; subject?: string; chapter?: string },
-) => update(userId, contentId, 'MCQ', record => {
-  record.scoreHistory = [
-    ...record.scoreHistory,
-    { correct: Math.max(0, correct), total: Math.max(0, total), seconds: Math.max(0, Math.round(seconds)), attemptedAt: new Date().toISOString() },
-  ].slice(-5);
-  if (meta?.topic) record.topic = meta.topic;
-  if (meta?.subject) record.subject = meta.subject;
-  if (meta?.chapter) record.chapter = meta.chapter;
-});
+) => {
+  let targetUserId = userIdOrKey;
+  let targetContentId = String(contentIdOrHist || '');
+  let actualCorrect = Number(correct) || 0;
+  let actualTotal = Number(total) || 0;
+  let actualSeconds = Number(seconds) || 0;
+  let actualMeta = meta;
+
+  // Handle overloaded 2-arg signature: recordMcqScore(contentKey, { score, total, correct, timestamp })
+  if (typeof contentIdOrHist === 'object' && contentIdOrHist !== null && correct === undefined) {
+    targetContentId = userIdOrKey;
+    actualCorrect = Number(contentIdOrHist.correct ?? contentIdOrHist.correctAnswers ?? contentIdOrHist.score ?? 0);
+    actualTotal = Number(contentIdOrHist.total ?? contentIdOrHist.totalQuestions ?? 0);
+    actualSeconds = Number(contentIdOrHist.seconds ?? contentIdOrHist.timeElapsedSeconds ?? 0);
+    try {
+      const storedUser = JSON.parse(localStorage.getItem('nst_auth_user') || '{}');
+      targetUserId = storedUser?.id || 'guest';
+    } catch {
+      targetUserId = 'guest';
+    }
+  }
+
+  const doSave = (uid: string, cid: string) => {
+    if (!uid || !cid) return;
+    update(uid, cid, 'MCQ', record => {
+      record.scoreHistory = [
+        ...(record.scoreHistory || []),
+        {
+          correct: Math.max(0, actualCorrect),
+          total: Math.max(0, actualTotal),
+          seconds: Math.max(0, Math.round(actualSeconds)),
+          attemptedAt: new Date().toISOString(),
+        },
+      ].slice(-10);
+      if (actualMeta?.topic) record.topic = actualMeta.topic;
+      if (actualMeta?.subject) record.subject = actualMeta.subject;
+      if (actualMeta?.chapter) record.chapter = actualMeta.chapter;
+    });
+  };
+
+  doSave(targetUserId, targetContentId);
+  if (targetContentId.includes('__')) {
+    doSave(targetUserId, targetContentId.replace('__', '_'));
+  } else if (targetContentId.includes('_')) {
+    doSave(targetUserId, targetContentId.replace('_', '__'));
+  }
+};
 
 export const recordStudyMetric = (
   userId: string,

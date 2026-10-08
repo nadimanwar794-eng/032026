@@ -1,7 +1,27 @@
 // @ts-nocheck
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Lightbulb, ThumbsUp, Send, X, Trash2, MessageSquare, CheckCircle, Clock, RefreshCw, ShieldCheck, Tag, FilePen, AlertCircle, Trophy, Coins, Star, Award, Camera, Download, Maximize2, Lock } from 'lucide-react';
+import {
+  Lightbulb,
+  ThumbsUp,
+  Send,
+  X,
+  Trash2,
+  MessageSquare,
+  Clock,
+  RefreshCw,
+  ShieldCheck,
+  Tag,
+  FilePen,
+  AlertCircle,
+  Trophy,
+  Coins,
+  Camera,
+  Download,
+  Eye,
+  ArrowLeft,
+  CheckCircle,
+} from 'lucide-react';
 import { uploadImageToImgBB } from '../services/imgbbService';
 import {
   saveSuggestion,
@@ -13,7 +33,7 @@ import {
   applyNoteCorrection,
   subscribeLeaderboard,
   subscribeUserCoins,
-  updateSuggestionLeaderboard,
+  markSuggestionOpenedByAdmin,
   SuggLeaderboardEntry,
 } from '../firebase';
 
@@ -32,6 +52,8 @@ interface SuggestionItem {
   adminReply?: string;
   adminReplyAt?: string;
   adminTag?: string;
+  adminOpened?: boolean;
+  adminOpenedAt?: string;
   status: 'open' | 'replied' | 'resolved';
   lessonTitle?: string;
   pageNo?: string;
@@ -44,38 +66,37 @@ interface Props {
   user: any;
   isAdmin: boolean;
   onClose: () => void;
-  tierTheme?: any;
+  context?: {
+    lessonTitle?: string;
+    pageNo?: string | number;
+    mode?: 'reading' | 'writing' | 'mcq';
+    subject?: string;
+    classLevel?: string;
+    noteChunks?: string[];
+  };
+  currentNoteChunks?: string[];
+  onNoteChunksUpdated?: (updatedChunks: string[]) => void;
 }
 
-const ADMIN_TAGS = [
-  'Thanks, fixed in next update',
-  'Will be addressed soon',
-  'Already noted',
-  'Not a bug — working as intended',
-  'Needs more info',
+const TAG_OPTIONS = [
+  { id: 'typo', label: '🔤 Spelling / Typo', color: '#60a5fa' },
+  { id: 'concept', label: '🧠 Wrong Concept', color: '#f87171' },
+  { id: 'hindi_mistake', label: '🇮🇳 Hindi Anuvaad Galti', color: '#fb923c' },
+  { id: 'missing_info', label: '➕ Missing Info', color: '#a78bfa' },
+  { id: 'fixed', label: '✅ Note mein Fix Kar Diya', color: '#4ade80' },
+  { id: 'rejected', label: '❌ Sahi hai (No issue)', color: '#94a3b8' },
+  { id: 'duplicate', label: '🔁 Duplicate Report', color: '#e879f9' },
 ];
 
-const statusConfig = {
-  open:     { label: '⏳ Open',     bg: 'rgba(245,158,11,0.15)',  color: '#fcd34d' },
-  replied:  { label: '✅ Replied',  bg: 'rgba(16,185,129,0.2)',   color: '#6ee7b7' },
-  resolved: { label: '🎯 Resolved', bg: 'rgba(139,92,246,0.2)',   color: '#c4b5fd' },
-};
-
-const MEDAL_COLORS = ['#FFD700', '#C0C0C0', '#CD7F32'];
-
-const reasonLabel = (reason: string) => {
-  if (reason === 'galti_resolved') return '🎯 Galti fix hui';
-  if (reason === 'admin_replied') return '✅ Admin reply mila';
-  return reason;
-};
-
-export function SuggestionsPanel({ user, isAdmin, onClose, tierTheme }: Props) {
-  const brandPrimary = tierTheme?.primary || '#f59e0b';
-  const brandMid = tierTheme?.mid || brandPrimary;
-  const brandBorder = (tierTheme as any)?.cardBorderColor || tierTheme?.primary || brandPrimary;
-  const brandGrad = tierTheme?.btnGrad || `linear-gradient(135deg, ${brandPrimary}, ${brandMid})`;
-
-  const [tab, setTab] = useState<'feed' | 'submit' | 'history' | 'rank'>('feed');
+export const SuggestionsPanel: React.FC<Props> = ({
+  user,
+  isAdmin,
+  onClose,
+  context,
+  currentNoteChunks,
+  onNoteChunksUpdated,
+}) => {
+  const [tab, setTab] = useState<'feed' | 'submit' | 'history'>('feed');
   const [suggestions, setSuggestions] = useState<SuggestionItem[]>([]);
   const [newText, setNewText] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -89,7 +110,7 @@ export function SuggestionsPanel({ user, isAdmin, onClose, tierTheme }: Props) {
   const [editCorrections, setEditCorrections] = useState<Record<number, string>>({});
   const [applyingEdit, setApplyingEdit] = useState(false);
   const [editResult, setEditResult] = useState<{ success: boolean; count: number } | null>(null);
-  const [activeFilter, setActiveFilter] = useState<'all' | 'replied' | 'open' | 'resolved'>('all');
+  const [activeFilter, setActiveFilter] = useState<'all' | 'open' | 'resolved'>('all');
   const [leaderboard, setLeaderboard] = useState<SuggLeaderboardEntry[]>([]);
   const [userCoins, setUserCoins] = useState(0);
   const [userCoinHistory, setUserCoinHistory] = useState<any[]>([]);
@@ -148,36 +169,40 @@ export function SuggestionsPanel({ user, isAdmin, onClose, tierTheme }: Props) {
   const handleSubmit = async () => {
     if ((!newText.trim() && !selectedImageFile) || submitting) return;
     setSubmitting(true);
+
+    let finalImageUrl: string | undefined = undefined;
+
     try {
-      let uploadedImageUrl = '';
       if (selectedImageFile) {
         setIsUploadingImage(true);
-        uploadedImageUrl = await uploadImageToImgBB(
-          selectedImageFile,
-          `sug_${uid}_${Date.now()}`
-        );
-        setIsUploadingImage(false);
+        const uploaded = await uploadImageToImgBB(selectedImageFile);
+        if (uploaded) {
+          finalImageUrl = uploaded;
+        }
       }
 
-      const id = `sug_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      const userName = user?.name || user?.email?.split('@')[0] || 'Student';
       await saveSuggestion({
-        id,
-        text: newText.trim(),
-        imageUrl: uploadedImageUrl || undefined,
+        text: newText.trim() || 'Photo ke sath report submit ki gayi hai',
+        imageUrl: finalImageUrl,
         uid: uid || 'anonymous',
-        userName,
+        userName: user?.displayName || user?.name || 'A student',
         userBoard: user?.board || '',
         createdAt: new Date().toISOString(),
-        tier: isPaidUser ? 'VIP' : 'FREE',
-        isVip: isPaidUser,
-        priority: isPaidUser ? 'HIGH' : 'NORMAL',
+        lessonTitle: context?.lessonTitle,
+        pageNo: context?.pageNo ? String(context.pageNo) : undefined,
+        mode: context?.mode,
+        subject: context?.subject,
+        classLevel: context?.classLevel,
+        adminOpened: false,
       });
-      updateSuggestionLeaderboard(uid, userName, 'reported').catch(() => {});
+
       setNewText('');
       handleClearImage();
       setSubmitted(true);
-      setTimeout(() => { setSubmitted(false); setTab('feed'); }, 2000);
+      setTimeout(() => {
+        setSubmitted(false);
+        setTab('feed');
+      }, 1500);
     } catch (e) {
       console.error('[SuggestionsPanel] submit error:', e);
     } finally {
@@ -189,6 +214,14 @@ export function SuggestionsPanel({ user, isAdmin, onClose, tierTheme }: Props) {
   const handleUpvote = async (id: string) => {
     if (!uid) return;
     await reactToSuggestion(id, uid, 'like');
+  };
+
+  const handleMarkOpened = async (id: string) => {
+    try {
+      await markSuggestionOpenedByAdmin(id);
+    } catch (e) {
+      console.error('[SuggestionsPanel] mark opened error:', e);
+    }
   };
 
   const handleAdminReply = async (id: string) => {
@@ -213,14 +246,12 @@ export function SuggestionsPanel({ user, isAdmin, onClose, tierTheme }: Props) {
 
   const counts = {
     all: suggestions.length,
-    open: suggestions.filter(s => !s.adminReply && s.status === 'open').length,
-    replied: suggestions.filter(s => s.status === 'replied').length,
-    resolved: suggestions.filter(s => s.status === 'resolved').length,
+    open: suggestions.filter((s) => s.status === 'open').length,
+    resolved: suggestions.filter((s) => s.status === 'resolved').length,
   };
 
-  const filtered = suggestions.filter(s => {
-    if (activeFilter === 'replied') return s.status === 'replied';
-    if (activeFilter === 'open') return s.status === 'open' && !s.adminReply;
+  const filtered = suggestions.filter((s) => {
+    if (activeFilter === 'open') return s.status === 'open';
     if (activeFilter === 'resolved') return s.status === 'resolved';
     return true;
   });
@@ -236,148 +267,126 @@ export function SuggestionsPanel({ user, isAdmin, onClose, tierTheme }: Props) {
     return 'abhi';
   };
 
-  // Leaderboard rank of current user
-  const myRank = leaderboard.findIndex(e => e.uid === uid) + 1;
+  const reasonLabel = (reason: string) => {
+    if (reason === 'SUGG_FIXED') return '🎯 Teri pakdi galti fix ho gayi';
+    if (reason === 'SUGG_REPLY') return '✅ Admin ne reply diya';
+    return '🪙 Reward coins';
+  };
 
   const userTier = (user?.subscriptionLevel || 'FREE')?.toUpperCase();
-  const isPaidUser = isAdmin || (
-    (userTier === 'ULTRA' || userTier === 'BASIC' || user?.isPremium) &&
-    (!user?.subscriptionEndDate || new Date(user.subscriptionEndDate).getTime() > Date.now())
-  );
+  const isPaidUser =
+    isAdmin ||
+    ((userTier === 'ULTRA' || userTier === 'BASIC' || user?.isPremium) &&
+      (!user?.subscriptionEndDate || new Date(user.subscriptionEndDate).getTime() > Date.now()));
 
   const todayStr = new Date().toISOString().slice(0, 10);
-  const todayUserSubmissions = suggestions.filter(s => s.uid === uid && s.createdAt?.slice(0, 10) === todayStr);
+  const todayUserSubmissions = suggestions.filter(
+    (s) => s.uid === uid && s.createdAt?.slice(0, 10) === todayStr
+  );
   const freeDailyLimit = 3;
   const freeRemainingToday = Math.max(0, freeDailyLimit - todayUserSubmissions.length);
   const canSubmit = isPaidUser || freeRemainingToday > 0;
 
   return createPortal(
     <>
-      {/* Backdrop */}
+      {/* Fullscreen View with Community Theme Background */}
       <div
-        className="fixed inset-0 z-[99998] bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-      />
-
-      {/* Panel */}
-      <div
-        className="fixed bottom-0 left-0 right-0 z-[99999] flex flex-col rounded-t-3xl overflow-hidden"
-        style={{
-          background: 'linear-gradient(160deg, #0f0c29 0%, #1a1440 50%, #0d1b2a 100%)',
-          border: `1px solid ${brandBorder}40`,
-          height: '78dvh',
-          maxHeight: '78dvh',
-        }}
-        onClick={e => e.stopPropagation()}
+        id="suggestions-panel-fullscreen"
+        className="fixed inset-0 z-[99999] flex flex-col w-full h-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden select-none animate-in fade-in duration-150"
+        onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div
-          className="flex items-center justify-between px-4 pt-4 pb-3 shrink-0"
-          style={{ borderBottom: `1px solid ${brandBorder}26` }}
-        >
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-2xl flex items-center justify-center" style={{ background: `${brandBorder}26`, color: brandPrimary }}>
+        {/* Top App Header */}
+        <div className="flex items-center justify-between px-3.5 py-3 shrink-0 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shadow-xs">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition-all cursor-pointer active:scale-95 shrink-0"
+            title="Wapas Community Par Jaayein"
+          >
+            <ArrowLeft size={16} />
+            <span>Back</span>
+          </button>
+
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-500 to-yellow-500 text-slate-950 flex items-center justify-center shrink-0 shadow-xs font-black">
               <Lightbulb size={18} />
             </div>
-            <div>
-              <p className="font-black text-white text-sm leading-tight">Suggestions & Corrections</p>
-              <p className="text-[9px] text-slate-400 leading-tight">{suggestions.length} total • Community feedback</p>
+            <div className="min-w-0">
+              <h1 className="font-black text-slate-900 dark:text-white text-sm leading-tight truncate">
+                Notes Fix Hub
+              </h1>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight truncate">
+                {suggestions.length} total • Community notes mistakes & corrections
+              </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            {/* User coin balance pill */}
-            {uid && (
-              <div
-                className="flex items-center gap-1 px-2.5 py-1 rounded-full"
-                style={{ background: `${brandBorder}20`, border: `1px solid ${brandBorder}40` }}
-              >
-                <span style={{ fontSize: 13 }}>🪙</span>
-                <span className="text-[11px] font-black text-amber-300">{userCoins}</span>
-                {myRank > 0 && (
-                  <span className="text-[9px] text-amber-500/70 ml-0.5">#{myRank}</span>
-                )}
-              </div>
-            )}
-            <button
-              onClick={onClose}
-              className="w-8 h-8 rounded-full flex items-center justify-center active:scale-90 transition"
-              style={{ background: 'rgba(255,255,255,0.08)' }}
-            >
-              <X size={15} className="text-white" />
-            </button>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-8 h-8 rounded-xl flex items-center justify-center bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white active:scale-90 transition cursor-pointer"
+            title="Band Karein"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* 3 Main Tabs Bar (Feed, Notes Fix, History) */}
+        <div className="w-full px-3.5 py-2.5 shrink-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800">
+          <div className="flex gap-2.5 max-w-xl mx-auto">
+            {(['feed', 'submit', 'history'] as const).map((t) => {
+              const labels = {
+                feed: '📋 Feed',
+                submit: '✍️ Notes Fix',
+                history: '📜 History',
+              };
+              const isActive = tab === t;
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => {
+                    setTab(t);
+                    if (t === 'submit') {
+                      setTimeout(() => textareaRef.current?.focus(), 150);
+                    }
+                  }}
+                  className={`flex-1 py-2.5 rounded-xl text-xs sm:text-sm font-black transition-all cursor-pointer select-none text-center flex items-center justify-center gap-1.5 shadow-xs active:scale-95 ${
+                    isActive
+                      ? 'bg-amber-500 text-slate-950 shadow-md ring-1 ring-amber-400 scale-[1.01]'
+                      : 'bg-slate-100 dark:bg-slate-800/90 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  {labels[t]}
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        {/* Tabs */}
-        <div className="flex gap-1 px-4 pt-3 pb-2 shrink-0">
-          {(['feed', 'submit', 'history', 'rank'] as const).map(t => {
-            const labels = { feed: '📋 Feed', submit: '✍️ Submit', history: '📜 History', rank: '🏆 Rank' };
-            return (
-              <button
-                key={t}
-                onClick={() => { setTab(t); if (t === 'submit') setTimeout(() => textareaRef.current?.focus(), 150); }}
-                className={`flex-1 py-1.5 rounded-xl text-[10px] font-black transition-all ${tab === t ? 'text-white shadow' : 'text-slate-400'}`}
-                style={tab === t ? { background: brandGrad } : { background: 'rgba(255,255,255,0.06)' }}
-              >
-                {labels[t]}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Free vs VIP Tier Difference Status Bar */}
-        <div className="px-4 pb-2 shrink-0">
-          <div className="rounded-xl px-3 py-2 flex items-center justify-between gap-2"
-            style={{
-              background: isPaidUser ? 'linear-gradient(90deg, rgba(245,158,11,0.15) 0%, rgba(217,119,6,0.08) 100%)' : 'rgba(255,255,255,0.04)',
-              border: isPaidUser ? '1px solid rgba(245,158,11,0.35)' : '1px solid rgba(255,255,255,0.08)'
-            }}>
-            <div className="flex items-center gap-2">
-              <span className="text-xs">{isPaidUser ? '👑' : '🆓'}</span>
-              <div>
-                <p className="text-[10px] font-black leading-tight" style={{ color: isPaidUser ? '#fbbf24' : '#cbd5e1' }}>
-                  {isPaidUser ? 'VIP Fast-Track Priority Member' : 'Free Member Tier'}
-                </p>
-                <p className="text-[8px] text-slate-400 leading-tight">
-                  {isPaidUser
-                    ? 'Unlimited Reports • ⚡ 24h Review • 3x Rewards (15🪙 Reply / 50🪙 Resolve)'
-                    : `Daily Quota: ${freeRemainingToday}/${freeDailyLimit} Left • Standard Review • 5🪙 Reward`}
-                </p>
-              </div>
-            </div>
-            {isPaidUser ? (
-              <span className="text-[8px] font-black px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/40 shrink-0">
-                VIP ACTIVE
-              </span>
-            ) : (
-              <span className="text-[8px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700 shrink-0">
-                {freeRemainingToday} Left Today
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto px-4 pb-6">
-
+        {/* Tab Content Area */}
+        <div className="flex-1 overflow-y-auto p-3.5 sm:p-4 max-w-2xl mx-auto w-full">
           {/* ── FEED TAB ── */}
           {tab === 'feed' && (
             <div>
-              {/* Filter chips */}
-              <div className="flex gap-1.5 mb-3 flex-wrap">
-                {(['all', 'open', 'replied', 'resolved'] as const).map(f => {
+              {/* Filter Chips: All, Open, Resolved */}
+              <div className="flex gap-2 mb-3.5 flex-wrap">
+                {(['all', 'open', 'resolved'] as const).map((f) => {
                   const labels = {
                     all: `All (${counts.all})`,
                     open: `⏳ Open (${counts.open})`,
-                    replied: `✅ Replied (${counts.replied})`,
                     resolved: `🎯 Resolved (${counts.resolved})`,
                   };
                   return (
                     <button
                       key={f}
+                      type="button"
                       onClick={() => setActiveFilter(f)}
-                      className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider transition-all ${activeFilter === f ? 'bg-amber-500 text-white' : 'text-slate-400'}`}
-                      style={activeFilter !== f ? { background: 'rgba(255,255,255,0.06)' } : {}}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer select-none shadow-xs active:scale-95 ${
+                        activeFilter === f
+                          ? 'bg-purple-600 text-white shadow-sm ring-1 ring-purple-400/50'
+                          : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:text-slate-900 dark:hover:text-white'
+                      }`}
                     >
                       {labels[f]}
                     </button>
@@ -385,337 +394,328 @@ export function SuggestionsPanel({ user, isAdmin, onClose, tierTheme }: Props) {
                 })}
               </div>
 
+              {/* Suggestions List */}
               {filtered.length === 0 ? (
-                <div className="text-center py-10">
-                  <Lightbulb size={36} className="text-amber-500/30 mx-auto mb-3" />
-                  <p className="text-slate-500 text-sm font-black">Koi suggestion nahi</p>
-                  <p className="text-slate-600 text-[10px] mt-1">Pehle suggestion submit karo!</p>
+                <div className="text-center py-16 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xs">
+                  <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto mb-3">
+                    <Lightbulb size={24} />
+                  </div>
+                  <p className="text-slate-700 dark:text-slate-300 font-bold text-sm">
+                    {activeFilter === 'resolved'
+                      ? 'Koi resolved galti nahi hai'
+                      : activeFilter === 'open'
+                      ? 'Sabhi galtiyan review ho chuki hain!'
+                      : 'Abhi koi suggestion ya note mistake report nahi hai'}
+                  </p>
+                  <p className="text-slate-500 dark:text-slate-400 text-xs mt-1">
+                    Notes padhte waqt galti dikhe toh "✍️ Notes Fix" se report karein!
+                  </p>
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-3.5">
                   {filtered.map((s) => {
-                    const isUpvoted = !!(s.likedBy || {})[uid];
-                    const isOwner = s.uid === uid;
+                    const hasLiked = !!s.likedBy?.[uid];
                     const hasReply = !!s.adminReply;
-                    const st = statusConfig[s.status] ?? statusConfig.open;
 
                     return (
                       <div
                         key={s.id}
-                        className="rounded-2xl overflow-hidden"
-                        style={{
-                          background: s.status === 'resolved'
-                            ? 'rgba(139,92,246,0.06)'
-                            : hasReply ? 'rgba(245,158,11,0.06)' : 'rgba(255,255,255,0.04)',
-                          border: s.status === 'resolved'
-                            ? '1px solid rgba(139,92,246,0.25)'
-                            : hasReply ? '1px solid rgba(245,158,11,0.25)' : '1px solid rgba(255,255,255,0.07)',
-                        }}
+                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden transition-all"
                       >
-                        {/* Suggestion body */}
-                        <div className="p-3">
-                          <div className="flex items-start justify-between gap-2 mb-2">
+                        {/* Status bar directly on top of report */}
+                        <div
+                          className={`px-3.5 py-2 border-b flex items-center justify-between gap-2 text-xs font-black ${
+                            s.status === 'resolved'
+                              ? 'bg-purple-50 dark:bg-purple-950/60 border-purple-200 dark:border-purple-800/60 text-purple-700 dark:text-purple-300'
+                              : hasReply || s.status === 'replied'
+                              ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-800/60 text-emerald-700 dark:text-emerald-300'
+                              : s.adminOpened
+                              ? 'bg-blue-50 dark:bg-blue-950/60 border-blue-200 dark:border-blue-800/60 text-blue-700 dark:text-blue-300'
+                              : 'bg-amber-50 dark:bg-amber-950/60 border-amber-200 dark:border-amber-800/60 text-amber-700 dark:text-amber-300'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            {s.status === 'resolved' ? (
+                              <>
+                                <ShieldCheck
+                                  size={14}
+                                  className="shrink-0 text-purple-600 dark:text-purple-400"
+                                />
+                                <span className="truncate">
+                                  🎯 Admin ne Galti Resolve / Sudhar Diya Hai
+                                </span>
+                              </>
+                            ) : hasReply || s.status === 'replied' ? (
+                              <>
+                                <MessageSquare
+                                  size={14}
+                                  className="shrink-0 text-emerald-600 dark:text-emerald-400"
+                                />
+                                <span className="truncate">
+                                  ✅ Admin ne Dekh Kar Reply Diya Hai
+                                </span>
+                              </>
+                            ) : s.adminOpened ? (
+                              <>
+                                <Eye
+                                  size={14}
+                                  className="shrink-0 text-blue-600 dark:text-blue-400"
+                                />
+                                <span className="truncate">
+                                  👁️ Admin ne Open Kar Liya Hai (Review Chalu Hai)
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <Clock
+                                  size={14}
+                                  className="shrink-0 text-amber-600 dark:text-amber-400"
+                                />
+                                <span className="truncate">
+                                  ⏳ Admin ne Abhi Open Nahi Kiya (Pending Review)
+                                </span>
+                              </>
+                            )}
+                          </div>
+                          <span className="text-[9px] px-2 py-0.5 rounded-full font-black uppercase tracking-wider shrink-0 bg-white/90 dark:bg-slate-900/90 shadow-2xs">
+                            {s.status === 'resolved'
+                              ? 'RESOLVED'
+                              : hasReply
+                              ? 'REPLIED'
+                              : s.adminOpened
+                              ? 'OPENED'
+                              : 'NOT OPENED'}
+                          </span>
+                        </div>
+
+                        {/* Report Header (User & Context Info) */}
+                        <div className="p-3.5 pb-2">
+                          <div className="flex items-start justify-between gap-2">
                             <div className="flex items-center gap-2">
-                              <div
-                                className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-black shrink-0"
-                                style={{ background: 'rgba(99,102,241,0.25)', color: '#a5b4fc' }}
-                              >
+                              <div className="w-8 h-8 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400 font-black text-xs flex items-center justify-center shrink-0">
                                 {s.userName?.charAt(0)?.toUpperCase() || 'S'}
                               </div>
                               <div>
-                                <p className="text-[10px] font-black text-white leading-tight">{s.userName}</p>
-                                <div className="flex items-center gap-1.5">
-                                  {s.userBoard && (
-                                    <span
-                                      className="text-[8px] font-black px-1.5 py-0.5 rounded-full"
-                                      style={{ background: s.userBoard === 'NCERT_EN' ? 'rgba(59,130,246,0.2)' : s.userBoard === 'NCERT_HI' ? 'rgba(139,92,246,0.2)' : 'rgba(249,115,22,0.2)', color: s.userBoard === 'NCERT_EN' ? '#93c5fd' : s.userBoard === 'NCERT_HI' ? '#c4b5fd' : '#fdba74' }}
-                                    >
-                                      {s.userBoard}
-                                    </span>
-                                  )}
-                                  <span className="text-[8px] text-slate-600">{timeAgo(s.createdAt)}</span>
-                                </div>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              {/* VIP or Free Badge */}
-                              {(s.isVip || s.tier === 'VIP') ? (
-                                <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/40 flex items-center gap-0.5">
-                                  👑 VIP
-                                </span>
-                              ) : (
-                                <span className="text-[8px] font-semibold px-1.5 py-0.5 rounded-full bg-slate-800/80 text-slate-400 border border-slate-700">
-                                  Free
-                                </span>
-                              )}
-                              {/* Status badge */}
-                              <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full" style={{ background: st.bg, color: st.color }}>
-                                {st.label}
-                              </span>
-                              {(isAdmin || isOwner) && (
-                                <button
-                                  onClick={() => handleDelete(s.id)}
-                                  className="p-1 rounded-lg active:scale-90"
-                                  style={{ color: '#f87171' }}
-                                >
-                                  <Trash2 size={11} />
-                                </button>
-                              )}
-                            </div>
-                          </div>
-
-                          {(s.mode || s.lessonTitle || s.subject) && (
-                            <div className="flex items-center gap-1.5 flex-wrap mb-2 bg-white/5 rounded-xl px-2 py-1.5">
-                              {s.mode && (
-                                <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full"
-                                  style={{ background: s.mode === 'reading' ? 'rgba(59,130,246,0.2)' : s.mode === 'writing' ? 'rgba(16,185,129,0.2)' : 'rgba(168,85,247,0.2)', color: s.mode === 'reading' ? '#93c5fd' : s.mode === 'writing' ? '#6ee7b7' : '#d8b4fe' }}>
-                                  {s.mode === 'reading' ? '📖 Reading' : s.mode === 'writing' ? '✍️ Writing' : '📝 MCQ'}
-                                </span>
-                              )}
-                              {s.lessonTitle && <span className="text-[8px] font-black text-slate-300 truncate max-w-[140px]">📚 {s.lessonTitle}</span>}
-                              {s.pageNo && <span className="text-[8px] text-slate-500 shrink-0">Pg {s.pageNo}</span>}
-                              {s.subject && <span className="text-[8px] text-slate-500 shrink-0 capitalize">{s.subject}</span>}
-                              {s.classLevel && s.classLevel !== 'COMPETITION' && <span className="text-[8px] text-slate-500 shrink-0">Class {s.classLevel}</span>}
-                            </div>
-                          )}
-                          <p className="text-[12px] text-slate-200 leading-relaxed mb-2.5">{s.text}</p>
-
-                          {/* Attached Photo / Screenshot */}
-                          {s.imageUrl && (
-                            <div className="mb-2.5 relative overflow-hidden rounded-xl border border-amber-500/20 bg-black/40 group">
-                              <img
-                                src={s.imageUrl}
-                                alt="Attached Screenshot"
-                                className="w-full max-h-48 object-cover object-center cursor-pointer hover:scale-[1.01] transition-transform duration-200"
-                                onClick={() => setLightboxImage(s.imageUrl)}
-                                loading="lazy"
-                              />
-                              <div
-                                onClick={() => setLightboxImage(s.imageUrl)}
-                                className="absolute bottom-2 right-2 px-2 py-1 bg-black/70 hover:bg-black/90 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-colors"
-                              >
-                                <Maximize2 size={12} /> Full View
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Actions row */}
-                          <div className="flex items-center gap-2">
-                            {/* Upvote */}
-                            <button
-                              onClick={() => handleUpvote(s.id)}
-                              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-black transition-all active:scale-90 ${isUpvoted ? 'text-white' : 'text-slate-400'}`}
-                              style={isUpvoted
-                                ? { background: 'linear-gradient(135deg,#f59e0b,#d97706)' }
-                                : { background: 'rgba(255,255,255,0.06)' }}
-                            >
-                              <ThumbsUp size={11} />
-                              <span>{isUpvoted ? 'Same issue!' : 'Same issue'}</span>
-                              {(s.likes || 0) > 0 && (
-                                <span
-                                  className="px-1.5 py-0.5 rounded-full text-[8px] font-black"
-                                  style={{ background: isUpvoted ? 'rgba(255,255,255,0.25)' : 'rgba(245,158,11,0.2)', color: isUpvoted ? '#fff' : '#fbbf24' }}
-                                >
-                                  {s.likes}
-                                </span>
-                              )}
-                            </button>
-
-                            {/* Admin controls */}
-                            {isAdmin && (
-                              <div className="flex items-center gap-1.5 ml-auto flex-wrap justify-end">
-                                {s.chapterKey && s.pointsData?.length > 0 && (
-                                  <button
-                                    onClick={() => {
-                                      if (editingContentId === s.id) {
-                                        setEditingContentId(null); setEditCorrections({}); setEditResult(null);
-                                      } else {
-                                        setEditingContentId(s.id); setReplyingId(null);
-                                        const init: Record<number, string> = {};
-                                        s.pointsData.forEach((p: any) => { init[p.index] = p.originalText; });
-                                        setEditCorrections(init); setEditResult(null);
-                                      }
-                                    }}
-                                    className={`flex items-center gap-1 px-2 py-1 rounded-xl text-[10px] font-black transition-all active:scale-90 ${editingContentId === s.id ? 'text-white' : 'text-emerald-300'}`}
-                                    style={editingContentId === s.id ? { background: 'rgba(16,185,129,0.5)' } : { background: 'rgba(16,185,129,0.12)' }}
-                                  >
-                                    <FilePen size={11} />
-                                    Edit Content
-                                  </button>
-                                )}
-                                <button
-                                  onClick={() => { setReplyingId(replyingId === s.id ? null : s.id); setEditingContentId(null); setReplyText(s.adminReply || ''); setReplyTag(s.adminTag || ''); setReplyStatus('replied'); }}
-                                  className={`flex items-center gap-1 px-2 py-1 rounded-xl text-[10px] font-black transition-all active:scale-90 ${replyingId === s.id ? 'bg-amber-500 text-white' : 'text-amber-400'}`}
-                                  style={replyingId !== s.id ? { background: 'rgba(245,158,11,0.12)' } : {}}
-                                >
-                                  <MessageSquare size={11} />
-                                  {hasReply ? 'Edit' : 'Reply'}
-                                </button>
-                                {s.status !== 'resolved' && (
-                                  <button
-                                    onClick={() => handleResolve(s.id)}
-                                    className="flex items-center gap-1 px-2 py-1 rounded-xl text-[10px] font-black active:scale-90"
-                                    style={{ background: 'rgba(139,92,246,0.15)', color: '#c4b5fd' }}
-                                  >
-                                    <ShieldCheck size={11} />
-                                    Resolve
-                                  </button>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Admin Tag pill */}
-                        {s.adminTag && !replyingId && (
-                          <div className="px-3 pb-2">
-                            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full"
-                              style={{ background: 'rgba(139,92,246,0.15)', border: '1px solid rgba(139,92,246,0.3)' }}>
-                              <Tag size={9} className="text-violet-300" />
-                              <span className="text-[9px] font-black text-violet-300">{s.adminTag}</span>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Admin Reply display */}
-                        {hasReply && !replyingId && (
-                          <div className="px-3 pb-3">
-                            <div className="rounded-xl p-2.5"
-                              style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)' }}>
-                              <div className="flex items-center gap-1.5 mb-1.5">
-                                <span className="text-[8px] font-black text-amber-400 uppercase tracking-wider">⚡ Admin Reply</span>
-                                {s.adminReplyAt && <span className="text-[8px] text-slate-600">{timeAgo(s.adminReplyAt)}</span>}
-                              </div>
-                              <p className="text-[11px] text-amber-100 leading-relaxed">{s.adminReply}</p>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Admin Reply Form */}
-                        {isAdmin && replyingId === s.id && (
-                          <div className="px-3 pb-3" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                            <p className="text-[9px] font-black text-amber-400 uppercase tracking-wider mt-2 mb-1.5">⚡ Admin Reply:</p>
-                            <textarea
-                              value={replyText}
-                              onChange={e => setReplyText(e.target.value)}
-                              placeholder="Is suggestion ka jawab do..."
-                              className="w-full rounded-xl p-2.5 text-[11px] text-white outline-none resize-none min-h-[60px]"
-                              style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(245,158,11,0.3)', caretColor: '#fbbf24' }}
-                              rows={3}
-                            />
-                            <div className="mt-2 mb-2">
-                              <p className="text-[8px] font-black text-slate-500 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                                <Tag size={8} /> Admin Tag (optional):
-                              </p>
-                              <div className="flex flex-wrap gap-1.5">
-                                {ADMIN_TAGS.map(tag => (
-                                  <button key={tag} onClick={() => setReplyTag(replyTag === tag ? '' : tag)}
-                                    className={`px-2 py-1 rounded-full text-[8px] font-black transition-all active:scale-95 ${replyTag === tag ? 'text-white' : 'text-violet-300'}`}
-                                    style={replyTag === tag
-                                      ? { background: 'rgba(139,92,246,0.5)', border: '1px solid rgba(139,92,246,0.7)' }
-                                      : { background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.25)' }}>
-                                    {tag}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                            <div className="flex gap-1.5 mb-2">
-                              {(['replied', 'resolved'] as const).map(st => (
-                                <button key={st} onClick={() => setReplyStatus(st)}
-                                  className={`flex-1 py-1.5 rounded-xl text-[9px] font-black transition-all active:scale-95 ${replyStatus === st ? 'text-white' : 'text-slate-400'}`}
-                                  style={replyStatus === st
-                                    ? { background: st === 'resolved' ? 'rgba(139,92,246,0.5)' : 'rgba(16,185,129,0.4)' }
-                                    : { background: 'rgba(255,255,255,0.06)' }}>
-                                  {st === 'replied' ? '✅ Mark as Replied (+5🪙)' : '🎯 Mark as Resolved (+20🪙)'}
-                                </button>
-                              ))}
-                            </div>
-                            <div className="flex gap-2 mt-1.5">
-                              <button onClick={() => { setReplyingId(null); setReplyText(''); setReplyTag(''); setReplyStatus('replied'); }}
-                                className="flex-1 py-2 rounded-xl text-[10px] font-black text-slate-400 active:scale-95"
-                                style={{ background: 'rgba(255,255,255,0.06)' }}>
-                                Cancel
-                              </button>
-                              <button onClick={() => handleAdminReply(s.id)} disabled={!replyText.trim() || savingReply}
-                                className="flex-1 py-2 rounded-xl text-[10px] font-black text-white flex items-center justify-center gap-1.5 active:scale-95 disabled:opacity-40"
-                                style={{ background: 'linear-gradient(135deg, #f59e0b, #d97706)' }}>
-                                {savingReply ? <RefreshCw size={11} className="animate-spin" /> : <Send size={11} />}
-                                {savingReply ? 'Saving…' : 'Save Reply'}
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Edit Content Panel */}
-                        {isAdmin && editingContentId === s.id && s.chapterKey && s.pointsData?.length > 0 && (
-                          <div className="px-3 pb-3" style={{ borderTop: '1px solid rgba(16,185,129,0.2)', background: 'rgba(16,185,129,0.04)' }}>
-                            <div className="flex items-center gap-1.5 mt-2.5 mb-3">
-                              <FilePen size={12} className="text-emerald-400 shrink-0" />
-                              <p className="text-[9px] font-black text-emerald-400 uppercase tracking-wider">Edit Main Content</p>
-                              <span className="text-[8px] text-slate-500 ml-auto">Chapter: {s.chapterKey}</span>
-                            </div>
-                            {editResult && (
-                              <div className="mb-3 px-3 py-2 rounded-xl flex items-center gap-2"
-                                style={editResult.success
-                                  ? { background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)' }
-                                  : { background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)' }}>
-                                {editResult.success
-                                  ? <CheckCircle size={13} className="text-emerald-400 shrink-0" />
-                                  : <AlertCircle size={13} className="text-red-400 shrink-0" />}
-                                <p className="text-[10px] font-black" style={{ color: editResult.success ? '#6ee7b7' : '#fca5a5' }}>
-                                  {editResult.success
-                                    ? `✅ ${editResult.count} line${editResult.count !== 1 ? 's' : ''} updated in content!`
-                                    : '❌ Koi line match nahi hui — text exactly match karo.'}
+                                <p className="text-xs font-black text-slate-900 dark:text-white leading-tight">
+                                  {s.userName}
+                                </p>
+                                <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                                  {timeAgo(s.createdAt)}
+                                  {s.userBoard ? ` • ${s.userBoard}` : ''}
                                 </p>
                               </div>
-                            )}
-                            <div className="space-y-3">
-                              {s.pointsData.map((pt: any, pi: number) => (
-                                <div key={pi} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: '10px 12px' }}>
-                                  <p className="text-[8px] font-black text-slate-500 uppercase tracking-wider mb-1">Point {pt.index + 1} — Original:</p>
-                                  <p className="text-[10px] text-slate-400 leading-relaxed mb-2 p-2 rounded-lg" style={{ background: 'rgba(0,0,0,0.2)', wordBreak: 'break-word' }}>
-                                    {pt.originalText}
-                                  </p>
-                                  <p className="text-[8px] font-black text-emerald-400 uppercase tracking-wider mb-1">Corrected Text:</p>
-                                  <textarea
-                                    value={editCorrections[pt.index] ?? pt.originalText}
-                                    onChange={e => setEditCorrections(prev => ({ ...prev, [pt.index]: e.target.value }))}
-                                    className="w-full rounded-lg p-2 text-[11px] text-white outline-none resize-none"
-                                    style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.3)', caretColor: '#6ee7b7', minHeight: 52 }}
-                                    rows={2}
-                                    placeholder="Sahi text yahan likho..."
-                                  />
+                            </div>
+
+                            {/* Tags or Lesson Metadata */}
+                            <div className="flex flex-wrap items-center gap-1 justify-end">
+                              {s.lessonTitle && (
+                                <span className="text-[9.5px] font-bold px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                                  📖 {s.lessonTitle}
+                                </span>
+                              )}
+                              {s.pageNo && (
+                                <span className="text-[9.5px] font-bold px-1.5 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300">
+                                  Page {s.pageNo}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Report Text */}
+                          <p className="mt-2.5 text-[13px] text-slate-800 dark:text-slate-200 leading-relaxed font-normal whitespace-pre-wrap">
+                            {s.text}
+                          </p>
+
+                          {/* Screenshot Image Attachment */}
+                          {s.imageUrl && (
+                            <div className="mt-2.5">
+                              <button
+                                type="button"
+                                onClick={() => setLightboxImage(s.imageUrl || null)}
+                                className="group relative block rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-800 cursor-zoom-in"
+                              >
+                                <img
+                                  src={s.imageUrl}
+                                  alt="Report Screenshot"
+                                  className="w-full max-h-56 object-cover object-top group-hover:scale-[1.01] transition-transform"
+                                />
+                                <div className="absolute bottom-2 right-2 px-2 py-1 bg-black/70 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 backdrop-blur-xs">
+                                  <Eye size={12} />
+                                  <span>Tap to View</span>
                                 </div>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Action Bar (Upvote & Admin Controls) */}
+                        <div className="px-3.5 py-2 flex items-center justify-between border-t border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/50">
+                          <button
+                            type="button"
+                            onClick={() => handleUpvote(s.id)}
+                            className={`flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-black transition-all cursor-pointer active:scale-95 ${
+                              hasLiked
+                                ? 'bg-amber-500 text-slate-950 shadow-xs'
+                                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-slate-800'
+                            }`}
+                          >
+                            <ThumbsUp size={13} />
+                            <span>{s.likes || 0} Agree</span>
+                          </button>
+
+                          {isAdmin && (
+                            <div className="flex items-center gap-1.5">
+                              {/* Quick Mark Opened button if not opened yet */}
+                              {!s.adminOpened && !hasReply && s.status === 'open' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleMarkOpened(s.id)}
+                                  className="flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-black bg-blue-500/15 text-blue-600 dark:text-blue-400 hover:bg-blue-500/25 active:scale-95 transition-all cursor-pointer"
+                                  title="Mark Under Review"
+                                >
+                                  <Eye size={12} />
+                                  <span>Mark Open</span>
+                                </button>
+                              )}
+
+                              {/* Reply Button */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setReplyingId(replyingId === s.id ? null : s.id);
+                                  setReplyText(s.adminReply || '');
+                                  setReplyTag(s.adminTag || '');
+                                  setReplyStatus(s.status === 'resolved' ? 'resolved' : 'replied');
+                                  if (!s.adminOpened) {
+                                    handleMarkOpened(s.id);
+                                  }
+                                }}
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-black bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/25 active:scale-95 transition-all cursor-pointer"
+                              >
+                                <MessageSquare size={12} />
+                                <span>{hasReply ? 'Edit Reply' : 'Reply'}</span>
+                              </button>
+
+                              {/* Resolve Button */}
+                              {s.status !== 'resolved' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleResolve(s.id)}
+                                  className="flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-black bg-purple-500/15 text-purple-600 dark:text-purple-400 hover:bg-purple-500/25 active:scale-95 transition-all cursor-pointer"
+                                >
+                                  <ShieldCheck size={12} />
+                                  <span>Resolve</span>
+                                </button>
+                              )}
+
+                              {/* Delete Button */}
+                              <button
+                                type="button"
+                                onClick={() => handleDelete(s.id)}
+                                className="p-1 rounded-xl text-slate-400 hover:text-red-500 transition-all cursor-pointer"
+                                title="Delete"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* ── ADMIN REPLY DISPLAY (Directly under each report) ── */}
+                        {hasReply && (
+                          <div className="px-3.5 pb-3.5 pt-1">
+                            <div className="rounded-xl p-3 bg-emerald-50/90 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 shadow-xs">
+                              <div className="flex items-center justify-between gap-2 mb-1.5">
+                                <div className="flex items-center gap-1.5">
+                                  <div className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px] font-black">
+                                    ✓
+                                  </div>
+                                  <span className="text-[11px] font-black text-emerald-800 dark:text-emerald-300">
+                                    Admin Reply
+                                  </span>
+                                  {s.adminTag && (
+                                    <span className="text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/60 text-purple-700 dark:text-purple-300">
+                                      {s.adminTag}
+                                    </span>
+                                  )}
+                                </div>
+                                {s.adminReplyAt && (
+                                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                                    {timeAgo(s.adminReplyAt)}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-slate-800 dark:text-slate-200 leading-relaxed font-medium whitespace-pre-wrap">
+                                {s.adminReply}
+                              </p>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* ── INLINE ADMIN REPLY COMPOSER ── */}
+                        {isAdmin && replyingId === s.id && (
+                          <div className="p-3.5 border-t border-slate-200 dark:border-slate-800 bg-slate-100/70 dark:bg-slate-800/60">
+                            <p className="text-xs font-black text-slate-900 dark:text-white mb-2">
+                              ✍️ Admin Reply Dein:
+                            </p>
+                            <textarea
+                              value={replyText}
+                              onChange={(e) => setReplyText(e.target.value)}
+                              placeholder="Apna reply likhein..."
+                              className="w-full rounded-xl p-2.5 text-xs text-slate-900 dark:text-white bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 outline-none resize-none focus:ring-1 focus:ring-amber-500"
+                              rows={3}
+                            />
+
+                            {/* Tag Selection */}
+                            <div className="flex flex-wrap gap-1 mt-2">
+                              {TAG_OPTIONS.map((tag) => (
+                                <button
+                                  key={tag.id}
+                                  type="button"
+                                  onClick={() => setReplyTag(replyTag === tag.label ? '' : tag.label)}
+                                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                                    replyTag === tag.label
+                                      ? 'bg-amber-500 text-slate-950 font-black'
+                                      : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
+                                  }`}
+                                >
+                                  {tag.label}
+                                </button>
                               ))}
                             </div>
-                            <div className="flex gap-2 mt-3">
-                              <button onClick={() => { setEditingContentId(null); setEditCorrections({}); setEditResult(null); }}
-                                className="flex-1 py-2 rounded-xl text-[10px] font-black text-slate-400 active:scale-95"
-                                style={{ background: 'rgba(255,255,255,0.06)' }}>
-                                Cancel
-                              </button>
-                              <button disabled={applyingEdit}
-                                onClick={async () => {
-                                  setApplyingEdit(true); setEditResult(null);
-                                  try {
-                                    const corrections = s.pointsData.map((pt: any) => ({
-                                      originalText: pt.originalText,
-                                      correctedText: (editCorrections[pt.index] ?? pt.originalText).trim(),
-                                    })).filter((c: any) => c.correctedText && c.correctedText !== c.originalText);
-                                    if (corrections.length === 0) { setEditResult({ success: false, count: 0 }); setApplyingEdit(false); return; }
-                                    const replaced = await applyNoteCorrection(s.chapterKey, corrections);
-                                    setEditResult({ success: replaced > 0, count: replaced });
-                                    if (replaced > 0) await resolvesuggestion(s.id);
-                                  } catch (err) {
-                                    console.error('[EditContent]', err);
-                                    setEditResult({ success: false, count: 0 });
-                                  } finally { setApplyingEdit(false); }
-                                }}
-                                className="flex-1 py-2 rounded-xl text-[10px] font-black text-white flex items-center justify-center gap-1.5 active:scale-95 disabled:opacity-40"
-                                style={{ background: 'linear-gradient(135deg, #10b981, #059669)' }}>
-                                {applyingEdit ? <RefreshCw size={11} className="animate-spin" /> : <FilePen size={11} />}
-                                {applyingEdit ? 'Applying…' : 'Apply to Content'}
-                              </button>
+
+                            {/* Status & Save Buttons */}
+                            <div className="flex items-center justify-between mt-3">
+                              <div className="flex items-center gap-2">
+                                <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 flex items-center gap-1 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={replyStatus === 'resolved'}
+                                    onChange={(e) =>
+                                      setReplyStatus(e.target.checked ? 'resolved' : 'replied')
+                                    }
+                                    className="rounded"
+                                  />
+                                  <span>Mark Resolved as well</span>
+                                </label>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setReplyingId(null)}
+                                  className="px-3 py-1.5 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleAdminReply(s.id)}
+                                  disabled={!replyText.trim() || savingReply}
+                                  className="px-4 py-1.5 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-500 text-white transition-all cursor-pointer shadow-xs disabled:opacity-50"
+                                >
+                                  {savingReply ? 'Saving...' : 'Send Reply'}
+                                </button>
+                              </div>
                             </div>
                           </div>
                         )}
@@ -727,156 +727,178 @@ export function SuggestionsPanel({ user, isAdmin, onClose, tierTheme }: Props) {
             </div>
           )}
 
-          {/* ── SUBMIT TAB ── */}
+          {/* ── NOTES FIX (SUBMIT) TAB ── */}
           {tab === 'submit' && (
-            <div className="space-y-4">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xs">
               {submitted ? (
-                <div className="text-center py-12">
-                  <CheckCircle size={48} className="text-emerald-400 mx-auto mb-3" />
-                  <p className="text-white font-black text-lg">Submitted! 🎉</p>
-                  <p className="text-slate-400 text-sm mt-1">Tera suggestion save ho gaya</p>
+                <div className="text-center py-10">
+                  <div className="w-12 h-12 rounded-full bg-emerald-500/20 text-emerald-500 flex items-center justify-center mx-auto mb-3">
+                    <CheckCircle size={28} />
+                  </div>
+                  <h2 className="text-base font-black text-slate-900 dark:text-white">
+                    Dhanyawaad! Report Submit Ho Gayi
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    Admin jald hi review karega aur points update honge.
+                  </p>
                 </div>
               ) : (
-                <>
-                  {/* Coin reward info */}
-                  <div className="rounded-2xl p-3" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }}>
-                    <p className="text-[9px] font-black text-amber-400 uppercase tracking-wider mb-2">🪙 Coin Rewards</p>
-                    <div className="space-y-1">
-                      {[
-                        { label: 'Admin ne galti sudhara (Resolved)', coins: 20, icon: '🎯' },
-                        { label: 'Admin ne reply diya', coins: 5, icon: '✅' },
-                      ].map(r => (
-                        <div key={r.label} className="flex items-center justify-between">
-                          <span className="text-[9px] text-slate-400">{r.icon} {r.label}</span>
-                          <span className="text-[10px] font-black text-amber-300">+{r.coins} 🪙</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl p-3.5"
-                    style={{ background: 'rgba(245,158,11,0.05)', border: '1px solid rgba(245,158,11,0.15)' }}>
-                    <div className="flex items-center gap-2 mb-2">
-                      <Lightbulb size={14} className="text-amber-400 shrink-0" />
-                      <p className="text-[10px] font-black text-amber-300 uppercase tracking-wider">Suggestion Guidelines</p>
-                    </div>
-                    <ul className="space-y-1">
-                      {['Notes mein galat information dikhi? Batao.', 'MCQ answer galat laga? Flag karo.', 'Koi topic missing hai? Suggest karo.', 'App mein koi bug ya improvement?'].map((g, gi) => (
-                        <li key={gi} className="flex items-start gap-1.5">
-                          <span className="text-amber-500 shrink-0 mt-0.5 text-[10px]">•</span>
-                          <span className="text-[10px] text-slate-400 leading-tight">{g}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-
+                <div className="space-y-4">
                   <div>
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider block mb-2">
-                      Teri Suggestion / Correction:
+                    <h2 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                      <Lightbulb size={16} className="text-amber-500" />
+                      <span>Notes Mein Galti Report Karein</span>
+                    </h2>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                      Spelling mistake, galat anuvaad, missing point ya concept error batayein.
+                    </p>
+                  </div>
+
+                  {/* Lesson Context preview if launched from reader */}
+                  {context?.lessonTitle && (
+                    <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-xs text-amber-800 dark:text-amber-300">
+                      <p className="font-black">📖 Current Lesson Context:</p>
+                      <p className="text-[11px] mt-0.5">
+                        {context.lessonTitle} • Page {context.pageNo || 1} • {context.mode || 'notes'}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Textarea */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Kahan galti hai aur sahi kya hona chahiye?
                     </label>
                     <textarea
                       ref={textareaRef}
                       value={newText}
-                      onChange={e => setNewText(e.target.value)}
-                      placeholder="Yahan likho — kya suggestion hai ya kya galat laga..."
-                      className="w-full rounded-2xl p-3.5 text-sm text-white outline-none resize-none"
-                      style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', caretColor: '#fbbf24', minHeight: 120 }}
+                      onChange={(e) => setNewText(e.target.value)}
+                      placeholder="Udaharan: Page 2 par paragraph 3 mein formula galat likha hai..."
+                      rows={5}
                       maxLength={500}
+                      className="w-full rounded-xl p-3 text-xs sm:text-sm text-slate-900 dark:text-white bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 outline-none resize-none focus:ring-2 focus:ring-amber-500/50"
                     />
-                    <div className="flex justify-between mt-1">
-                      <p className="text-[9px] text-slate-600">Board: {user?.board || 'N/A'} • Class: {user?.class || 'N/A'}</p>
-                      <p className="text-[9px] text-slate-600">{newText.length}/500</p>
-                    </div>
-
-                    {/* Screenshot / Photo Attachment */}
-                    <div className="mt-3">
-                      <input
-                        id="nsta-suggestion-photo-input"
-                        type="file"
-                        ref={fileInputRef}
-                        accept="image/*"
-                        onChange={handleImageSelect}
-                        className="sr-only"
-                        tabIndex={-1}
-                        onClick={(e) => {
-                          (e.target as HTMLInputElement).value = '';
-                        }}
-                      />
-
-                      {imagePreviewUrl ? (
-                        <div className="relative inline-block mt-1">
-                          <img
-                            src={imagePreviewUrl}
-                            alt="Screenshot preview"
-                            className="w-36 h-24 object-cover rounded-xl border border-amber-400/50 shadow-md"
-                          />
-                          <button
-                            type="button"
-                            onClick={handleClearImage}
-                            className="absolute -top-2 -right-2 p-1 bg-red-600 hover:bg-red-700 text-white rounded-full shadow cursor-pointer active:scale-95 transition-transform"
-                            title="Photo hataayein"
-                          >
-                            <X size={12} />
-                          </button>
-                          {isUploadingImage && (
-                            <div className="absolute inset-0 bg-black/70 rounded-xl flex flex-col items-center justify-center text-white text-[10px] font-bold">
-                              <RefreshCw size={14} className="animate-spin text-amber-400 mb-1" />
-                              <span>Uploading...</span>
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <label
-                          htmlFor="nsta-suggestion-photo-input"
-                          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-amber-300 hover:text-amber-200 active:scale-95 transition-all cursor-pointer select-none"
-                          style={{ background: 'rgba(245,158,11,0.12)', border: '1px dashed rgba(245,158,11,0.4)' }}
-                          onClick={() => {
-                            if (fileInputRef.current) {
-                              fileInputRef.current.value = '';
-                            }
-                          }}
-                        >
-                          <Camera size={14} />
-                          <span>Screenshot / Photo Attach Karein (Optional)</span>
-                        </label>
-                      )}
+                    <div className="flex justify-between mt-1 text-[10px] text-slate-400">
+                      <span>Board: {user?.board || 'All'}</span>
+                      <span>{newText.length}/500</span>
                     </div>
                   </div>
 
+                  {/* Screenshot / Photo Attachment */}
+                  <div>
+                    <input
+                      id="nsta-suggestion-photo-input"
+                      type="file"
+                      ref={fileInputRef}
+                      accept="image/*"
+                      onChange={handleImageSelect}
+                      className="sr-only"
+                    />
+
+                    {imagePreviewUrl ? (
+                      <div className="relative inline-block mt-1">
+                        <img
+                          src={imagePreviewUrl}
+                          alt="Screenshot preview"
+                          className="w-40 h-28 object-cover rounded-xl border border-amber-400 shadow-xs"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleClearImage}
+                          className="absolute -top-2 -right-2 p-1 bg-red-600 hover:bg-red-700 text-white rounded-full shadow-md cursor-pointer active:scale-95"
+                          title="Hataayein"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <label
+                        htmlFor="nsta-suggestion-photo-input"
+                        className="flex items-center justify-center gap-2 p-3 rounded-xl border-2 border-dashed border-amber-300 dark:border-amber-700 bg-amber-50/50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 text-xs font-bold cursor-pointer hover:bg-amber-100/50 dark:hover:bg-amber-950/40 transition-all select-none"
+                      >
+                        <Camera size={16} />
+                        <span>Screenshot / Photo Attach Karein (Optional)</span>
+                      </label>
+                    )}
+                  </div>
+
+                  {/* Quota & Submit */}
                   {!canSubmit ? (
-                    <div className="w-full p-3.5 rounded-2xl text-center bg-amber-500/10 border border-amber-500/30">
-                      <p className="text-xs font-bold text-amber-300 mb-1">⚠️ Aaj ka Free Quota (3/3) Poora Ho Chuka Hai</p>
-                      <p className="text-[10px] text-slate-400 leading-relaxed">
-                        Aap kal naye suggestions submit kar sakte hain. VIP members ko unlimited reports aur 24h fast-track review milta hai.
+                    <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-center">
+                      <p className="text-xs font-bold text-amber-600 dark:text-amber-400">
+                        ⚠️ Aaj ka Free Quota (3/3) poora ho gaya hai
+                      </p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        Aap kal naye suggestions submit kar sakte hain ya VIP access lein.
                       </p>
                     </div>
                   ) : (
-                    <button onClick={handleSubmit} disabled={(!newText.trim() && !selectedImageFile) || submitting}
-                      className="w-full py-3.5 rounded-2xl text-[13px] font-black text-white flex items-center justify-center gap-2 active:scale-95 transition disabled:opacity-40 cursor-pointer"
-                      style={{ background: brandGrad, boxShadow: `0 4px 20px ${brandPrimary}55` }}>
-                      {submitting ? <RefreshCw size={16} className="animate-spin" /> : <Send size={16} />}
-                      {submitting ? (isUploadingImage ? 'Photo upload ho rahi hai…' : 'Submit ho raha hai…') : (isPaidUser ? 'Submit VIP Priority Suggestion 👑' : `Submit Suggestion (${freeRemainingToday} left today)`)}
+                    <button
+                      type="button"
+                      onClick={handleSubmit}
+                      disabled={(!newText.trim() && !selectedImageFile) || submitting}
+                      className="w-full py-3.5 rounded-xl text-xs sm:text-sm font-black text-slate-950 bg-gradient-to-r from-amber-400 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 active:scale-95 transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                    >
+                      {submitting ? (
+                        <>
+                          <RefreshCw size={16} className="animate-spin" />
+                          <span>Submit ho raha hai...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Send size={16} />
+                          <span>
+                            Submit Suggestion{' '}
+                            {!isPaidUser && `(${freeRemainingToday} left today)`}
+                          </span>
+                        </>
+                      )}
                     </button>
                   )}
-                </>
+                </div>
               )}
             </div>
           )}
 
           {/* ── HISTORY TAB ── */}
           {tab === 'history' && (
-            <div>
-              {/* User's own coin history */}
+            <div className="space-y-4">
+              {/* User Coins summary */}
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500/15 via-orange-500/15 to-purple-500/15 border border-amber-300/40 dark:border-amber-700/40 flex items-center justify-between shadow-xs">
+                <div>
+                  <p className="text-xs font-bold text-slate-600 dark:text-slate-400">
+                    Aapke Total Coins
+                  </p>
+                  <p className="text-xl font-black text-amber-500 dark:text-amber-400 flex items-center gap-1.5 mt-0.5">
+                    <Coins size={20} />
+                    <span>{userCoins} Coins</span>
+                  </p>
+                </div>
+                <div className="text-right text-[11px] text-slate-500 dark:text-slate-400">
+                  <p>🎯 Fix = 20 Coins</p>
+                  <p>✅ Reply = 5 Coins</p>
+                </div>
+              </div>
+
+              {/* Coin History */}
               {uid && userCoinHistory.length > 0 && (
-                <div className="mb-5 rounded-2xl p-3" style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.2)' }}>
-                  <p className="text-[9px] font-black text-amber-400 uppercase tracking-wider mb-2">🪙 Tera Coin History</p>
-                  <div className="space-y-1.5">
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
+                  <p className="text-xs font-black text-slate-900 dark:text-white mb-2.5 flex items-center gap-1.5">
+                    <Coins size={14} className="text-amber-500" />
+                    <span>Coin Earning History</span>
+                  </p>
+                  <div className="space-y-2">
                     {userCoinHistory.slice(0, 10).map((h, i) => (
-                      <div key={i} className="flex items-center justify-between">
-                        <span className="text-[10px] text-slate-300">{reasonLabel(h.reason)}</span>
-                        <div className="flex items-center gap-1">
-                          <span className="text-[10px] font-black text-amber-300">+{h.amount} 🪙</span>
-                          <span className="text-[8px] text-slate-600 ml-1">{timeAgo(h.date)}</span>
+                      <div
+                        key={i}
+                        className="flex items-center justify-between text-xs py-1.5 border-b border-slate-100 dark:border-slate-800 last:border-0"
+                      >
+                        <span className="text-slate-700 dark:text-slate-300">
+                          {reasonLabel(h.reason)}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-black text-amber-500">+{h.amount} 🪙</span>
+                          <span className="text-[10px] text-slate-400">{timeAgo(h.date)}</span>
                         </div>
                       </div>
                     ))}
@@ -884,177 +906,64 @@ export function SuggestionsPanel({ user, isAdmin, onClose, tierTheme }: Props) {
                 </div>
               )}
 
-              <p className="text-[9px] font-black uppercase tracking-wider mb-4" style={{ color: 'rgba(245,158,11,0.55)' }}>
-                Pichle 7 din ki changes • Day-by-Day
-              </p>
+              {/* Day-by-Day Activity */}
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
+                <p className="text-xs font-black text-slate-900 dark:text-white mb-3 flex items-center gap-1.5">
+                  <Clock size={14} className="text-purple-500" />
+                  <span>Pichle 7 Dino Ki Activity</span>
+                </p>
 
-              {Array.from({ length: 7 }, (_, i) => {
-                const d = new Date();
-                d.setDate(d.getDate() - i);
-                const dateStr = d.toISOString().slice(0, 10);
-                const dayItems = suggestions.filter(s => {
-                  const replyDate = s.adminReplyAt?.slice(0, 10);
-                  const createDate = s.createdAt?.slice(0, 10);
-                  return replyDate === dateStr || createDate === dateStr;
-                });
-                const dayLabel = i === 0 ? 'Aaj' : i === 1 ? 'Kal' : `${i} din pehle`;
-                const dayFull = d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', weekday: 'short' });
+                {Array.from({ length: 7 }, (_, i) => {
+                  const d = new Date();
+                  d.setDate(d.getDate() - i);
+                  const dateStr = d.toISOString().slice(0, 10);
+                  const dayItems = suggestions.filter((s) => {
+                    const replyDate = s.adminReplyAt?.slice(0, 10);
+                    const createDate = s.createdAt?.slice(0, 10);
+                    return replyDate === dateStr || createDate === dateStr;
+                  });
+                  const dayLabel = i === 0 ? 'Aaj' : i === 1 ? 'Kal' : `${i} din pehle`;
+                  const dayFull = d.toLocaleDateString('en-IN', {
+                    day: 'numeric',
+                    month: 'short',
+                    weekday: 'short',
+                  });
 
-                return (
-                  <div key={dateStr} className="mb-5">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-[10px] font-black px-2.5 py-1 rounded-lg shrink-0"
-                        style={{ background: 'rgba(245,158,11,0.15)', color: '#fbbf24' }}>
-                        {dayLabel}
-                      </span>
-                      <span className="text-[9px] text-slate-600">{dayFull}</span>
-                      <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.06)' }} />
-                      <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full shrink-0"
-                        style={{ background: dayItems.length > 0 ? 'rgba(245,158,11,0.15)' : 'rgba(255,255,255,0.04)', color: dayItems.length > 0 ? '#fbbf24' : '#475569' }}>
-                        {dayItems.length} changes
-                      </span>
-                    </div>
-                    {dayItems.length === 0 ? (
-                      <div className="text-center py-2.5 rounded-xl text-slate-700 text-[10px]"
-                        style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)' }}>
-                        Koi activity nahi
+                  return (
+                    <div key={dateStr} className="mb-3.5 last:mb-0">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-xs font-black text-amber-600 dark:text-amber-400">
+                          {dayLabel} • <span className="text-slate-400 font-normal">{dayFull}</span>
+                        </span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                          {dayItems.length} changes
+                        </span>
                       </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {dayItems.map(s => {
-                          const wasRepliedToday = s.adminReplyAt?.slice(0, 10) === dateStr;
-                          const wasCreatedToday = s.createdAt?.slice(0, 10) === dateStr;
-                          let actionLabel: string, actionColor: string, actionBg: string;
-                          if (s.status === 'resolved' && wasRepliedToday) { actionLabel = '🎯 Resolved'; actionColor = '#c4b5fd'; actionBg = 'rgba(139,92,246,0.18)'; }
-                          else if (wasRepliedToday && s.adminReply) { actionLabel = '✅ Admin ne Reply diya'; actionColor = '#6ee7b7'; actionBg = 'rgba(16,185,129,0.15)'; }
-                          else if (wasCreatedToday) { actionLabel = '📝 New Suggestion'; actionColor = '#93c5fd'; actionBg = 'rgba(96,165,250,0.12)'; }
-                          else { actionLabel = '🔄 Updated'; actionColor = '#fbbf24'; actionBg = 'rgba(245,158,11,0.12)'; }
-                          return (
-                            <div key={s.id} className="rounded-xl p-2.5"
-                              style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
-                              <div className="flex items-start gap-2">
-                                <span className="text-[8px] font-black px-2 py-0.5 rounded-full shrink-0 mt-0.5 whitespace-nowrap"
-                                  style={{ background: actionBg, color: actionColor }}>
-                                  {actionLabel}
-                                </span>
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-[11px] text-slate-300 leading-snug line-clamp-2">{s.text}</p>
-                                  {wasRepliedToday && s.adminReply && (
-                                    <p className="text-[10px] mt-1 line-clamp-1" style={{ color: 'rgba(245,158,11,0.7)' }}>↳ {s.adminReply}</p>
-                                  )}
-                                  <p className="text-[8px] text-slate-600 mt-0.5">{s.userName}{s.userBoard ? ` • ${s.userBoard}` : ''}</p>
-                                </div>
-                              </div>
+                      {dayItems.length === 0 ? (
+                        <p className="text-[11px] text-slate-400 pl-2">Koi activity nahi</p>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {dayItems.map((s) => (
+                            <div
+                              key={s.id}
+                              className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700/60 text-xs"
+                            >
+                              <p className="text-slate-800 dark:text-slate-200 line-clamp-1">
+                                {s.text}
+                              </p>
+                              {s.adminReply && (
+                                <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-0.5 line-clamp-1">
+                                  ↳ {s.adminReply}
+                                </p>
+                              )}
                             </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* ── RANK TAB — Leaderboard ── */}
-          {tab === 'rank' && (
-            <div>
-              {/* Hero banner */}
-              <div className="rounded-2xl p-4 mb-4 text-center"
-                style={{ background: 'linear-gradient(135deg, rgba(245,158,11,0.15) 0%, rgba(139,92,246,0.15) 100%)', border: '1px solid rgba(245,158,11,0.2)' }}>
-                <div style={{ fontSize: 32, marginBottom: 4 }}>🏆</div>
-                <p className="text-white font-black text-sm">Galti Pakadne Ka Leaderboard</p>
-                <p className="text-[10px] text-slate-400 mt-1">Jo jitni galtiyan pakdega, utne zyada coins aur rank milega</p>
-                <div className="flex justify-center gap-4 mt-3">
-                  <div className="text-center">
-                    <p className="text-lg font-black text-amber-300">🎯 20</p>
-                    <p className="text-[8px] text-slate-500">Coins / Galti Fixed</p>
-                  </div>
-                  <div className="w-px" style={{ background: 'rgba(255,255,255,0.08)' }} />
-                  <div className="text-center">
-                    <p className="text-lg font-black text-emerald-300">✅ 5</p>
-                    <p className="text-[8px] text-slate-500">Coins / Admin Reply</p>
-                  </div>
-                  <div className="w-px" style={{ background: 'rgba(255,255,255,0.08)' }} />
-                  <div className="text-center">
-                    <p className="text-lg font-black text-amber-300">🪙 {userCoins}</p>
-                    <p className="text-[8px] text-slate-500">Tere Coins</p>
-                  </div>
-                </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-
-              {leaderboard.length === 0 ? (
-                <div className="text-center py-10">
-                  <Trophy size={36} className="text-amber-500/30 mx-auto mb-3" />
-                  <p className="text-slate-500 text-sm font-black">Abhi koi rank nahi</p>
-                  <p className="text-slate-600 text-[10px] mt-1">Galtiyan pakdo, coins kamao!</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {leaderboard.map((entry, i) => {
-                    const isMe = entry.uid === uid;
-                    const medal = i < 3 ? MEDAL_COLORS[i] : null;
-                    return (
-                      <div key={entry.uid}
-                        className="rounded-2xl p-3 flex items-center gap-3"
-                        style={{
-                          background: isMe
-                            ? 'linear-gradient(135deg, rgba(245,158,11,0.15), rgba(139,92,246,0.12))'
-                            : 'rgba(255,255,255,0.04)',
-                          border: isMe
-                            ? '1px solid rgba(245,158,11,0.4)'
-                            : medal ? `1px solid ${medal}30` : '1px solid rgba(255,255,255,0.07)',
-                        }}>
-                        {/* Rank */}
-                        <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-[11px] font-black"
-                          style={{
-                            background: medal ? `${medal}25` : 'rgba(255,255,255,0.08)',
-                            color: medal || '#94a3b8',
-                          }}>
-                          {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}
-                        </div>
-
-                        {/* Avatar */}
-                        <div className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-black shrink-0"
-                          style={{ background: isMe ? 'rgba(245,158,11,0.3)' : 'rgba(99,102,241,0.25)', color: isMe ? '#fbbf24' : '#a5b4fc' }}>
-                          {entry.userName?.charAt(0)?.toUpperCase() || 'S'}
-                        </div>
-
-                        {/* Info */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <p className="text-[11px] font-black text-white leading-tight truncate">
-                              {entry.userName}
-                              {isMe && <span className="text-amber-400 text-[9px] ml-1">(Tum)</span>}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                            <span className="text-[8px] text-slate-500">📝 {entry.totalReported ?? 0} pakdi</span>
-                            <span className="text-[8px] text-slate-500">🎯 {entry.totalResolved ?? 0} fix</span>
-                            <span className="text-[8px] text-slate-500">✅ {entry.totalReplied ?? 0} replied</span>
-                          </div>
-                        </div>
-
-                        {/* Coins */}
-                        <div className="flex flex-col items-end shrink-0">
-                          <span className="text-[13px] font-black text-amber-300">{entry.totalCoins ?? 0}</span>
-                          <span className="text-[8px] text-amber-500/60">🪙 coins</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* My position if not in top 20 */}
-              {uid && myRank === 0 && (
-                <div className="mt-4 rounded-2xl p-3"
-                  style={{ background: 'rgba(245,158,11,0.07)', border: '1px dashed rgba(245,158,11,0.3)' }}>
-                  <p className="text-[10px] text-slate-400 text-center">
-                    Galtiyan pakdo aur leaderboard mein aao! 🚀
-                  </p>
-                </div>
-              )}
             </div>
           )}
         </div>
@@ -1105,4 +1014,5 @@ export function SuggestionsPanel({ user, isAdmin, onClose, tierTheme }: Props) {
     </>,
     document.body
   );
-}
+};
+export default SuggestionsPanel;

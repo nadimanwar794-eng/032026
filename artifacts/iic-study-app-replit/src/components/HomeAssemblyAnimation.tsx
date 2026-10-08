@@ -62,6 +62,16 @@ export const HomeAssemblyAnimation: React.FC<HomeAssemblyAnimationProps> = ({
   const startTimeRef = useRef<number>(Date.now());
   const animReqRef = useRef<number | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const onCompleteRef = useRef(onComplete);
+  const onSoulTouchRef = useRef(onSoulTouch);
+
+  useEffect(() => {
+    onCompleteRef.current = onComplete;
+  }, [onComplete]);
+
+  useEffect(() => {
+    onSoulTouchRef.current = onSoulTouch;
+  }, [onSoulTouch]);
 
   const officialLogo = (settings?.appLogo && !settings.appLogo.includes('placeholder'))
     ? settings.appLogo
@@ -90,7 +100,8 @@ export const HomeAssemblyAnimation: React.FC<HomeAssemblyAnimationProps> = ({
   }, []);
 
   useEffect(() => {
-    startTimeRef.current = Date.now();
+    const start = startTimeRef.current || Date.now();
+    startTimeRef.current = start;
 
     const updateFrame = () => {
       const elapsed = Date.now() - startTimeRef.current;
@@ -98,7 +109,7 @@ export const HomeAssemblyAnimation: React.FC<HomeAssemblyAnimationProps> = ({
 
       if (elapsed >= TOTAL_DURATION) {
         hapticStrong();
-        onComplete();
+        onCompleteRef.current?.();
       } else {
         animReqRef.current = requestAnimationFrame(updateFrame);
       }
@@ -109,7 +120,7 @@ export const HomeAssemblyAnimation: React.FC<HomeAssemblyAnimationProps> = ({
     return () => {
       if (animReqRef.current) cancelAnimationFrame(animReqRef.current);
     };
-  }, [onComplete]);
+  }, []); // Run animation loop once on mount; do NOT restart on prop updates!
 
   // Haptics & Events
   const hapticPlayedRef = useRef<Record<string, boolean>>({});
@@ -152,10 +163,10 @@ export const HomeAssemblyAnimation: React.FC<HomeAssemblyAnimationProps> = ({
     // Dot hits main NSTA at 18.0s -> NSTA animates!
     if (sec >= 18.0 && !hapticPlayedRef.current['nsta_hit']) {
       hapticPlayedRef.current['nsta_hit'] = true;
-      if (onSoulTouch) onSoulTouch();
+      if (onSoulTouchRef.current) onSoulTouchRef.current();
       hapticStrong();
     }
-  }, [progress, onSoulTouch]);
+  }, [progress]);
 
   // Smooth Viewport Auto-Scroll
   // 8.0s - 12.0s: Smooth scroll down to highlight Revision Hub & Routine at full size
@@ -181,8 +192,8 @@ export const HomeAssemblyAnimation: React.FC<HomeAssemblyAnimationProps> = ({
     setIsSkipped(true);
     hapticMedium();
     if (animReqRef.current) cancelAnimationFrame(animReqRef.current);
-    if (onSoulTouch) onSoulTouch();
-    onComplete();
+    if (onSoulTouchRef.current) onSoulTouchRef.current();
+    onCompleteRef.current?.();
   };
 
   if (isSkipped) return null;
@@ -892,7 +903,41 @@ export const HomeAssemblyAnimation: React.FC<HomeAssemblyAnimationProps> = ({
 
             return (
               <>
-                {/* 1. THE RADIANT SOUL DOT (No outer ring as requested) */}
+                {/* 1. SHINING RING AROUND THE SOUL DOT ("ishke charo or ek ring hoga chamakta hua") */}
+                {!hasHitNsta && (
+                  <div
+                    className="absolute pointer-events-none flex items-center justify-center transition-none"
+                    style={{
+                      left: `${curX}px`,
+                      top: `${curY}px`,
+                      transform: 'translate(-50%, -50%)',
+                      opacity: ringOpacity,
+                    }}
+                  >
+                    {/* Outer shining glow ring */}
+                    <div
+                      className="absolute rounded-full border border-amber-300/80"
+                      style={{
+                        width: `${72 * dotScale}px`,
+                        height: `${72 * dotScale}px`,
+                        boxShadow: '0 0 24px rgba(251, 191, 36, 0.75), inset 0 0 16px rgba(251, 191, 36, 0.45)',
+                        animation: 'spin 6s linear infinite',
+                      }}
+                    />
+                    {/* Inner shimmering pulsating ring */}
+                    <div
+                      className="absolute rounded-full border-2 border-dashed border-yellow-200/90"
+                      style={{
+                        width: `${54 * dotScale}px`,
+                        height: `${54 * dotScale}px`,
+                        boxShadow: '0 0 16px rgba(253, 224, 71, 0.8)',
+                        animation: 'spin 3s linear infinite reverse',
+                      }}
+                    />
+                  </div>
+                )}
+
+                {/* 2. THE RADIANT SOUL DOT */}
                 {!hasHitNsta && (
                   <div 
                     className="absolute pointer-events-none flex items-center justify-center transition-none"
@@ -922,11 +967,11 @@ export const HomeAssemblyAnimation: React.FC<HomeAssemblyAnimationProps> = ({
                         background: 'radial-gradient(circle, #ffffff 25%, #fef08a 55%, #f59e0b 100%)',
                       }}
                     >
-                      <div className="w-2.5 h-2.5 rounded-full bg-white shadow-sm animate-ping" />
+                      <div className="w-2.5 h-2.5 rounded-full bg-white shadow-sm" />
                     </div>
 
                     {/* Starlight sparkle */}
-                    <div className="absolute text-amber-200 text-sm animate-spin" style={{ animationDuration: '1s' }}>
+                    <div className="absolute text-amber-200 text-sm">
                       ✨
                     </div>
                   </div>

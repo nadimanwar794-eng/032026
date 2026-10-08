@@ -1,15 +1,10 @@
+import { uploadImageToTelegram, resolveTelegramUrl } from './telegramStorageService';
+
 /**
- * Cloud Image Upload Service with Auto-Fallback & Optimization
- * Primary Provider: FreeImage.host (High speed direct CDN, no throttling)
- * Secondary Provider: ImgBB
- * Offline/Fallback: Compressed Data URL (guarantees upload NEVER fails)
+ * Universal Image Upload Service powered by Telegram Cloud Storage (@nsta_vault_bot)
+ * Unlimited Free Cloud CDN hosting for profile photos, status updates, community posts,
+ * homework attachments, and admin formulas.
  */
-
-const FREEIMAGE_API_KEY = '6d207e02198a847aa98d0a2a901485a5';
-const FREEIMAGE_UPLOAD_URL = 'https://freeimage.host/api/1/upload';
-
-const IMGBB_API_KEY = '09685f54349874efecdd6b764314d492';
-const IMGBB_UPLOAD_URL = `https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`;
 
 export interface ImgBBUploadResponse {
   success: boolean;
@@ -97,11 +92,7 @@ export interface UploadImageOptions {
 }
 
 /**
- * Uploads an image directly to high-availability CDN with multiple fallback layers:
- * 1. FreeImage.host CDN (High speed direct iili.io links)
- * 2. ImgBB CDN
- * 3. Compact Compressed Data URL (100% resilient fallback)
- *
+ * Uploads an image directly to Telegram Cloud Storage (@nsta_vault_bot).
  * Supports HD mode: high resolution up to 3200px & 0.95 quality for crystal-clear notes and formulas.
  */
 export async function uploadImageToImgBB(
@@ -116,101 +107,43 @@ export async function uploadImageToImgBB(
 
   let base64Data = '';
   try {
-    // Compress first for fast network transit (higher resolution & quality when HD enabled)
+    // Compress first for fast network transit
     base64Data = await compressImage(file, targetMaxWidth, targetMaxHeight, targetQuality);
   } catch (err) {
-    console.warn('[Cloud Image Service] Pre-compression failed, continuing raw:', err);
+    console.warn('[Image Upload Service] Pre-compression skipped:', err);
   }
 
-  // ── Strategy 1: FreeImage.host Direct CDN ──
+  // ── Strategy 1: Telegram Cloud Storage (@nsta_vault_bot) via Secure Proxy ──
   try {
-    const formData = new FormData();
-    formData.append('key', FREEIMAGE_API_KEY);
-    formData.append('action', 'upload');
-    formData.append('format', 'json');
-
-    if (base64Data) {
-      const rawBase64 = base64Data.replace(/^data:image\/[a-z]+;base64,/, '');
-      formData.append('source', rawBase64);
-    } else if (typeof file !== 'string') {
-      formData.append('source', file as any);
+    const inputPayload = (file instanceof File || file instanceof Blob) ? file : (base64Data || file);
+    const directTelegramUrl = await uploadImageToTelegram(
+      inputPayload,
+      name || `nsta_img_${Date.now()}.jpg`,
+      'NSTA App Media'
+    );
+    if (directTelegramUrl && typeof directTelegramUrl === 'string' && directTelegramUrl.trim()) {
+      return resolveTelegramUrl(directTelegramUrl.trim());
     }
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4500);
-    const res = await fetch(FREEIMAGE_UPLOAD_URL, {
-      method: 'POST',
-      body: formData,
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-
-    if (res.ok) {
-      const json = await res.json();
-      const directUrl =
-        json?.image?.url ||
-        json?.image?.display_url ||
-        json?.data?.url ||
-        json?.image?.image?.url;
-      if (directUrl && typeof directUrl === 'string') {
-        return directUrl;
-      }
-    }
-  } catch (err) {
-    console.warn('[Cloud Image Service] FreeImage host attempt failed, trying fallback:', err);
+  } catch (tgErr: any) {
+    console.warn('[Image Upload Service] Telegram storage attempt error:', tgErr?.message || tgErr);
   }
 
-  // ── Strategy 2: ImgBB Cloud Fallback ──
+  // ── Strategy 2: In-App Compressed Data URL Fallback (For offline & network resilience) ──
   try {
-    const formData = new FormData();
-    if (base64Data) {
-      const rawBase64 = base64Data.replace(/^data:image\/[a-z]+;base64,/, '');
-      formData.append('image', rawBase64);
-    } else if (typeof file === 'string') {
-      const cleanBase64 = file.replace(/^data:image\/[a-z]+;base64,/, '');
-      formData.append('image', cleanBase64);
-    } else {
-      formData.append('image', file);
-    }
-    if (name) formData.append('name', name);
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4500);
-    const res = await fetch(IMGBB_UPLOAD_URL, {
-      method: 'POST',
-      body: formData,
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-
-    if (res.ok) {
-      const data = await res.json();
-      const directUrl = data?.data?.display_url || data?.data?.image?.url || data?.data?.url;
-      if (directUrl) {
-        return directUrl;
-      }
-    }
-  } catch (err) {
-    console.warn('[Cloud Image Service] ImgBB fallback attempt failed:', err);
-  }
-
-  // ── Strategy 3: Guaranteed In-App Compressed Data URL ──
-  // If external CDN servers are blocked by network/ISP or API rate-limits,
-  // compress image cleanly so it instantly delivers without throwing an error
-  try {
-    const fallbackWidth = isHd ? 1920 : 960;
-    const fallbackHeight = isHd ? 1920 : 960;
-    const fallbackQuality = isHd ? 0.88 : 0.70;
+    const fallbackWidth = isHd ? 1280 : 800;
+    const fallbackHeight = isHd ? 1280 : 800;
+    const fallbackQuality = isHd ? 0.82 : 0.72;
     const ultraCompact = await compressImage(file, fallbackWidth, fallbackHeight, fallbackQuality);
     if (ultraCompact) {
       return ultraCompact;
     }
-  } catch {}
+  } catch (compErr) {
+    console.warn('[Image Upload Service] Fallback compression error:', compErr);
+  }
 
   if (base64Data) {
     return base64Data;
   }
 
-  throw new Error('Photo upload nahi ho payi. Kripya dobara koshish karein.');
+  throw new Error('Photo process nahi ho payi. Kripya dobara koshish karein.');
 }
-

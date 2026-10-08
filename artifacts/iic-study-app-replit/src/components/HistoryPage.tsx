@@ -289,6 +289,11 @@ export const HistoryPage: React.FC<Props> = ({ user, onUpdateUser, settings, ini
     } else {
       stopStarRead();
     }
+    const handleUpdate = () => {
+      if (activeTab === 'STARRED') loadStarredNotes();
+    };
+    window.addEventListener('nst_notes_updated', handleUpdate);
+    return () => window.removeEventListener('nst_notes_updated', handleUpdate);
   }, [activeTab, stopStarRead]);
 
   const [alertConfig, setAlertConfig] = useState<{isOpen: boolean, message: string}>({isOpen: false, message: ''});

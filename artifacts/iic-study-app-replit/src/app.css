@@ -3358,6 +3358,55 @@ model-viewer {
 body[data-iic-notes-focus] [data-iic-bottom-nav] { display: none !important; }
 body[data-iic-notes-focus] [data-iic-float-logo] { display: none !important; }
 
+/* ── Popup / Modal Active — automatically hides bottom nav and floating buttons ── */
+body[data-modal-open="true"] [data-iic-bottom-nav],
+body[data-modal-open="true"] [data-iic-float-logo],
+body[data-modal-open="true"] .iic-bottom-nav,
+body[data-modal-open="true"] #nsta-floating-trigger,
+body.iic-modal-open [data-iic-bottom-nav],
+body.iic-modal-open [data-iic-float-logo],
+body.iic-modal-open .iic-bottom-nav,
+body.iic-modal-open #nsta-floating-trigger,
+body.nsta-modal-open [data-iic-bottom-nav],
+body.nsta-modal-open [data-iic-float-logo],
+body.nsta-modal-open .iic-bottom-nav,
+body.nsta-modal-open #nsta-floating-trigger {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+/* ── Video Player Fullscreen: Hides Top Bar AND Bottom Navigation Completely ── */
+body.nsta-video-fullscreen-active,
+html.nsta-video-fullscreen-active,
+:fullscreen,
+::backdrop,
+*:fullscreen {
+  background-color: #000000 !important;
+}
+
+body.nsta-video-fullscreen-active #top-banner-container,
+body.nsta-video-fullscreen-active [data-iic-topbar],
+body.nsta-video-fullscreen-active .iic-top-bar,
+body.nsta-video-fullscreen-active [data-iic-bottom-nav],
+body.nsta-video-fullscreen-active .iic-bottom-nav,
+body.nsta-video-fullscreen-active [data-iic-float-logo],
+body.nsta-video-fullscreen-active #nsta-floating-trigger,
+body.nsta-video-fullscreen-active [data-nsta-fab],
+html.nsta-video-fullscreen-active #top-banner-container,
+html.nsta-video-fullscreen-active [data-iic-bottom-nav],
+html.nsta-video-fullscreen-active .iic-bottom-nav,
+html.nsta-video-fullscreen-active #nsta-floating-trigger {
+  display: none !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  overflow: hidden !important;
+}
+
 /* ── Tier-based Notes Content (Class 6-12 only) ── */
 /* data-tier="basic"  → Basic + Ultra users dekh sakte hain */
 /* data-tier="ultra"  → Sirf Ultra users dekh sakte hain     */
@@ -3688,5 +3737,250 @@ body.force-desktop-mode {
 .mcq-official-scroll::-webkit-scrollbar-thumb:hover {
   background: rgba(59, 130, 246, 0.8);
 }
+
+/* ── Pedro 3D Mascot Animations ── */
+@keyframes pedro-tail-wag {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-18deg) scale(1.06);
+  }
+  50% {
+    transform: rotate(6deg);
+  }
+  75% {
+    transform: rotate(-22deg) scale(1.09);
+  }
+}
+
+.animate-pedro-tail {
+  transform-origin: 12px 30px;
+  animation: pedro-tail-wag 1.4s ease-in-out infinite;
+}
+
+/* Arms up and down continuous motion ("haath upar niche karta rahega") */
+@keyframes pedro-arm-bob-left {
+  0%, 100% {
+    transform: rotate(0deg) translateY(0px);
+  }
+  50% {
+    transform: rotate(-14deg) translateY(-4px);
+  }
+}
+
+@keyframes pedro-arm-bob-right {
+  0%, 100% {
+    transform: rotate(0deg) translateY(0px);
+  }
+  50% {
+    transform: rotate(16deg) translateY(-4.5px);
+  }
+}
+
+.animate-pedro-arm-left {
+  transform-origin: 24px 57px;
+  animation: pedro-arm-bob-left 1.3s ease-in-out infinite;
+}
+
+.animate-pedro-arm-right {
+  transform-origin: 56px 57px;
+  animation: pedro-arm-bob-right 1.3s ease-in-out infinite 0.25s;
+}
+
+@keyframes pedro-wave-hand {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(22deg);
+  }
+  50% {
+    transform: rotate(-8deg);
+  }
+  75% {
+    transform: rotate(24deg);
+  }
+}
+
+.animate-pedro-wave {
+  transform-origin: 70px 49px;
+  animation: pedro-wave-hand 0.8s ease-in-out infinite;
+}
+
+@keyframes pedro-hover-float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+.animate-pedro-hover {
+  animation: pedro-hover-float 2.6s ease-in-out infinite;
+}
+
+/* Smooth continuous 360 degree spin */
+@keyframes pedro-360-spin {
+  0% {
+    transform: perspective(700px) rotateY(0deg);
+  }
+  100% {
+    transform: perspective(700px) rotateY(360deg);
+  }
+}
+
+.animate-pedro-360 {
+  animation: pedro-360-spin 9s linear infinite;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   LEVEL BADGES SYSTEM & LEVEL 15 PINNACLE ANIMATIONS
+   Progression: L1-L3 (clean), L4-L6 (shimmer), L7-L10 (glow + pulses),
+   L11-L14 (cosmic aura), L15 (apex legend), L15 Diamond Gamma V (supreme pinnacle)
+   ═══════════════════════════════════════════════════════════════════════ */
+
+@keyframes level-badge-shimmer {
+  0% { transform: translateX(-150%) skewX(-20deg); }
+  50%, 100% { transform: translateX(250%) skewX(-20deg); }
+}
+
+@keyframes level-badge-pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 6px var(--lvl-glow, rgba(56,189,248,0.4)), 0 0 12px var(--lvl-glow, rgba(56,189,248,0.2));
+    border-color: var(--lvl-border, rgba(56,189,248,0.6));
+  }
+  50% {
+    box-shadow: 0 0 14px var(--lvl-glow, rgba(56,189,248,0.7)), 0 0 24px var(--lvl-glow, rgba(56,189,248,0.35));
+    border-color: var(--lvl-color, #38bdf8);
+  }
+}
+
+@keyframes level-badge-border-rotate {
+  0% { filter: hue-rotate(0deg); }
+  100% { filter: hue-rotate(360deg); }
+}
+
+@keyframes pinnacle-diamond-shine {
+  0% {
+    background-position: 0% 50%;
+    box-shadow: 0 0 10px rgba(192, 132, 252, 0.7), 0 0 20px rgba(56, 189, 248, 0.5), inset 0 0 8px rgba(255, 255, 255, 0.4);
+  }
+  50% {
+    background-position: 100% 50%;
+    box-shadow: 0 0 18px rgba(245, 158, 11, 0.8), 0 0 32px rgba(192, 132, 252, 0.7), inset 0 0 14px rgba(255, 255, 255, 0.7);
+  }
+  100% {
+    background-position: 0% 50%;
+    box-shadow: 0 0 10px rgba(192, 132, 252, 0.7), 0 0 20px rgba(56, 189, 248, 0.5), inset 0 0 8px rgba(255, 255, 255, 0.4);
+  }
+}
+
+@keyframes pinnacle-sparkle-float {
+  0%, 100% {
+    transform: translateY(0px) scale(1) rotate(0deg);
+    opacity: 0.9;
+  }
+  50% {
+    transform: translateY(-2px) scale(1.15) rotate(12deg);
+    opacity: 1;
+  }
+}
+
+@keyframes rainbow-border-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Base level badge element */
+.user-level-badge-base {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  user-select: none;
+  overflow: hidden;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Level 4-6 Shimmer effect */
+.level-badge-shimmer-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.4) 50%, transparent 100%);
+  animation: level-badge-shimmer 3s ease-in-out infinite;
+}
+
+/* Level 7-10 Radiant Pulse */
+.level-badge-pulse-active {
+  animation: level-badge-pulse-glow 2.4s ease-in-out infinite;
+}
+
+/* Level 11-14 Cosmic Aura */
+.level-badge-cosmic-active {
+  animation: level-badge-pulse-glow 1.8s ease-in-out infinite;
+}
+
+/* Level 15 Supreme Apex */
+.level-badge-l15-apex {
+  animation: level-badge-pulse-glow 1.4s ease-in-out infinite;
+  background: linear-gradient(135deg, rgba(165,243,252,0.25) 0%, rgba(192,132,252,0.3) 50%, rgba(251,191,36,0.25) 100%);
+}
+
+/* ULTIMATE PINNACLE: Level 15 Diamond Gamma V */
+.level-badge-pinnacle-diamond-v {
+  position: relative;
+  background: linear-gradient(135deg, #090d16 0%, #1e1b4b 35%, #172554 70%, #090d16 100%);
+  background-size: 250% 250%;
+  border: 1.5px solid rgba(192, 132, 252, 0.85) !important;
+  animation: pinnacle-diamond-shine 3.5s ease infinite !important;
+}
+
+.level-badge-pinnacle-diamond-v::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: linear-gradient(90deg, #38bdf8, #c084fc, #fbbf24, #f43f5e, #38bdf8);
+  background-size: 300% 300%;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: level-badge-border-rotate 4s linear infinite;
+  pointer-events: none;
+}
+
+.pinnacle-sparkle-icon {
+  display: inline-block;
+  animation: pinnacle-sparkle-float 2s ease-in-out infinite;
+}
+
+/* Name badge (Tier badge): 3 types Free, Basic, Ultra */
+.tier-badge-free {
+  background: rgba(148, 163, 184, 0.15);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+.tier-badge-basic {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.25) 0%, rgba(2, 132, 199, 0.15) 100%);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  box-shadow: 0 0 6px rgba(56, 189, 248, 0.25);
+}
+
+.tier-badge-ultra {
+  background: linear-gradient(135deg, rgba(217, 119, 6, 0.3) 0%, rgba(147, 51, 234, 0.3) 50%, rgba(245, 158, 11, 0.25) 100%);
+  color: #fde047;
+  border: 1px solid rgba(251, 191, 36, 0.55);
+  box-shadow: 0 0 10px rgba(251, 191, 36, 0.35), inset 0 0 6px rgba(251, 191, 36, 0.2);
+}
+
+
 
 

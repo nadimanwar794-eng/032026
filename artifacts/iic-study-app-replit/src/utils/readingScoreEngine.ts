@@ -3,7 +3,7 @@
  *
  * Reading Mode:
  *   • Every 30 sec of active reading  → +5 pts
- *   • Max reward window by level (L1-L8: 5 min … L15: 10 min)
+ *   • Max reward window by level (L1-L8: 10 min, L9: 11 min, +1 min per level up to L15: 17 min)
  *   • Progress validation every 2 min: need ≥10% net forward progress
  *   • TTS topic highlight → +1 pts; Manual topic 10s → +2 pts
  *
@@ -34,16 +34,11 @@
 
 import { tryEarnScore } from './scoreSystem';
 
-/** Max reward window in seconds by level */
+/** Max reward window in seconds by level: L1-L8 = 600s (10 min), L9+ = +60s (1 min) per level */
 export const getReadingWindowSeconds = (level: number): number => {
-  if (level <= 8) return 300;
-  if (level === 9)  return 330;
-  if (level === 10) return 360;
-  if (level === 11) return 390;
-  if (level === 12) return 420;
-  if (level === 13) return 450;
-  if (level === 14) return 480;
-  return 600;
+  const base = 600;
+  if (level <= 8) return base;
+  return base + (level - 8) * 60;
 };
 
 export type WarningLevel = 0 | 1 | 2 | 3;

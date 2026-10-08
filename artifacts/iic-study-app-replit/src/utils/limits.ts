@@ -12,8 +12,8 @@ export const UNLOCK_COSTS = {
   MCQ_PRACTICE: { credits: 20, diamonds: 5 },
   PROJECTOR_MODE: { credits: 20, diamonds: 5 },
 
-  // Revision Hub MCQ Session: 100 Credits or 20 Diamonds
-  REVISION_HUB_MCQ: { credits: 100, diamonds: 20 },
+  // Revision Hub MCQ Session: 100 Credits or 25 Diamonds (1 💎 = 4 🪙)
+  REVISION_HUB_MCQ: { credits: 100, diamonds: 25 },
 
   // Full Analysis on Marksheet: 20 Credits or 5 Diamonds
   FULL_ANALYSIS: { credits: 20, diamonds: 5 },
@@ -96,12 +96,12 @@ export const ROUTINE_SLOTS = {
  */
 export function getDiamondUnlockCost(creditCost: number, reason?: string): number {
   if (reason && /revision hub/i.test(reason)) {
-    return UNLOCK_COSTS.REVISION_HUB_MCQ.diamonds; // 20 diamonds
+    return UNLOCK_COSTS.REVISION_HUB_MCQ.diamonds; // 25 diamonds (1 diamond = 4 credits)
   }
   if (reason && /analysis/i.test(reason)) {
     return UNLOCK_COSTS.FULL_ANALYSIS.diamonds; // 5 diamonds
   }
-  if (creditCost >= 100) return 20;
+  if (creditCost >= 100) return 25;
   if (creditCost >= 20) return 5;
   return Math.max(1, Math.ceil(creditCost / 4));
 }

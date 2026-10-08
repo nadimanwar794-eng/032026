@@ -7,6 +7,7 @@ import type { SchoolLesson, LessonMCQ } from "../../school-types";
 import { Plus, Trash2, Save, ChevronLeft, BookOpen, Edit3, FileText, Layers, CheckSquare, Eye, EyeOff, HelpCircle, Check, X, ChevronDown, ChevronUp, Upload, AlignLeft, ListChecks, Settings2, Star } from "lucide-react";
 import { parseMCQText } from "../../utils/mcqParser";
 import { ChunkedNotesReader } from "../ChunkedNotesReader";
+import { DirectUploadButton } from "../DirectUploadButton";
 
 // ── MCQ paste normalizer (handles common Hindi/English formats) ────────────
 function normalizeMcqPaste(raw: string): string {
@@ -614,11 +615,16 @@ export const ContentManager: React.FC<Props> = ({
                   {editLesson.features.pdfEnabled ? "✓ Enabled" : "Disabled"}
                 </button>
               </div>
-              <p className="text-xs text-slate-400">Google Drive / Any public PDF URL paste karo</p>
-              <input value={editLesson.pdfUrl}
-                onChange={e => setEditLesson(prev => prev ? { ...prev, pdfUrl: e.target.value } : prev)}
-                placeholder="https://drive.google.com/file/d/..."
-                className="w-full px-3 py-2.5 border dark:border-slate-600 rounded-xl bg-transparent text-slate-800 dark:text-white text-sm focus:ring-2 focus:ring-orange-400 focus:outline-none" />
+              <div className="flex items-center justify-between gap-2 flex-wrap p-2.5 bg-orange-50/50 dark:bg-orange-950/20 rounded-xl border border-orange-200 dark:border-orange-800">
+                <p className="text-xs font-bold text-slate-700 dark:text-slate-200">Phone se PDF Upload karein:</p>
+                <DirectUploadButton
+                  kind="pdf"
+                  compact
+                  currentUrl={editLesson.pdfUrl}
+                  onUploaded={(url) => setEditLesson(prev => prev ? { ...prev, pdfUrl: url, features: { ...prev.features, pdfEnabled: true } } : prev)}
+                  onClear={() => setEditLesson(prev => prev ? { ...prev, pdfUrl: '', features: { ...prev.features, pdfEnabled: false } } : prev)}
+                />
+              </div>
               {editLesson.pdfUrl && (
                 <a href={editLesson.pdfUrl} target="_blank" rel="noopener noreferrer"
                   className="inline-flex items-center gap-1.5 text-xs font-bold text-orange-600 dark:text-orange-400 underline">

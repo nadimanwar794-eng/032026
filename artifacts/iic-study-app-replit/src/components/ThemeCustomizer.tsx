@@ -2004,7 +2004,8 @@ export const ThemeCustomizer: React.FC<Props> = ({ user, onUpdateUser, onBack, s
 
     const isBasicOrUltra = user.role === 'ADMIN' || user.role === 'SUB_ADMIN' || user.isPremium || user.subscriptionLevel === 'BASIC' || user.subscriptionLevel === 'ULTRA';
     const userLevel = (user as any).level || (user as any).totalScore ? Math.max(1, Math.floor(Math.sqrt((user as any).totalScore || 0) / 10)) : 1;
-    const isThemeStudioUnlocked = isBasicOrUltra || userLevel >= 2;
+    // Theme Studio unlocked for all users so anyone can customize app themes freely
+    const isThemeStudioUnlocked = true;
 
     if (!isThemeStudioUnlocked) {
         return (

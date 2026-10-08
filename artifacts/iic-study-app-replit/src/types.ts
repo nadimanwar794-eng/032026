@@ -113,7 +113,9 @@ export interface RoutineTask {
 export interface User {
   id: string; // Login ID (Firebase UID)
   displayId?: string; // Visible ID (IIC-XXX)
-  password: string;
+  password?: string;
+  displayName?: string;
+  photoUrl?: string;
   name: string;
   mobile: string;
   email: string;
@@ -142,7 +144,10 @@ export interface User {
   customAnimation?: UserCustomAnimation;
   activeThemeAppliedUntil?: string;
   activeAnimationAppliedUntil?: string;
-  level?: number; // Current Level (Default 1)
+  level?: number; // User Study Level (Default 1)
+  pedroLevel?: number; // Pedro Mascot Level (1 to 8) - distinct from user study level, updates Pedro's 3D look & saved in profile
+  pedroXp?: number; // Pedro interaction/bonding XP
+  pedroColorScheme?: 'classic' | 'cyber'; // Pedro 3D mascot color styling
   xp?: number; // Current XP
   lastLoginDate: string; // ISO Date string YYYY-MM-DD
   lastActiveTime?: string; // ISO String for "Online" status
@@ -199,6 +204,9 @@ export interface User {
   avatarChoice?: 'gmail' | 'app';
   linkedGoogleUid?: string;
   linkedGoogleEmail?: string;
+  isGuest?: boolean;
+  isAnonymous?: boolean;
+  fcmToken?: string;
   profileCompleted?: boolean;
   
   // Chat & Premium Features
@@ -226,6 +234,10 @@ export interface User {
   giftedCredits?: number; // Admin-gifted credits (separate from earned/bonus)
   giftedCreditsExpiry?: string; // ISO date when gifted credits expire
   lastLevelNotified?: number; // Last level the user was shown a level-up celebration for
+  pedroLevel?: number; // Pedro mascot's own independent companion level (1-8), distinct from student academic level
+  pedroXp?: number; // Pedro's companion experience points
+  pedroColorScheme?: 'classic' | 'cyber'; // Saved Pedro 3D color scheme
+  claimedLevelRewards?: number[]; // Array of level numbers (2..15) whose coin rewards have been claimed
   dailyMcqDate?: string; // YYYY-MM-DD for daily MCQ tracking
   dailyMcqCount?: number; // MCQs attempted today
   dailyMcqCorrect?: number; // Correct MCQs today
@@ -244,6 +256,8 @@ export interface User {
   // SUBSCRIPTION MANAGEMENT
   subscriptionTier?: 'FREE' | 'WEEKLY' | 'MONTHLY' | '3_MONTHLY' | 'YEARLY' | 'LIFETIME' | 'CUSTOM'; // Added 3_MONTHLY and CUSTOM
   subscriptionLevel?: 'BASIC' | 'ULTRA'; // NEW: Granular level for Real subscribers
+  vipPlusTier?: 'PRO_PLUS' | 'MAX_PLUS'; // VIP+ Elite Tier (PRO+ or MAX+ with Daily Diamonds)
+  dailyVipDiamonds?: number; // Daily diamonds included with VIP+ subscription
   subscriptionEndDate?: string; // ISO Date when subscription expires
   subscriptionPrice?: number; // Price admin set for this user's subscription
   subscriptionSource?: 'PURCHASE' | 'CREDITS' | 'ADMIN' | 'REWARD'; // Method of acquisition
@@ -458,6 +472,15 @@ export interface SubscriptionPlan {
   ultraPrice: number;
   ultraOriginalPrice: number;
   creditPriceUltra?: number; // Custom credits needed for Ultra
+
+  // VIP+ Tiers (Pro+ & Max+)
+  proPlusPrice?: number;
+  proPlusOriginalPrice?: number;
+  proPlusDailyDiamonds?: number;
+
+  maxPlusPrice?: number;
+  maxPlusOriginalPrice?: number;
+  maxPlusDailyDiamonds?: number;
   
   features: string[]; // Generic features list or split logic
   popular?: boolean;
@@ -579,7 +602,10 @@ export interface LoginBonusConfig {
 export interface BroadcastRedeemCode {
     id: string;
     code: string;
-    type: 'CREDITS' | 'CREDIT_SUBSCRIPTION' | 'DIAMONDS' | 'DIAMOND_SUBSCRIPTION' | 'SUBSCRIPTION' | 'DISCOUNT' | 'CONTENT_UNLOCK' | 'TOPBAR_EFFECT_COLOR' | 'TOPBAR_EFFECT_ID' | 'SCORE' | 'SCORE_BOOST' | 'SCORE_LIMIT_BOOST';
+    type: 'CREDITS' | 'CREDIT_SUBSCRIPTION' | 'DIAMONDS' | 'DIAMOND_SUBSCRIPTION' | 'SUBSCRIPTION' | 'VIP_PLUS' | 'DISCOUNT' | 'CONTENT_UNLOCK' | 'TOPBAR_EFFECT_COLOR' | 'TOPBAR_EFFECT_ID' | 'SCORE' | 'SCORE_BOOST' | 'SCORE_LIMIT_BOOST';
+    vipPlusTier?: 'PRO_PLUS' | 'MAX_PLUS'; // For VIP_PLUS type
+    vipPlusDurationDays?: number; // For VIP_PLUS type
+    vipPlusDailyDiamonds?: number; // For VIP_PLUS type
     scoreBoostPercent?: number; // For SCORE_BOOST type — how much % to boost score by
     scoreBoostDurationHours?: number; // How long the boost lasts
     scoreLimitBoostPercent?: number; // For SCORE_LIMIT_BOOST type — temporary daily limit increase %
@@ -735,6 +761,18 @@ export interface LucentNoteEntry {
    *  और आसान समझ (Explanation) sab unlock hote hain, daily reading limit nahi lagti.
    *  Har subject mein ek "sample" lesson ke liye use karo. */
   isSampleLesson?: boolean;
+  isMathLesson?: boolean;
+  mathBookPages?: MathImagePage[];
+  mathPremiumNotesPages?: MathImagePage[];
+  mathSolutionPages?: MathImagePage[];
+  chapterId?: string;
+  updatedAt?: string;
+  /** Lesson-wide Video URL (YouTube, Drive, or Telegram MP4) */
+  videoUrl?: string;
+  /** Lesson-wide PDF URL (Drive, Telegram PDF, or direct URL) */
+  pdfUrl?: string;
+  /** Lesson-wide Audio URL (Telegram Audio, MP3, or direct URL) */
+  audioUrl?: string;
 }
 
 export interface AppNotification {
@@ -763,11 +801,60 @@ export interface PlanCompareGroup {
   items: PlanCompareItem[];
 }
 
+export interface PedroItemDetail {
+  id: string;
+  title: string;
+  icon: string;
+  summary: string;
+  speechText: string;
+  bullets: string[];
+  perks?: string[];
+  actionLabel?: string;
+  actionKey?: string;
+  targetSelector?: string;
+}
+
+export interface PedroCategory {
+  id: string;
+  title: string;
+  icon: string;
+  description: string;
+  items: PedroItemDetail[];
+  targetSelector?: string;
+  actionKey?: string;
+  speechText?: string;
+}
+
+export interface PedroPageConfig {
+  pageId: string;
+  pageTitle: string;
+  pageIcon: string;
+  introSpeech: string;
+  categories: PedroCategory[];
+  enabled?: boolean;
+  customVoicePitch?: number;
+  customVoiceRate?: number;
+  badgeLabel?: string;
+}
+
+export interface PedroSystemConfig {
+  enabled?: boolean; // Master Pedro Active flag
+  guidePowerEnabled?: boolean; // When false, Guide walkthrough & tour drawer are paused, but Pedro mascot stays!
+  robotName?: string;
+  defaultPitch?: number;
+  defaultRate?: number;
+  pages?: Record<string, PedroPageConfig>;
+}
+
+export type AppSettings = SystemSettings;
+
 export interface SystemSettings {
+  pedroConfig?: PedroSystemConfig; // NEW: Admin-controlled Pedro AI Robot Guide & Voice script
   cardBorderAnimation?: boolean; // When true or undefined, rotating border animation on cards is active
   notifications?: AppNotification[];
   broadcastRedeemCodes?: BroadcastRedeemCode[];
   loadingScreenVideoUrl?: string; // NEW: Video to show before loading screen
+  loadingScreenVideoEnabled?: boolean; // Toggle for loading screen video
   /** 'default' = current white card login, 'video' = fullscreen looping video bg */
   loginPageStyle?: 'default' | 'video';
   loginVideoUrl?: string;
@@ -869,6 +956,8 @@ export interface SystemSettings {
   officialAppUrl?: string; // NEW: Play Store Link
   referralMilestones?: ReferralMilestone[]; // Admin-configurable Refer & Earn milestones & prizes
   planComparisonData?: PlanCompareGroup[]; // Admin-configurable Plan Comparison matrix (Free vs Basic vs Ultra)
+  vipCreditOffData?: PlanCompareGroup[]; // VIP Feature Comparison Matrix (CRADIT OFF)
+  vipPlusCreditOnData?: PlanCompareGroup[]; // VIP+ Feature Comparison Matrix (CRADIT ON)
   enable3DModels?: boolean; // NEW: 3D Models in Notes
   showMcqMakerCard?: boolean; // NEW: Show MCQ Maker card on student home page
   showHomeResumeFilter?: boolean; // NEW: Show subject filter chips above Home "Continue Reading" card
@@ -901,11 +990,26 @@ export interface SystemSettings {
   appBackground?: string;
   appBackgroundImage?: string;
   profileBackground?: string;
+  // ── 5 Pages Background Wallpapers (Admin Live Telegram / Image Wallpapers) ──
+  homeBackgroundImage?: string; // Wallpaper for Home page
+  homeBackgroundOpacity?: number; // 0.05 to 1.0 (default 0.22)
+  mcqHubBackgroundImage?: string; // Wallpaper for MCQhub page
+  mcqHubBackgroundOpacity?: number; // 0.05 to 1.0 (default 0.25)
+  communityBackgroundImage?: string; // Wallpaper for Community page
+  communityBackgroundOpacity?: number; // 0.05 to 1.0 (default 0.22)
+  routineBackgroundImage?: string; // Wallpaper for Routine page
+  routineBackgroundOpacity?: number; // 0.05 to 1.0 (default 0.22)
+  profileBackgroundImage?: string; // Wallpaper for Profile page
+  profileBackgroundOpacity?: number; // 0.05 to 1.0 (default 0.25)
   themeColor?: string;
   // ── Home Page Section Card Colors (Advanced Theme) ──
   homeClass612CardBg?: string;
   homeClass612CardBorder?: string;
   globalCards3D?: boolean;
+  cardDepth3D?: 'subtle' | 'medium' | 'deep';
+  appCardBackground?: string;
+  appCardBorderColor?: string;
+  appCardRadius?: 'xl' | '2xl' | '3xl';
   homeAllCards3D?: boolean;
   homeClass612Card3D?: boolean;
   homeCompetitionCardBg?: string;
@@ -914,6 +1018,31 @@ export interface SystemSettings {
   homeQuickAccessCard3D?: boolean;
   homeQuickAccessCardBg?: string;
   homeQuickAccessCardBorder?: string;
+  // ── New Home Cards: Academic, Practice Set, Daily Challenge, Study Room, Revision Hub, My Mistakes ──
+  homeAcademicCard3D?: boolean;
+  homeAcademicCardBg?: string;
+  homeAcademicCardBorder?: string;
+  homePracticeCard3D?: boolean;
+  homePracticeCardBg?: string;
+  homePracticeCardBorder?: string;
+  homeDailyChallengeCard3D?: boolean;
+  homeDailyChallengeCardBg?: string;
+  homeDailyChallengeCardBorder?: string;
+  homeStudyRoomCard3D?: boolean;
+  homeStudyRoomCardBg?: string;
+  homeStudyRoomCardBorder?: string;
+  homeLiveRoomCard3D?: boolean;
+  homeLiveRoomCardBg?: string;
+  homeLiveRoomCardBorder?: string;
+  homeRevisionCard3D?: boolean;
+  homeRevisionCardBg?: string;
+  homeRevisionCardBorder?: string;
+  homeRevisionHubCard3D?: boolean;
+  homeRevisionHubCardBg?: string;
+  homeRevisionHubCardBorder?: string;
+  homeMistakesCard3D?: boolean;
+  homeMistakesCardBg?: string;
+  homeMistakesCardBorder?: string;
   // ── School & Coaching Home Cards ──────────────────────────────────────────
   homeSchoolCardBg?: string;
   homeSchoolCardBorder?: string;
@@ -1093,6 +1222,13 @@ export interface SystemSettings {
   packages?: CreditPackage[];
   subscriptionPlans?: SubscriptionPlan[];
   creditSubscriptionPlans?: CreditSubscriptionPlan[]; // Daily Credit Subscription Plans managed by Admin
+  hideCreditsStore?: boolean; // NEW: Hide Credits Tab & store
+  hideDiamondsStore?: boolean; // NEW: Hide Diamonds Tab & store
+  showCreditsStore?: boolean; // Admin toggle: Enable Credits Store (Default: false / OFF)
+  showDiamondsStore?: boolean; // Admin toggle: Enable Diamonds Store (Default: false / OFF)
+  hideSubscriptionsStore?: boolean; // NEW: Hide VIP Subscriptions Tab & store
+  hidePassesStore?: boolean; // NEW: Hide Daily Credit/Diamond passes
+  hideExchangeStore?: boolean; // NEW: Hide Exchange Tab
   diamondTemplates?: {
     id: string;
     name: string;
@@ -1528,7 +1664,10 @@ export interface MCQRewardRule {
 export interface GiftCode {
   id: string;
   code: string;
-  type: 'CREDITS' | 'CREDIT_SUBSCRIPTION' | 'DIAMONDS' | 'DIAMOND_SUBSCRIPTION' | 'SUBSCRIPTION' | 'DISCOUNT' | 'CONTENT_UNLOCK' | 'TOPBAR_EFFECT_COLOR' | 'TOPBAR_EFFECT_ID' | 'SCORE' | 'SCORE_BOOST' | 'SCORE_LIMIT_BOOST' | 'THEME_COLOR'; // New: Type of code
+  type: 'CREDITS' | 'CREDIT_SUBSCRIPTION' | 'DIAMONDS' | 'DIAMOND_SUBSCRIPTION' | 'SUBSCRIPTION' | 'VIP_PLUS' | 'DISCOUNT' | 'CONTENT_UNLOCK' | 'TOPBAR_EFFECT_COLOR' | 'TOPBAR_EFFECT_ID' | 'SCORE' | 'SCORE_BOOST' | 'SCORE_LIMIT_BOOST' | 'THEME_COLOR'; // New: Type of code
+  vipPlusTier?: 'PRO_PLUS' | 'MAX_PLUS'; // For VIP_PLUS type
+  vipPlusDurationDays?: number; // For VIP_PLUS type
+  vipPlusDailyDiamonds?: number; // For VIP_PLUS type
   scoreBoostPercent?: number; // For SCORE_BOOST type
   scoreBoostDurationHours?: number; // Hours the boost lasts
   scoreLimitBoostPercent?: number; // For SCORE_LIMIT_BOOST type — temporary daily limit increase %
@@ -1639,6 +1778,14 @@ export interface MCQItem {
   difficulty?: 'EASY' | 'MEDIUM' | 'HARD'; // Difficulty Level
   difficultyLevel?: string;
   pyqInspired?: string;
+  /** Attached picture URL (stored directly in Telegram Cloud Vault) */
+  imageUrl?: string;
+  /** Custom picture size/width (e.g. 30%, 50%, 75%, 100%) set by admin */
+  imageWidth?: number | string;
+  /** Custom alignment of picture set by admin ('left' | 'center' | 'right') */
+  imageAlign?: 'left' | 'center' | 'right';
+  /** Custom placement of picture: above question, below question (default), or after options */
+  imagePosition?: 'above_question' | 'below_question' | 'after_options';
 }
 
 // NEW: Performance Analytics
@@ -1724,6 +1871,14 @@ export interface ActivityLogEntry {
   role: Role;
 }
 
+export interface MathImagePage {
+  id: string;
+  pageNo: number;
+  imageUrl: string;
+  title?: string;
+  caption?: string;
+}
+
 export interface HtmlModule {
   id: string;
   title: string;
@@ -1801,6 +1956,11 @@ export interface LessonContent {
   videoPlaylist?: {title: string, url: string, price?: number, access?: 'FREE' | 'BASIC' | 'ULTRA'}[]; // LEGACY
   audioPlaylist?: {title: string, url: string, price?: number, access?: 'FREE' | 'BASIC' | 'ULTRA'}[]; // LEGACY
 
+  // MATH PICTURE MODES
+  mathBookPages?: MathImagePage[]; // Mode 1: Book Pages
+  mathPremiumNotesPages?: MathImagePage[]; // Mode 2: Premium Notes
+  mathSolutionPages?: MathImagePage[]; // Mode 3: Solution Pages
+
   // CUSTOM SLOTS (6/6/6)
   customPdf?: { id: string, name: string, link: string, price: number }[];
   customVideo?: { id: string, name: string, link: string, price: number }[];
@@ -1866,7 +2026,7 @@ export interface LessonContent {
   analytics?: any; // For passing full analytics data
 }
 
-export type ViewState = 'ONBOARDING' | 'BOARDS' | 'CLASSES' | 'STREAMS' | 'SUBJECTS' | 'CHAPTERS' | 'LESSON' | 'ADMIN_DASHBOARD' | 'AUDIO_STUDIO' | 'STUDENT_DASHBOARD' | 'UNIVERSAL_CHAT' | 'RULES' | 'IIC' | 'LEADERBOARD';
+export type ViewState = 'ONBOARDING' | 'STREAMS' | 'SUBJECTS' | 'CHAPTERS' | 'LESSON' | 'ADMIN_DASHBOARD' | 'AUDIO_STUDIO' | 'STUDENT_DASHBOARD' | 'UNIVERSAL_CHAT' | 'RULES' | 'IIC' | 'LEADERBOARD';
 
 export interface WeeklyTest {
   id: string;
@@ -1923,7 +2083,7 @@ export interface StudentTestAttempt {
   answers: Record<number, number>; // question index -> selected answer index
 }
 
-export type StudentTab = 'HOME' | 'EXPLORE' | 'COURSES' | 'ROUTINE' | 'HISTORY' | 'REDEEM' | 'PREMIUM' | 'GAME' | 'EARN' | 'WEEKLY_TEST' | 'PROFILE' | 'LEADERBOARD' | 'STORE' | 'VIDEO' | 'PDF' | 'MCQ' | 'ANALYTICS' | 'PRIZES' | 'REWARDS' | 'UPDATES' | 'IIC_GALLERY' | 'SUPPORT' | 'CUSTOM_PAGE' | 'AI_CHAT' | 'REVISION' | 'MCQ_REVIEW' | 'AI_HUB' | 'AI_STUDIO' | 'UNIVERSAL_VIDEO' | 'DOWNLOADS' | 'APP_STORE' | 'THEME_BUILDER';
+export type StudentTab = 'HOME' | 'EXPLORE' | 'COURSES' | 'ROUTINE' | 'HISTORY' | 'REDEEM' | 'PREMIUM' | 'GAME' | 'EARN' | 'WEEKLY_TEST' | 'PROFILE' | 'LEADERBOARD' | 'STORE' | 'VIDEO' | 'PDF' | 'MCQ' | 'ANALYTICS' | 'PRIZES' | 'REWARDS' | 'UPDATES' | 'IIC_GALLERY' | 'SUPPORT' | 'CUSTOM_PAGE' | 'AI_CHAT' | 'REVISION' | 'MCQ_REVIEW' | 'AI_HUB' | 'AI_STUDIO' | 'UNIVERSAL_VIDEO' | 'DOWNLOADS' | 'THEME_BUILDER';
 
 export interface UserCustomTheme {
   id: string;
@@ -2185,3 +2345,7 @@ export interface AppFeedbackEntry {
   overallRating: number;
   submittedAt: string;
 }
+
+// Runtime fallback export for User to prevent browser runtime resolution errors
+export const User = {};
+

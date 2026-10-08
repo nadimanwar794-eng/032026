@@ -1,5 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { Youtube, ArrowLeft, RotateCcw } from 'lucide-react';
+import { getOptimizedVideoUrl } from '../services/cloudinaryService';
+import { PlayerWatermark } from './PlayerWatermark';
 
 interface BadgePos {
     portrait?:  { bottom: number; right: number };
@@ -46,7 +48,7 @@ const autoFontSize = (text: string, base = 11, min = 7, max = 13): number => {
 export const CustomPlayer: React.FC<CustomPlayerProps> = ({
     videoUrl, brandingLogo, onBrandingClick, onBack, onNext, nextTitle,
     badgePos, isAdmin, onBadgePosChange, badgeLabel,
-    forceRotate, videoTitle, onRotate, hideYtLogoBlocker,
+    forceRotate, videoTitle, onRotate, hideYtLogoBlocker, onEnded,
 }) => {
     const containerRef  = useRef<HTMLDivElement>(null);
     const hideTimer     = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -140,16 +142,29 @@ export const CustomPlayer: React.FC<CustomPlayerProps> = ({
     let videoId = '';
     let isDrive = false;
     let isNotebookLM = false;
+    let isDirectVideo = false;
     try {
-        if (videoUrl.includes('youtu.be/'))       videoId = videoUrl.split('youtu.be/')[1].split('?')[0];
-        else if (videoUrl.includes('v='))          videoId = videoUrl.split('v=')[1].split('&')[0];
-        else if (videoUrl.includes('embed/'))      videoId = videoUrl.split('embed/')[1].split('?')[0];
+        const cleanUrl = (videoUrl || '').trim();
+        if (cleanUrl.includes('youtu.be/'))       videoId = cleanUrl.split('youtu.be/')[1].split('?')[0];
+        else if (cleanUrl.includes('v='))          videoId = cleanUrl.split('v=')[1].split('&')[0];
+        else if (cleanUrl.includes('embed/'))      videoId = cleanUrl.split('embed/')[1].split('?')[0];
         if (videoId?.includes('?'))                videoId = videoId.split('?')[0];
-        if (videoUrl.includes('drive.google.com')) isDrive = true;
-        else if (videoUrl.includes('notebooklm')) isNotebookLM = true;
+        if (cleanUrl.includes('drive.google.com')) isDrive = true;
+        else if (cleanUrl.includes('notebooklm')) isNotebookLM = true;
+        else if (
+            !videoId &&
+            (cleanUrl.includes('telegram') ||
+             cleanUrl.includes('/api/telegram/') ||
+             cleanUrl.includes('cloudinary.com') ||
+             /\.(mp4|webm|mov|m4v|mkv|ogg)(\?.*)?$/i.test(cleanUrl) ||
+             cleanUrl.startsWith('blob:') ||
+             cleanUrl.startsWith('https://'))
+        ) {
+            isDirectVideo = true;
+        }
     } catch (_) {}
 
-    const isYouTube = !!videoId && !isDrive && !isNotebookLM;
+    const isYouTube = !!videoId && !isDrive && !isNotebookLM && !isDirectVideo;
 
     let driveFileId = '';
     if (isDrive) {
@@ -163,7 +178,7 @@ export const CustomPlayer: React.FC<CustomPlayerProps> = ({
         ? videoUrl
         : `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&controls=1&modestbranding=1&rel=0&iv_load_policy=3&playsinline=1&enablejsapi=1&showinfo=0&disablekb=0&fs=0`;
 
-    if (!videoId && !isDrive && !isNotebookLM) {
+    if (!videoId && !isDrive && !isNotebookLM && !isDirectVideo) {
         return (
             <div style={{ width: '100%', height: '100%', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <div style={{ textAlign: 'center' }}>
@@ -191,8 +206,9 @@ export const CustomPlayer: React.FC<CustomPlayerProps> = ({
             transform: 'translate(-50%, -50%) rotate(90deg)',
             transformOrigin: 'center center',
             overflow: 'hidden',
+            background: '#000',
           }
-        : { position: 'absolute', inset: 0, overflow: 'hidden' };
+        : { position: 'absolute', inset: 0, overflow: 'hidden', background: '#000' };
 
     const blocker = (extra: React.CSSProperties): React.CSSProperties => ({
         position: 'absolute', zIndex: 20,
@@ -210,16 +226,31 @@ export const CustomPlayer: React.FC<CustomPlayerProps> = ({
             style={outerStyle}
             onContextMenu={blockMenu}
         >
-            {/* ── iframe ── */}
-            <div style={iframeWrapStyle}>
-                <iframe
-                    src={embedUrl}
-                    style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 'none', display: 'block' }}
-                    allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
-                    allowFullScreen
-                    title="Video"
-                    sandbox="allow-scripts allow-same-origin allow-presentation"
-                />
+            {/* ── Official Corner App Logo Watermark ── */}
+            <PlayerWatermark position="bottom-right" />
+
+            {/* ── iframe or direct video ── */}
+            <div style={iframeWrapStyle} onClick={isDirectVideo ? showTopBar : undefined}>
+                {isDirectVideo ? (
+                    <video
+                        src={getOptimizedVideoUrl(videoUrl)}
+                        controls
+                        autoPlay
+                        playsInline
+                        controlsList="nodownload"
+                        onEnded={onEnded}
+                        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', background: '#000', display: 'block' }}
+                    />
+                ) : (
+                    <iframe
+                        src={embedUrl}
+                        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 'none', display: 'block' }}
+                        allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+                        allowFullScreen
+                        title="Video"
+                        sandbox="allow-scripts allow-same-origin allow-presentation"
+                    />
+                )}
 
                 {/* ── YouTube blockers ── */}
                 {isYouTube && (<>
