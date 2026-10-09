@@ -1,0 +1,1 @@
+- [Workspace TypeScript build cache](workspace-typecheck-cache.md) — force-rebuild referenced libraries before package typechecks to avoid stale TS6305 declaration errors.

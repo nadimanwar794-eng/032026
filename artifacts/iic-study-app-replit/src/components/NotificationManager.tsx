@@ -602,17 +602,18 @@ export const testDelayedBackgroundNotification = async (delaySeconds = 5): Promi
   try {
     if ('serviceWorker' in navigator) {
       const reg = await getFcmServiceWorkerRegistration();
+      const testNotificationOptions: NotificationOptions & { vibrate?: number[]; renotify?: boolean } = {
+        body: 'Aapki app band hone par bhi notification bilkul sahi kaam kar raha hai! (Lock Screen Test Successful)',
+        icon: '/icons/icon-192.png',
+        badge: '/favicon.svg',
+        tag: 'bg-test-' + Date.now(),
+        renotify: true,
+        requireInteraction: true,
+        vibrate: [200, 100, 200],
+        data: { url: '/' },
+      };
       setTimeout(() => {
-        showNotification(reg, '🎉 Background Notification Test!', {
-          body: 'Aapki app band hone par bhi notification bilkul sahi kaam kar raha hai! (Lock Screen Test Successful)',
-          icon: '/icons/icon-192.png',
-          badge: '/favicon.svg',
-          tag: 'bg-test-' + Date.now(),
-          renotify: true,
-          requireInteraction: true,
-          vibrate: [200, 100, 200],
-          data: { url: '/' },
-        });
+        void reg.showNotification('🎉 Background Notification Test!', testNotificationOptions);
       }, Math.max(1, delaySeconds) * 1000);
       return true;
     } else {
